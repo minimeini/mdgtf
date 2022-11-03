@@ -1,0 +1,1463 @@
+---
+title: "Poisson DGLM with MCMC Inference"
+author: "Meini Tang"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    extra_dependencies: "subfig"
+header-includes:
+  \usepackage{dcolumn}
+  \usepackage{booktabs}
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE,
+                      error = TRUE, # print error but do not stop on errors
+                      message = FALSE,
+                      out.width = "70%",
+                      fig.align = "center")
+
+rm(list=ls())
+library(Rcpp)
+library(ggplot2) 
+```
+
+```{r}
+sourceCpp("/Users/meinitang/Repository/pois_dglm_inference/lbe_poisson.cpp")
+sourceCpp("/Users/meinitang/Repository/pois_dglm_inference/mcmc_disturbance_poisson.cpp")
+sourceCpp("/Users/meinitang/Repository/pois_dglm_inference/pl_poisson.cpp")
+source("/Users/meinitang/Repository/pois_dglm_inference/lbe_pois_utils.R")
+```
+
+# TODO
+
+- Smoothing with LBE
+- [Done] Is LBE correct? - Filtering is working
+- [Done] LBE with transfer function
+- Particle Filtering
+
+
+# 1. No Transfer Function
+
+## Simulated Data
+
+```{r}
+n = 200
+rho = 0.9
+Q = 0.1
+E0 = 0
+```
+
+```{r}
+v = rnorm(n,mean=0,sd=sqrt(Q))
+Fx = update_Fx0(n,rho)
+E = Fx%*% as.matrix(v,ncol=1)
+Y = rpois(n,lambda=exp(E))
+plot(Y,type="l")
+plot(E,type="l")
+plot(v,type="l")
+```
+
+## Linear Bayes Filtering
+
+```{r}
+m0 = 0
+C0 = 1e5
+output = lbe_poisson0(Y,rho,Q,m0,C0)
+
+tmp = data.frame(time=11:n, true=E[-c(1:10)],y=Y[-c(1:10)],
+                 mt=c(output$mt[-c(1:11)]),
+                 mt_lo=c(output$mt[-c(1:11)])-2*sqrt(c(output$Ct[-c(1:11)])),
+                 mt_hi=c(output$mt[-c(1:11)])+2*sqrt(c(output$Ct[-c(1:11)])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("State")
+
+plot(v[-c(1:10)],type="l")
+lines(diff(tmp$mt),col="royalblue")
+```
+
+```{r}
+Rw = 1e5
+output = lbe_poisson1(Y,rho,Q,E0,Rw)
+
+tmp = data.frame(time=11:n, true=E[-c(1:10)],y=Y[-c(1:10)],
+                 mt=c(output$mt[-c(1:11)]),
+                 mt_lo=c(output$mt[-c(1:11)])-2*sqrt(c(output$Ct[-c(1:11)])),
+                 mt_hi=c(output$mt[-c(1:11)])+2*sqrt(c(output$Ct[-c(1:11)])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("State")
+
+plot(v[-c(1:10)],type="l")
+lines(diff(tmp$mt),col="royalblue")
+```
+
+## MCMC reparameterized with disturbance
+
+### Infer v and Q: rho is known
+
+```{r,results='hide'}
+av = 0
+Rv = 1e-2
+output = mcmc_disturbance_pois0(Y,c(av,Rv),E0,
+                                rho_true=rho,
+                                QPrior=c(1e-5,1),
+                                Vxi = 0.3,
+                                nburnin=10000,
+                                nthin=2,
+                                nsample=5000)
+```
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+Et_est[1,] = rho*rep(E0,5000) + output$v[1,]
+for (t in 2:n) {
+  Et_est[t,] = rho*Et_est[t-1,] + output$v[t,]
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+hist(c(output$Q))
+abline(v=Q,col="maroon")
+
+hist(output$rho)
+abline(v=rho,col="maroon")
+```
+
+### Infer rho and Q: v is known
+
+```{r,results='hide'}
+av = 0
+Rv = 1e-2
+output = mcmc_disturbance_pois0(Y,c(av,Rv),E0,
+                                QPrior=c(1e-5,1),
+                                Vxi = 0.3,
+                                vt_true=v,
+                                nburnin=10000,
+                                nthin=2,
+                                nsample=5000)
+```
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+hist(output$rho,breaks=50)
+abline(v=rho,col="maroon")
+```
+
+### Infer all (that is vt,rho,Q)
+
+```{r,results='hide'}
+av = 0
+Rv = 1e-2
+output = mcmc_disturbance_pois0(Y,c(av,Rv),E0,
+                                QPrior=c(1e-5,1),
+                                Vxi = 0.3,
+                                nburnin=10000,
+                                nthin=2,
+                                nsample=5000)
+```
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+Et_est[1,] = rho*rep(E0,5000) + output$v[1,]
+for (t in 2:n) {
+  Et_est[t,] = rho*Et_est[t-1,] + output$v[t,]
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+hist(output$rho,breaks=50)
+abline(v=rho,col="maroon")
+```
+
+# 2. Koyck's Transfer Function
+
+## Simulated Data
+
+```{r}
+n = 200
+rho = 0.9
+Q = 0.01
+E0 = 0
+```
+
+
+```{r}
+# X = sim.rw(n, 0, 0, 0.15)
+X = rep(0.5,n)
+v = rnorm(n,mean=0,sd=sqrt(Q))
+
+Fx = update_Fx1(n,rho,X)
+E = update_Et(n,Fx,v,rho,E0)
+
+lambda = exp(E)
+Y = rpois(n,lambda)
+
+plot(Y,type="l", main="Observations")
+plot(1:n,X,type="l",col="maroon",lty=2, main="X")
+plot(1:n,E,type="l", main="Hidden State")
+plot(1:n,v,type="l", main="Systematic Error / Disturbance")
+```
+
+## Linear Bayes Filtering
+
+```{r,eval=FALSE}
+delta_grid = seq(0.1,0.9,by=0.1)
+rho_grid = seq(0.1,0.9,by=0.05)
+ndelta = length(delta_grid)
+delta_prob = rep(0,ndelta)
+rho_sel = rep(0,ndelta)
+m0 = c(0,0)
+C0 = diag(c(0.1,0.1))
+
+for (i in 1:ndelta) {
+  delta = delta_grid[i]
+  logprob = get_rho_prob(Y,X,delta,rho_grid,m0,C0)
+  rho_idx = which.max(logprob)
+  rho_sel[i] = rho_grid[rho_idx]
+  delta_prob[i] = logprob[rho_idx]
+}
+plot(delta_grid,delta_prob,type="l",
+     xlab="delta",ylab="logprob")
+```
+
+```{r}
+# delta = 0.5
+# logprob = get_rho_prob(Y,X,delta,rho_grid,m0,C0)
+# plot(rho_grid,logprob,type="l")
+# 
+delta = 0.8
+logprob = get_rho_prob(Y,X,delta,rho_grid,m0,C0)
+plot(rho_grid,logprob,type="l")
+
+rho_idx = which.max(logprob)
+rho_hat = rho_grid[rho_idx]
+
+output = lbe_poissonX(Y,X,rho_hat,delta,m0,C0)
+```
+
+```{r}
+ts = 2
+tmp = data.frame(time=(ts+1):n, true=E[-c(1:ts)],y=Y[-c(1:ts)],
+                 mt=c(output$mt[1,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[1,-c(1:(ts+1))])-2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[1,-c(1:(ts+1))])+2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("State")
+
+vest = diff(output$mt[2,-c(1:(ts+1))])
+plot(vest,type="l",col="royalblue",
+     ylim=c(min(c(vest,v)), max(c(vest,v))) )
+lines(v[-c(1:ts)])
+```
+
+
+
+## MCMC reparameterisation
+
+### Settings
+
+```{r}
+av = 0
+Rv = 0.01
+v1Prior = c(av,Rv)
+QPrior=c(1e-2,1)
+wt_hat = diff(output$mt[2,-1])
+What = estimate_state_var(wt_hat,QPrior)
+Vxi = 0.005
+E0Prior = c(0,0.1)
+```
+
+### Infer w: W and rho is known
+
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois(Y,X,
+                               Vxi = Vxi,
+                               QPrior = QPrior,
+                               v1Prior = v1Prior,
+                               E0_true=E0,
+                               rho_true = rho,
+                               Q_true = Q,
+                               nburnin = 10000,
+                               nthin = 2,
+                               nsample = 5000)
+```
+
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+```
+
+### Infer W and rho: w is known
+
+```{r,results='hide'}
+av = 0
+Rv = 0.01
+output = mcmc_disturbance_pois(Y,X,
+                               Vxi = Vxi,
+                               QPrior = QPrior,
+                               v1Prior = v1Prior,
+                               vt_true = v,
+                               E0_true = E0,
+                               nburnin = 10000,
+                               nthin = 2,
+                               nsample = 5000)
+print(output$rho_accept)
+```
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+hist(c(output$rho),breaks=50)
+abline(v=rho,col="maroon")
+plot(output$rho,type="l")
+```
+
+### Infer w and rho: W and theta[0] is known
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois(Y,X,
+                               Vxi = Vxi,
+                               QPrior = QPrior,
+                               v1Prior = v1Prior,
+                               rho_init = rho_hat,
+                               vt_init = c(0,wt_hat),
+                               Q_true = Q,
+                               E0_true = E0,
+                               nburnin = 100000,
+                               nthin = 20,
+                               nsample = 10000)
+print(output$rho_accept)
+```
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+
+hist(c(output$rho),breaks=50,
+     xlim=c(min(c(rho,output$rho)),
+            max(c(rho,output$rho))))
+abline(v=rho,col="maroon")
+
+plot(output$rho,type="l")
+```
+
+
+### Infer theta[0] and W
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois(Y,X,
+                               E0Prior = E0Prior,
+                               Vxi = Vxi,
+                               QPrior = QPrior,
+                               rho_true = rho,
+                               vt_true = v,
+                               nburnin = 10000,
+                               nthin = 2,
+                               nsample = 5000)
+print(output$E0_accept)
+hist(c(output$E0),breaks=50,
+     main=paste0("E0 ",round(output$E0_accept*100),"%"))
+abline(v=E0,col="maroon")
+
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+```
+
+### Infer w and rho and E0
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois(Y,X,
+                               E0Prior = E0Prior,
+                               Vxi = Vxi,
+                               QPrior = QPrior,
+                               v1Prior = v1Prior,
+                               E0_init = E0,
+                               rho_init = rho_hat,
+                               vt_init = c(0,wt_hat),
+                               Q_true = Q,
+                               nburnin = 100000,
+                               nthin = 20,
+                               nsample = 10000)
+print(output$rho_accept)
+print(output$E0_accept)
+```
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+
+hist(c(output$rho),breaks=50,
+     xlim=c(min(c(rho,output$rho)),
+            max(c(rho,output$rho))),
+     main=paste0("rho ",round(output$rho_accept*100),"%"))
+abline(v=rho,col="maroon")
+
+plot(output$rho,type="l")
+
+hist(c(output$E0),breaks=50,
+     main=paste0("E0 ",round(output$E0_accept*100),"%"))
+abline(v=E0,col="maroon")
+
+plot(output$E0,type="l")
+```
+
+
+# 3. Pascal-Distributed Lags with exponential link function
+
+## Simulated Data
+
+```{r}
+n = 200
+rho = 0.9
+Q = 0.5
+r = 2
+```
+
+```{r}
+# X = sim.rw(n, 0, 0, 0.15)
+v = rnorm(n,mean=0,sd=sqrt(Q))
+X = c(1,rep(0,n-1))
+Fx = update_Fx_Solow(n,rho,X)
+E = update_Et(n,Fx,v)
+plot(E,type="l",main="Impulse Response")
+
+X = rep(1,n)
+Fx = update_Fx_Solow(n,rho,X)
+E = update_Et(n,Fx,v,rho,0)
+
+lambda = exp(E)
+Y = rpois(n,lambda)
+
+plot(Y,type="l", main="Observations")
+plot(1:n,X,type="l",col="maroon",lty=2, main="X")
+plot(1:n,E,type="l", main="Hidden State")
+plot(1:n,v,type="l", main="Systematic Error / Disturbance")
+```
+
+## Linear Bayes Filetering
+
+```{r,eval=FALSE}
+delta_grid = seq(0.5,0.9,by=0.1)
+rho_grid = seq(0.1,0.9,by=0.05)
+ndelta = length(delta_grid)
+delta_prob = rep(NA,ndelta)
+rho_sel = rep(0,ndelta)
+m0 = c(0,0,0)
+C0 = diag(c(0.01,0.01,0.01))
+
+for (i in 1:ndelta) {
+  delta = delta_grid[i]
+  logprob = get_rho_prob(Y,X,delta,rho_grid,m0,C0,"Solow")
+  names(logprob) = rho_grid
+  logprob2 = logprob[is.finite(logprob)]
+  if (length(logprob2)>0) {
+    rho_sel = as.numeric(names(which.max(logprob2)))
+    rho_idx = which(rho_sel == rho_grid)
+    rho_sel[i] = rho_grid[rho_idx]
+    delta_prob[i] = logprob[rho_idx]
+  }
+}
+plot(delta_grid,delta_prob,type="l",
+     xlab="delta",ylab="logprob")
+```
+
+```{r}
+delta = 0.85
+logprob = get_rho_prob(Y,X,delta,rho_grid,m0,C0,"Solow")
+rho_idx = which.max(logprob)
+rho_hat = rho_grid[rho_idx]
+
+plot(rho_grid,logprob,type="l",
+     main=paste0("rho_hat=",rho_hat))
+abline(v=rho,col="maroon",lty=2)
+abline(v=rho_hat,col="royalblue")
+```
+
+```{r}
+output = lbe_poissonSolow(Y,X,rho_hat,delta,m0,C0)
+ts = 2
+tmp = data.frame(time=(ts+1):n, true=E[-c(1:ts)],y=Y[-c(1:ts)],
+                 mt=c(output$mt[1,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[1,-c(1:(ts+1))])-2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[1,-c(1:(ts+1))])+2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("State")
+
+vest = diff(output$mt[3,-c(1:(ts+1))])
+plot(vest,type="l",col="royalblue",
+     ylim=c(min(c(vest,v)), max(c(vest,v))) )
+lines(v[-c(1:ts)])
+```
+
+```{r}
+output = lbe_poissonSolow0(Y,X,rho,Q,m0,C0)
+ts = 2
+tmp = data.frame(time=(ts+1):n, true=E[-c(1:ts)],y=Y[-c(1:ts)],
+                 mt=c(output$mt[1,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[1,-c(1:(ts+1))])-2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[1,-c(1:(ts+1))])+2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("State")
+
+vest = diff(output$mt[3,-c(1:(ts+1))])
+plot(vest,type="l",col="royalblue",
+     ylim=c(min(c(vest,v)), max(c(vest,v))) )
+lines(v[-c(1:ts)])
+```
+
+## MCMC reparameterisation
+
+### Settings
+
+```{r}
+v1Prior = c(0,0.5)
+QPrior=c(1e-2,1)
+Vxi = 0.02
+```
+
+```{r}
+wt_hat = diff(output$mt[2,-1])
+What = estimate_state_var(wt_hat,QPrior)
+```
+
+### Infer w: W and rho is known
+
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow(Y,X,
+                                     v1Prior = v1Prior,
+                                     vt_init = v,
+                                     rho_true = rho,
+                                     Q_true = Q,
+                                     nburnin = 10000,
+                                     nthin = 2,
+                                     nsample = 5000)
+```
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+```
+
+### Infer W and rho: w is known
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow(Y,X,
+                                     Vxi = Vxi,
+                                     QPrior = QPrior,
+                                     rho_init = rho,
+                                     Q_init = Q,
+                                     vt_true = v,
+                                     nburnin = 10000,
+                                     nthin = 2,
+                                     nsample = 5000)
+print(output$rho_accept)
+```
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+hist(c(output$rho),breaks=50)
+abline(v=rho,col="maroon")
+plot(output$rho,type="l")
+```
+
+### Infer w and W: rho is known
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow(Y,X,
+                                     QPrior = QPrior,
+                                     v1Prior = v1Prior,
+                                     Q_init = What,
+                                     vt_init = c(0,wt_hat),
+                                     rho_true = rho,
+                                     nburnin = 10000,
+                                     nthin = 2,
+                                     nsample = 5000)
+```
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+```
+
+### Infer all
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow(Y,X,
+                                     Vxi = Vxi,
+                                     QPrior = QPrior,
+                                     v1Prior = v1Prior,
+                                     rho_init = rho,
+                                     Q_init = Q,
+                                     vt_init = v,
+                                     nburnin = 10000,
+                                     nthin = 2,
+                                     nsample = 5000)
+print(output$rho_accept)
+```
+
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+hist(c(output$rho),breaks=50)
+abline(v=rho,col="maroon")
+plot(c(output$rho),type="l")
+
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v,Time=1:n))
+
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+```
+
+# 4. Identity Link + Pascal
+
+## Simulated Data
+
+```{r}
+n = 200
+rho = 0.9
+Q =0.01
+r = 2
+```
+
+```{r}
+# X = sim.rw(n, 0, 0, 0.15)
+v = rnorm(n,mean=0,sd=sqrt(Q))
+beta = cumsum(v)
+beta[beta<0] = 0
+
+X = c(1,rep(0,n-1))
+X_ = c(0,X)
+E = rep(0,n+2)
+for (t in 1:n) {
+  E[t+2] = 2*rho*E[t+1] - rho^2*E[t] + (1-rho)^2*beta[t]*X[t]
+}
+E = E[-c(1:2)]
+plot(E,type="l",main="Impulse Response")
+
+X = rep(1,n)
+X_ = c(0,X)
+E = rep(0,n+2)
+for (t in 1:n) {
+  E[t+2] = 2*rho*E[t+1] - rho^2*E[t] + (1-rho)^2*beta[t]*X[t]
+}
+E = E[-c(1:2)]
+
+print(all(E>=0))
+
+# lambda = exp(E)
+Y = rpois(n,E)
+
+plot(1:n,X,type="l",col="maroon",lty=2, main="X - Unit Step")
+plot(1:n,E,type="l", main="Step Response")
+plot(1:n,beta,type="l", main="Something Related to Reproduction Number")
+# plot(1:n,v,type="l", main="Systematic Error / Disturbance")
+plot(Y,type="l", main="Observations")
+```
+
+
+# 5. Identity Link + Shifted Pascal
+
+## Simulated Data
+
+```{r}
+n = 200
+rho = 0.7
+Q =0.01
+r = 2
+```
+
+```{r}
+# X = sim.rw(n, 0, 0, 0.15)
+v = rnorm(n+1,mean=0,sd=sqrt(Q))
+beta = cumsum(v)
+beta[beta<.Machine$double.eps] = .Machine$double.eps
+# beta = c(0,beta)
+
+X = c(1,rep(0,n-1))
+X_ = c(0,X)
+E = rep(0,n+2)
+for (t in 1:n) {
+  E[t+2] = 2*rho*E[t+1] - rho^2*E[t] + (1-rho)^2*beta[t]*X[t]
+}
+E = E[-c(1:2)]
+plot(E,type="l",main="Impulse Response")
+
+X = rep(1,n)
+X_ = c(0,X)
+E = rep(0,n+2)
+for (t in 1:n) {
+  E[t+2] = 2*rho*E[t+1] - rho^2*E[t] + (1-rho)^2*beta[t]*X[t]
+}
+E = E[-c(1:2)]
+beta = beta[-1]
+
+# lambda = exp(E)
+Y = rpois(n,E)
+
+plot(1:n,X,type="l",col="maroon",lty=2, main="X - Unit Step")
+plot(1:n,E,type="l", main="Step Response")
+plot(1:n,beta,type="l", main="Something Related to Reproduction Number")
+# plot(1:n,v,type="l", main="Systematic Error / Disturbance")
+plot(Y,type="l", main="Observations")
+
+```
+## Linear Bayes Filtering
+
+```{r}
+m0 = c(0,0,0)
+C0 = diag(c(0.01,0.01,0.01))
+
+rho_hat = 0.7
+delta = 0.75
+
+output = lbe_poissonSolowIdentity(Y,X_,rho_hat,delta,m0,C0)
+
+ts = 50
+tmp = data.frame(time=(ts+1):n, true=E[-c(1:ts)],y=Y[-c(1:ts)],
+                 mt=c(output$mt[1,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[1,-c(1:(ts+1))])-2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[1,-c(1:(ts+1))])+2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.2,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=(ts+1):n, true=beta[-c(1:ts)],
+                 mt=c(output$mt[3,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[3,-c(1:(ts+1))])-2*sqrt(c(output$Ct[3,3,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[3,-c(1:(ts+1))])+2*sqrt(c(output$Ct[3,3,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction-ish")
+```
+
+
+## MCMC reparameterisation
+
+### Settings
+
+```{r}
+v1Prior = c(0,0.5)
+QPrior=c(1e-2,1)
+Vxi = 1
+Fx = update_Fx_Solow(n,rho,X)
+```
+
+```{r}
+wt_hat = diff(output$mt[3,-1])
+wt_hat[abs(wt_hat)>1] = 1
+What = estimate_state_var(wt_hat,QPrior)
+```
+
+### Infer w: W and rho is known
+
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow_eye(Y,X,
+                                         v1Prior = v1Prior,
+                                         vt_init = v[-1],
+                                         rho_true = rho,
+                                         Q_true = Q,
+                                         nburnin = 10000,
+                                         nthin = 2,
+                                         nsample = 5000)
+```
+
+```{r}
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v[-1],Time=1:n))
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+```
+
+### Infer rho: others are known
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow_eye(Y,X,
+                                         Vxi = Vxi,
+                                         rho_init = rho,
+                                         Q_true = Q,
+                                         vt_true = v[-n],
+                                         nburnin = 10000,
+                                         nthin = 2,
+                                         nsample = 5000)
+print(output$rho_accept)
+```
+
+
+```{r}
+hist(c(output$Q),breaks=100)
+abline(v=Q,col="maroon")
+
+hist(c(output$rho),breaks=100)
+abline(v=rho,col="maroon")
+plot(output$rho,type="l")
+```
+
+
+### Infer w and W: rho is known
+
+The MCMC sampler is sensitive to initial values.
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow_eye(Y,X,
+                                         QPrior = QPrior,
+                                         v1Prior = v1Prior,
+                                         Q_init = Q,
+                                         vt_init = v[-n],
+                                         rho_true = rho,
+                                         nburnin = 10000,
+                                         nthin = 2,
+                                         nsample = 5000)
+```
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v[-1],Time=1:n))
+
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+```
+
+
+### Infer all: initialize to true values
+
+The MCMC sampler is sensitive to initial values.
+
+```{r,results='hide'}
+output = mcmc_disturbance_pois_solow_eye(Y,X,
+                                         Vxi = Vxi,
+                                         QPrior = QPrior,
+                                         v1Prior = v1Prior,
+                                         Q_init = Q,
+                                         vt_init = v[-n],
+                                         rho_init = rho,
+                                         nburnin = 10000,
+                                         nthin = 2,
+                                         nsample = 5000)
+print(output$rho_accept)
+```
+
+```{r}
+hist(c(output$Q),breaks=50)
+abline(v=Q,col="maroon")
+
+hist(c(output$rho),breaks=100)
+abline(v=rho,col="maroon")
+plot(output$rho,type="l")
+
+vt_est = t(apply(output$v,1,quantile,c(0.025,0.5,0.975)))
+vt_est = as.data.frame(vt_est)
+colnames(vt_est) = c("lobnd", "vt", "hibnd")
+vt_est$Time = 1:n
+ggplot(vt_est,aes(x=Time)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=vt),color="royalblue") +
+  geom_line(aes(y=True),data=data.frame(True=v[-1],Time=1:n))
+
+
+
+Et_est = matrix(0,nrow=n,ncol=5000)
+for (i in 1:5000) {
+  Et_est[,i] = c(Fx %*% as.matrix(output$v[,i],ncol=1))
+}
+Et_est = apply(Et_est,1,quantile,c(0.025,0.5,0.975))
+Et_est = as.data.frame(t(Et_est))
+colnames(Et_est) = c("lobnd","Et","hibnd")
+Et_est$Time = 1:n
+ggplot(Et_est,aes(x=Time,y=Et)) + theme_bw() +
+  geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+              alpha=0.2,fill="royalblue") +
+  geom_line(color="royalblue") +
+  geom_line(aes(x=time,y=true),
+            data=data.frame(true=E,time=1:n))
+
+plot(output$v_accept,type="l")
+```
+
+## Particle Filtering
+
+```{r}
+output = bf_pois_solow_eye_max(Y,X,rho,Q,N=5000)
+
+tmp = data.frame(time=1:n, true=E, y=Y,
+                 mt = apply(output$theta,2,quantile,0.5),
+                 mt_hi = apply(output$theta,2,quantile,0.025),
+                 mt_lo = apply(output$theta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=1:n, true=beta,
+                 mt = apply(output$beta,2,quantile,0.5),
+                 mt_hi = apply(output$beta,2,quantile,0.025),
+                 mt_lo = apply(output$beta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction")
+```
+
+## Particle Learning
+
+```{r}
+m0 = rep(0,3)
+C0 = diag(rep(10,3))
+output = sf_pois_solow_eye_max(Y,X,rho,
+                               QPrior=c(1e-2,1e-2),
+                               Q_init=Q,
+                               N=5000)
+
+tmp = data.frame(time=1:n, true=E, y=Y,
+                 mt = apply(output$theta,2,quantile,0.5),
+                 mt_hi = apply(output$theta,2,quantile,0.025),
+                 mt_lo = apply(output$theta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=1:n, true=beta,
+                 mt = apply(output$beta,2,quantile,0.5),
+                 mt_hi = apply(output$beta,2,quantile,0.025),
+                 mt_lo = apply(output$beta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction")
+
+hist(output$Q,breaks=50)
+abline(v=Q,col="maroon")
+```
+
+# 6. Identity Link + Nonlinear SS + Shifted Pascal
+
+## Simulated Data
+
+```{r}
+n = 200
+rho = 0.7
+Q =0.01
+r = 2
+```
+
+```{r}
+# X = sim.rw(n, 0, 0, 0.15)
+v = rnorm(n+1,mean=0,sd=sqrt(Q))
+beta = cumsum(v)
+# beta = c(0,beta)
+
+X = c(1,rep(0,n-1))
+X_ = c(0,X)
+E = rep(0,n+2)
+for (t in 1:n) {
+  E[t+2] = 2*rho*E[t+1] - rho^2*E[t] + (1-rho)^2*exp(beta[t])*X_[t]
+}
+E = E[-c(1:2)]
+plot(E,type="l",main="Impulse Response")
+
+X = rep(1,n)
+X_ = c(0,X)
+E = rep(0,n+2)
+for (t in 1:n) {
+  E[t+2] = 2*rho*E[t+1] - rho^2*E[t] + (1-rho)^2*exp(beta[t])*X_[t]
+}
+E = E[-c(1:2)]
+beta = beta[-1]
+
+# lambda = exp(E)
+Y = rpois(n,E)
+
+plot(1:n,X,type="l",col="maroon",lty=2, main="X - Unit Step")
+plot(1:n,E,type="l", main="Step Response")
+plot(1:n,beta,type="l", main="Something Related to Reproduction Number")
+# plot(1:n,v,type="l", main="Systematic Error / Disturbance")
+plot(Y,type="l", main="Observations")
+
+```
+
+
+## Linear Bayes Filtering
+
+```{r}
+m0 = c(0,0,0)
+C0 = diag(c(0.01,0.01,0.01))
+
+rho_hat = 0.7
+delta = 0.7
+
+output = lbe_poissonSolowIdentity2(Y,X_,rho_hat,delta,m0,C0)
+
+ts = 50
+tmp = data.frame(time=(ts+1):n, true=E[-c(1:ts)],y=Y[-c(1:ts)],
+                 mt=c(output$mt[1,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[1,-c(1:(ts+1))])-2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[1,-c(1:(ts+1))])+2*sqrt(c(output$Ct[1,1,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=(ts+1):n, true=beta[-c(1:ts)],
+                 mt=c(output$mt[3,-c(1:(ts+1))]),
+                 mt_lo=c(output$mt[3,-c(1:(ts+1))])-2*sqrt(c(output$Ct[3,3,-c(1:(ts+1))])),
+                 mt_hi=c(output$mt[3,-c(1:(ts+1))])+2*sqrt(c(output$Ct[3,3,-c(1:(ts+1))])))
+
+ggplot(tmp,aes(x=time)) +
+  # geom_ribbon(aes(ymin=exp(mt_lo),ymax=exp(mt_hi)),
+  #             fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction-ish")
+```
+
+## Particle Filtering
+
+```{r,results='hide'}
+output = apf_pois_solow_eye_exp(Y,X,rho,Q,N=5000)
+```
+
+```{r}
+tmp = data.frame(time=1:n, true=E, y=Y,
+                 mt = apply(output$theta,2,quantile,0.5),
+                 mt_hi = apply(output$theta,2,quantile,0.025),
+                 mt_lo = apply(output$theta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=1:n, true=exp(beta),
+                 mt = apply(exp(output$beta),2,quantile,0.5),
+                 mt_hi = apply(exp(output$beta),2,quantile,0.025),
+                 mt_lo = apply(exp(output$beta),2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction")
+```
+
+```{r,results='hide'}
+output = bf_pois_solow_eye_exp(Y,X,rho,Q,N=5000)
+```
+
+```{r}
+tmp = data.frame(time=1:n, true=E, y=Y,
+                 mt = apply(output$theta,2,quantile,0.5),
+                 mt_hi = apply(output$theta,2,quantile,0.025),
+                 mt_lo = apply(output$theta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=1:n, true=beta,
+                 mt = apply(output$beta,2,quantile,0.5),
+                 mt_hi = apply(output$beta,2,quantile,0.025),
+                 mt_lo = apply(output$beta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction")
+```
+
+## Particle Learning
+
+```{r,results='hide'}
+m0 = rep(0,3)
+C0 = diag(rep(10,3))
+output = sf_pois_solow_eye_exp(Y,X,rho,
+                               QPrior=c(1e-2,1e-2),
+                               Q_true=Q,
+                               N=5000)
+```
+
+```{r}
+tmp = data.frame(time=1:n, true=E, y=Y,
+                 mt = apply(output$theta,2,quantile,0.5),
+                 mt_hi = apply(output$theta,2,quantile,0.025),
+                 mt_lo = apply(output$theta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=1:n, true=beta,
+                 mt = apply(output$beta,2,quantile,0.5),
+                 mt_hi = apply(output$beta,2,quantile,0.025),
+                 mt_lo = apply(output$beta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction")
+```
+
+```{r,results='hide'}
+output = pl_pois_solow_eye_exp2(Y,X,rho,
+                                QPrior=c(1e-2,1e-2),
+                                Q_init=Q,
+                                N=5000,
+                                resample=TRUE)
+```
+
+```{r}
+tmp = data.frame(time=1:n, true=E, y=Y,
+                 mt = apply(output$theta,2,quantile,0.5),
+                 mt_hi = apply(output$theta,2,quantile,0.025),
+                 mt_lo = apply(output$theta,2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  geom_point(aes(y=y),alpha=0.5,size=0.5) +
+  xlab("Time") + ylab("Intensity")
+
+
+tmp = data.frame(time=1:n, true=exp(beta),
+                 mt = apply(exp(output$beta),2,quantile,0.5),
+                 mt_hi = apply(exp(output$beta),2,quantile,0.025),
+                 mt_lo = apply(exp(output$beta),2,quantile,0.975))
+
+ggplot(tmp,aes(x=time)) +
+  geom_ribbon(aes(ymin=mt_lo,ymax=mt_hi),
+              fill="royalblue",alpha=0.2) +
+  geom_line(aes(y=mt),color="royalblue") +
+  geom_line(aes(y=true)) + theme_bw() +
+  xlab("Time") + ylab("Reproduction")
+```
+
