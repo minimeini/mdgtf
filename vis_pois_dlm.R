@@ -1,4 +1,6 @@
 plot_sim = function(sim_dat) {
+  require(ggplot2)
+
   n = length(sim_dat$y)
   p1 = ggplot(data.frame(Time=1:n, lambda=sim_dat$lambda, y=sim_dat$y), 
               aes(x=Time)) +
@@ -18,6 +20,8 @@ plot_sim = function(sim_dat) {
 
 
 plot_lbe = function(sim_dat,lbe_dat,ModelCode) {
+  require(ggplot2)
+
   n = length(sim_dat$y)
   tmp = data.frame(time=1:n, true=sim_dat$psi,y=sim_dat$y,
                    mt=c(lbe_dat$mt[1,-1]),
@@ -89,6 +93,8 @@ plot_lbe = function(sim_dat,lbe_dat,ModelCode) {
 
 
 plot_mcmc = function(sim_dat,mcmc_dat,lbe_dat=NULL) {
+  require(ggplot2)
+  
   n = length(sim_dat$y)
   
   psi = apply(mcmc_dat$wt,2,cumsum)

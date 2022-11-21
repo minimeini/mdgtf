@@ -1,5 +1,5 @@
 cdir = getwd()
-repo = "/Users/meinitang/Repository/pois_dglm_inference"
+repo = "/Users/meinitang/Dropbox/Repository/poisson-dlm"
 
 Rcpp::sourceCpp(file.path(repo,"model_utils.cpp"))
 
