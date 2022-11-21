@@ -6,13 +6,13 @@ pk.mu = log(m/sqrt(1+(s/m)^2))
 pk.sg2 = log(1+(s/m)^2)
 
 #function that computes \Phi_d in Koyama et al. (2021)
-Pd=function(d,mu,sigmasq){
+Pd_r=function(d,mu,sigmasq){
   phid=0.5*pracma::erfc(-(log(d)-mu)/sqrt(2*sigmasq))
   phid
 }
 #function that computes \phi_d in Koyama et al. (2021)
-knl=function(t,mu,sd2){
-  Pd(t,mu,sd2)-Pd(t-1,mu,sd2)
+knl_r=function(t,mu,sd2){
+  Pd_r(t,mu,sd2)-Pd_r(t-1,mu,sd2)
 }
 
 
@@ -33,8 +33,7 @@ Ft_vector=function(at,Fphi,Fy){
 }
 
 
-lbe_pois_dlm = function(y,delta=0.88,L=30, W=NULL,Ftype=0){
-  delta = delta^2
+lbe_pois_dlm = function(y,delta=0.7744,L=30, W=NULL,Ftype=0){
 
   T = length(y)
   at=array(0,c(T,L))
@@ -52,7 +51,7 @@ lbe_pois_dlm = function(y,delta=0.88,L=30, W=NULL,Ftype=0){
   Wtill = array(0,c(L,L))
   if (!is.null(W)) Wtill[1,1] = W
   
-  phis=knl(1:L,pk.mu,pk.sg2)
+  phis=knl_r(1:L,pk.mu,pk.sg2)
 
   m0=rep(0,L)
   C0=0.1*diag(L)
@@ -142,7 +141,7 @@ lbe_pois_dlm = function(y,delta=0.88,L=30, W=NULL,Ftype=0){
       Bt = Ct[t,,] %*% t(G) %*% solve(Rt[t+1,,])
       mt_smooth[t,] = mt[t,] + Bt%*%(mt_smooth[t+1,] - at[t+1,])
     } else {
-      mt_smooth[t,1] = mt[t,1] + delta*(mt_smooth[t+1,1] - at[t+1,1])
+      mt_smooth[t,1] = mt[t,1] + delta*(mt_smooth[t+1,1] - mt[t,1])
     }    
   }
   
@@ -157,7 +156,7 @@ lbe_pois_dlm = function(y,delta=0.88,L=30, W=NULL,Ftype=0){
       } else {
         Fa = sapply(mt_smooth[2:t,1],max,0)
       }
-      h = sum(Fa*y[(1:t-1)]*knl((t-1):1,pk.mu,pk.sg2))
+      h = sum(Fa*y[(1:t-1)]*knl_r((t-1):1,pk.mu,pk.sg2))
     }
     rate[t] = mu+h;
   }

@@ -54,255 +54,255 @@ arma::vec update_Et(
 
 
 
-/*
-Assume (rho,V,Q,E0) are known without transfer function
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List mcmc_disturbance_pois0(
-	const arma::vec& Y, // n x 1
-	const arma::vec& Prior, // (aw, Rw), v1 ~ N(aw, Rw)
-    const double E0,
-	const double rho_true = NA_REAL,
-	const double Q_true = NA_REAL, // State variance
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (nv,Sv)
-	const double Vxi = NA_REAL, // mh proposal for xi=logit(rho)
-	const Rcpp::Nullable<Rcpp::NumericVector>& vt_true = R_NilValue,
-	const unsigned int nburnin = 0,
-	const unsigned int nthin = 1,
-	const unsigned int nsample = 1) { // n x 1
-
-	const double EBOUND = 700.;
-
-	const unsigned int n = Y.n_elem;
-	const double n_ = static_cast<double>(n);
-	const unsigned int ntotal = nburnin + nthin*nsample + 1;
-
-
-	// Hyperparameter
-	double aw = Prior.at(0);
-	double Rw = Prior.at(1);
-	double Rwsqrt = std::sqrt(Rw);
-
-	double Q,nv,nSv,nv_new,nSv_new;
-	arma::vec Q_stored(nsample);
-	bool Qflag;
-	if (R_IsNA(Q_true)) {
-		Qflag = true;
-		if (QPrior.isNull()) {
-			stop("Error: You must provide either true value or prior for Q.");
-		}
-		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
-		nv = QPrior_.at(0);
-		nSv = nv*QPrior_.at(1);
-		nv_new = nv + n_ - 1.;
-		Q = 1./R::rgamma(0.5*nv,2./nSv);
-	} else {
-		Qflag = false;
-		Q = Q_true;
-	}
-	double Qsqrt = std::sqrt(Q);
-
-
-	double rho, xi, xi_old, xi_new;
-	arma::vec rho_stored(nsample);
-	double rho_accept = 0.;
-	bool rhoflag;
-	if (R_IsNA(rho_true)) {
-		rhoflag = true;
-		rho = 0.5;
-	} else {
-		rhoflag = false;
-		rho = rho_true;
-	}
-
-
-	bool vtflag = true;
-	// arma::vec vt(n); 
-	arma::vec vt = aw + arma::randn(n)*std::sqrt(Rw); 
-	arma::vec vt_accept(n);
-	arma::mat v_stored(n,nsample,arma::fill::zeros);
-	if (!vt_true.isNull()) {
-		vtflag = false;
-		vt = Rcpp::as<arma::vec>(vt_true);
-	}
-
-	arma::mat Fx = update_Fx0(n,rho);
-    arma::vec E0tilde(n,arma::fill::zeros);
-	E0tilde.at(0) = E0;
-   	for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
-		E0tilde.at(t) = rho*E0tilde.at(t-1);
-		// E0tilde.at(t) = std::pow(rho,static_cast<double>(t))*E0;
-    }
-
-    double bt,Bt,Btsqrt;
-    arma::vec Et(n);
-	arma::vec lambda(n);
-	arma::vec Ytilde(n);
-	arma::vec Yhat(n);
-
-	double vt_old, vt_new;
-	double logp_old,logp_new,logq_old,logq_new,logratio;
-	
-	bool saveiter;
-
-	for (unsigned int b=0; b<ntotal; b++) {
-		R_CheckUserInterrupt();
-		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
-
-
-		for (unsigned int t=0; t<n; t++) {
-			if (!vtflag) { break; }
-
-			/* Part 1. Checked - OK */
-			vt_old = vt.at(t);
-		    Et = E0tilde + Fx * vt;
-			lambda = arma::exp(Et);
-			logp_old = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
-			}
-			if (t==0) {
-				logp_old += R::dnorm(vt_old,aw,Rwsqrt,true);
-			} else {
-				logp_old += R::dnorm(vt_old,0.,Qsqrt,true);
-			}
-			/* Part 1. Checked - OK */
-
-			/* Part 2. */
-			Ytilde = Et + (Y - lambda) / lambda;
-		    Yhat = Ytilde - Et + Fx.col(t)*vt_old;
-		    if (t==0) {
-        	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-      	    } else {
-      		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-      	    }
-			Btsqrt = std::sqrt(Bt);
-		    vt_new = R::rnorm(bt, Btsqrt);
-			logq_new = R::dnorm(vt_new,bt,Btsqrt,true);
-			/* Part 2. */
-
-			vt.at(t) = vt_new;
-			Et = E0tilde + Fx * vt;
-			lambda = arma::exp(Et);
-			logp_new = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
-			}
-			if (t==0) {
-				logp_new += R::dnorm(vt_new,aw,Rwsqrt,true);
-			} else {
-				logp_new += R::dnorm(vt_new,0.,Qsqrt,true);
-			}
-
-			Ytilde = Et + (Y - lambda) / lambda;
-		    Yhat = Ytilde - Et + Fx.col(t)*vt_new;
-		    if (t==0) {
-        	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
-        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-      	    } else {
-      		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
-        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-      	    }
-			Btsqrt = std::sqrt(Bt);
-		    vt_new = R::rnorm(bt, Btsqrt);
-			logq_old = R::dnorm(vt_old,bt,Btsqrt,true);
-
-			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-				vt.at(t) = vt_old;
-			} else {
-				vt_accept.at(t) += 1.;
-			}
-	    }
-
-
-		if (rhoflag) {
-			/*
-			*** MH with a logit transform and Normal RW proposal ***
-			*/
-			xi_old = std::log(rho/(1.-rho));
-			Et = E0tilde + Fx * vt;
-			lambda = arma::exp(Et);
-			logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
-			for (unsigned int t=0; t<n; t++) {
-    			logp_old += R::dpois(Y.at(t),lambda.at(t),true);
-			}
-
-			xi_new = R::rnorm(xi_old,std::sqrt(Vxi));
-			rho = 1./(1.+std::exp(-xi_new));
-
-			Fx = update_Fx0(n,rho);
-			E0tilde.at(0) = E0;
-			for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
-    			E0tilde.at(t) = rho*E0tilde.at(t-1);
-			}
-			Et = E0tilde + Fx * vt;
-			lambda = arma::exp(Et);
-			logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
-			for (unsigned int t=0; t<n; t++) {
-    			logp_new += R::dpois(Y.at(t),lambda.at(t),true);
-			}
-
-			logratio = std::min(0.,logp_new-logp_old);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-    			rho = 1./(1.+std::exp(-xi_old));
-			} else {
-    			rho_accept += 1.;
-			}
-		}
-
-		Fx = update_Fx0(n,rho);
-		E0tilde.at(0) = E0;
-		for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
-    		E0tilde.at(t) = rho*E0tilde.at(t-1);
-		}
-
-
-		if (Qflag) {
-			nSv_new = nSv + arma::accu(arma::pow(vt.tail(n-1),2.));
-			Q = 1./R::rgamma(0.5*nv_new,2./nSv_new);
-		}
-
-
-		if (saveiter || b==(ntotal-1)) {
-			unsigned int idx_run;
-			if (saveiter) {
-				idx_run = (b-nburnin-1)/nthin;
-			} else {
-				idx_run = nsample - 1;
-			}
-
-			v_stored.col(idx_run) = vt;
-			Q_stored.at(idx_run) = Q;
-			rho_stored.at(idx_run) = rho;
-		}
-
-		// Rcout << "\rProgress: " << b << "/" << ntotal-1;
-	}
-
-	// Rcout << std::endl;
-
-	Rcpp::List output;
-	output["v"] = Rcpp::wrap(v_stored);
-	output["v_accept"] = Rcpp::wrap(vt_accept/static_cast<double>(ntotal));
-	output["Q"] = Rcpp::wrap(Q_stored);
-	output["rho"] = Rcpp::wrap(rho_stored);
-	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
-	return output;
-}
-
-
-
-
-
-
-
 // /*
-// With Koyck's geometrically decaying transfer function
+// Assume (rho,V,Q,E0) are known without transfer function
 // */
+// //' @export
+// // [[Rcpp::export]]
+// Rcpp::List mcmc_disturbance_pois0(
+// 	const arma::vec& Y, // n x 1
+// 	const arma::vec& Prior, // (aw, Rw), v1 ~ N(aw, Rw)
+//     const double E0,
+// 	const double rho_true = NA_REAL,
+// 	const double Q_true = NA_REAL, // State variance
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (nv,Sv)
+// 	const double Vxi = NA_REAL, // mh proposal for xi=logit(rho)
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& vt_true = R_NilValue,
+// 	const unsigned int nburnin = 0,
+// 	const unsigned int nthin = 1,
+// 	const unsigned int nsample = 1) { // n x 1
+
+// 	const double EBOUND = 700.;
+
+// 	const unsigned int n = Y.n_elem;
+// 	const double n_ = static_cast<double>(n);
+// 	const unsigned int ntotal = nburnin + nthin*nsample + 1;
+
+
+// 	// Hyperparameter
+// 	double aw = Prior.at(0);
+// 	double Rw = Prior.at(1);
+// 	double Rwsqrt = std::sqrt(Rw);
+
+// 	double Q,nv,nSv,nv_new,nSv_new;
+// 	arma::vec Q_stored(nsample);
+// 	bool Qflag;
+// 	if (R_IsNA(Q_true)) {
+// 		Qflag = true;
+// 		if (QPrior.isNull()) {
+// 			stop("Error: You must provide either true value or prior for Q.");
+// 		}
+// 		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
+// 		nv = QPrior_.at(0);
+// 		nSv = nv*QPrior_.at(1);
+// 		nv_new = nv + n_ - 1.;
+// 		Q = 1./R::rgamma(0.5*nv,2./nSv);
+// 	} else {
+// 		Qflag = false;
+// 		Q = Q_true;
+// 	}
+// 	double Qsqrt = std::sqrt(Q);
+
+
+// 	double rho, xi, xi_old, xi_new;
+// 	arma::vec rho_stored(nsample);
+// 	double rho_accept = 0.;
+// 	bool rhoflag;
+// 	if (R_IsNA(rho_true)) {
+// 		rhoflag = true;
+// 		rho = 0.5;
+// 	} else {
+// 		rhoflag = false;
+// 		rho = rho_true;
+// 	}
+
+
+// 	bool vtflag = true;
+// 	// arma::vec vt(n); 
+// 	arma::vec vt = aw + arma::randn(n)*std::sqrt(Rw); 
+// 	arma::vec vt_accept(n);
+// 	arma::mat v_stored(n,nsample,arma::fill::zeros);
+// 	if (!vt_true.isNull()) {
+// 		vtflag = false;
+// 		vt = Rcpp::as<arma::vec>(vt_true);
+// 	}
+
+// 	arma::mat Fx = update_Fx0(n,rho);
+//     arma::vec E0tilde(n,arma::fill::zeros);
+// 	E0tilde.at(0) = E0;
+//    	for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
+// 		E0tilde.at(t) = rho*E0tilde.at(t-1);
+// 		// E0tilde.at(t) = std::pow(rho,static_cast<double>(t))*E0;
+//     }
+
+//     double bt,Bt,Btsqrt;
+//     arma::vec Et(n);
+// 	arma::vec lambda(n);
+// 	arma::vec Ytilde(n);
+// 	arma::vec Yhat(n);
+
+// 	double vt_old, vt_new;
+// 	double logp_old,logp_new,logq_old,logq_new,logratio;
+	
+// 	bool saveiter;
+
+// 	for (unsigned int b=0; b<ntotal; b++) {
+// 		R_CheckUserInterrupt();
+// 		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
+
+
+// 		for (unsigned int t=0; t<n; t++) {
+// 			if (!vtflag) { break; }
+
+// 			/* Part 1. Checked - OK */
+// 			vt_old = vt.at(t);
+// 		    Et = E0tilde + Fx * vt;
+// 			lambda = arma::exp(Et);
+// 			logp_old = 0.;
+// 			for (unsigned int j=t;j<n;j++) {
+// 				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
+// 			}
+// 			if (t==0) {
+// 				logp_old += R::dnorm(vt_old,aw,Rwsqrt,true);
+// 			} else {
+// 				logp_old += R::dnorm(vt_old,0.,Qsqrt,true);
+// 			}
+// 			/* Part 1. Checked - OK */
+
+// 			/* Part 2. */
+// 			Ytilde = Et + (Y - lambda) / lambda;
+// 		    Yhat = Ytilde - Et + Fx.col(t)*vt_old;
+// 		    if (t==0) {
+//         	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
+//         	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    } else {
+//       		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
+//         	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    }
+// 			Btsqrt = std::sqrt(Bt);
+// 		    vt_new = R::rnorm(bt, Btsqrt);
+// 			logq_new = R::dnorm(vt_new,bt,Btsqrt,true);
+// 			/* Part 2. */
+
+// 			vt.at(t) = vt_new;
+// 			Et = E0tilde + Fx * vt;
+// 			lambda = arma::exp(Et);
+// 			logp_new = 0.;
+// 			for (unsigned int j=t;j<n;j++) {
+// 				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
+// 			}
+// 			if (t==0) {
+// 				logp_new += R::dnorm(vt_new,aw,Rwsqrt,true);
+// 			} else {
+// 				logp_new += R::dnorm(vt_new,0.,Qsqrt,true);
+// 			}
+
+// 			Ytilde = Et + (Y - lambda) / lambda;
+// 		    Yhat = Ytilde - Et + Fx.col(t)*vt_new;
+// 		    if (t==0) {
+//         	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
+//         	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    } else {
+//       		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
+//         	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    }
+// 			Btsqrt = std::sqrt(Bt);
+// 		    vt_new = R::rnorm(bt, Btsqrt);
+// 			logq_old = R::dnorm(vt_old,bt,Btsqrt,true);
+
+// 			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
+// 			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+// 				vt.at(t) = vt_old;
+// 			} else {
+// 				vt_accept.at(t) += 1.;
+// 			}
+// 	    }
+
+
+// 		if (rhoflag) {
+// 			/*
+// 			*** MH with a logit transform and Normal RW proposal ***
+// 			*/
+// 			xi_old = std::log(rho/(1.-rho));
+// 			Et = E0tilde + Fx * vt;
+// 			lambda = arma::exp(Et);
+// 			logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
+// 			for (unsigned int t=0; t<n; t++) {
+//     			logp_old += R::dpois(Y.at(t),lambda.at(t),true);
+// 			}
+
+// 			xi_new = R::rnorm(xi_old,std::sqrt(Vxi));
+// 			rho = 1./(1.+std::exp(-xi_new));
+
+// 			Fx = update_Fx0(n,rho);
+// 			E0tilde.at(0) = E0;
+// 			for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
+//     			E0tilde.at(t) = rho*E0tilde.at(t-1);
+// 			}
+// 			Et = E0tilde + Fx * vt;
+// 			lambda = arma::exp(Et);
+// 			logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
+// 			for (unsigned int t=0; t<n; t++) {
+//     			logp_new += R::dpois(Y.at(t),lambda.at(t),true);
+// 			}
+
+// 			logratio = std::min(0.,logp_new-logp_old);
+// 			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+//     			rho = 1./(1.+std::exp(-xi_old));
+// 			} else {
+//     			rho_accept += 1.;
+// 			}
+// 		}
+
+// 		Fx = update_Fx0(n,rho);
+// 		E0tilde.at(0) = E0;
+// 		for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
+//     		E0tilde.at(t) = rho*E0tilde.at(t-1);
+// 		}
+
+
+// 		if (Qflag) {
+// 			nSv_new = nSv + arma::accu(arma::pow(vt.tail(n-1),2.));
+// 			Q = 1./R::rgamma(0.5*nv_new,2./nSv_new);
+// 		}
+
+
+// 		if (saveiter || b==(ntotal-1)) {
+// 			unsigned int idx_run;
+// 			if (saveiter) {
+// 				idx_run = (b-nburnin-1)/nthin;
+// 			} else {
+// 				idx_run = nsample - 1;
+// 			}
+
+// 			v_stored.col(idx_run) = vt;
+// 			Q_stored.at(idx_run) = Q;
+// 			rho_stored.at(idx_run) = rho;
+// 		}
+
+// 		// Rcout << "\rProgress: " << b << "/" << ntotal-1;
+// 	}
+
+// 	// Rcout << std::endl;
+
+// 	Rcpp::List output;
+// 	output["v"] = Rcpp::wrap(v_stored);
+// 	output["v_accept"] = Rcpp::wrap(vt_accept/static_cast<double>(ntotal));
+// 	output["Q"] = Rcpp::wrap(Q_stored);
+// 	output["rho"] = Rcpp::wrap(rho_stored);
+// 	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
+// 	return output;
+// }
+
+
+
+
+
+
+
+/*
+MCMC disturbance sampler for different transfer kernels, link functions, and reproduction number functions.
+*/
 //' @export
 // [[Rcpp::export]]
 Rcpp::List mcmc_disturbance_pois(
@@ -790,564 +790,564 @@ Rcpp::List mcmc_disturbance_pois(
 }
 
 
-/*
-With Solows's pascal-distributed transfer function
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List mcmc_disturbance_pois_solow(
-	const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-	const double Vxi = NA_REAL, // variance of mh normal random walk proposal for xi=logit(rho)
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (nv,Sv), prior for Q~IG(nv/2,nv*Sv/2)
-	const Rcpp::Nullable<Rcpp::NumericVector>& v1Prior = R_NilValue, // (aw, Rw), v1 ~ N(aw, Rw), prior for v[1], the first state/evolution/state error/disturbance.
-	const double rho_init = NA_REAL,
-	const double Q_init = NA_REAL,
-	const Rcpp::Nullable<Rcpp::NumericVector>& vt_init = R_NilValue,
-	const double rho_true = NA_REAL, // true value of state/evolution coefficient
-	const double Q_true = NA_REAL, // true value of state/evolution error variance
-	const Rcpp::Nullable<Rcpp::NumericVector>& vt_true = R_NilValue, // true value of system/evolution/state error/disturbance
-	const unsigned int nburnin = 0,
-	const unsigned int nthin = 1,
-	const unsigned int nsample = 1) { // n x 1
+// /*
+// With Solows's pascal-distributed transfer function
+// */
+// //' @export
+// // [[Rcpp::export]]
+// Rcpp::List mcmc_disturbance_pois_solow(
+// 	const arma::vec& Y, // n x 1, the observed response
+// 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
+// 	const double Vxi = NA_REAL, // variance of mh normal random walk proposal for xi=logit(rho)
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (nv,Sv), prior for Q~IG(nv/2,nv*Sv/2)
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& v1Prior = R_NilValue, // (aw, Rw), v1 ~ N(aw, Rw), prior for v[1], the first state/evolution/state error/disturbance.
+// 	const double rho_init = NA_REAL,
+// 	const double Q_init = NA_REAL,
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& vt_init = R_NilValue,
+// 	const double rho_true = NA_REAL, // true value of state/evolution coefficient
+// 	const double Q_true = NA_REAL, // true value of state/evolution error variance
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& vt_true = R_NilValue, // true value of system/evolution/state error/disturbance
+// 	const unsigned int nburnin = 0,
+// 	const unsigned int nthin = 1,
+// 	const unsigned int nsample = 1) { // n x 1
 
-	const double EBOUND = 700.;
+// 	const double EBOUND = 700.;
 
-	const unsigned int n = Y.n_elem;
-	const double n_ = static_cast<double>(n);
-	const unsigned int ntotal = nburnin + nthin*nsample + 1;
+// 	const unsigned int n = Y.n_elem;
+// 	const double n_ = static_cast<double>(n);
+// 	const unsigned int ntotal = nburnin + nthin*nsample + 1;
 
-	// Hyperparameter
-	double Q,nv,nSv,nv_new,nSv_new;
-	arma::vec Q_stored(nsample);
-	bool Qflag;
-	if (R_IsNA(Q_true)) {
-		Qflag = true;
-		if (QPrior.isNull()) {
-			stop("Error: You must provide either true value or prior for Q.");
-		}
-		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
-		nv = QPrior_.at(0);
-		nSv = nv*QPrior_.at(1);
-		nv_new = nv + n_ - 1.;
-		if (R_IsNA(Q_init)) {
-			Q = 1./R::rgamma(0.5*nv,2./nSv);
-		} else {
-			Q = Q_init;
-		}
+// 	// Hyperparameter
+// 	double Q,nv,nSv,nv_new,nSv_new;
+// 	arma::vec Q_stored(nsample);
+// 	bool Qflag;
+// 	if (R_IsNA(Q_true)) {
+// 		Qflag = true;
+// 		if (QPrior.isNull()) {
+// 			stop("Error: You must provide either true value or prior for Q.");
+// 		}
+// 		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
+// 		nv = QPrior_.at(0);
+// 		nSv = nv*QPrior_.at(1);
+// 		nv_new = nv + n_ - 1.;
+// 		if (R_IsNA(Q_init)) {
+// 			Q = 1./R::rgamma(0.5*nv,2./nSv);
+// 		} else {
+// 			Q = Q_init;
+// 		}
 		
-	} else {
-		Qflag = false;
-		Q = Q_true;
-	}
-	double Qsqrt = std::sqrt(Q);
+// 	} else {
+// 		Qflag = false;
+// 		Q = Q_true;
+// 	}
+// 	double Qsqrt = std::sqrt(Q);
 
 
-	double rho, xi, xi_old, xi_new;
-	arma::vec rho_stored(nsample);
-	double rho_accept = 0.;
-	bool rhoflag;
-	if (R_IsNA(rho_true)) {
-		rhoflag = true;
-		if (R_IsNA(Vxi)) {
-			stop("Error: You must provide either true value or prior for rho.");
-		}
-		if (R_IsNA(rho_init)) {
-			rho = 0.5;
-		} else {
-			rho = rho_init;
-		}
-	} else {
-		rhoflag = false;
-		rho = rho_true;
-	}
-	// double rho_sq = rho * rho;
+// 	double rho, xi, xi_old, xi_new;
+// 	arma::vec rho_stored(nsample);
+// 	double rho_accept = 0.;
+// 	bool rhoflag;
+// 	if (R_IsNA(rho_true)) {
+// 		rhoflag = true;
+// 		if (R_IsNA(Vxi)) {
+// 			stop("Error: You must provide either true value or prior for rho.");
+// 		}
+// 		if (R_IsNA(rho_init)) {
+// 			rho = 0.5;
+// 		} else {
+// 			rho = rho_init;
+// 		}
+// 	} else {
+// 		rhoflag = false;
+// 		rho = rho_true;
+// 	}
+// 	// double rho_sq = rho * rho;
 
-	bool vtflag = true;
-	double aw,Rw,Rwsqrt;
-	arma::vec vt(n); 
-	arma::vec vt_accept(n);
-	arma::mat v_stored(n,nsample,arma::fill::zeros);
-	if (!vt_true.isNull()) {
-		vtflag = false;
-		vt = Rcpp::as<arma::vec>(vt_true);
-	} else {
-		vtflag = true;
-		if (!v1Prior.isNull()) {
-			arma::vec v1Prior_ = Rcpp::as<arma::vec>(v1Prior);
-			aw = v1Prior_.at(0);
-			Rw = v1Prior_.at(1);
-			Rwsqrt = std::sqrt(Rw);
-		}
-		if (!vt_init.isNull()) {
-			vt = Rcpp::as<arma::vec>(vt_init);
-		} else {
-			vt = aw + arma::randn(n)*std::sqrt(Rw);
-		}
-	}
+// 	bool vtflag = true;
+// 	double aw,Rw,Rwsqrt;
+// 	arma::vec vt(n); 
+// 	arma::vec vt_accept(n);
+// 	arma::mat v_stored(n,nsample,arma::fill::zeros);
+// 	if (!vt_true.isNull()) {
+// 		vtflag = false;
+// 		vt = Rcpp::as<arma::vec>(vt_true);
+// 	} else {
+// 		vtflag = true;
+// 		if (!v1Prior.isNull()) {
+// 			arma::vec v1Prior_ = Rcpp::as<arma::vec>(v1Prior);
+// 			aw = v1Prior_.at(0);
+// 			Rw = v1Prior_.at(1);
+// 			Rwsqrt = std::sqrt(Rw);
+// 		}
+// 		if (!vt_init.isNull()) {
+// 			vt = Rcpp::as<arma::vec>(vt_init);
+// 		} else {
+// 			vt = aw + arma::randn(n)*std::sqrt(Rw);
+// 		}
+// 	}
 	
 	
 
-	arma::mat Fx = update_Fx_Solow(n,rho,X);
+// 	arma::mat Fx = update_Fx_Solow(n,rho,X);
 
-    double bt,Bt,Btsqrt;
-    arma::vec Et(n);
-	arma::vec lambda(n);
-	arma::vec Ytilde(n);
-	arma::vec Yhat(n);
+//     double bt,Bt,Btsqrt;
+//     arma::vec Et(n);
+// 	arma::vec lambda(n);
+// 	arma::vec Ytilde(n);
+// 	arma::vec Yhat(n);
 
-	double vt_old, vt_new;
-	double logp_old,logp_new,logq_old,logq_new,logratio;
+// 	double vt_old, vt_new;
+// 	double logp_old,logp_new,logq_old,logq_new,logratio;
 	
-	bool saveiter;
+// 	bool saveiter;
 
-	for (unsigned int b=0; b<ntotal; b++) {
-		R_CheckUserInterrupt();
-		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
-
-
-		// [OK] Update evolution/state disturbances/errors, denoted by vt.
-		for (unsigned int t=0; t<n; t++) {
-			if (!vtflag) { break; }
-
-			/* Part 1. Target full conditional based on old value */
-			vt_old = vt.at(t);
-		    Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND); //**
-			lambda = arma::exp(Et);
-			logp_old = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
-			}
-			if (t==0) {
-				logp_old += R::dnorm(vt_old,aw,Rwsqrt,true);
-			} else {
-				logp_old += R::dnorm(vt_old,0.,Qsqrt,true);
-			}
-			/* Part 1. Checked - OK */
-
-			/* Part 2. Proposal new | old */
-			Ytilde = Et + (Y - lambda) / lambda; // Linearlisation
-		    Yhat = Ytilde - Et + Fx.col(t)*vt_old; // TODO - CHECK HERE
-		    if (t==0) {
-        	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-      	    } else {
-      		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-      	    }
-			Btsqrt = std::sqrt(Bt);
-		    vt_new = R::rnorm(bt, Btsqrt);
-			if (!std::isfinite(vt_new)) {
-				Rcout << "(bt=" << bt << ", Bt=" << Bt << ")" << std::endl;
-				Rcout << "vt: " << vt.t() << std::endl;
-				Rcout << "Yhat: " << Yhat.t() << std::endl;
-				Rcout << "Et: " << Et.t() << std::endl;
-				Rcout << "lambda: " << lambda.t() << std::endl;
-				stop("Non finite vt");
-			}
-			logq_new = R::dnorm(vt_new,bt,Btsqrt,true);
-			/* Part 2. */
-
-			vt.at(t) = vt_new;
-			Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			lambda = arma::exp(Et);
-			logp_new = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
-			}
-			if (t==0) {
-				logp_new += R::dnorm(vt_new,aw,Rwsqrt,true);
-			} else {
-				logp_new += R::dnorm(vt_new,0.,Qsqrt,true);
-			}
-
-			Ytilde = Et + (Y - lambda) / lambda; // linearlisation
-		    Yhat = Ytilde - Et + Fx.col(t)*vt_new;
-		    if (t==0) {
-        	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
-        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-      	    } else {
-      		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
-        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-      	    }
-			Btsqrt = std::sqrt(Bt);
-		    vt_new = R::rnorm(bt, Btsqrt);
-			logq_old = R::dnorm(vt_old,bt,Btsqrt,true);
-
-			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-				vt.at(t) = vt_old;
-			} else {
-				vt_accept.at(t) += 1.;
-			}
-	    }
+// 	for (unsigned int b=0; b<ntotal; b++) {
+// 		R_CheckUserInterrupt();
+// 		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
 
 
-		// [OK] Update state/evolution error variance
-		if (Qflag) {
-			nSv_new = nSv + arma::accu(arma::pow(vt.tail(n-1),2.));
-			Q = 1./R::rgamma(0.5*nv_new,2./nSv_new);
-		}
+// 		// [OK] Update evolution/state disturbances/errors, denoted by vt.
+// 		for (unsigned int t=0; t<n; t++) {
+// 			if (!vtflag) { break; }
+
+// 			/* Part 1. Target full conditional based on old value */
+// 			vt_old = vt.at(t);
+// 		    Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND); //**
+// 			lambda = arma::exp(Et);
+// 			logp_old = 0.;
+// 			for (unsigned int j=t;j<n;j++) {
+// 				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
+// 			}
+// 			if (t==0) {
+// 				logp_old += R::dnorm(vt_old,aw,Rwsqrt,true);
+// 			} else {
+// 				logp_old += R::dnorm(vt_old,0.,Qsqrt,true);
+// 			}
+// 			/* Part 1. Checked - OK */
+
+// 			/* Part 2. Proposal new | old */
+// 			Ytilde = Et + (Y - lambda) / lambda; // Linearlisation
+// 		    Yhat = Ytilde - Et + Fx.col(t)*vt_old; // TODO - CHECK HERE
+// 		    if (t==0) {
+//         	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
+//         	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    } else {
+//       		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
+//         	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    }
+// 			Btsqrt = std::sqrt(Bt);
+// 		    vt_new = R::rnorm(bt, Btsqrt);
+// 			if (!std::isfinite(vt_new)) {
+// 				Rcout << "(bt=" << bt << ", Bt=" << Bt << ")" << std::endl;
+// 				Rcout << "vt: " << vt.t() << std::endl;
+// 				Rcout << "Yhat: " << Yhat.t() << std::endl;
+// 				Rcout << "Et: " << Et.t() << std::endl;
+// 				Rcout << "lambda: " << lambda.t() << std::endl;
+// 				stop("Non finite vt");
+// 			}
+// 			logq_new = R::dnorm(vt_new,bt,Btsqrt,true);
+// 			/* Part 2. */
+
+// 			vt.at(t) = vt_new;
+// 			Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+// 			lambda = arma::exp(Et);
+// 			logp_new = 0.;
+// 			for (unsigned int j=t;j<n;j++) {
+// 				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
+// 			}
+// 			if (t==0) {
+// 				logp_new += R::dnorm(vt_new,aw,Rwsqrt,true);
+// 			} else {
+// 				logp_new += R::dnorm(vt_new,0.,Qsqrt,true);
+// 			}
+
+// 			Ytilde = Et + (Y - lambda) / lambda; // linearlisation
+// 		    Yhat = Ytilde - Et + Fx.col(t)*vt_new;
+// 		    if (t==0) {
+//         	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
+//         	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    } else {
+//       		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
+//         	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    }
+// 			Btsqrt = std::sqrt(Bt);
+// 		    vt_new = R::rnorm(bt, Btsqrt);
+// 			logq_old = R::dnorm(vt_old,bt,Btsqrt,true);
+
+// 			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
+// 			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+// 				vt.at(t) = vt_old;
+// 			} else {
+// 				vt_accept.at(t) += 1.;
+// 			}
+// 	    }
 
 
-		// Update rho: the state/evolution coefficient
-		if (rhoflag) {
-			// if (std::abs(rho)<arma::datum::eps) {
-			// 	rho += arma::datum::eps;
-			// }
-			xi_old = std::log(rho/(1.-rho));
-			Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			lambda = arma::exp(Et);
-			logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
-			for (unsigned int t=0; t<n; t++) {
-				logp_old += R::dpois(Y.at(t),lambda.at(t),true);
-			}
+// 		// [OK] Update state/evolution error variance
+// 		if (Qflag) {
+// 			nSv_new = nSv + arma::accu(arma::pow(vt.tail(n-1),2.));
+// 			Q = 1./R::rgamma(0.5*nv_new,2./nSv_new);
+// 		}
 
-			xi_new = R::rnorm(xi_old,std::sqrt(Vxi));
-			rho = 1./(1.+std::exp(-xi_new));
-			Fx = update_Fx_Solow(n,rho,X);
-			Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			lambda = arma::exp(Et);
-			logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
-			for (unsigned int t=0; t<n; t++) {
-				logp_new += R::dpois(Y.at(t),lambda.at(t),true);
-			}
 
-			logratio = std::min(0.,logp_new-logp_old);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-				rho = 1./(1.+std::exp(-xi_old));
-				Fx = update_Fx_Solow(n,rho,X);
-			} else {
-				rho_accept += 1.;
-			}
-			// rho_sq = rho * rho;
+// 		// Update rho: the state/evolution coefficient
+// 		if (rhoflag) {
+// 			// if (std::abs(rho)<arma::datum::eps) {
+// 			// 	rho += arma::datum::eps;
+// 			// }
+// 			xi_old = std::log(rho/(1.-rho));
+// 			Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+// 			lambda = arma::exp(Et);
+// 			logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
+// 			for (unsigned int t=0; t<n; t++) {
+// 				logp_old += R::dpois(Y.at(t),lambda.at(t),true);
+// 			}
+
+// 			xi_new = R::rnorm(xi_old,std::sqrt(Vxi));
+// 			rho = 1./(1.+std::exp(-xi_new));
+// 			Fx = update_Fx_Solow(n,rho,X);
+// 			Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+// 			lambda = arma::exp(Et);
+// 			logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
+// 			for (unsigned int t=0; t<n; t++) {
+// 				logp_new += R::dpois(Y.at(t),lambda.at(t),true);
+// 			}
+
+// 			logratio = std::min(0.,logp_new-logp_old);
+// 			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+// 				rho = 1./(1.+std::exp(-xi_old));
+// 				Fx = update_Fx_Solow(n,rho,X);
+// 			} else {
+// 				rho_accept += 1.;
+// 			}
+// 			// rho_sq = rho * rho;
 		
 
-			if (!std::isfinite(rho)) {
-				Rcout << "rho_new=" << rho << std::endl;
-				stop("Non finite value for rho");
-			}
-		}
+// 			if (!std::isfinite(rho)) {
+// 				Rcout << "rho_new=" << rho << std::endl;
+// 				stop("Non finite value for rho");
+// 			}
+// 		}
 		
 		
-		// store samples after burnin and thinning
-		if (saveiter || b==(ntotal-1)) {
-			unsigned int idx_run;
-			if (saveiter) {
-				idx_run = (b-nburnin-1)/nthin;
-			} else {
-				idx_run = nsample - 1;
-			}
+// 		// store samples after burnin and thinning
+// 		if (saveiter || b==(ntotal-1)) {
+// 			unsigned int idx_run;
+// 			if (saveiter) {
+// 				idx_run = (b-nburnin-1)/nthin;
+// 			} else {
+// 				idx_run = nsample - 1;
+// 			}
 
-			v_stored.col(idx_run) = vt;
-			Q_stored.at(idx_run) = Q;
-			rho_stored.at(idx_run) = rho;
-		}
+// 			v_stored.col(idx_run) = vt;
+// 			Q_stored.at(idx_run) = Q;
+// 			rho_stored.at(idx_run) = rho;
+// 		}
 
-		// Rcout << "\rProgress: " << b << "/" << ntotal-1;
-	}
+// 		// Rcout << "\rProgress: " << b << "/" << ntotal-1;
+// 	}
 
-	// Rcout << std::endl;
+// 	// Rcout << std::endl;
 
-	Rcpp::List output;
-	output["v"] = Rcpp::wrap(v_stored);
-	vt_accept /= static_cast<double>(ntotal);
-	output["v_accept"] = Rcpp::wrap(vt_accept);
-	output["Q"] = Rcpp::wrap(Q_stored);
-	output["rho"] = Rcpp::wrap(rho_stored);
-	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
-	return output;
-}
+// 	Rcpp::List output;
+// 	output["v"] = Rcpp::wrap(v_stored);
+// 	vt_accept /= static_cast<double>(ntotal);
+// 	output["v_accept"] = Rcpp::wrap(vt_accept);
+// 	output["Q"] = Rcpp::wrap(Q_stored);
+// 	output["rho"] = Rcpp::wrap(rho_stored);
+// 	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
+// 	return output;
+// }
 
 
 
-/*
-With Solows's pascal-distributed transfer function
-and identity link function
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List mcmc_disturbance_pois_solow_eye(
-	const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-	const double Vxi = NA_REAL, // variance of mh normal random walk proposal for xi=logit(rho)
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (nv,Sv), prior for Q~IG(nv/2,nv*Sv/2)
-	const Rcpp::Nullable<Rcpp::NumericVector>& v1Prior = R_NilValue, // (aw, Rw), v1 ~ N(aw, Rw), prior for v[1], the first state/evolution/state error/disturbance.
-	const double rho_init = NA_REAL,
-	const double Q_init = NA_REAL,
-	const Rcpp::Nullable<Rcpp::NumericVector>& vt_init = R_NilValue,
-	const double rho_true = NA_REAL, // true value of state/evolution coefficient
-	const double Q_true = NA_REAL, // true value of state/evolution error variance
-	const Rcpp::Nullable<Rcpp::NumericVector>& vt_true = R_NilValue, // true value of system/evolution/state error/disturbance
-	const unsigned int nburnin = 0,
-	const unsigned int nthin = 1,
-	const unsigned int nsample = 1) { // n x 1
+// /*
+// With Solows's pascal-distributed transfer function
+// and identity link function
+// */
+// //' @export
+// // [[Rcpp::export]]
+// Rcpp::List mcmc_disturbance_pois_solow_eye(
+// 	const arma::vec& Y, // n x 1, the observed response
+// 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
+// 	const double Vxi = NA_REAL, // variance of mh normal random walk proposal for xi=logit(rho)
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (nv,Sv), prior for Q~IG(nv/2,nv*Sv/2)
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& v1Prior = R_NilValue, // (aw, Rw), v1 ~ N(aw, Rw), prior for v[1], the first state/evolution/state error/disturbance.
+// 	const double rho_init = NA_REAL,
+// 	const double Q_init = NA_REAL,
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& vt_init = R_NilValue,
+// 	const double rho_true = NA_REAL, // true value of state/evolution coefficient
+// 	const double Q_true = NA_REAL, // true value of state/evolution error variance
+// 	const Rcpp::Nullable<Rcpp::NumericVector>& vt_true = R_NilValue, // true value of system/evolution/state error/disturbance
+// 	const unsigned int nburnin = 0,
+// 	const unsigned int nthin = 1,
+// 	const unsigned int nsample = 1) { // n x 1
 
-	const double EBOUND = 700.;
+// 	const double EBOUND = 700.;
 
-	const unsigned int n = Y.n_elem;
-	const double n_ = static_cast<double>(n);
-	const unsigned int ntotal = nburnin + nthin*nsample + 1;
+// 	const unsigned int n = Y.n_elem;
+// 	const double n_ = static_cast<double>(n);
+// 	const unsigned int ntotal = nburnin + nthin*nsample + 1;
 
-	// Hyperparameter
-	double Q,nv,nSv,nv_new,nSv_new;
-	arma::vec Q_stored(nsample);
-	bool Qflag;
-	if (R_IsNA(Q_true)) {
-		Qflag = true;
-		if (QPrior.isNull()) {
-			stop("Error: You must provide either true value or prior for Q.");
-		}
-		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
-		nv = QPrior_.at(0);
-		nSv = nv*QPrior_.at(1);
-		nv_new = nv + n_ - 1.;
-		if (R_IsNA(Q_init)) {
-			Q = 1./R::rgamma(0.5*nv,2./nSv);
-		} else {
-			Q = Q_init;
-		}
+// 	// Hyperparameter
+// 	double Q,nv,nSv,nv_new,nSv_new;
+// 	arma::vec Q_stored(nsample);
+// 	bool Qflag;
+// 	if (R_IsNA(Q_true)) {
+// 		Qflag = true;
+// 		if (QPrior.isNull()) {
+// 			stop("Error: You must provide either true value or prior for Q.");
+// 		}
+// 		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
+// 		nv = QPrior_.at(0);
+// 		nSv = nv*QPrior_.at(1);
+// 		nv_new = nv + n_ - 1.;
+// 		if (R_IsNA(Q_init)) {
+// 			Q = 1./R::rgamma(0.5*nv,2./nSv);
+// 		} else {
+// 			Q = Q_init;
+// 		}
 		
-	} else {
-		Qflag = false;
-		Q = Q_true;
-	}
-	double Qsqrt = std::sqrt(Q);
+// 	} else {
+// 		Qflag = false;
+// 		Q = Q_true;
+// 	}
+// 	double Qsqrt = std::sqrt(Q);
 
 
-	double rho, xi, xi_old, xi_new, Vxi_sqrt;
-	arma::vec rho_stored(nsample);
-	double rho_accept = 0.;
-	bool rhoflag;
-	if (R_IsNA(rho_true)) {
-		rhoflag = true;
-		if (R_IsNA(Vxi)) {
-			stop("Error: You must provide either true value or prior for rho.");
-		}
-		if (R_IsNA(rho_init)) {
-			rho = 0.5;
-		} else {
-			rho = rho_init;
-		}
-		Vxi_sqrt = std::sqrt(Vxi);
-	} else {
-		rhoflag = false;
-		rho = rho_true;
-	}
-	// double rho_sq = rho * rho;
+// 	double rho, xi, xi_old, xi_new, Vxi_sqrt;
+// 	arma::vec rho_stored(nsample);
+// 	double rho_accept = 0.;
+// 	bool rhoflag;
+// 	if (R_IsNA(rho_true)) {
+// 		rhoflag = true;
+// 		if (R_IsNA(Vxi)) {
+// 			stop("Error: You must provide either true value or prior for rho.");
+// 		}
+// 		if (R_IsNA(rho_init)) {
+// 			rho = 0.5;
+// 		} else {
+// 			rho = rho_init;
+// 		}
+// 		Vxi_sqrt = std::sqrt(Vxi);
+// 	} else {
+// 		rhoflag = false;
+// 		rho = rho_true;
+// 	}
+// 	// double rho_sq = rho * rho;
 
-	bool vtflag = true;
-	double aw,Rw,Rwsqrt;
-	arma::vec vt(n); 
-	arma::vec vt_accept(n);
-	arma::mat v_stored(n,nsample,arma::fill::zeros);
-	if (!vt_true.isNull()) {
-		vtflag = false;
-		vt = Rcpp::as<arma::vec>(vt_true);
-	} else {
-		vtflag = true;
-		if (!v1Prior.isNull()) {
-			arma::vec v1Prior_ = Rcpp::as<arma::vec>(v1Prior);
-			aw = v1Prior_.at(0);
-			Rw = v1Prior_.at(1);
-			Rwsqrt = std::sqrt(Rw);
-		}
-		if (!vt_init.isNull()) {
-			vt = Rcpp::as<arma::vec>(vt_init);
-		} else {
-			vt = aw + arma::randn(n)*std::sqrt(Rw);
-		}
-	}
+// 	bool vtflag = true;
+// 	double aw,Rw,Rwsqrt;
+// 	arma::vec vt(n); 
+// 	arma::vec vt_accept(n);
+// 	arma::mat v_stored(n,nsample,arma::fill::zeros);
+// 	if (!vt_true.isNull()) {
+// 		vtflag = false;
+// 		vt = Rcpp::as<arma::vec>(vt_true);
+// 	} else {
+// 		vtflag = true;
+// 		if (!v1Prior.isNull()) {
+// 			arma::vec v1Prior_ = Rcpp::as<arma::vec>(v1Prior);
+// 			aw = v1Prior_.at(0);
+// 			Rw = v1Prior_.at(1);
+// 			Rwsqrt = std::sqrt(Rw);
+// 		}
+// 		if (!vt_init.isNull()) {
+// 			vt = Rcpp::as<arma::vec>(vt_init);
+// 		} else {
+// 			vt = aw + arma::randn(n)*std::sqrt(Rw);
+// 		}
+// 	}
 	
 	
 
-	arma::mat Fx = update_Fx_Solow(n,rho,X);
+// 	arma::mat Fx = update_Fx_Solow(n,rho,X);
 
-    double bt,Bt,Btsqrt;
-    arma::vec Et(n);
-	arma::vec lambda(n);
-	arma::vec Ytilde(n);
-	arma::vec Yhat(n);
+//     double bt,Bt,Btsqrt;
+//     arma::vec Et(n);
+// 	arma::vec lambda(n);
+// 	arma::vec Ytilde(n);
+// 	arma::vec Yhat(n);
 
-	double vt_old, vt_new;
-	double logp_old,logp_new,logq_old,logq_new,logratio;
+// 	double vt_old, vt_new;
+// 	double logp_old,logp_new,logq_old,logq_new,logratio;
 	
-	bool saveiter;
+// 	bool saveiter;
 
-	for (unsigned int b=0; b<ntotal; b++) {
-		R_CheckUserInterrupt();
-		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
-
-
-		// [OK] Update evolution/state disturbances/errors, denoted by vt.
-		for (unsigned int t=0; t<n; t++) {
-			// Metropolis-Hastings for each of the vt
-			if (!vtflag) { break; }
-
-			/* Part 1. Target full conditional based on old value */
-			vt_old = vt.at(t);
-		    Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND); //**
-			// lambda = arma::exp(Et);
-			lambda = Et;
-			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
-			logp_old = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
-			}
-			if (t==0) {
-				logp_old += R::dnorm(vt_old,aw,Rwsqrt,true);
-			} else {
-				logp_old += R::dnorm(vt_old,0.,Qsqrt,true);
-			}
-			/* Part 1. Checked - OK */
-
-			/* Part 2. Proposal new | old */
-			// Ytilde = Et + (Y - lambda) / lambda; // Linearlisation
-		    Yhat = Y - Et + Fx.col(t)*vt_old; // TODO - CHECK HERE
-		    if (t==0) {
-        	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-      	    } else {
-      		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-      	    }
-			Btsqrt = std::sqrt(Bt);
-		    vt_new = R::rnorm(bt, Btsqrt);
-			if (!std::isfinite(vt_new)) {
-				Rcout << "(bt=" << bt << ", Bt=" << Bt << ")" << std::endl;
-				Rcout << "vt: " << vt.t() << std::endl;
-				Rcout << "Yhat: " << Yhat.t() << std::endl;
-				Rcout << "Et: " << Et.t() << std::endl;
-				Rcout << "lambda: " << lambda.t() << std::endl;
-				stop("Non finite vt");
-			}
-			logq_new = R::dnorm(vt_new,bt,Btsqrt,true);
-			/* Part 2. */
-
-			vt.at(t) = vt_new;
-			Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			// lambda = arma::exp(Et);
-			lambda = Et;
-			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
-			logp_new = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
-			}
-			if (t==0) {
-				logp_new += R::dnorm(vt_new,aw,Rwsqrt,true);
-			} else {
-				logp_new += R::dnorm(vt_new,0.,Qsqrt,true);
-			}
-
-			// Ytilde = Et + (Y - lambda) / lambda; // linearlisation
-		    Yhat = Y - Et + Fx.col(t)*vt_new;
-		    if (t==0) {
-        	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
-        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-      	    } else {
-      		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
-        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-      	    }
-			Btsqrt = std::sqrt(Bt);
-			logq_old = R::dnorm(vt_old,bt,Btsqrt,true);
-
-			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-				vt.at(t) = vt_old;
-			} else {
-				vt_accept.at(t) += 1.;
-			}
-	    }
+// 	for (unsigned int b=0; b<ntotal; b++) {
+// 		R_CheckUserInterrupt();
+// 		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
 
 
-		// [OK] Update state/evolution error variance
-		if (Qflag) {
-			nSv_new = nSv + arma::accu(arma::pow(vt.tail(n-1),2.));
-			Q = 1./R::rgamma(0.5*nv_new,2./nSv_new);
-		}
+// 		// [OK] Update evolution/state disturbances/errors, denoted by vt.
+// 		for (unsigned int t=0; t<n; t++) {
+// 			// Metropolis-Hastings for each of the vt
+// 			if (!vtflag) { break; }
+
+// 			/* Part 1. Target full conditional based on old value */
+// 			vt_old = vt.at(t);
+// 		    Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND); //**
+// 			// lambda = arma::exp(Et);
+// 			lambda = Et;
+// 			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
+// 			logp_old = 0.;
+// 			for (unsigned int j=t;j<n;j++) {
+// 				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
+// 			}
+// 			if (t==0) {
+// 				logp_old += R::dnorm(vt_old,aw,Rwsqrt,true);
+// 			} else {
+// 				logp_old += R::dnorm(vt_old,0.,Qsqrt,true);
+// 			}
+// 			/* Part 1. Checked - OK */
+
+// 			/* Part 2. Proposal new | old */
+// 			// Ytilde = Et + (Y - lambda) / lambda; // Linearlisation
+// 		    Yhat = Y - Et + Fx.col(t)*vt_old; // TODO - CHECK HERE
+// 		    if (t==0) {
+//         	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
+//         	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    } else {
+//       		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
+//         	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    }
+// 			Btsqrt = std::sqrt(Bt);
+// 		    vt_new = R::rnorm(bt, Btsqrt);
+// 			if (!std::isfinite(vt_new)) {
+// 				Rcout << "(bt=" << bt << ", Bt=" << Bt << ")" << std::endl;
+// 				Rcout << "vt: " << vt.t() << std::endl;
+// 				Rcout << "Yhat: " << Yhat.t() << std::endl;
+// 				Rcout << "Et: " << Et.t() << std::endl;
+// 				Rcout << "lambda: " << lambda.t() << std::endl;
+// 				stop("Non finite vt");
+// 			}
+// 			logq_new = R::dnorm(vt_new,bt,Btsqrt,true);
+// 			/* Part 2. */
+
+// 			vt.at(t) = vt_new;
+// 			Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+// 			// lambda = arma::exp(Et);
+// 			lambda = Et;
+// 			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
+// 			logp_new = 0.;
+// 			for (unsigned int j=t;j<n;j++) {
+// 				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
+// 			}
+// 			if (t==0) {
+// 				logp_new += R::dnorm(vt_new,aw,Rwsqrt,true);
+// 			} else {
+// 				logp_new += R::dnorm(vt_new,0.,Qsqrt,true);
+// 			}
+
+// 			// Ytilde = Et + (Y - lambda) / lambda; // linearlisation
+// 		    Yhat = Y - Et + Fx.col(t)*vt_new;
+// 		    if (t==0) {
+//         	    Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
+//         	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    } else {
+//       		    Bt = 1./(1./Q + arma::accu(arma::pow(Fx.col(t),2.)%lambda));
+//         	    bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
+//       	    }
+// 			Btsqrt = std::sqrt(Bt);
+// 			logq_old = R::dnorm(vt_old,bt,Btsqrt,true);
+
+// 			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
+// 			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+// 				vt.at(t) = vt_old;
+// 			} else {
+// 				vt_accept.at(t) += 1.;
+// 			}
+// 	    }
 
 
-		// Update rho: the state/evolution coefficient
-		// ATTENTION: POOR PERFORMANCE
-		if (rhoflag) {
-			// if (std::abs(rho)<arma::datum::eps) {
-			// 	rho += arma::datum::eps;
-			// }
-			xi_old = std::log(rho/(1.-rho));
-			Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			// lambda = arma::exp(Et);
-			lambda = Et;
-			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
-			logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
-			for (unsigned int t=0; t<n; t++) {
-				logp_old += R::dpois(Y.at(t),lambda.at(t),true);
-			}
+// 		// [OK] Update state/evolution error variance
+// 		if (Qflag) {
+// 			nSv_new = nSv + arma::accu(arma::pow(vt.tail(n-1),2.));
+// 			Q = 1./R::rgamma(0.5*nv_new,2./nSv_new);
+// 		}
 
-			xi_new = R::rnorm(xi_old,Vxi_sqrt);
-			rho = 1./(1.+std::exp(-xi_new));
-			Fx = update_Fx_Solow(n,rho,X);
-			Et = Fx * vt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			// lambda = arma::exp(Et);
-			lambda = Et;
-			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
-			logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
-			for (unsigned int t=0; t<n; t++) {
-				logp_new += R::dpois(Y.at(t),lambda.at(t),true);
-			}
 
-			logratio = std::min(0.,logp_new-logp_old);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-				rho = 1./(1.+std::exp(-xi_old));
-				Fx = update_Fx_Solow(n,rho,X);
-			} else {
-				rho_accept += 1.;
-			}
-			// rho_sq = rho * rho;
+// 		// Update rho: the state/evolution coefficient
+// 		// ATTENTION: POOR PERFORMANCE
+// 		if (rhoflag) {
+// 			// if (std::abs(rho)<arma::datum::eps) {
+// 			// 	rho += arma::datum::eps;
+// 			// }
+// 			xi_old = std::log(rho/(1.-rho));
+// 			Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+// 			// lambda = arma::exp(Et);
+// 			lambda = Et;
+// 			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
+// 			logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
+// 			for (unsigned int t=0; t<n; t++) {
+// 				logp_old += R::dpois(Y.at(t),lambda.at(t),true);
+// 			}
+
+// 			xi_new = R::rnorm(xi_old,Vxi_sqrt);
+// 			rho = 1./(1.+std::exp(-xi_new));
+// 			Fx = update_Fx_Solow(n,rho,X);
+// 			Et = Fx * vt;
+// 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+// 			// lambda = arma::exp(Et);
+// 			lambda = Et;
+// 			lambda.elem(arma::find(lambda<=0)).fill(arma::datum::eps);
+// 			logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
+// 			for (unsigned int t=0; t<n; t++) {
+// 				logp_new += R::dpois(Y.at(t),lambda.at(t),true);
+// 			}
+
+// 			logratio = std::min(0.,logp_new-logp_old);
+// 			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+// 				rho = 1./(1.+std::exp(-xi_old));
+// 				Fx = update_Fx_Solow(n,rho,X);
+// 			} else {
+// 				rho_accept += 1.;
+// 			}
+// 			// rho_sq = rho * rho;
 		
 
-			if (!std::isfinite(rho)) {
-				Rcout << "rho_new=" << rho << std::endl;
-				stop("Non finite value for rho");
-			}
-		}
+// 			if (!std::isfinite(rho)) {
+// 				Rcout << "rho_new=" << rho << std::endl;
+// 				stop("Non finite value for rho");
+// 			}
+// 		}
 		
 		
-		// store samples after burnin and thinning
-		if (saveiter || b==(ntotal-1)) {
-			unsigned int idx_run;
-			if (saveiter) {
-				idx_run = (b-nburnin-1)/nthin;
-			} else {
-				idx_run = nsample - 1;
-			}
+// 		// store samples after burnin and thinning
+// 		if (saveiter || b==(ntotal-1)) {
+// 			unsigned int idx_run;
+// 			if (saveiter) {
+// 				idx_run = (b-nburnin-1)/nthin;
+// 			} else {
+// 				idx_run = nsample - 1;
+// 			}
 
-			v_stored.col(idx_run) = vt;
-			Q_stored.at(idx_run) = Q;
-			rho_stored.at(idx_run) = rho;
-		}
+// 			v_stored.col(idx_run) = vt;
+// 			Q_stored.at(idx_run) = Q;
+// 			rho_stored.at(idx_run) = rho;
+// 		}
 
-		// Rcout << "\rProgress: " << b << "/" << ntotal-1;
-	}
+// 		// Rcout << "\rProgress: " << b << "/" << ntotal-1;
+// 	}
 
-	// Rcout << std::endl;
+// 	// Rcout << std::endl;
 
-	Rcpp::List output;
-	output["v"] = Rcpp::wrap(v_stored);
-	vt_accept /= static_cast<double>(ntotal);
-	output["v_accept"] = Rcpp::wrap(vt_accept);
-	output["Q"] = Rcpp::wrap(Q_stored);
-	output["rho"] = Rcpp::wrap(rho_stored);
-	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
-	return output;
-}
+// 	Rcpp::List output;
+// 	output["v"] = Rcpp::wrap(v_stored);
+// 	vt_accept /= static_cast<double>(ntotal);
+// 	output["v_accept"] = Rcpp::wrap(vt_accept);
+// 	output["Q"] = Rcpp::wrap(Q_stored);
+// 	output["rho"] = Rcpp::wrap(rho_stored);
+// 	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
+// 	return output;
+// }
 
 
 double update_obs_eq_koyama_exp(
@@ -1363,177 +1363,3 @@ double update_obs_eq_koyama_exp(
 	return lambda;
 }
 
-
-
-/*
-Logarithm of the full conditional of 
-(psi[t] | psi[0:(t-1)], psi[(t+1):n], y[1:n])
-[idx] denotes the index in R, usually start from 1, and 0 means initial value.
-*/
-double logprob_psi(
-	const double psi, // psi[t]
-	const double psi_prev, // psi[t-1]
-	const double psi_next, // psi[t+1]
-	const arma::vec& yL, // L x 1 vector, yL = (y[t],...,y[t+L-1])
-	const arma::vec& lambdaL, // L x 1 vector, lambdaL = (lambda[t],...,lambda[t+L-1])
-	const double Fphi_sum, // Fphi_sum = sum(Fphi), where Fphi = (phi[1],...,phi[L])
-	const double y_prev, // y[t-1]
-	const double W){ // evolutional variance
-
-	double logprob = -(psi*psi - (psi_prev+psi_next)*psi)/W + arma::dot(yL,arma::log(lambdaL)) + Fphi_sum*y_prev*std::exp(psi);
-	return logprob;
-}
-
-
-/*
-Logarithm of the full conditional of 
-psi[0] | psi[1:n], y[1:n]
-[idx] denotes the index in R, usually start from 1, and 0 means initial value.
-*/
-double logprob_psi(
-	const double psi, // psi[0]
-	const double psi_next, // psi[1]
-	const arma::vec& yL, // L x 1 vector, yL = (0,y[1],...,y[L-1])
-	const arma::vec& lambdaL, // L x 1 vector, lambdaL = (0,lambda[1],...,lambda[L-1])
-	const double Fphi_sum, // Fphi_sum = sum(Fphi), where Fphi = (phi[1],...,phi[L])
-	const double W){ // evolutional variance
-
-	double logprob = -0.5*(psi*psi - 2*psi_next*psi)/W + arma::dot(yL,arma::log(lambdaL));
-	return logprob;
-}
-
-
-/*
-Logarithm of the full conditional of 
-psi[1] | psi[0], psi[2:n], y[1:n]
-[idx] denotes the index in R, usually start from 1, and 0 means initial value.
-*/
-double logprob_psi(
-	const double psi, // psi[1]
-	const double psi_prev, // psi[0]
-	const double psi_next, // psi[2]
-	const arma::vec& yL, // L x 1 vector, yL = (y[1],...,y[L])
-	const arma::vec& lambdaL, // L x 1 vector, lambdaL = (lambda[1],...,lambda[L])
-	const double Fphi_sum, // Fphi_sum = sum(Fphi), where Fphi = (phi[1],...,phi[L])
-	const double W){ // evolutional variance
-
-	double logprob = -(psi*psi - (psi_prev+psi_next)*psi)/W + arma::dot(yL,arma::log(lambdaL));
-	return logprob;
-}
-
-
-
-/*
-Logarithm of the full conditional of 
-psi[n] | psi[0:(n-1)], y[1:n]
-[idx] denotes the index in R, usually start from 1, and 0 means initial value.
-*/
-double logprob_psi(
-	const double psi, // psi[n]
-	const double psi_prev, // psi[n-1]
-	const arma::vec& yL, // L x 1 vector, yL = (y[1],...,y[L])
-	const arma::vec& lambdaL, // L x 1 vector, lambdaL = (lambda[1],...,lambda[L])
-	const double Fphi_sum, // Fphi_sum = sum(Fphi), where Fphi = (phi[1],...,phi[L])
-	const double y_prev, // y[n-1]
-	const double W){ // evolutional variance
-
-	double logprob = -0.5*(psi*psi - 2*psi_prev*psi)/W + arma::dot(yL,arma::log(lambdaL)) + Fphi_sum*y_prev*std::exp(psi);;
-	return logprob;
-}
-
-
-
-
-// /*
-// Koyama's discretized Hawkes formulation 
-// with an exponential function to ensure positivity.
-// Using vanila Metropolis-Hastings step iteratively for psi[t].
-
-// Reference: 
-// */
-// //' @export
-// // [[Rcpp::export]]
-// Rcpp::List mcmc_mh_pos_koyama_exp(
-// 	const arma::vec& Y, // n x 1, the observed response
-// 	const unsigned int L = 12, // number of lags for transmission delay
-// 	const double rho = 34.08792, // parameter for negative binomial observation distribution
-// 	const double W = 0.01, // known evolutional variance, for now
-// 	const double delta = 0.9, // discount factor for Linear Bayes approximate filtering and smoothing
-// 	const unsigned int nburnin = 0,
-// 	const unsigned int nthin = 1,
-// 	const unsigned int nsample = 1
-// ) {
-// 	const unsigned int n = Y.n_elem;
-// 	double tmpd; // store temporary double value
-//     unsigned int tmpi; // store temporary integer value
-//     arma::vec tmpv1(1);
-
-// 	const double m = 4.7;
-// 	const double s = 2.9;
-// 	const double sm2 = std::pow(s/m,2);
-// 	const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-// 	const double pk_sg2 = std::log(1.+sm2);
-// 	const double pk_2sg = std::sqrt(2.*pk_sg2);
-
-// 	arma::mat G(L,L,arma::fill::zeros); // L x L state transition matrix
-//     arma::vec Fphi(L,arma::fill::zeros); // L x 1 transmission delay distribution
-//     G.at(0,0) = 1.;
-//     tmpv1.at(0) = pk_mu/pk_2sg;
-//     Fphi.at(0) = 0.5*arma::as_scalar(arma::erfc(tmpv1));
-//     for (unsigned int d=1; d<L; d++) {
-//         G.at(d,d-1) = 1.;
-//         tmpd = static_cast<double>(d) + 1.;
-//         tmpv1.at(0) = -(std::log(tmpd)-pk_mu)/pk_2sg;
-//         Fphi.at(d) = 0.5*arma::as_scalar(arma::erfc(tmpv1));
-//         tmpd -= 1.;
-//         tmpv1.at(0) = -(std::log(tmpd)-pk_mu)/pk_2sg;
-//         Fphi.at(d) -= 0.5*arma::as_scalar(arma::erfc(tmpv1));
-//     }
-// 	double Fphi_sum = arma::accu(Fphi);
-
-// 	Rcpp::List output_lbe = lbe_poissonKoyamaExp2(Y,L,delta);
-// 	arma::vec ht = Rcpp::as<arma::vec>(output_lbe["ht"]); // n x 1, smoothing expectation
-// 	arma::vec Ht = Rcpp::as<arma::vec>(output_lbe["Ht"]); // n x 1, smoothing variance
-
-// 	const unsigned int ntotal = nburnin + nthin*nsample + 1;
-// 	bool saveiter;
-// 	double log_alpha;
-// 	double psi_new, psi_old, psi_next, psi_prev;
-// 	arma::vec psi(n+1); // psi[0], psi[1], ..., psi[n]
-
-// 	arma::vec yL(L,arma::fill::zeros);
-// 	arma::vec lambdaL(L,arma::fill::zeros);
-// 	// yL = (y[t],...,y[t+L-1]) using the index in R (starts from 1)
-// 	// also the same for the index in C (starts from 0) 
-// 	// because y[t] denotes current value at time index t
-
-// 	for (unsigned int b=0; b<ntotal; b++) {
-// 		saveiter = (b>nburnin) && ((b-nburnin-1)%nthin==0);
-
-
-// 		for (unsigned int t=0; t<=n; t++) {
-// 			/*
-// 			Loop through t = 0,1,...,n (n+1 in total).
-// 			We use the index system in C (the first element starts from 0)
-
-// 			> t = 0 - initial value psi[0]; yL = (0,y[0],...,y[L-2])
-// 			> t = 1 - psi[1]; yL = (y[0],...,y[L-1])
-// 			> 2 <= t <= (n-L+1) - psi[t]; yL = (y[t-1],...,y[t+L-2]), where t+L-2 <= n-1
-// 			> (n-L) < t <= n - psi[t]; yL = (t[t-1],...,y[n-1],0,...,0)
-// 			*/
-// 			yL.zeros();
-//         	tmpi = std::min(t+L-1,n-1);
-//         	if (t>0 && t<=(n-L+1)) {
-//             	// Checked Fy - CORRECT
-//             	yL = Y.subvec(t-1,t+L-2);
-//         	} else if (t==0) {
-// 				yL.tail(L-1) = Y.subvec(0,L-2);
-// 			} else { // t > (n-L+1)
-// 				yL.head(n-t+1) = Y.subvec(t-1,n-1);
-// 			}
-// 		}
-
-// 	}
-	
-
-// }

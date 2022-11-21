@@ -29,5 +29,3 @@ estimate_state_var = function(state_err_hat,QPrior) {
   Qhat = nSv_new/nv_new
   return(Qhat)
 }
-
-

@@ -4,6 +4,34 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]
 
 
+/*
+------------------------
+------ Model Code ------
+------------------------
+
+0 - (KoyamaMax) Identity link    + log-normal transmission delay kernel        + ramp function (aka max(x,0)) on gain factor (psi)
+1 - (KoyamaExp) Identity link    + log-normal transmission delay kernel        + exponential function on gain factor
+2 - (SolowMax)  Identity link    + negative-binomial transmission delay kernel + ramp function on gain factor
+3 - (SolowExp)  Identity link    + negative-binomial transmission delay kernel + exponential function on gain factor
+4 - (KoyckMax)  Identity link    + exponential transmission delay kernel       + ramp function on gain factor
+5 - (KoyckExp)  Identity link    + exponential transmission delay kernel       + exponential function on gain factor
+6 - (KoyamaEye) Exponential link + log-normal transmission delay kernel        + identity function on gain factor
+7 - (SolowEye)  Exponential link + negative-binomial transmission delay kernel + identity function on gain factor
+8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
+*/
+
+
+/*
+---------------------------------------
+------ Desiderata of lbe_poisson ------
+---------------------------------------
+
+- Accommodate (1) known and fixed evolution variance $W$; (2) use of discount factor $\delta$ by assuming a time-varying evolution variance $W_t$.
+- Different dimension of the state space, aka, dimension of $\widetilde{\boldsymbol{\theta}}_t$.
+- Function that maps state equations to DLM form for different models.
+- Accommodate different link functions, different gain functions, different transfer functions.
+*/
+
 
 double trigamma_obj(
 	unsigned n,
@@ -44,1342 +72,635 @@ double optimize_trigamma(double q) {
 
 
 
+arma::vec update_at(
+	const unsigned int p,
+	const unsigned int ModelCode,
+	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
+	const arma::mat& Gt, // p x p
+	const double y = NA_REAL,  // n x 1
+	const double rho = NA_REAL,
+	const unsigned int L = 1) {
+	
+	arma::vec at(p,arma::fill::zeros);
+	
+	if (TransferCode == 2) { // Solow
+		/*------ START Solow ------*/
+		at.at(0) = mt.at(0); // psi[t]
+		at.at(2) = mt.at(1); // theta[t-1]
+		const double coef1 = (1.-rho)*(1.-rho);
+		switch (ModelCode) { // theta[t]
+			case 2: // SolowMax
+			{
+				at.at(1) = coef1*y*std::max(mt.at(0),arma::datum::eps);
+			}
+			break;
+			case 3: // SolowEXP
+			{
+				at.at(1) = coef1*y*std::exp(mt.at(0));
+			}
+			break;
+			case 7: // SolowEye
+			{
+				at.at(1) = coef1*y*mt.at(0);
+			}
+			break;
+			default:
+			{
+				::Rf_error("at - This block only support SolowMax(2), SolowExp(3), SolowEye(7)");
+			}
+		} // END switch block
+		at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
+		/*------ END Solow ------*/
+
+	} else if (TransferCode == 0) { // Koyck
+		/*------ START Koyck ------*/
+		at.at(0) = mt.at(0); // psi[t]
+		switch (ModelCode) { // theta[t]
+			case 4: // KoyckMax
+			{
+				at.at(1) = y*std::max(mt.at(0),arma::datum::eps); 
+			}
+			break;
+			case 5: // KoyckExp
+			{
+				at.at(1) = y*std::exp(mt.at(0));
+			}
+			break;
+			case 8: // KoyckEye
+			{
+				at.at(1) = y*mt.at(0);
+			}
+			break;
+			default:
+			{
+				::Rf_error("at - This block only support KoyckMax(4), KoyckExp(5), KoyckEye(8)");
+			}
+		} // END switch block
+		at.at(1) += rho*mt.at(1);
+		/*------ END Koyck ------*/
+
+	} else if (TransferCode == 1) { // Koyama
+		/*------ START Koyama ------*/
+		at = Gt * mt;
+		/*------ END Koyama ------*/
+
+	} else {
+		::Rf_error("get_at function is only defined for Koyama, Solow, or Koyck's transmission kernels.");
+	}
+
+	return at;
+}
+
+
+
+void update_Gt(
+	arma::mat& Gt, // p x p
+	const unsigned int ModelCode, 
+	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const arma::vec& mt, // p x 1
+	const double y = NA_REAL,  // obs
+	const double rho = NA_REAL) {
+	
+	if (TransferCode == 2) { // Solow
+		switch (ModelCode) {
+			case 2: // SolowMax
+			{
+				// Gt.at(1,0) = std::max(mt.at(0),arma::datum::eps);
+				::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
+			}
+			break;
+			case 3: // SolowExp
+			{
+				Gt.at(1,0) = std::exp(mt.at(0));
+			}
+			break;
+			case 7: // SolowEye
+			{
+				Gt.at(1,0) = 1.;
+			}
+			break;
+			default:
+			{
+				::Rf_error("This block only supports Solow");
+			}
+		} // End switc block
+		Gt.at(1,0) *= (1.-rho)*(1.-rho)*y;
+
+	} else if (TransferCode == 0) { // Koyck
+		switch (ModelCode) {
+			case 4: // KoyckMax
+			{
+				::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
+			}
+			break;
+			case 5: // KoyckExp
+			{
+				Gt.at(1,0) = std::exp(mt.at(0));
+			}
+			break;
+			case 8: // KoyckEye
+			{
+				Gt.at(1,0) = 1.;
+			}
+			break;
+			default:
+			{
+				::Rf_error("This block only supports Koyck");
+			}
+		} // End switch block
+
+		Gt.at(1,0) *= y;
+
+	}
+	
+}
+
+
+
+void update_Rt(
+	arma::mat& Rt, // p x p
+	const arma::mat& Ct, // p x p
+	const arma::mat& Gt, // p x p
+	const bool use_discount, // true if !R_IsNA(delta)
+	const double W = NA_REAL, // known evolution error of psi
+	const double delta = NA_REAL) { // discount factor
+
+	Rt = Gt * Ct * Gt.t();
+	if (use_discount) {
+		Rt.for_each( [&delta](arma::mat::elem_type& val) { val /= delta; } );
+	} else {
+		Rt.at(0,0) += W;
+	}
+
+}
+
+
+void update_Ft(
+	arma::vec& Ft, // L x 1
+	arma::vec& Fy, // L x 1
+	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const unsigned int t, // current time point
+	const unsigned int L, // lag
+	const arma::vec& Y,  // (n+1) x 1, obs
+	const arma::vec& Fphi) { // L x 1
+		
+	if (TransferCode == 1) { // Koyama
+		double L_ = static_cast<double>(L);
+
+		if (t <= L) {
+			arma::vec Fy = arma::reverse(Y.subvec(0,L-1));
+		} else {
+			Fy = arma::reverse(Y.subvec(t-L,t-1));
+		}
+		Fy.elem(arma::find(Fy<=arma::datum::eps)).fill(0.01/L_);
+		Ft = Fphi % Fy;
+	}
+}
+
+
+/* Forward Filtering */
 void forwardFilter(
-	const unsigned int model,
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const double G, // state transition matrix
-	const double W, // p x p, state error
-	arma::vec& mt, // (n+1) x 1, t=0 is the mean for initial value theta[0]
-	arma::vec& at, // (n+1) x 1
-	arma::vec& Ct, // (n+1) x 1, t=0 is the var for initial value theta[0]
-	arma::vec& Rt, // (n+1) x 1
+	arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+	arma::mat& at, // p x (n+1)
+	arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
+	arma::cube& Rt, // p x p x (n+1)
 	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
+	arma::vec& betat, // (n+1) x 1
+	const unsigned int ModelCode,
+	const unsigned int TransferCode,
+	const unsigned int n, // number of observations
+	const unsigned int p, // dimension of the state space
+	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
+	const unsigned int L = 0,
+	const double rho = 0.9,
+	const double mu0 = 0.,
+	const double W = NA_REAL,
+	const double delta = NA_REAL) { 
 
-	const unsigned int n = Y.n_elem; // number of observation
-    const double F = 1.;
+	if (R_IsNA(delta) && R_IsNA(W)) {
+		::Rf_error("Either evolution error W or discount factor delta must be provided.");
+	}
 
-	double et,ft,Qt,At,ft_ast,Qt_ast;
+	/*
+	------ Initialization ------
+	*/
+	unsigned int LinkCode = 1; // 0 - exponential; 1 - identity
+	if (ModelCode > 5) {LinkCode = 0;}
+	const bool use_discount = !R_IsNA(delta); // Prioritize discount factor if it is given.
 
-	for (unsigned int t=1; t<=n; t++) {
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        if (t==1 && model==1) {
-			Rt.at(t) = Ct.at(0); // R1 = Rw and a1 = rho*E0
-        } else {
-            Rt.at(t) = G * Ct.at(t-1) * G + W;
-        }
-		at.at(t) = G * mt.at(t-1);
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = F * at.at(t);
-		Qt = F * Rt.at(t) * F;
 
-        alphat.at(t) = optimize_trigamma(Qt);
-		betat.at(t) = std::exp(R::digamma(alphat.at(t)) - ft);
+	arma::vec Ft(p,arma::fill::zeros);
+	if (TransferCode != 1) {Ft.at(1) = 1.;} // not koyama
 
-        ft_ast = R::digamma(alphat.at(t)+Y.at(t-1)) - std::log(betat.at(t)+1.);
-		Qt_ast = R::trigamma(alphat.at(t)+Y.at(t-1));
+	arma::mat Gt(p,p,arma::fill::zeros);
+	Gt.at(0,0) = 1.;
+	if (TransferCode == 0) { // Koyck
+		Gt.at(1,1) = rho;
+	} else if (TransferCode == 1) { // Koyama
+		Gt.diag(-1).ones();
+	} else if (TransferCode == 2) { // Solow
+		Gt.at(1,1) = 2.*rho;
+		Gt.at(1,2) = -rho*rho;
+		Gt.at(2,1) = 1.;
+	}
+
+	arma::vec Fphi;
+	arma::vec Fy;
+	if (TransferCode == 1 && L>0) { // koyama
+		const double mu = 2.2204e-16;
+		const double m = 4.7;
+		const double s = 2.9;
+		Fphi = get_Fphi(L,mu,m,s);
+		Fy.zeros(L);
+	}
+	/*
+	------ Initialization ------
+	*/
+
+	
+	double et,ft,Qt,ft_ast,Qt_ast;
+	arma::vec At(p);
+
+
+	/*
+	------ Reference Analysis for Koyama's Transfer Kernel ------
+	*/
+	if (TransferCode == 1 && L>0) { // Koyama
+		at.col(1) = update_at(p,ModelCode,TransferCode,mt.col(0),Gt,Y.at(0),rho,L);
+		update_Rt(Rt.slice(1), Ct.slice(0), Gt, use_discount, W, delta);
+		update_Ft(Ft, Fy, TransferCode, 0, L, Y, Fphi);
+		switch (ModelCode) {
+			case 0: // KoyamaMax
+			{
+				::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
+			}
+			break;
+			case 1: // KoyamaExp
+			{
+				Ft = Ft % arma::exp(at.col(1));
+				ft = arma::accu(Ft);
+				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+			}
+			break;
+			case 6: // KoyamaEye
+			{
+				ft = arma::accu(Ft % at.col(1));
+				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+			}
+			break;
+			default:
+			{
+				::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
+			}
+		} // END switch block
+		/*
+		------ Moment Matching ------
+		Depends on specific link function
+		*/
+		if (LinkCode == 1) { // Identity Link
+			betat.at(1) = (mu0 + ft) / Qt;
+			alphat.at(1) = (mu0 + ft) * betat.at(1);
+			Qt_ast = (alphat.at(1)+Y.at(0)) / (betat.at(1)+1.) / (betat.at(1)+1.);
+			ft_ast = Qt_ast * (betat.at(1)+1.) - mu0;
+
+		} else if (LinkCode == 0) { // Exponential Link
+			alphat.at(1) = optimize_trigamma(Qt);
+			betat.at(1) = std::exp(R::digamma(alphat.at(1)) - mu0 - ft);
+        	ft_ast = R::digamma(alphat.at(1)+Y.at(0)) - std::log(betat.at(1)+1.) - mu0;
+			Qt_ast = R::trigamma(alphat.at(1)+Y.at(0));
+		}
+        
 
 		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
 		et = ft_ast - ft;
-		At = Rt.at(t) * F / Qt;
-		mt.at(t) = at.at(t) + At * et;
-		Ct.at(t) = Rt.at(t) - At*(Qt-Qt_ast)*At;
+		At = Rt.slice(1) * Ft / Qt; // p x 1
+		mt.col(1) = at.col(1) + At * et;
+		Ct.slice(1) = Rt.slice(1) - At*(Qt-Qt_ast)*At.t();
+
+		if (L > 1) {
+			for (unsigned int t=2; t<=L; t++) {
+        		at.col(t) = at.col(1);
+        		Rt.slice(t) = Rt.slice(1);
+        		mt.col(t) = mt.col(1);
+        		Ct.slice(t) = Ct.slice(1);
+				alphat.at(t) = alphat.at(1);
+				betat.at(t) = betat.at(1);
+    		}
+		}
+		
 	}
 
-}
+	
+	/*
+	------ Reference Analysis for Koyama's Transfer Kernel ------
+	*/
 
-
-
-// void backwardSmoother(
-// 	const double G, // k x k, state transition matrix: assume time-invariant
-// 	const arma::vec& mt, // (n+1) x 1, t=0 is the mean for initial value theta[0]
-// 	const arma::vec& at, // (n+1) x 1
-// 	const arma::vec& Ct, // (n+1) x 1, t=0 is the var for initial value theta[0]
-// 	const arma::vec& Rt, // (n+1) x 1
-// 	arma::vec& ht, // n x 1
-// 	arma::vec& Ht) { // n x 1
-
-// 	// Use the conditional distribution
-// 	const unsigned int n = ht.n_elem; // num of obs
-
-// 	ht.at(n-1) = mt.at(n);
-// 	Ht.at(n-1) = Ct.at(n);
-
-// 	double Bt;
-// 	for (unsigned int t=(n-2); t>0; t--) {
-// 		Bt = Ct.at(t+1) * G / Rt.at(t+2);
-// 		ht.at(t) = mt.at(t+1) + Bt*(ht.at(t+1)-at.at(t+2));
-// 		Ht.at(t) = Ct.at(t+1) - Bt*(Rt.at(t+2)-Ht.at(t+1))*Bt;
-// 	}
-
-// 	// t = 0
-// 	Bt = Ct.at(1) * G / Rt.at(2);
-// 	ht.at(0) = mt.at(1) + Bt*(ht.at(1)-at.at(2));
-// 	Ht.at(0) = Ct.at(1) - Bt*(Rt.at(2)-Ht.at(1))*Bt;
-// }
-
-
-void forwardFilterX(
-	const unsigned int model,
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::vec& X, // n x 1
-	const double W, // evolution/state error
-	arma::mat& Gt, // 2 x 2, state transition matrix
-	arma::mat& Wt, // 2 x 2, state error
-	arma::mat& mt, // 2 x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // 2 x (n+1)
-	arma::cube& Ct, // 2 x 2 x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // 2 x 2 x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
-
-	const unsigned int n = Y.n_elem; // number of observation
-    arma::vec F(2); F.at(0) = 1.; F.at(1) = 0.;
-
-	double et,ft,Qt,ft_ast,Qt_ast;
-	arma::vec At(2);
-
-	for (unsigned int t=1; t<=n; t++) {
+	for (unsigned int t=(L+1); t<=n; t++) {
 		R_CheckUserInterrupt();
 
-		Gt.at(0,1) = X.at(t-1);
-		Wt.at(1,1) = 1.; 
-		Wt.at(0,1) = X.at(t-1);
-		Wt.at(1,0) = Wt.at(0,1); 
-		Wt.at(0,0) = X.at(t-1)*Wt.at(1,0);
-		Wt *= W;
-		
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        if (t==1 && model==1) {
-			Rt.slice(t) = Ct.slice(0); // R1 = Rw and a1 = rho*E0
-        } else {
-            Rt.slice(t) = Gt * Ct.slice(t-1) * Gt.t() + Wt;
-        }
-		at.col(t) = Gt * mt.col(t-1);
+		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
+		// Linear approximation is implemented if the state equation is nonlinear
+		update_Gt(Gt, ModelCode, TransferCode, mt.col(t-1), Y.at(t-1), rho);
+		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt,Y.at(t-1),rho,L);
+		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt, use_discount, W, delta);
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = arma::as_scalar(F.t() * at.col(t));
-		Qt = arma::as_scalar(F.t() * Rt.slice(t) * F);
+		if (TransferCode == 1) { // Koyama
+			update_Ft(Ft, Fy, TransferCode, t, L, Y, Fphi);
+			switch (ModelCode) {
+				case 0: // KoyamaMax
+				{
+					::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
+				}
+				break;
+				case 1: // KoyamaExp
+				{
+					Ft = Ft % arma::exp(at.col(t));
+					ft = arma::accu(Ft);
+					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+				}
+				break;
+				case 6: // KoyamaEye
+				{
+					ft = arma::accu(Ft % at.col(t));
+					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+				}
+				break;
+				default:
+				{
+					::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
+				}
+			} // END switch block
+		} else {
+			ft = arma::as_scalar(Ft.t() * at.col(t));
+			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+		}
 
-        alphat.at(t) = optimize_trigamma(Qt);
-		betat.at(t) = std::exp(R::digamma(alphat.at(t)) - ft);
+		/*
+		------ Moment Matching ------
+		Depends on specific link function
+		*/
+		if (LinkCode == 1) { // Identity Link
+			betat.at(t) = (mu0 + ft) / Qt;
+			alphat.at(t) = (mu0 + ft) * betat.at(t);
+			Qt_ast = (alphat.at(t)+Y.at(t)) / (betat.at(t)+1.) / (betat.at(t)+1.);
+			ft_ast = Qt_ast * (betat.at(t)+1.) - mu0;
 
-        ft_ast = R::digamma(alphat.at(t)+Y.at(t-1)) - std::log(betat.at(t)+1.);
-		Qt_ast = R::trigamma(alphat.at(t)+Y.at(t-1));
+		} else if (LinkCode == 0) { // Exponential Link
+			alphat.at(t) = optimize_trigamma(Qt);
+			betat.at(t) = std::exp(R::digamma(alphat.at(t)) - mu0 - ft);
+        	ft_ast = R::digamma(alphat.at(t)+Y.at(t)) - std::log(betat.at(t)+1.) - mu0;
+			Qt_ast = R::trigamma(alphat.at(t)+Y.at(t));
+		}
+        
 
 		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
 		et = ft_ast - ft;
-		At = Rt.slice(t) * F / Qt;
+		At = Rt.slice(t) * Ft / Qt; // p x 1
 		mt.col(t) = at.col(t) + At * et;
 		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
-	}
 
+		// if (t<10) {
+		// 	Rcout << std::endl << "t=" << t << std::endl;
+		// 	Rcout << "Gt = " << Gt << std::endl;
+		// 	Rcout << "at = " << at.col(t).t() << std::endl;
+		// 	Rcout << "Rt = " << Rt.slice(t) << std::endl;
+		// 	Rcout << "(alphat=" << alphat << ", betat=" << betat << ")" << std::endl;
+		// 	Rcout << "(ft=" << ft << ", Qt=" << Qt << "), (ft*=" << ft_ast << ", Qt*=" << Qt_ast << std::endl; 
+		// }
+
+		// Rcout << "\rFiltering: " << t << "/" << n;
+	}
+	// Rcout << std::endl;
 }
 
 
 
-void forwardFilterX2(
-	const unsigned int model,
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::vec& X, // n x 1
-	const double delta, // discount factor for evolution/state error
-	arma::mat& Gt, // 2 x 2, state transition matrix
-	arma::mat& mt, // 2 x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // 2 x (n+1)
-	arma::cube& Ct, // 2 x 2 x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // 2 x 2 x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
-
-	const unsigned int n = Y.n_elem; // number of observation
-    arma::vec F(2); F.at(0) = 1.; F.at(1) = 0.;
-
-	double et,ft,Qt,ft_ast,Qt_ast;
-	arma::vec At(2);
-
-	for (unsigned int t=1; t<=n; t++) {
-		R_CheckUserInterrupt();
-		
-		Gt.at(0,1) = X.at(t-1);
-		
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        if (t==1 && model==1) {
-			Rt.slice(t) = Ct.slice(0); // R1 = Rw and a1 = rho*E0
-        } else {
-            Rt.slice(t) = Gt * Ct.slice(t-1) * Gt.t() / delta;
-        }
-		at.col(t) = Gt * mt.col(t-1);
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = arma::as_scalar(F.t() * at.col(t));
-		Qt = arma::as_scalar(F.t() * Rt.slice(t) * F);
-
-        alphat.at(t) = optimize_trigamma(Qt);
-		betat.at(t) = std::exp(R::digamma(alphat.at(t)) - ft);
-
-        ft_ast = R::digamma(alphat.at(t)+Y.at(t-1)) - std::log(betat.at(t)+1.);
-		Qt_ast = R::trigamma(alphat.at(t)+Y.at(t-1));
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t) * F / Qt;
-		mt.col(t) = at.col(t) + At * et;
-		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
-	}
-
-}
-
-
-
-/*
----- Method ----
-- Koyama's Discretized Hawkes Process
-- Ordinary Kalman filtering with all static parameters known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-
-
-/*
-Linear Bayes approximation based filtering for koyama's model with exponential on the transmission delay.
-- Observational linear approximation - This function uses 1st order Taylor expansion for the nonlinear Ft at the observational equation.
-- Known evolution variance - This function assumes the evolution variance, W, is fixed and known
-*/
-void forwardFilterKoyamaExp(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-    const arma::mat& G, // L x L, state transition matrix
-    const arma::vec& Fphi, // L x 1, state-to-obs nonlinear mapping vector
-	const double W, // state variance
-	arma::mat& mt, // L x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // L x (n+1)
-	arma::cube& Ct, // L x L x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt) { // L x L x (n+1)
-
-	const unsigned int n = Y.n_elem; // number of observation
-    const unsigned int L = Fphi.n_elem;
-    const double L_ = static_cast<double>(L);
-
-	double et,ft,Qt,alphat,betat,ft_ast,Qt_ast;
-    arma::mat Wtill(L,L,arma::fill::zeros);
-    Wtill.at(0,0) = W;
-
-    /* 
-    --- Reference Analysis --- 
-    !!! This part is essential !!!
-    */
-    arma::vec Fy = arma::reverse(Y.subvec(0,L-1));
-    at.col(1) = G * mt.col(0);
-    Rt.slice(1) = G * Ct.slice(0) * G.t() + Wtill;
-    arma::vec Ft = arma::exp(at.col(1)) % Fphi % Fy;
-    ft = arma::accu(Ft);
-    Qt = arma::as_scalar(Ft.t()*Rt.slice(1)*Ft);
-    betat = ft / Qt;
-    alphat = betat*ft;
-    ft_ast = (alphat + Y.at(0)) / (betat + 1.);
-    Qt_ast = ft_ast / (betat + 1.);
-    et = ft_ast - ft;
-	mt.col(1) = at.col(1) + Rt.slice(1)*Ft*et/Qt;
-    arma::vec Ft2 = arma::exp(at.col(1)) % arma::reverse(Fphi) % Fy;
-	Ct.slice(1) = Rt.slice(1) - Rt.slice(1)*Ft*Ft2.t()*Rt.slice(1)*(1.-Qt_ast/Qt)/Qt;
-
-    for (unsigned int t=2; t<=L; t++) {
-        at.col(t) = at.col(1);
-        Rt.slice(t) = Rt.slice(1);
-        mt.col(t) = mt.col(1);
-        Ct.slice(t) = Ct.slice(1);    
-    }
-    /* 
-    --- Reference Analysis --- 
-    */
-
-    
-	for (unsigned int t=(L+1); t<=n; t++) {
-        /*
-        Fy - Checked. Correct.
-        */
-        Fy = arma::reverse(Y.subvec(t-L-1,t-2));
-        Fy.elem(arma::find(Fy<=0)).fill(0.01/L_);
- 
-		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
-        at.col(t) = G * mt.col(t-1);
-        Rt.slice(t) = G * Ct.slice(t-1) * G.t() + Wtill;
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ (ft, Qt)
-        // TODO: check this part, the derivatives of Ft()
-        // arma::uvec tmpvL = arma::find(Fy<=0);
-        
-        Ft = arma::exp(at.col(t)) % Fphi % Fy; // L x 1
-        if (!Ft.is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "at: " << at.col(t).t() << std::endl;
-            Rcout << "m[t-1]: " << mt.col(t-1).t() << std::endl;
-            stop("Non-finite values for Ft");
-        }
-		ft = arma::accu(Ft);
-		Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-
-        betat = ft/Qt;
-        alphat = betat*ft;
-
-        ft_ast = (alphat+Y.at(t-1)) / (betat +1.);
-        Qt_ast = ft_ast / (betat+1.);
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		mt.col(t) = at.col(t) + Rt.slice(t)*Ft*et/Qt;
-        if (!mt.col(t).is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "m[t]: " << mt.col(t).t() << std::endl;
-            stop("Non-finite values for mt");
-        }
-        Ft2 = arma::exp(at.col(t)) % arma::reverse(Fphi) % Fy;
-		Ct.slice(t) = Rt.slice(t) - Rt.slice(t)*Ft*Ft2.t()*Rt.slice(t)*(1.-Qt_ast/Qt)/Qt;
-	}
-
-}
-
-
-
-/*
-Linear Bayes approximation based filtering for koyama's model with exponential on the transmission delay.
-- Observational linear approximation - This function uses 1st order Taylor expansion for the nonlinear Ft at the observational equation.
-- Evolutional discounting - This function assumes the evolution variance is time-varying, which we are not interested in. Instead, 
-we preselect a discount factor, delta, to account for the time-varying evolutional variance.
-*/
-void forwardFilterKoyamaExp2(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-    const arma::mat& G, // L x L, state transition matrix
-    const arma::vec& Fphi, // L x 1, state-to-obs nonlinear mapping vector
-	const double delta, // state variance
-	arma::mat& mt, // L x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // L x (n+1)
-	arma::cube& Ct, // L x L x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt) { // L x L x (n+1)
-
-	const unsigned int n = Y.n_elem; // number of observation
-    const unsigned int L = Fphi.n_elem;
-    const double L_ = static_cast<double>(L);
-
-	double et,ft,Qt,alphat,betat,ft_ast,Qt_ast;
-	arma::vec At(L);
-
-    /* 
-    --- Reference Analysis --- 
-    !!! This part is essential !!!
-    */
-    arma::vec Fy = arma::reverse(Y.subvec(0,L-1)); // L x 1
-    at.col(1) = G * mt.col(0);
-    Rt.slice(1) = G * Ct.slice(0) * G.t();
-	Rt.at(0,0,1) /= delta;
-
-    arma::vec Ft = arma::exp(at.col(1)) % Fphi % Fy; // L x 1
-    ft = arma::accu(Ft);
-    Qt = arma::as_scalar(Ft.t()*Rt.slice(1)*Ft);
-
-    betat = ft / Qt;
-    alphat = betat*ft;
-    ft_ast = (alphat + Y.at(0)) / (betat + 1.);
-    Qt_ast = ft_ast / (betat + 1.);
-
-	// TODO: check Ft2 -- should we use `arma::reverse(Fphi)` or not?
-    et = ft_ast - ft;
-	At = Rt.slice(1)*Ft/Qt; // L x 1
-	mt.col(1) = at.col(1) + Rt.slice(1)*Ft*et/Qt;
-	Ct.slice(1) = Rt.slice(1) - At * (Qt - Qt_ast) * At.t();
-    // arma::vec Ft2 = arma::exp(at.col(1)) % arma::reverse(Fphi) % Fy;
-	// Ct.slice(1) = Rt.slice(1) - Rt.slice(1)*Ft*Ft2.t()*Rt.slice(1)*(1.-Qt_ast/Qt)/Qt;
-
-    for (unsigned int t=2; t<=L; t++) {
-        at.col(t) = at.col(1);
-        Rt.slice(t) = Rt.slice(1);
-        mt.col(t) = mt.col(1);
-        Ct.slice(t) = Ct.slice(1);    
-    }
-    /* 
-    --- Reference Analysis --- 
-    */
-
-    
-	for (unsigned int t=(L+1); t<=n; t++) {
-        /*
-        Fy - Checked. Correct.
-        */
-        Fy = arma::reverse(Y.subvec(t-L-1,t-2));
-        Fy.elem(arma::find(Fy<=0)).fill(0.01/L_);
- 
-		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
-        at.col(t) = G * mt.col(t-1);
-        Rt.slice(t) = G * Ct.slice(t-1) * G.t();
-		Rt.at(0,0,t) /= delta;
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ (ft, Qt)
-        // TODO: check this part, the derivatives of Ft()
-        // arma::uvec tmpvL = arma::find(Fy<=0);
-        
-        Ft = arma::exp(at.col(t)) % Fphi % Fy; // L x 1
-        if (!Ft.is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "at: " << at.col(t).t() << std::endl;
-            Rcout << "m[t-1]: " << mt.col(t-1).t() << std::endl;
-            stop("Non-finite values for Ft");
-        }
-		ft = arma::accu(Ft);
-		Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-
-        betat = ft/Qt;
-        alphat = betat*ft;
-
-        ft_ast = (alphat+Y.at(t-1)) / (betat +1.);
-        Qt_ast = ft_ast / (betat+1.);
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t)*Ft/Qt; // L x 1
-		mt.col(t) = at.col(t) + Rt.slice(t)*Ft*et/Qt;
-        if (!mt.col(t).is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "m[t]: " << mt.col(t).t() << std::endl;
-            stop("Non-finite values for mt");
-        }
-		Ct.slice(t) = Rt.slice(t) - At * (Qt - Qt_ast) * At.t();
-        // Ft2 = arma::exp(at.col(t)) % arma::reverse(Fphi) % Fy;
-		// Ct.slice(t) = Rt.slice(t) - Rt.slice(t)*Ft*Ft2.t()*Rt.slice(t)*(1.-Qt_ast/Qt)/Qt;
-	}
-
-}
-
-
-
-/*
----- Method ----
-- Koyama's Discretized Hawkes Process
-- Ordinary Kalman filtering with all static parameters known
-- Using the DLM formulation
-- 1st order linear approximation at the observational equation
-- Fixed and known evolutional variance
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-void backwardSmootherKoyamaExp(
-	const arma::mat& G, // L x L, state transition matrix
-	const arma::mat& mt, // L x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::mat& at, // L x (n+1)
-	const arma::cube& Ct, // L x L x (n+1), t=0 is the var for initial value theta[0]
-	const arma::cube& Rt, // L x L x (n+1)
-	arma::mat& ht, // L x n
-    arma::cube& Ht) { // L x L x n
-
-	// Use the conditional distribution
-	const unsigned int n = ht.n_cols; // num of obs
-    const unsigned int L = G.n_rows; 
-    double delta;
-
-	ht.col(n-1) = mt.col(n);
-    Ht.slice(n-1) = Ct.slice(n);
-
-	arma::mat Bt(L,L);
-	for (unsigned int t=(n-2); t>0; t--) {
-		// sample from theta[t] | theta[t+1], D[t]
-		// Bt = G * Ct.slice(t+1) * G.t();
-        // delta = Bt.at(0,0) / Rt.at(0,0,t+2);
-        Bt = Ct.slice(t+1) * G.t() * Rt.slice(t+2).i();
-		ht.col(t) = mt.col(t+1) + Bt*(ht.col(t+1)-at.col(t+2));
-        Ht.slice(t) = Ct.slice(t+1) - Bt*(Rt.slice(t+2)-Ht.slice(t+1))*Bt.t();
-	}
-
-	// t = 0
-	Bt = Ct.slice(1) * G.t() * Rt.slice(2).i();
-    // delta = Bt.at(0,0) / Rt.at(0,0,2);
-    ht.col(0) = mt.col(1) + Bt*(ht.col(1)-at.col(2));
-    Ht.slice(0) = Ct.slice(1) - Bt*(Rt.slice(2)-Ht.slice(1))*Bt.t();
-}
-
-
-
-/*
----- Method ----
-- Koyama's Discretized Hawkes Process
-- Ordinary Kalman filtering with all static parameters known
-- Using the DLM formulation
-- 1st order linear approximation at the observational equation
-- Discounting for the time-varying and unknown evolutional variance
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-void backwardSmootherKoyamaExp2(
-	const arma::mat& G, // L x L, state transition matrix
-	const arma::mat& mt, // L x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::mat& at, // L x (n+1)
-	const arma::cube& Ct, // L x L x (n+1), t=0 is the var for initial value theta[0]
-	const arma::cube& Rt, // L x L x (n+1)
+void backwardSmoother(
+	arma::vec& ht, // (n+1) x 1
+	arma::vec& Ht, // (n+1) x 1
+	const unsigned int n,
 	const double delta, // discount factor
-	arma::vec& ht, // n
-    arma::vec& Ht) { // n
+	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+	const arma::mat& at, // p x (n+1)
+	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
+	const arma::cube& Rt) { // p x p x (n+1)
 
-	// Use the conditional distribution
-	const unsigned int n = ht.n_cols; // num of obs
-    const unsigned int L = G.n_rows; 
+	ht.at(n) = mt.at(0,n);
+	Ht.at(n) = Ct.at(0,0,n);
 
-	ht.at(n-1) = mt.at(0,n);
-    Ht.at(n-1) = Ct.at(0,0,n);
-
-	for (unsigned int t=(n-2); t>0; t--) {
-		// sample from theta[t] | theta[t+1], D[t]
-		ht.at(t) = (1.-delta) * mt.at(0,t+1) + delta*ht.at(t+1);
-        Ht.at(t) = (1.-delta) * Ct.at(0,0,t+1);
+	double coef1 = 1. - delta;
+	double coef2 = delta * delta;
+	for (unsigned int t=(n-1); t>0; t--) {
+		R_CheckUserInterrupt();
+		ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
+		Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
+		// Rcout << "\rSmoothing: " << n+1-t << "/" << n;
 	}
+	// Rcout << std::endl;
 
 	// t = 0
-    ht.at(0) = (1.-delta)*mt.at(0,1) + delta*ht.at(1);
-    Ht.at(0) = (1.-delta)*Ct.at(0,0,1);
+	ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
+	Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
 }
 
 
 
-/*
-Solow's Pascal Disctributed Lags with r=2
-*/
-void forwardFilterSolow2_0(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::vec& X, // (n+1) x 1, x[0],x[1],...,x[n]
-	const double W, // evolution error of the beta's
-	const double rho,
-	arma::mat& Gt, // 3 x 3, state transition matrix
-	arma::mat& Wt, // 3 x 3, evolution error matrix
-	arma::mat& mt, // 3 x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // 3 x (n+1)
-	arma::cube& Ct, // 3 x 3 x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // 3 x 3 x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
-
-	const unsigned int n = Y.n_elem; // number of observation
-    arma::vec F(3,arma::fill::zeros); F.at(0) = 1.;
-
-	double et,ft,Qt,ft_ast,Qt_ast;
-	double coef = (1.-rho) * (1.-rho);
-	double coef4 = std::pow(coef,2.);
-	arma::vec At(3);
-
-	for (unsigned int t=1; t<=n; t++) {
-		R_CheckUserInterrupt();
-		Gt.at(0,2) = coef * X.at(t-1);
-
-		Wt.zeros();
-		Wt.at(0,0) = coef4 * X.at(t-1) * X.at(t-1);
-		Wt.at(0,2) = coef * X.at(t-1);
-		Wt.at(2,0) = coef * X.at(t-1);
-		Wt.at(2,2) = 1.;
-		Wt *= W;
-
-		
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        Rt.slice(t) = Gt * Ct.slice(t-1) * Gt.t() + Wt;
-		at.col(t) = Gt * mt.col(t-1);
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = arma::as_scalar(F.t() * at.col(t));
-		Qt = arma::as_scalar(F.t() * Rt.slice(t) * F);
-
-        alphat.at(t) = optimize_trigamma(Qt);
-		betat.at(t) = std::exp(R::digamma(alphat.at(t)) - ft);
-
-        ft_ast = R::digamma(alphat.at(t)+Y.at(t-1)) - std::log(betat.at(t)+1.);
-		Qt_ast = R::trigamma(alphat.at(t)+Y.at(t-1));
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t) * F / Qt;
-		mt.col(t) = at.col(t) + At * et;
-		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
-	}
-
-}
-
-
-
-/*
-Solow's Pascal Disctributed Lags with r=2
-*/
-void forwardFilterSolow2(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::vec& X, // (n+1) x 1, x[0],x[1],...,x[n]
-	const double delta, // discount factor for evolution/state error, delta = 1 is a constant value with zero variance
-	const double rho,
-	arma::mat& Gt, // 3 x 3, state transition matrix
-	arma::mat& mt, // 3 x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // 3 x (n+1)
-	arma::cube& Ct, // 3 x 3 x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // 3 x 3 x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
-
-	const unsigned int n = Y.n_elem; // number of observation
-    arma::vec F(3,arma::fill::zeros); F.at(0) = 1.;
-
-	double et,ft,Qt,ft_ast,Qt_ast;
-	double coef = (1.-rho) * (1.-rho);
-	arma::vec At(3);
-
-	for (unsigned int t=1; t<=n; t++) {
-		R_CheckUserInterrupt();
-		Gt.at(0,2) = coef * X.at(t-1);
-		
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        Rt.slice(t) = Gt * Ct.slice(t-1) * Gt.t() / delta;
-		at.col(t) = Gt * mt.col(t-1);
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = arma::as_scalar(F.t() * at.col(t));
-		Qt = arma::as_scalar(F.t() * Rt.slice(t) * F);
-
-        alphat.at(t) = optimize_trigamma(Qt);
-		betat.at(t) = std::exp(R::digamma(alphat.at(t)) - ft);
-
-        ft_ast = R::digamma(alphat.at(t)+Y.at(t-1)) - std::log(betat.at(t)+1.);
-		Qt_ast = R::trigamma(alphat.at(t)+Y.at(t-1));
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t) * F / Qt;
-		mt.col(t) = at.col(t) + At * et;
-		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
-	}
-
-}
-
-
-
-/*
-Solow's Pascal Disctributed Lags with r=2
-and an identity link function
-*/
-void forwardFilterSolow2_Identity(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::vec& X, // n x 1, x[0],x[1],...,x[n]
-	const double delta, // discount factor for evolution/state error, delta = 1 is a constant value with zero variance
-	const double rho,
-	arma::mat& Gt, // 3 x 3, state transition matrix
-	arma::mat& mt, // 3 x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // 3 x (n+1)
-	arma::cube& Ct, // 3 x 3 x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // 3 x 3 x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
-
-	const unsigned int n = Y.n_elem; // number of observation
-    arma::vec F(3,arma::fill::zeros); F.at(0) = 1.;
-
-	double et,ft,Qt,ft_ast,Qt_ast;
-	double coef = (1.-rho) * (1.-rho);
-	arma::vec At(3);
-
-	for (unsigned int t=1; t<=n; t++) {
-		R_CheckUserInterrupt();
-		Gt.at(0,2) = coef * X.at(t-1);
-		
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        Rt.slice(t) = Gt * Ct.slice(t-1) * Gt.t() / delta;
-		at.col(t) = Gt * mt.col(t-1);
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = arma::as_scalar(F.t() * at.col(t));
-		Qt = arma::as_scalar(F.t() * Rt.slice(t) * F);
-        
-		betat.at(t) = ft/Qt;
-		alphat.at(t) = ft*betat.at(t);
-
-        ft_ast = (alphat.at(t)+Y.at(t-1)) / (betat.at(t)+1.);
-		Qt_ast = ft_ast / (betat.at(t)+1.);
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t) * F / Qt;
-		mt.col(t) = at.col(t) + At * et;
-		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
-	}
-
-}
-
-
-
-/*
-Solow's Pascal Disctributed Lags with r=2
-and an identity link function
-and nonlinear state space
-
-y[t] ~ Pois(lambda[t])
-lambda[t] = theta[t]
-theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-beta[t] = beta[t-1] + omega[t]
-
-omega[t] ~ Normal(0,W), where W is modeled by discount factor delta
-
-*/
-void forwardFilterSolow2_Identity2(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::vec& X, // n x 1, x[0],x[1],...,x[n]
-	const double delta, // discount factor for evolution/state error, delta = 1 is a constant value with zero variance
-	const double rho,
-	arma::mat& Gt, // 3 x 3, state transition matrix
-	arma::mat& mt, // 3 x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // 3 x (n+1)
-	arma::cube& Ct, // 3 x 3 x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // 3 x 3 x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat) { // (n+1) x 1
-
-	const unsigned int n = Y.n_elem; // number of observation
-    arma::vec F(3,arma::fill::zeros); F.at(0) = 1.;
-
-	double et,ft,Qt,ft_ast,Qt_ast;
-	double coef = (1.-rho) * (1.-rho);
-	double rho2 = rho * rho;
-	arma::vec At(3);
-	arma::vec gt(3);
-
-	for (unsigned int t=1; t<=n; t++) {
-		R_CheckUserInterrupt();
-		Gt.at(0,2) = coef*X.at(t-1)*std::exp(mt.at(2,t-1));
-
-		gt.at(0) = 2*rho*mt.at(0,t-1) - rho2*mt.at(1,t-1) + Gt.at(0,2);
-		gt.at(1) = mt.at(0,t-1);
-		gt.at(2) = mt.at(2,t-1);
-		
-		// Prior at time t: theta[t] | D[t-1] ~ N(at, Rt)
-        Rt.slice(t) = Gt * Ct.slice(t-1) * Gt.t() / delta;
-		at.col(t) = gt;
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		ft = arma::as_scalar(F.t() * at.col(t));
-		Qt = arma::as_scalar(F.t() * Rt.slice(t) * F);
-        
-		betat.at(t) = ft/Qt;
-		alphat.at(t) = ft*betat.at(t);
-
-        ft_ast = (alphat.at(t)+Y.at(t-1)) / (betat.at(t)+1.);
-		Qt_ast = ft_ast / (betat.at(t)+1.);
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t) * F / Qt;
-		mt.col(t) = at.col(t) + At * et;
-		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
-	}
-
-}
-
-
-
-
-/*
-Linear Bayes Estimator - Version 0
-Assume  rho, V, W are known;
-        E[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
 //' @export
 // [[Rcpp::export]]
-Rcpp::List lbe_poisson0(
-	const arma::vec& Y, // n x 1, obs data
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double W,
-    const double m0,
-    const double C0) {  // systematic variance
-
-	const unsigned int n = Y.n_elem;
-	arma::vec mt(n+1,arma::fill::zeros); mt.at(0) = m0;
-    arma::vec Ct(n+1,arma::fill::zeros); Ct.at(0) = C0;
-	arma::vec at(n+1,arma::fill::zeros);
-    arma::vec Rt(n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
-
-	forwardFilter(0,Y,rho,W,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
-
-
-/*
-Linear Bayes Estimator - Version 1
-Assume  rho, V, W, E[0] are known;
-STATUS - Checked and Correct
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poisson1(
-	const arma::vec& Y, // n x 1, obs data
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double W,
-    const double E0,
-    const double Rw) {  // systematic variance
-
-	const unsigned int n = Y.n_elem;
-	arma::vec mt(n+1,arma::fill::zeros); mt.at(0) = E0;
-    arma::vec Ct(n+1,arma::fill::zeros); Ct.at(0) = Rw;
-	arma::vec at(n+1,arma::fill::zeros);
-    arma::vec Rt(n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
-
-	forwardFilter(1,Y,rho,W,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
-
-
-/*
-Linear Bayes Estimator with Transfer Function - Version 0
-Assume  rho, W are known;
-        E[0] and beta[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poissonX0(
-	const arma::vec& Y, // n x 1, obs data
-	const arma::vec& X,
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double W,
-    const arma::vec& m0, // 2 x 1
-    const arma::mat& C0) {  // 2 x 2, systematic variance
-
-	const unsigned int n = Y.n_elem;
-	arma::mat Gt(2,2,arma::fill::eye); Gt.at(0,0) = rho;
-	arma::mat Wt(2,2,arma::fill::eye);
-
-	arma::mat mt(2,n+1,arma::fill::zeros); mt.col(0) = m0;
-    arma::cube Ct(2,2,n+1,arma::fill::zeros); Ct.slice(0) = C0;
-	arma::mat at(2,n+1,arma::fill::zeros);
-    arma::cube Rt(2,2,n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
-
-	forwardFilterX(0,Y,X,W,Gt,Wt,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
-
-
-/*
-Linear Bayes Estimator with Transfer Function - Version 0
-Assume  rho is known;
-		use discount factor `delta` for Wt
-        E[0] and beta[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poissonX(
-	const arma::vec& Y, // n x 1, obs data
-	const arma::vec& X, // n x 1
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double delta, // discount factor
-    const arma::vec& m0, // 2 x 1
-    const arma::mat& C0) {  // 2 x 2, systematic variance
-
-	const unsigned int n = Y.n_elem;
-	arma::mat Gt(2,2,arma::fill::eye); Gt.at(0,0) = rho;
-
-	arma::mat mt(2,n+1,arma::fill::zeros); mt.col(0) = m0;
-    arma::cube Ct(2,2,n+1,arma::fill::zeros); Ct.slice(0) = C0;
-	arma::mat at(2,n+1,arma::fill::zeros);
-    arma::cube Rt(2,2,n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
-
-	forwardFilterX2(0,Y,X,delta,Gt,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	output["alphat"] = Rcpp::wrap(alphat);
-	output["betat"] = Rcpp::wrap(betat);
-	output["delta"] = delta;
-	output["rho"] = rho;
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
-
-
-/*
----- Method ----
-- Koyama's Discretized Hawkes Process
-- Ordinary Kalman filtering and smoothing
-- with all static parameters known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poissonKoyamaExp(
+Rcpp::List lbe_poisson(
 	const arma::vec& Y, // n x 1, the observed response
-    const unsigned int L = 12,
-    const double W = 0.01, 
-    const Rcpp::Nullable<Rcpp::NumericVector>& theta0_init = R_NilValue) {  // systematic variance
-
-	const unsigned int n = Y.n_elem;
-    const double n_ = static_cast<double>(n);
-    const double ssy2 = arma::accu(Y%Y);
-
-	double tmpd; // store temporary double value
-    arma::vec tmpv1(1);
-    arma::mat tmpmL(L,L);
-
-	arma::mat ht(L,n,arma::fill::zeros); // E(theta[t] | Dn), for t=1,...,n
-    arma::cube Ht(L,L,n);
-    arma::mat mt(L,n+1,arma::fill::zeros); // m0
-    arma::cube Ct(L,L,n+1); 
-    Ct.slice(0).eye(); Ct.slice(0)*= 0.1; // C0
-    arma::mat at(L,n+1,arma::fill::zeros);
-    arma::cube Rt(L,L,n+1);
-    
-    for (unsigned int t=1; t<=n; t++) {
-        Ct.slice(t).eye();
-    }
-    for (unsigned int t=0; t<=n; t++) {
-        Rt.slice(t).eye();
-    }
-    for (unsigned int t=0; t<n; t++) {
-        Ht.slice(t).eye();
-    }
-    if (!theta0_init.isNull()) {
-        arma::vec theta0_init_ = Rcpp::as<arma::vec>(theta0_init); 
-        mt.col(0).fill(theta0_init_.at(0));
-        Ct.slice(0).diag().fill(theta0_init_.at(1));
-    }
-
-
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-    // const double pk_2sg = std::sqrt(2.*pk_sg2);
-
-    arma::mat G(L,L,arma::fill::zeros);
-    arma::vec Fphi(L,arma::fill::zeros);
-    G.at(0,0) = 1.;
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        G.at(d,d-1) = 1.;
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
-    /*
-    Fphi - Checked. Correct.
-    G - Checked. Correct.
-    */
-
-    forwardFilterKoyamaExp(Y,G,Fphi,W,mt,at,Ct,Rt);
-    if (!mt.is_finite() || !at.is_finite() || !Ct.is_finite() || !Rt.is_finite()) {
-        stop("Non-finite values for filtering.");
-    }
-    backwardSmootherKoyamaExp(G,mt,at,Ct,Rt,ht,Ht);
-    if (!ht.is_finite() || !Ht.is_finite()) {
-        stop("Non-finite values for filtering.");
-    }
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	output["ht"] = Rcpp::wrap(ht);
-	output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
-
-
-/*
----- Method ----
-- Koyama's Discretized Hawkes Process
-- Ordinary Kalman filtering and smoothing
-- with all static parameters known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poissonKoyamaExp2(
-	const arma::vec& Y, // n x 1, the observed response
-    const unsigned int L = 12,
+	const unsigned int ModelCode,
+	const double rho = 0.9,
+    const unsigned int L = 0,
+	const double mu0 = 0.,
     const double delta = 0.9, 
-    const Rcpp::Nullable<Rcpp::NumericVector>& theta0_init = R_NilValue) {  // systematic variance
+	const double W = NA_REAL,
+	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue) {
 
 	const unsigned int n = Y.n_elem;
-    const double n_ = static_cast<double>(n);
-    const double ssy2 = arma::accu(Y%Y);
+	const unsigned int npad = n+1;
 
-	double tmpd; // store temporary double value
-    arma::vec tmpv1(1);
-    arma::mat tmpmL(L,L);
+	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6;
+	unsigned int TransferCode;
+	unsigned int p; // dimension of DLM state space
+	unsigned int L_;
+	if (is_koyck) { 
+		TransferCode = 0; 
+		p = 2;
+		L_ = 0;
+	}
+	if (is_koyama) { 
+		TransferCode = 1; 
+		p = L;
+		L_ = L;
+	}
+	if (is_solow) { 
+		TransferCode = 2; 
+		p = 3;
+		L_ = 0;
+	}
 
-	arma::vec ht(n,arma::fill::zeros); // E(theta[t] | Dn), for t=1,...,n
-    arma::vec Ht(n,arma::fill::ones);
-    arma::mat mt(L,n+1,arma::fill::zeros); // m0
-    arma::cube Ct(L,L,n+1); 
-    Ct.slice(0).eye(); Ct.slice(0)*= 0.1; // C0
-    arma::mat at(L,n+1,arma::fill::zeros);
-    arma::cube Rt(L,L,n+1);
+	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
+	Ypad.tail(n) = Y;
+	arma::mat mt(p,npad,arma::fill::zeros);
+	arma::mat at(p,npad,arma::fill::zeros);
+	arma::cube Ct(p,p,npad); 
+	const arma::mat Ip(p,p,arma::fill::eye);
+	Ct.each_slice() = Ip;
+	arma::cube Rt(p,p,npad);
+	arma::vec alphat(npad,arma::fill::zeros);
+	arma::vec betat(npad,arma::fill::zeros);
+	arma::vec ht(npad,arma::fill::zeros);
+	arma::vec Ht(npad,arma::fill::zeros);
+
+	if (!m0_prior.isNull()) {
+		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
+	}
+	if (!C0_prior.isNull()) {
+		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
+	}
     
-    for (unsigned int t=1; t<=n; t++) {
-        Ct.slice(t).eye();
-    }
-    for (unsigned int t=0; t<=n; t++) {
-        Rt.slice(t).eye();
-    }
-    if (!theta0_init.isNull()) {
-        arma::vec theta0_init_ = Rcpp::as<arma::vec>(theta0_init); 
-        mt.col(0).fill(theta0_init_.at(0));
-        Ct.slice(0).diag().fill(theta0_init_.at(1));
-    }
-
-
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-    // const double pk_2sg = std::sqrt(2.*pk_sg2);
-
-    arma::mat G(L,L,arma::fill::zeros);
-    arma::vec Fphi(L,arma::fill::zeros);
-    G.at(0,0) = 1.;
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        G.at(d,d-1) = 1.;
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
-    /*
-    Fphi - Checked. Correct.
-    G - Checked. Correct.
-    */
-
-    forwardFilterKoyamaExp2(Y,G,Fphi,delta,mt,at,Ct,Rt);
-    if (!mt.is_finite() || !at.is_finite() || !Ct.is_finite() || !Rt.is_finite()) {
-        stop("Non-finite values for filtering.");
-    }
-    backwardSmootherKoyamaExp2(G,mt,at,Ct,Rt,delta,ht,Ht);
-    if (!ht.is_finite() || !Ht.is_finite()) {
-        stop("Non-finite values for filtering.");
-    }
+	forwardFilter(mt,at,Ct,Rt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,delta);
+	if (!R_IsNA(delta)) {
+		backwardSmoother(ht,Ht,n,delta,mt,at,Ct,Rt);
+	}
+	
 
 	Rcpp::List output;
 	output["mt"] = Rcpp::wrap(mt);
 	output["Ct"] = Rcpp::wrap(Ct);
 	output["ht"] = Rcpp::wrap(ht);
 	output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
-
-
-
-/*
-Linear Bayes Estimator with Solow's Transfer Function - Version 0
-Assume  rho is known;
-		use discount factor `delta` for Wt
-        E[0] and beta[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poissonSolow0(
-	const arma::vec& Y, // n x 1, obs data
-	const arma::vec& X, // n x 1
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double W, // evolution error variance
-    const arma::vec& m0, // 3 x 1
-    const arma::mat& C0) {  // 3 x 3, systematic variance
-
-	const unsigned int n = Y.n_elem;
-	arma::mat Gt(3,3,arma::fill::zeros); 
-	Gt.at(0,0) = 2*rho;
-	Gt.at(0,1) = -rho*rho;
-	Gt.at(1,0) = 1.;
-	Gt.at(2,2) = 1.;
-	arma::mat Wt(3,3,arma::fill::zeros);
-
-	arma::vec X_(n+1,arma::fill::zeros); 
-	X_.tail(n) = X;
-
-	arma::mat mt(3,n+1,arma::fill::zeros); mt.col(0) = m0;
-    arma::cube Ct(3,3,n+1,arma::fill::zeros); Ct.slice(0) = C0;
-	arma::mat at(3,n+1,arma::fill::zeros);
-    arma::cube Rt(3,3,n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
-
-	forwardFilterSolow2_0(Y,X_,W,rho,Gt,Wt,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
 	output["alphat"] = Rcpp::wrap(alphat);
 	output["betat"] = Rcpp::wrap(betat);
-	output["W"] = W;
-	output["rho"] = rho;
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
 
 	return output;
 }
 
 
-
-
-/*
-Linear Bayes Estimator with Solow's Transfer Function - Version 0
-Assume  rho is known;
-		use discount factor `delta` for Wt
-        E[0] and beta[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
 //' @export
 // [[Rcpp::export]]
-Rcpp::List lbe_poissonSolow(
-	const arma::vec& Y, // n x 1, obs data
-	const arma::vec& X, // n x 1
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double delta, // discount factor
-    const arma::vec& m0, // 3 x 1
-    const arma::mat& C0) {  // 3 x 3, systematic variance
-
+Rcpp::List get_eta_koyama(
+	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
+	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+	const arma::cube& Ct, // p x p x (n+1)
+	const unsigned int ModelCode,
+	const double mu0 = 0.) {
+	
 	const unsigned int n = Y.n_elem;
-	arma::mat Gt(3,3,arma::fill::zeros); 
-	Gt.at(0,0) = 2*rho;
-	Gt.at(0,1) = -rho*rho;
-	Gt.at(1,0) = 1.;
-	Gt.at(2,2) = 1.;
+	const unsigned int p = mt.n_rows;
+	const unsigned int TransferCode = 1; // Koyama
 
-	// arma::vec X_(n+1,arma::fill::zeros); 
-	// X_.tail(n) = X;
+	arma::vec ft(n+1);
+	arma::vec Qt(n+1,arma::fill::zeros);
 
-	arma::mat mt(3,n+1,arma::fill::zeros); mt.col(0) = m0;
-    arma::cube Ct(3,3,n+1,arma::fill::zeros); Ct.slice(0) = C0;
-	arma::mat at(3,n+1,arma::fill::zeros);
-    arma::cube Rt(3,3,n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
+	arma::vec Ft(p,arma::fill::zeros);
+	arma::vec Fy(p,arma::fill::zeros);
+	const double mu = 2.2204e-16;
+	const double m = 4.7;
+	const double s = 2.9;
+	arma::vec Fphi = get_Fphi(p,mu,m,s);
 
-	forwardFilterSolow2(Y,X,delta,rho,Gt,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
+	arma::mat mt_ramp;
+	if (ModelCode == 0) {
+		mt_ramp = mt;
+		mt_ramp.elem(arma::find(mt_ramp<arma::datum::eps)).zeros(); // Ramp function
+	}
+
+	for (unsigned int t=0; t<=n; t++) {
+		update_Ft(Ft, Fy, TransferCode, t, p, Y, Fphi);
+		switch (ModelCode) {
+			case 0: // KoyamaMax
+			{
+				ft.at(t) = mu0 + arma::accu(Ft % mt_ramp.col(t));
+			}
+			break;
+			case 1: // KoyamaExp
+			{
+				ft.at(t) = mu0 + arma::accu(Ft % arma::exp(mt.col(t)));
+				Ft = Ft % arma::exp(mt.col(t));
+				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
+			}
+			break;
+			case 6: // KoyamaEye
+			{
+				ft.at(t) = mu0 + arma::accu(Ft % mt.col(t));
+				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
+			}
+			break;
+			default:
+			{
+				::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
+			}
+		} // END switch block
+	}
 
 	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	output["alphat"] = Rcpp::wrap(alphat);
-	output["betat"] = Rcpp::wrap(betat);
-	output["delta"] = delta;
-	output["rho"] = rho;
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
-
+	output["mean"] = Rcpp::wrap(ft);
+	output["var"] = Rcpp::wrap(Qt);
 	return output;
 }
 
 
-/*
-Linear Bayes Estimator with Solow's Transfer Function
-and an identity link
 
-Assume  rho is known;
-		use discount factor `delta` for Wt
-        E[0] and beta[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
 //' @export
 // [[Rcpp::export]]
-Rcpp::List lbe_poissonSolowIdentity(
-	const arma::vec& Y, // n x 1, obs data
-	const arma::vec& X, // n x 1
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double delta, // discount factor
-    const arma::vec& m0, // 3 x 1
-    const arma::mat& C0) {  // 3 x 3, systematic variance
+Rcpp::List get_optimal_delta(
+	const arma::vec& Y, // n x 1
+	const unsigned int ModelCode,
+	const arma::vec& delta_grid, // m x 1
+	const double rho = 0.9,
+    const unsigned int L = 0,
+	const double mu0 = 0.,
+	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue) { // (n+1) x 1
 
 	const unsigned int n = Y.n_elem;
-	arma::mat Gt(3,3,arma::fill::zeros); 
-	Gt.at(0,0) = 2*rho;
-	Gt.at(0,1) = -rho*rho;
-	Gt.at(1,0) = 1.;
-	Gt.at(2,2) = 1.;
+	const unsigned int m = delta_grid.n_elem;
+	const double W = NA_REAL;
+	const double n_ = static_cast<double>(n);
 
-	// arma::vec X_(n+1,arma::fill::zeros); 
-	// X_.tail(n) = X;
+	arma::vec logpred(m);
+	arma::vec mse(m);
+	arma::vec mae(m);
+	double delta;
+	double ymean,prob_success;
+	for (unsigned int i=0; i<m; i++) {
+		delta = delta_grid.at(i);
+		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior);
+		arma::vec alphat = lbe["alphat"];
+		arma::vec betat = lbe["betat"];
+		for (unsigned int j=1; j<=n; j++) {
+			// Marginal log predictive likelihood
+			prob_success = betat.at(j)/(1.+betat.at(j));
+			logpred.at(i) += R::dnbinom(Y.at(j-1),alphat.at(j),prob_success,true);
 
-	arma::mat mt(3,n+1,arma::fill::zeros); mt.col(0) = m0;
-    arma::cube Ct(3,3,n+1,arma::fill::zeros); Ct.slice(0) = C0;
-	arma::mat at(3,n+1,arma::fill::zeros);
-    arma::cube Rt(3,3,n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
+			// MSE
+			ymean = (1.-prob_success)/prob_success*alphat.at(j);
+			mse.at(i) += (Y.at(j-1)-ymean)*(Y.at(j-1)-ymean);
 
-	forwardFilterSolow2_Identity(Y,X,delta,rho,Gt,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
+			// MAE
+			mae.at(i) = std::abs(Y.at(j-1) - ymean);
+		}
+	}
+
+	mse /= n_;
+	mae /= n_;
 
 	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	output["alphat"] = Rcpp::wrap(alphat);
-	output["betat"] = Rcpp::wrap(betat);
-	output["delta"] = delta;
-	output["rho"] = rho;
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
+	output["delta"] = Rcpp::wrap(delta_grid);
+	output["logpred"] = Rcpp::wrap(logpred);
+	output["mse"] = Rcpp::wrap(mse);
+	output["mae"] = Rcpp::wrap(mae);
+
+	arma::vec delta_optim = {delta_grid.at(logpred.index_max()),delta_grid.at(mse.index_min()),delta_grid.at(mae.index_min())};
+
+	output["delta_optim"] = Rcpp::wrap(delta_optim);
 
 	return output;
 }
-
-
-
-/*
-Linear Bayes Estimator with Solow's Transfer Function
-and an identity link
-and nonlinear state space
-
-y[t] ~ Pois(lambda[t])
-lambda[t] = theta[t]
-theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-beta[t] = beta[t-1] + omega[t]
-
-omega[t] ~ Normal(0,W), where W is modeled by discount factor delta
-
-Assume  rho is known;
-		use discount factor `delta` for Wt
-        theta[0] and beta[0] is unknown with prior N(m[0],C[0])
-STATUS - Checked and Correct
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List lbe_poissonSolowIdentity2(
-	const arma::vec& Y, // n x 1, obs data
-	const arma::vec& X, // n x 1
-	const double rho, // aka G, state transition matrix: assume time-invariant
-    const double delta, // discount factor
-    const arma::vec& m0, // 3 x 1
-    const arma::mat& C0) {  // 3 x 3, systematic variance
-
-	const unsigned int n = Y.n_elem;
-	arma::mat Gt(3,3,arma::fill::zeros); 
-	Gt.at(0,0) = 2*rho;
-	Gt.at(0,1) = -rho*rho;
-	Gt.at(1,0) = 1.;
-	Gt.at(2,2) = 1.;
-
-	// arma::vec X_(n+1,arma::fill::zeros); 
-	// X_.tail(n) = X;
-
-	arma::mat mt(3,n+1,arma::fill::zeros); mt.col(0) = m0;
-    arma::cube Ct(3,3,n+1,arma::fill::zeros); Ct.slice(0) = C0;
-	arma::mat at(3,n+1,arma::fill::zeros);
-    arma::cube Rt(3,3,n+1,arma::fill::zeros);
-	arma::vec alphat(n+1,arma::fill::zeros);
-	arma::vec betat(n+1,arma::fill::zeros);
-	// arma::vec ht(n,arma::fill::zeros);
-	// arma::vec Ht(n,arma::fill::zeros);
-
-	forwardFilterSolow2_Identity2(Y,X,delta,rho,Gt,mt,at,Ct,Rt,alphat,betat);
-	// backwardSmoother(rho,mt,at,Ct,Rt,ht,Ht);
-
-	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	output["alphat"] = Rcpp::wrap(alphat);
-	output["betat"] = Rcpp::wrap(betat);
-	output["delta"] = delta;
-	output["rho"] = rho;
-	// output["ht"] = Rcpp::wrap(ht);
-	// output["Ht"] = Rcpp::wrap(Ht);
-
-	return output;
-}
-
