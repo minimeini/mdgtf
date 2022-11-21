@@ -5,3 +5,5 @@
 *.Rproj
 *.o
 *.vscode*
+*.json
+*.png
