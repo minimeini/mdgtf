@@ -1,447 +1,125 @@
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <cmath>
-#include <algorithm>
-#include <RcppArmadillo.h>
 #include "hva_gradients.h"
+#include "lbe_poisson.h"
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp11)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
 
-double Pd(
-    const double d,
-    const double mu,
-    const double sigmasq) {
-    arma::vec tmpv1(1);
-    tmpv1.at(0) = -(std::log(d)-mu)/std::sqrt(2.*sigmasq);
-    return arma::as_scalar(0.5*arma::erfc(tmpv1));
-}
-
-double knl(
-    const double t,
-    const double mu,
-    const double sd2) {
-    return Pd(t,mu,sd2) - Pd(t-1.,mu,sd2);
-}
-
-
-//' @export
-// [[Rcpp::export]]
-arma::vec get_Fphi(const unsigned int L){
-    double tmpd;
-
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-
-    arma::vec Fphi(L,arma::fill::zeros);
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
-    return Fphi;
-}
-
-
-/*
----- Method ----
-- Mean-Field Variational Inference
-- Ordinary Kalman filtering with all static parameters known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-void forwardFilter(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-    const arma::mat& G, // L x L, state transition matrix
-    const arma::vec& Fphi, // L x 1, state-to-obs nonlinear mapping vector
-    const unsigned int Ftype, // 0: exp(psi); 1: max(psi,0.)
-	arma::mat& mt, // L x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // L x (n+1)
-	arma::cube& Ct, // L x L x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // L x L x (n+1)
-    const double W = NA_REAL, // state variance
-    const double delta = NA_REAL) { // discount factor
-
-	const unsigned int n = Y.n_elem; // number of observation
-    const unsigned int L = Fphi.n_elem;
-    const double L_ = static_cast<double>(L);
-
-	double et,ft,Qt,alphat,betat,ft_ast,Qt_ast;
-    arma::mat Wtill(L,L,arma::fill::zeros);
-
-    bool dflag;
-    if (R_IsNA(W) && !R_IsNA(delta)) {
-        dflag = true; // use discount factor
-    } else if (!R_IsNA(W) && R_IsNA(delta)) {
-        dflag = false;
-        Wtill.at(0,0) = W; // use the given W
-    } else {
-        stop("forwardFilter: can only use either W or delta.");
-    }
-
-    
-
-    /* 
-    --- Reference Analysis --- 
-    !!! This part is essential !!!
-    */
-    arma::vec Fy = arma::reverse(Y.subvec(0,L-1));
-    at.col(1) = G * mt.col(0);
-    Rt.slice(1) = G * Ct.slice(0) * G.t();
-    if (dflag) { // use discount factor
-        Rt.slice(1) /= delta;
-    } else { // use given W
-        Rt.slice(1) += Wtill;
-    }
-    
-    if (!Rt.slice(1).is_finite()) {
-        Rcout << "Current time: " << 1 << std::endl;
-        Rcout << "Rt: " << Rt.slice(1) << std::endl;
-        Rcout << "C[t-1]: " << Ct.slice(0) << std::endl;
-        Rcout << "Wtill: " << Wtill << std::endl;
-        Rcout << "G: " << G << std::endl;
-        stop("Non-finite values for Rt");
-    }
-
-    arma::vec Fa(L);
-    if (Ftype==0) {
-        Fa = arma::exp(at.col(1));
-    } else {
-        for (unsigned int j=0; j<L; j++) {
-            Fa.at(j) = std::max(at.at(j,1),0.);
-        }
-    }
-    arma::vec Ft = Fa % Fphi % Fy;
-    if (!Ft.is_finite()) {
-        Rcout << "Current time: " << 1 << std::endl;
-        Rcout << "at: " << at.col(1).t() << std::endl;
-        Rcout << "m[t-1]: " << mt.col(0).t() << std::endl;
-        Rcout << "Q[t-1]: " << Qt << ", f[t-1]: " << ft << std::endl;
-        stop("Non-finite values for Ft");
-    }
-    
-    ft = arma::accu(Ft);
-    Qt = arma::as_scalar(Ft.t()*Rt.slice(1)*Ft);
-    if (!std::isfinite(Qt)) {
-        Rcout << "Current time: " << 1 << std::endl;
-        Rcout << "Q[t]: " << Qt << ", f[t]: " << ft << std::endl;
-        stop("Non-finite value for Qt");
-    }
-    if (Qt<arma::datum::eps) {
-        Rcout << "Current time: " << 1 << std::endl;
-        Rcout << "Q[t]: " << Qt << std::endl;
-        stop("Zero or negative value for Qt");
-    }
-    betat = ft / Qt;
-    alphat = betat*ft;
-    ft_ast = (alphat + Y.at(0)) / (betat + 1.);
-    Qt_ast = ft_ast / (betat + 1.);
-    et = ft_ast - ft;
-	mt.col(1) = at.col(1) + Rt.slice(1)*Ft*et/Qt;
-    if (!mt.col(1).is_finite()) {
-        Rcout << "Current time: " << 1 << std::endl;
-        Rcout << "m[t]: " << mt.col(1).t() << std::endl;
-        stop("Non-finite values for mt");
-    }
-    arma::vec Ft2 = Fa % arma::reverse(Fphi) % Fy;
-	Ct.slice(1) = Rt.slice(1) - Rt.slice(1)*Ft*Ft2.t()*Rt.slice(1)*(1.-Qt_ast/Qt)/Qt;
-    if (!Ct.slice(1).is_finite()) {
-        Rcout << "Current time: " << 1 << std::endl;
-        Rcout << "C[t]: " << Ct.slice(1) << std::endl;
-        stop("Non-finite values for Ct");
-    }
-
-    for (unsigned int t=2; t<=L; t++) {
-        at.col(t) = at.col(1);
-        Rt.slice(t) = Rt.slice(1);
-        mt.col(t) = mt.col(1);
-        Ct.slice(t) = Ct.slice(1);
-    }
-    /* 
-    --- Reference Analysis --- 
-    */
-
-    
-	for (unsigned int t=(L+1); t<=n; t++) {
-        /*
-        Fy - Checked. Correct.
-        */
-        Fy = arma::reverse(Y.subvec(t-L-1,t-2));
-        Fy.elem(arma::find(Fy<=0)).fill(0.01/L_);
- 
-		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
-        at.col(t) = G * mt.col(t-1);
-        Rt.slice(t) = G * Ct.slice(t-1) * G.t();
-        if (dflag) { // use discount factor
-            Rt.slice(t) /= delta;
-        } else { // use given W
-            Rt.slice(t) += Wtill;
-        }
-        if (!Rt.slice(t).is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "Rt: " << Rt.slice(t) << std::endl;
-            Rcout << "C[t-1]: " << Ct.slice(t-1) << std::endl;
-            Rcout << "Wtill: " << Wtill << std::endl;
-            Rcout << "G: " << G << std::endl;
-            stop("Non-finite values for Rt");
-        }
-		
-		// One-step ahead forecast: Y[t]|D[t-1] ~ (ft, Qt)
-        // TODO: check this part, the derivatives of Ft()
-        // arma::uvec tmpvL = arma::find(Fy<=0);
-        
-        if (Ftype==0) {
-            Fa = arma::exp(at.col(t));
-        } else {
-            for (unsigned int j=0; j<L; j++) {
-                Fa.at(j) = std::max(at.at(j,t),0.);
-            }
-        }
-        Ft = Fa % Fphi % Fy; // L x 1
-        if (!Ft.is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "at: " << at.col(t).t() << std::endl;
-            Rcout << "m[t-1]: " << mt.col(t-1).t() << std::endl;
-            Rcout << "Q[t-1]: " << Qt << ", f[t-1]: " << ft << std::endl;
-            stop("Non-finite values for Ft");
-        }
-		ft = arma::accu(Ft);
-		Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-        if (!std::isfinite(Qt)) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "Q[t]: " << Qt << ", f[t]: " << ft << std::endl;
-            stop("Non-finite value for Qt");
-        }
-        if (Qt<arma::datum::eps) {
-            // Qt = arma::datum::eps;
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "Q[t]: " << Qt << std::endl;
-            Rcout << "Ft: " << Ft.t() << std::endl;
-            Rcout << "Rt: " << Rt.slice(t) << std::endl;
-            stop("Zero or negative value for Qt");
-        }
-
-        betat = ft/Qt;
-        alphat = betat*ft;
-
-        ft_ast = (alphat+Y.at(t-1)) / (betat +1.);
-        Qt_ast = ft_ast / (betat+1.);
-
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		mt.col(t) = at.col(t) + Rt.slice(t)*Ft*et/Qt;
-        if (!mt.col(t).is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "m[t]: " << mt.col(t).t() << std::endl;
-            stop("Non-finite values for mt");
-        }
-        Ft2 = Fa % arma::reverse(Fphi) % Fy;
-		Ct.slice(t) = Rt.slice(t) - Rt.slice(t)*Ft*Ft2.t()*Rt.slice(t)*(1.-Qt_ast/Qt)/Qt;
-        if (!Ct.slice(t).is_finite()) {
-            Rcout << "Current time: " << t << std::endl;
-            Rcout << "C[t]: " << Ct.slice(t) << std::endl;
-            stop("Non-finite values for Ct");
-        }
-	}
-
-}
-
-
-
-/*
----- Method ----
-- Mean-Field Variational Inference
-- Ordinary Kalman filtering with all static parameters known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t]), t=1,...,n
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1]),t=1,...,n
-<state> psi[t] = psi[t-1] + omega[t], t=1,...,n
-        omega[t] ~ Normal(0,W)
-
-<prior> theta_till[0] ~ Norm(m0, C0)
-        W ~ IG(aw,bw)
-*/
-void backwardSmoother(
-	const arma::mat& G, // L x L, state transition matrix
-	const arma::mat& mt, // L x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::mat& at, // L x (n+1)
-	const arma::cube& Ct, // L x L x (n+1), t=0 is the var for initial value theta[0]
-	const arma::cube& Rt, // L x L x (n+1)
-	arma::vec& ht, // (n+1) x 1, only keep the first element
-    arma::vec& Ht, // (n+1) x 1, only keep the variance of the first element
-    const double delta = NA_REAL) { 
-
-	// Use the conditional distribution
-	const unsigned int n = ht.n_elem - 1; // num of obs
-    const unsigned int L = G.n_rows; 
-    // double delta;
-
-	ht.at(n) = mt.at(0,n);
-    Ht.at(n) = Ct.at(0,0,n);
-
-	arma::mat Bt(L,L);
-	for (unsigned int t=(n-1); t>0; t--) {
-		// sample from theta[t] | theta[t+1], D[t]
-		// Bt = G * Ct.slice(t+1) * G.t();
-        // delta = Bt.at(0,0) / Rt.at(0,0,t+2);
-        if (R_IsNA(delta)) {
-            Bt = Ct.slice(t) * G.t() * Rt.slice(t+1).i();
-		    ht.at(t) = mt.at(0,t) + Bt.at(0,0)*(ht.at(t+1)-at.at(0,t+1));
-            Ht.at(t) = Ct.at(0,0,t) - Bt.at(0,0)*(Rt.at(0,0,t+1)-Ht.at(t+1))*Bt.at(0,0);
-        } else {
-            ht.at(t) = mt.at(0,t) + delta/G.at(0,0)*(ht.at(t+1) - at.at(0,t+1));
-            Ht.at(t) = Ct.at(0,0,t) - delta/G.at(0,0)*(Rt.at(0,0,t+1)-Ht.at(t+1));
-        }
-        
-	}
-
-	// t = 0
-    // delta = Bt.at(0,0) / Rt.at(0,0,2);
-    if (R_IsNA(delta)) {
-        Bt = Ct.slice(0) * G.t() * Rt.slice(1).i();
-        ht.at(0) = mt.at(0,0) + Bt.at(0,0)*(ht.at(1)-at.at(0,1));
-        Ht.at(0) = Ct.at(0,0,0) - Bt.at(0,0)*(Rt.at(0,0,1)-Ht.at(1))*Bt.at(0,0);
-    } else {
-        ht.at(0) = mt.at(0,0) + delta/G.at(0,0)*(ht.at(1) - at.at(0,1));
-        Ht.at(0) = Ct.at(0,0,0) - delta/G.at(0,0)*(Rt.at(0,0,1)-Ht.at(1));
-    }
-    
-}
 
 
 
 
 //' @export
 // [[Rcpp::export]]
-Rcpp::List va_koyama(
+Rcpp::List vb_poisson(
     const arma::vec& Y, // n x 1, the observed response
-    const unsigned int L = 12,
+    const unsigned int ModelCode,
+    const double rho = 0.9,
+    const unsigned int L = 0,
+    const double mu0 = 0.,
+    const double delta = NA_REAL,
+    const double W_true = NA_REAL,
     const unsigned int niter = 5000, // number of iterations for variational inference
-    const double W0 = NA_REAL, 
-    const double delta = 0.88,
-    const Rcpp::Nullable<Rcpp::NumericVector>& W_init = R_NilValue, // (aw0:shape, bw0:rate)
-    const Rcpp::Nullable<Rcpp::NumericVector>& theta0_init = R_NilValue,
-    const unsigned int Ftype = 0) { // 0: exp(psi); 1: max(psi,0.)
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const double aw_prior = 0.01, // aw: shape of inverse gamma
+    const double bw_prior = 0.01, // bw: rate of inverse gamma
+    const bool use_smoothing = true,
+    const bool verbose = true) { 
 
     const unsigned int n = Y.n_elem;
     const double n_ = static_cast<double>(n);
-    const double ssy2 = arma::accu(Y%Y);
+	const unsigned int npad = n+1;
+    arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
+	Ypad.tail(n) = Y;
 
-    double tmpd; // store temporary double value
-    arma::vec tmpv1(1);
-    arma::mat tmpmL(L,L);
+	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6;
+	unsigned int TransferCode;
+	unsigned int p; // dimension of DLM state space
+	unsigned int L_;
+	if (is_koyck) { 
+		TransferCode = 0; 
+		p = 2;
+		L_ = 0;
+	}
+	if (is_koyama) { 
+		TransferCode = 1; 
+		p = L;
+		L_ = L;
+	}
+	if (is_solow) { 
+		TransferCode = 2; 
+		p = 3;
+		L_ = 0;
+	}
 
 
     /* ----- Hyperparameter and Initialization ----- */
-    double aw0, bw0, aw, bw, W;
+    double aw,bw,W;
     bool Wflag = true;
-    if (!R_IsNA(W0)) {
+    if (!R_IsNA(W_true)) {
         Wflag = false;
-        W = W0;
+        W = W_true;
     } else {
-        if (!W_init.isNull()) {
-            arma::vec W_init_ = Rcpp::as<arma::vec>(W_init);
-            aw0 = W_init_.at(0);
-            bw0 = W_init_.at(1);
-        } else {
-            aw0 = 1.e-3;
-            bw0 = 1.e-1;
-        }
-        aw = aw0;
-        bw = bw0;
-        W = aw/bw;
+        aw = aw_prior + 0.5*n_;
+        bw = bw_prior;
+        W = bw/(aw-1.);
     }
     
 
-    arma::vec ht(n+1,arma::fill::zeros); // E(theta[t] | Dn), for t=1,...,n
-    arma::vec Ht(n+1,arma::fill::ones);
-    arma::mat mt(L,n+1,arma::fill::zeros); // m0
-    arma::cube Ct(L,L,n+1); 
-    Ct.slice(0).eye(); Ct.slice(0)*= 0.1; // C0
-    arma::mat at(L,n+1,arma::fill::zeros);
-    arma::cube Rt(L,L,n+1);
+	arma::mat mt(p,npad,arma::fill::zeros);
+	arma::mat at(p,npad,arma::fill::zeros);
+	arma::cube Ct(p,p,npad); 
+	const arma::mat Ip(p,p,arma::fill::eye);
+	Ct.each_slice() = Ip;
+	arma::cube Rt(p,p,npad);
+	arma::vec alphat(npad,arma::fill::zeros);
+	arma::vec betat(npad,arma::fill::zeros);
+	arma::vec ht(npad,arma::fill::zeros);
+	arma::vec Ht(npad,arma::fill::zeros);
+
+    arma::cube Gt(p,p,npad);
+	arma::mat Gt0(p,p,arma::fill::zeros);
+	Gt0.at(0,0) = 1.;
+	if (TransferCode == 0) { // Koyck
+		Gt0.at(1,1) = rho;
+	} else if (TransferCode == 1) { // Koyama
+		Gt0.diag(-1).ones();
+	} else if (TransferCode == 2) { // Solow
+		Gt0.at(1,1) = 2.*rho;
+		Gt0.at(1,2) = -rho*rho;
+		Gt0.at(2,1) = 1.;
+	}
+	for (unsigned int t=0; t<npad; t++) {
+		Gt.slice(t) = Gt0;
+	}
+
+	if (!m0_prior.isNull()) {
+		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
+	}
+	if (!C0_prior.isNull()) {
+		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
+	}
     
-    for (unsigned int t=1; t<=n; t++) {
-        Ct.slice(t).eye();
-    }
-    for (unsigned int t=0; t<=n; t++) {
-        Rt.slice(t).eye();
-        // Ht.slice(t).eye();
-    }
-
-    if (!theta0_init.isNull()) {
-        arma::vec theta0_init_ = Rcpp::as<arma::vec>(theta0_init); 
-        mt.col(0).fill(theta0_init_.at(0));
-        Ct.slice(0).diag().fill(theta0_init_.at(1));
-    }
-
-
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-    // const double pk_2sg = std::sqrt(2.*pk_sg2);
-
-    arma::mat G(L,L,arma::fill::zeros);
-    arma::vec Fphi(L,arma::fill::zeros);
-    G.at(0,0) = 1.;
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        G.at(d,d-1) = 1.;
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
-    /*
-    Fphi - Checked. Correct.
-    G - Checked. Correct.
-    */
-
-    arma::vec Exx_th(n+1); // E(theta[t]theta[t]' | Dn), for t=0,1,...,n.
-    arma::vec Exy_th(n); // E(theta[t-1]theta[t]' | Dn), for t=1,...,n.
-
-    if (R_IsNA(delta)) {
-        forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,W,NA_REAL); // use W
-        backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,NA_REAL);
-    } else {
-        forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,NA_REAL,delta); // use discount factor
-        backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,delta);
-    }
+	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,NA_REAL);
     
-
-    for (unsigned int j=1; j<=n; j++) {
-        Exx_th.at(j) = ht.at(j)*ht.at(j) + Ht.at(j);
-        tmpd = Ht.at(j-1) * G.at(0,0);
-        // tmpmL = Ht.slice(j-1)*G.t(); // L x L
-        Exy_th.at(j-1) = ht.at(j-1)*ht.at(j) + tmpd;
+	if (use_smoothing) {
+		backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
+	} else {
+        ht = mt.row(0).t();
+        Ht = Ct.tube(0,0);
     }
-    Exx_th.at(0) = ht.at(0)*ht.at(0) + Ht.at(0);
 
     /* ----- Hyperparameter and Initialization ----- */
 
 
     /* ----- Storage ----- */
-    arma::vec W_stored(niter);
-    arma::mat ht_stored(n,niter);
-    // arma::mat htL_stored(L,niter);
-    arma::mat psit_stored(n,niter);
+    arma::mat ht_stored(npad,niter,arma::fill::zeros);
+    arma::mat Ht_stored(npad,niter,arma::fill::zeros);
+    arma::vec bw_stored(niter,arma::fill::zeros);
+    double tmp,psi_n_sq, psi_0_sq, Exx, Eyy, Exy1, Exy2;
     /* ----- Storage ----- */
 
     for (unsigned int i=0; i<niter; i++) {
@@ -449,42 +127,54 @@ Rcpp::List va_koyama(
 
         // TODO: check this part
         if (Wflag) {
-            aw = aw0 + 0.5*n_;
-            bw = bw0 + 0.5*(arma::accu(Exx_th.tail(n)) + arma::accu(Exx_th.head(n)) - 2.*arma::accu(Exy_th));
-            W = aw/bw;
+            // Exx = arma::accu(Ht.tail(n) + ht.tail(n)%ht.tail(n));
+            // Eyy = arma::accu(Ht.head(n) + ht.head(n)%ht.head(n));
+            // Exy1 = arma::accu(Ht.head(n) + ht.tail(n)%ht.head(n));
+            // Exy2 = arma::accu(Ht.tail(n) + ht.tail(n)%ht.head(n));
+            // Exx = arma::accu(ht.tail(n)%ht.tail(n));
+            // Eyy = arma::accu(ht.head(n)%ht.head(n));
+            // Exy1 = arma::accu(ht.tail(n)%ht.head(n));
+            // Exy2 = arma::accu(ht.tail(n)%ht.head(n));
+            // tmp = Exx - Exy1 - Exy2 + Eyy;
+            psi_n_sq = Ht.at(n) + ht.at(n)*ht.at(n);
+            psi_0_sq = Ht.at(0) + ht.at(0)*ht.at(0);
+            tmp = psi_n_sq - psi_0_sq;
+            bw = bw_prior;
+            if (tmp>arma::datum::eps) {
+                bw += 0.5*tmp;
+            }
+            bw_stored.at(i) = bw;
+            W = bw/(aw-1.);
         }
 
 
-        if (R_IsNA(delta)) {
-            forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,W,NA_REAL); // use W
-            backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,NA_REAL);
-        } else {
-            forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,NA_REAL,delta); // use discount factor
-            backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,delta);
+        forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,delta);
+        
+	    if (use_smoothing) {
+            backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
+	    } else {
+            ht = mt.row(0).t();
+            Ht = Ct.tube(0,0);
         }
 
-        for (unsigned int j=1; j<=n; j++) {
-            Exx_th.at(j) = ht.at(j)*ht.at(j) + Ht.at(j);
-            // tmpmL = Ht.slice(j-1)*G.t(); // L x L
-            tmpd = Ht.at(j-1) * G.at(0,0);
-            Exy_th.at(j-1) = ht.at(j-1)*ht.at(j) + tmpd;
+        ht_stored.col(i) = ht;
+        Ht_stored.col(i) = Ht;
+
+        if (verbose) {
+            Rcout << "\rProgress: " << i+1 << "/" << niter;
         }
-        Exx_th.at(0) = ht.at(0)*ht.at(0) + Ht.at(0);
-
-        W_stored.at(i) = W;
-        ht_stored.col(i) = ht.tail(n);
-        // htL_stored.col(i) = ht.col(L+1);
-        psit_stored.col(i) = mt(0,arma::span(1,n)).t();
-
-        Rcout << "\rProgress: " << i+1 << "/" << niter;
+        
     }
-
+    if (verbose) {
+        Rcout << std::endl;
+    }
+    
 
     Rcpp::List output;
-    output["W"] = Rcpp::wrap(W_stored);
+    output["aw"] = aw;
+    output["bw"] = Rcpp::wrap(bw_stored);
     output["ht"] = Rcpp::wrap(ht_stored);
-    // output["htL"] = Rcpp::wrap(htL_stored);
-    output["psi"] = Rcpp::wrap(psit_stored);
+    output["Ht"] = Rcpp::wrap(Ht_stored);
     return output;
 }
 
@@ -653,267 +343,267 @@ Unknown parameters: psi[1:n], W
 Known parameters: phi[1:L]
 Kwg: Identity link, exp(psi) state space
 */
-//' @export
-// [[Rcpp::export]]
-Rcpp::List hva_koyama(
-    const arma::vec& Y, // n x 1, the observed response
-    const unsigned int niter = 1000, // number of iterations for variational inference
-    const unsigned int L = 12,
-    const double W0 = NA_REAL, 
-    const double delta = 0.88,
-    const Rcpp::Nullable<Rcpp::NumericVector>& W_init = R_NilValue,
-    const unsigned int Ftype = 0) { // 0: exp(psi); 1: max(psi,0.)
+// //' @export
+// // [[Rcpp::export]]
+// Rcpp::List hva_koyama(
+//     const arma::vec& Y, // n x 1, the observed response
+//     const unsigned int niter = 1000, // number of iterations for variational inference
+//     const unsigned int L = 12,
+//     const double W0 = NA_REAL, 
+//     const double delta = 0.88,
+//     const Rcpp::Nullable<Rcpp::NumericVector>& W_init = R_NilValue,
+//     const unsigned int Ftype = 0) { // 0: exp(psi); 1: max(psi,0.)
 
-    const unsigned int n = Y.n_elem; // number of observations
-    const double CLOBND = -100;
+//     const unsigned int n = Y.n_elem; // number of observations
+//     const double CLOBND = -100;
 
-    double tmpd; // store temporary double value
-    arma::vec tmpv1(1);
-    arma::vec tmpvL(L);
-    arma::mat tmpmL(L,L);
+//     double tmpd; // store temporary double value
+//     arma::vec tmpv1(1);
+//     arma::vec tmpvL(L);
+//     arma::mat tmpmL(L,L);
 
-    double ada_rho = 0.95;
-    double ada_eps_step = 1.e-6;
-    double oldEdelta2_tau, oldEg2_tau, Eg2_tau, Change_delta_tau, Edelta2_tau, tau;
-    double oldEdelta2_mu, oldEg2_mu, Eg2_mu, Change_delta_mu, Edelta2_mu;
-    double oldEdelta2_sig, oldEg2_sig, Eg2_sig, Change_delta_sig, Edelta2_sig;  
+//     double ada_rho = 0.95;
+//     double ada_eps_step = 1.e-6;
+//     double oldEdelta2_tau, oldEg2_tau, Eg2_tau, Change_delta_tau, Edelta2_tau, tau;
+//     double oldEdelta2_mu, oldEg2_mu, Eg2_mu, Change_delta_mu, Edelta2_mu;
+//     double oldEdelta2_sig, oldEg2_sig, Eg2_sig, Change_delta_sig, Edelta2_sig;  
 
-    arma::vec zeps = arma::randn(niter); // standard normal error used in step 1 for reparameterisation
-    arma::vec mu_hyper(niter+1,arma::fill::zeros);
-    mu_hyper.at(0) = 0.;
-    arma::vec sig_hyper(niter+1,arma::fill::ones);
-    sig_hyper.at(0) = 0.5;
-    arma::vec gm_hyper(niter+1,arma::fill::ones);
-    gm_hyper.at(0) = 1.;
-    double cstar; // cstar = t_gamma(c)
-    double c;
-    double cp; // cp = the first order derivative of c_star=t_gamma(c)
-    double grad_q0,grad_g;
-    arma::vec grad_elbo(3);
+//     arma::vec zeps = arma::randn(niter); // standard normal error used in step 1 for reparameterisation
+//     arma::vec mu_hyper(niter+1,arma::fill::zeros);
+//     mu_hyper.at(0) = 0.;
+//     arma::vec sig_hyper(niter+1,arma::fill::ones);
+//     sig_hyper.at(0) = 0.5;
+//     arma::vec gm_hyper(niter+1,arma::fill::ones);
+//     gm_hyper.at(0) = 1.;
+//     double cstar; // cstar = t_gamma(c)
+//     double c;
+//     double cp; // cp = the first order derivative of c_star=t_gamma(c)
+//     double grad_q0,grad_g;
+//     arma::vec grad_elbo(3);
 
-    double W = 0.01;
-    double aw, bw;
-    bool Wflag = true;
-    if (!R_IsNA(W0)) {
-        Wflag = false;
-        W = W0;
-    } else {
-        if (!W_init.isNull()) {
-            arma::vec W_init_ = Rcpp::as<arma::vec>(W_init);
-            aw = W_init_.at(0);
-            bw = W_init_.at(1);
+//     double W = 0.01;
+//     double aw, bw;
+//     bool Wflag = true;
+//     if (!R_IsNA(W0)) {
+//         Wflag = false;
+//         W = W0;
+//     } else {
+//         if (!W_init.isNull()) {
+//             arma::vec W_init_ = Rcpp::as<arma::vec>(W_init);
+//             aw = W_init_.at(0);
+//             bw = W_init_.at(1);
             
-        } else {
-            aw = 1.e-3;
-            bw = 1.e-1;
-        }
-        W = aw/bw;
-    }
+//         } else {
+//             aw = 1.e-3;
+//             bw = 1.e-1;
+//         }
+//         W = aw/bw;
+//     }
 
-    arma::vec psi(n+1,arma::fill::zeros);
+//     arma::vec psi(n+1,arma::fill::zeros);
     
-    arma::mat mt(L,n+1,arma::fill::zeros); // m0
-    arma::cube Ct(L,L,n+1); 
-    Ct.slice(0).eye(); Ct.slice(0)*= 0.1; // C0
-    arma::mat at(L,n+1,arma::fill::zeros);
-    arma::cube Rt(L,L,n+1);
+//     arma::mat mt(L,n+1,arma::fill::zeros); // m0
+//     arma::cube Ct(L,L,n+1); 
+//     Ct.slice(0).eye(); Ct.slice(0)*= 0.1; // C0
+//     arma::mat at(L,n+1,arma::fill::zeros);
+//     arma::cube Rt(L,L,n+1);
 
-    arma::mat theta(L,n+1,arma::fill::zeros);
-    arma::mat Bt(L,L,arma::fill::eye);
-    arma::vec ht(n+1,arma::fill::zeros); // E(theta[t] | Dn), for t=1,...,n
-    arma::vec Ht(n+1,arma::fill::ones);
+//     arma::mat theta(L,n+1,arma::fill::zeros);
+//     arma::mat Bt(L,L,arma::fill::eye);
+//     arma::vec ht(n+1,arma::fill::zeros); // E(theta[t] | Dn), for t=1,...,n
+//     arma::vec Ht(n+1,arma::fill::ones);
     
-    for (unsigned int t=1; t<=n; t++) {
-        Ct.slice(t).eye();
-    }
-    for (unsigned int t=0; t<=n; t++) {
-        Rt.slice(t).eye();
-        // Ht.slice(t).eye();
-    }
+//     for (unsigned int t=1; t<=n; t++) {
+//         Ct.slice(t).eye();
+//     }
+//     for (unsigned int t=0; t<=n; t++) {
+//         Rt.slice(t).eye();
+//         // Ht.slice(t).eye();
+//     }
 
-    // if (!theta0_init.isNull()) {
-    //     arma::vec theta0_init_ = Rcpp::as<arma::vec>(theta0_init); 
-    //     mt.col(0).fill(theta0_init_.at(0));
-    //     Ct.slice(0).diag().fill(theta0_init_.at(1));
-    // }
-
-
-    arma::mat G(L,L,arma::fill::zeros);
-    G.at(0,0) = 1.;
-    for (unsigned int d=1; d<L; d++) {
-        G.at(d,d-1) = 1.;
-    }
+//     // if (!theta0_init.isNull()) {
+//     //     arma::vec theta0_init_ = Rcpp::as<arma::vec>(theta0_init); 
+//     //     mt.col(0).fill(theta0_init_.at(0));
+//     //     Ct.slice(0).diag().fill(theta0_init_.at(1));
+//     // }
 
 
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-    arma::vec Fphi(L,arma::fill::zeros);
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
-    /*
-    Fphi - Checked. Correct.
-    G - Checked. Correct.
-    */
+//     arma::mat G(L,L,arma::fill::zeros);
+//     G.at(0,0) = 1.;
+//     for (unsigned int d=1; d<L; d++) {
+//         G.at(d,d-1) = 1.;
+//     }
+
+
+//     const double mu = arma::datum::eps;
+//     const double m = 4.7;
+//     const double s = 2.9;
+//     const double sm2 = std::pow(s/m,2);
+//     const double pk_mu = std::log(m/std::sqrt(1.+sm2));
+//     const double pk_sg2 = std::log(1.+sm2);
+//     arma::vec Fphi(L,arma::fill::zeros);
+//     Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
+//     for (unsigned int d=1; d<L; d++) {
+//         tmpd = static_cast<double>(d) + 1.;
+//         Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
+//     }
+//     /*
+//     Fphi - Checked. Correct.
+//     G - Checked. Correct.
+//     */
 
 
 
-    /* ----- Storage ----- */
-    arma::vec W_stored(niter);
-    arma::mat theta_stored(n,niter);
-    /* ----- Storage ----- */
+//     /* ----- Storage ----- */
+//     arma::vec W_stored(niter);
+//     arma::mat theta_stored(n,niter);
+//     /* ----- Storage ----- */
 
-    for (unsigned int i=0; i<niter; i++) {
-        R_CheckUserInterrupt();
+//     for (unsigned int i=0; i<niter; i++) {
+//         R_CheckUserInterrupt();
 
-        /*
-        Step 1. Sample hyperparameter via the variational distribution
-            N(mu_hyper,sig_hyper^2)
-        using the reparameterisation trick
-        */
-        if (Wflag) {
-            cstar = mu_hyper.at(i) + sig_hyper.at(i)*zeps.at(i);
-            c = tYJinv_gm(cstar,gm_hyper.at(i));
-            // if (c<CLOBND) {
-            //     c = CLOBND;
-            //     cstar = tYJ_gm(c,gm_hyper.at(i));
-            // }
-            W = std::exp(-c);
+//         /*
+//         Step 1. Sample hyperparameter via the variational distribution
+//             N(mu_hyper,sig_hyper^2)
+//         using the reparameterisation trick
+//         */
+//         if (Wflag) {
+//             cstar = mu_hyper.at(i) + sig_hyper.at(i)*zeps.at(i);
+//             c = tYJinv_gm(cstar,gm_hyper.at(i));
+//             // if (c<CLOBND) {
+//             //     c = CLOBND;
+//             //     cstar = tYJ_gm(c,gm_hyper.at(i));
+//             // }
+//             W = std::exp(-c);
             
-        }
+//         }
         
-        if (!std::isfinite(W)) {
-            Rcout << "mu: " << mu_hyper.at(i);
-            Rcout << " sig: " << sig_hyper.at(i);
-            Rcout << " zeps: " << zeps.at(i);
-            Rcout << " gm: " << gm_hyper.at(i) << std::endl;
-            Rcout << "cstar: " << cstar;
-            Rcout << " c: " << c;
-            Rcout << " W: " << W << std::endl;
-            stop("Non-finite value for W");
-        }
+//         if (!std::isfinite(W)) {
+//             Rcout << "mu: " << mu_hyper.at(i);
+//             Rcout << " sig: " << sig_hyper.at(i);
+//             Rcout << " zeps: " << zeps.at(i);
+//             Rcout << " gm: " << gm_hyper.at(i) << std::endl;
+//             Rcout << "cstar: " << cstar;
+//             Rcout << " c: " << c;
+//             Rcout << " W: " << W << std::endl;
+//             stop("Non-finite value for W");
+//         }
 
 
-        /*
-        Step 2. Sample latent state parameters via conditional posteriors
-        using Smoothing distributions
-        */
-        if (R_IsNA(delta)) {
-            forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,W,NA_REAL); // use W
-            backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,NA_REAL);
-        } else {
-            forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,NA_REAL,delta); // use discount factor
-            backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,delta);
-        }
-        psi = ht;
+//         /*
+//         Step 2. Sample latent state parameters via conditional posteriors
+//         using Smoothing distributions
+//         */
+//         if (R_IsNA(delta)) {
+//             forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,W,NA_REAL); // use W
+//             backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,NA_REAL);
+//         } else {
+//             forwardFilter(Y,G,Fphi,Ftype,mt,at,Ct,Rt,NA_REAL,delta); // use discount factor
+//             backwardSmoother(G,mt,at,Ct,Rt,ht,Ht,delta);
+//         }
+//         psi = ht;
 
-        /*
-        Using FFBS
-        */
-        // ht = mt.col(n);
-        // Ht = Ct.slice(n);
-        // Ht = arma::symmatu(Ht);
-        // arma::eig_sym(tmpvL,tmpmL,Ht);
-        // tmpmL = arma::diagmat(arma::sqrt(arma::abs(tmpvL)))*tmpmL.t();
-        // theta.col(n) = ht + tmpmL.t()*arma::randn(L);
+//         /*
+//         Using FFBS
+//         */
+//         // ht = mt.col(n);
+//         // Ht = Ct.slice(n);
+//         // Ht = arma::symmatu(Ht);
+//         // arma::eig_sym(tmpvL,tmpmL,Ht);
+//         // tmpmL = arma::diagmat(arma::sqrt(arma::abs(tmpvL)))*tmpmL.t();
+//         // theta.col(n) = ht + tmpmL.t()*arma::randn(L);
 
-        // for (unsigned int t=n-1; t>0; t--) {
-        //     Bt = Ct.slice(t)*G.t()*Rt.slice(t+1).i();
-        //     ht = mt.col(t) + Bt*(theta.col(t+1) - at.col(t+1));
-        //     Ht = Ct.slice(t) - Bt*Rt.slice(t+1)*Bt.t();
-        //     Ht = arma::symmatu(Ht);
-        //     arma::eig_sym(tmpvL,tmpmL,Ht);
-        //     tmpmL = arma::diagmat(arma::sqrt(arma::abs(tmpvL)))*tmpmL.t();
-        //     theta.col(t) = ht + tmpmL.t()*arma::randn(L);
-        // }
+//         // for (unsigned int t=n-1; t>0; t--) {
+//         //     Bt = Ct.slice(t)*G.t()*Rt.slice(t+1).i();
+//         //     ht = mt.col(t) + Bt*(theta.col(t+1) - at.col(t+1));
+//         //     Ht = Ct.slice(t) - Bt*Rt.slice(t+1)*Bt.t();
+//         //     Ht = arma::symmatu(Ht);
+//         //     arma::eig_sym(tmpvL,tmpmL,Ht);
+//         //     tmpmL = arma::diagmat(arma::sqrt(arma::abs(tmpvL)))*tmpmL.t();
+//         //     theta.col(t) = ht + tmpmL.t()*arma::randn(L);
+//         // }
 
-        // Bt = Ct.slice(0)*G.t()*Rt.slice(1).i();
-        // ht = mt.col(0) + Bt*(theta.col(1) - at.col(1));
-        // Ht = Ct.slice(0) - Bt*Rt.slice(1)*Bt.t();
-        // Ht = arma::symmatu(Ht);
-        // arma::eig_sym(tmpvL,tmpmL,Ht);
-        // tmpmL = arma::diagmat(arma::sqrt(arma::abs(tmpvL)))*tmpmL.t();
-        // theta.col(0) = ht + tmpmL.t()*arma::randn(L);
-        // psi = theta.row(0).t(); // (n+1) x 1
+//         // Bt = Ct.slice(0)*G.t()*Rt.slice(1).i();
+//         // ht = mt.col(0) + Bt*(theta.col(1) - at.col(1));
+//         // Ht = Ct.slice(0) - Bt*Rt.slice(1)*Bt.t();
+//         // Ht = arma::symmatu(Ht);
+//         // arma::eig_sym(tmpvL,tmpmL,Ht);
+//         // tmpmL = arma::diagmat(arma::sqrt(arma::abs(tmpvL)))*tmpmL.t();
+//         // theta.col(0) = ht + tmpmL.t()*arma::randn(L);
+//         // psi = theta.row(0).t(); // (n+1) x 1
        
 
-        if (Wflag) {
-            /*
-            Step 3. Compuate gradient of the log variational distribution
-            */
-            // gradient of the variational distribution
-            // grad_elbo = {mu,sig,tau}
-            grad_g = dlogJoint_dc(psi,c,aw,bw);
-            // grad_g = dlogJoint_dc(psi,c);
-            grad_q0 = dlogVB_dc(c,mu_hyper.at(i),sig_hyper.at(i),gm_hyper.at(i));
-            grad_elbo = dYJinv(cstar,zeps.at(i),gm_hyper.at(i));
-            grad_elbo *= (grad_g - grad_q0);
+//         if (Wflag) {
+//             /*
+//             Step 3. Compuate gradient of the log variational distribution
+//             */
+//             // gradient of the variational distribution
+//             // grad_elbo = {mu,sig,tau}
+//             grad_g = dlogJoint_dc(psi,c,aw,bw);
+//             // grad_g = dlogJoint_dc(psi,c);
+//             grad_q0 = dlogVB_dc(c,mu_hyper.at(i),sig_hyper.at(i),gm_hyper.at(i));
+//             grad_elbo = dYJinv(cstar,zeps.at(i),gm_hyper.at(i));
+//             grad_elbo *= (grad_g - grad_q0);
 
-            /*
-            Step 4. Update Variational coefficients
-            */
-            // mu - mean of the variational distribution,
-            // mu takes value along the whole real line
-            oldEdelta2_mu = Edelta2_mu;
-            oldEg2_mu = Eg2_mu;
+//             /*
+//             Step 4. Update Variational coefficients
+//             */
+//             // mu - mean of the variational distribution,
+//             // mu takes value along the whole real line
+//             oldEdelta2_mu = Edelta2_mu;
+//             oldEg2_mu = Eg2_mu;
 
-            Eg2_mu = ada_rho*oldEg2_mu + (1.-ada_rho)*std::pow(grad_elbo.at(0),2.);
-            Change_delta_mu = std::sqrt(oldEdelta2_mu+ada_eps_step)/std::sqrt(Eg2_mu+ada_eps_step)*grad_elbo.at(0);
-            if (mu_hyper.at(i)+Change_delta_mu <= CLOBND) {
-                Change_delta_mu = 0.;
-            }
-            mu_hyper.at(i+1) = mu_hyper.at(i) + Change_delta_mu;
-            Edelta2_mu = ada_rho*oldEdelta2_mu + (1.-ada_rho)*std::pow(Change_delta_mu,2.);
+//             Eg2_mu = ada_rho*oldEg2_mu + (1.-ada_rho)*std::pow(grad_elbo.at(0),2.);
+//             Change_delta_mu = std::sqrt(oldEdelta2_mu+ada_eps_step)/std::sqrt(Eg2_mu+ada_eps_step)*grad_elbo.at(0);
+//             if (mu_hyper.at(i)+Change_delta_mu <= CLOBND) {
+//                 Change_delta_mu = 0.;
+//             }
+//             mu_hyper.at(i+1) = mu_hyper.at(i) + Change_delta_mu;
+//             Edelta2_mu = ada_rho*oldEdelta2_mu + (1.-ada_rho)*std::pow(Change_delta_mu,2.);
 
-            // sig - standard deviation of the variational distribution
-            oldEdelta2_sig = Edelta2_sig;
-            oldEg2_sig = Eg2_sig;
+//             // sig - standard deviation of the variational distribution
+//             oldEdelta2_sig = Edelta2_sig;
+//             oldEg2_sig = Eg2_sig;
 
-            Eg2_sig = ada_rho*oldEg2_sig + (1.-ada_rho)*std::pow(grad_elbo.at(1),2.);
-            Change_delta_sig = std::sqrt(oldEdelta2_sig+ada_eps_step)/std::sqrt(Eg2_sig+ada_eps_step)*grad_elbo.at(1);
-            sig_hyper.at(i+1) = sig_hyper.at(i) + Change_delta_sig;
-            Edelta2_sig = ada_rho*oldEdelta2_sig + (1.-ada_rho)*std::pow(Change_delta_sig,2.);
+//             Eg2_sig = ada_rho*oldEg2_sig + (1.-ada_rho)*std::pow(grad_elbo.at(1),2.);
+//             Change_delta_sig = std::sqrt(oldEdelta2_sig+ada_eps_step)/std::sqrt(Eg2_sig+ada_eps_step)*grad_elbo.at(1);
+//             sig_hyper.at(i+1) = sig_hyper.at(i) + Change_delta_sig;
+//             Edelta2_sig = ada_rho*oldEdelta2_sig + (1.-ada_rho)*std::pow(Change_delta_sig,2.);
 
 
-            // gamma
-            oldEdelta2_tau = Edelta2_tau;
-            oldEg2_tau = Eg2_tau;
-            tau = gm2tau(gm_hyper.at(i));
+//             // gamma
+//             oldEdelta2_tau = Edelta2_tau;
+//             oldEg2_tau = Eg2_tau;
+//             tau = gm2tau(gm_hyper.at(i));
 
-            Eg2_tau = ada_rho*oldEg2_tau + (1.-ada_rho)*std::pow(grad_elbo.at(2),2.);
-            Change_delta_tau = std::sqrt(oldEdelta2_tau+ada_eps_step)/std::sqrt(Eg2_tau+ada_eps_step)*grad_elbo.at(2);
-            tau = tau + Change_delta_tau;
-            gm_hyper.at(i+1) = tau2gm(tau);
-            if (std::abs(gm_hyper.at(i+1))<1.e-7) {
-                gm_hyper.at(i+1) = 1.e-7;
-            }
-            Edelta2_tau = ada_rho*oldEdelta2_tau + (1.-ada_rho)*std::pow(Change_delta_tau,2.);
-        }
+//             Eg2_tau = ada_rho*oldEg2_tau + (1.-ada_rho)*std::pow(grad_elbo.at(2),2.);
+//             Change_delta_tau = std::sqrt(oldEdelta2_tau+ada_eps_step)/std::sqrt(Eg2_tau+ada_eps_step)*grad_elbo.at(2);
+//             tau = tau + Change_delta_tau;
+//             gm_hyper.at(i+1) = tau2gm(tau);
+//             if (std::abs(gm_hyper.at(i+1))<1.e-7) {
+//                 gm_hyper.at(i+1) = 1.e-7;
+//             }
+//             Edelta2_tau = ada_rho*oldEdelta2_tau + (1.-ada_rho)*std::pow(Change_delta_tau,2.);
+//         }
         
         
         
-        W_stored.at(i) = W;
-        theta_stored.col(i) = psi.tail(n);
+//         W_stored.at(i) = W;
+//         theta_stored.col(i) = psi.tail(n);
 
 
-        Rcout << "\rProgress: " << i+1 << "/" << niter;
-    }
+//         Rcout << "\rProgress: " << i+1 << "/" << niter;
+//     }
 
 
-    Rcpp::List output;
-    output["W"] = Rcpp::wrap(W_stored);
-    output["theta"] = Rcpp::wrap(theta_stored);
-    output["mu"] = Rcpp::wrap(mu_hyper);
-    output["sig"] = Rcpp::wrap(sig_hyper);
-    output["gm"] = Rcpp::wrap(gm_hyper);
-    return output;
-}
+//     Rcpp::List output;
+//     output["W"] = Rcpp::wrap(W_stored);
+//     output["theta"] = Rcpp::wrap(theta_stored);
+//     output["mu"] = Rcpp::wrap(mu_hyper);
+//     output["sig"] = Rcpp::wrap(sig_hyper);
+//     output["gm"] = Rcpp::wrap(gm_hyper);
+//     return output;
+// }
 
 
 

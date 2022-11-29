@@ -265,6 +265,7 @@ void forwardFilter(
 	arma::mat& at, // p x (n+1)
 	arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
 	arma::cube& Rt, // p x p x (n+1)
+	arma::cube& Gt, // p x p x (n+1)
 	arma::vec& alphat, // (n+1) x 1
 	arma::vec& betat, // (n+1) x 1
 	const unsigned int ModelCode,
@@ -277,11 +278,7 @@ void forwardFilter(
 	const double mu0 = 0.,
 	const double W = NA_REAL,
 	const double delta = NA_REAL) { 
-
-	if (R_IsNA(delta) && R_IsNA(W)) {
-		::Rf_error("Either evolution error W or discount factor delta must be provided.");
-	}
-
+	
 	/*
 	------ Initialization ------
 	*/
@@ -293,17 +290,7 @@ void forwardFilter(
 	arma::vec Ft(p,arma::fill::zeros);
 	if (TransferCode != 1) {Ft.at(1) = 1.;} // not koyama
 
-	arma::mat Gt(p,p,arma::fill::zeros);
-	Gt.at(0,0) = 1.;
-	if (TransferCode == 0) { // Koyck
-		Gt.at(1,1) = rho;
-	} else if (TransferCode == 1) { // Koyama
-		Gt.diag(-1).ones();
-	} else if (TransferCode == 2) { // Solow
-		Gt.at(1,1) = 2.*rho;
-		Gt.at(1,2) = -rho*rho;
-		Gt.at(2,1) = 1.;
-	}
+	
 
 	arma::vec Fphi;
 	arma::vec Fy;
@@ -327,8 +314,8 @@ void forwardFilter(
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 	if (TransferCode == 1 && L>0) { // Koyama
-		at.col(1) = update_at(p,ModelCode,TransferCode,mt.col(0),Gt,Y.at(0),rho,L);
-		update_Rt(Rt.slice(1), Ct.slice(0), Gt, use_discount, W, delta);
+		at.col(1) = update_at(p,ModelCode,TransferCode,mt.col(0),Gt.slice(0),Y.at(0),rho,L);
+		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
 		update_Ft(Ft, Fy, TransferCode, 0, L, Y, Fphi);
 		switch (ModelCode) {
 			case 0: // KoyamaMax
@@ -401,9 +388,9 @@ void forwardFilter(
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		update_Gt(Gt, ModelCode, TransferCode, mt.col(t-1), Y.at(t-1), rho);
-		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt,Y.at(t-1),rho,L);
-		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt, use_discount, W, delta);
+		update_Gt(Gt.slice(t), ModelCode, TransferCode, mt.col(t-1), Y.at(t-1), rho);
+		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt.slice(t),Y.at(t-1),rho,L);
+		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
 		if (TransferCode == 1) { // Koyama
@@ -481,28 +468,70 @@ void backwardSmoother(
 	arma::vec& ht, // (n+1) x 1
 	arma::vec& Ht, // (n+1) x 1
 	const unsigned int n,
-	const double delta, // discount factor
+	const unsigned int p,
 	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
 	const arma::mat& at, // p x (n+1)
 	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
-	const arma::cube& Rt) { // p x p x (n+1)
+	const arma::cube& Rt,
+	const arma::cube& Gt,
+	const double W = NA_REAL,
+	const double delta = NA_REAL) { // p x p x (n+1)
 
 	ht.at(n) = mt.at(0,n);
-	Ht.at(n) = Ct.at(0,0,n);
+	Ht.at(n) = std::abs(Ct.at(0,0,n));
 
-	double coef1 = 1. - delta;
-	double coef2 = delta * delta;
+	double coef1, coef2;
+	if (!R_IsNA(delta)) {
+		coef1 = 1. - delta;
+		coef2 = delta * delta;
+	}
+
+	arma::mat Bt,Ht_prev,Ht_cur;
+	arma::vec ht_prev, ht_cur;
+	if (!R_IsNA(W)) {
+		Bt.set_size(p,p);
+		Ht_cur.set_size(p,p);
+		ht_cur.set_size(p);
+
+		Ht_prev = Ct.slice(n);
+		ht_prev = mt.col(n);
+	}
+
+	
 	for (unsigned int t=(n-1); t>0; t--) {
 		R_CheckUserInterrupt();
-		ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
-		Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
+		if (!R_IsNA(delta)) {
+			ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
+			Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
+		} else if (!R_IsNA(W)) {
+			Bt = Ct.slice(t) * Gt.slice(t+1).t() * Rt.slice(t+1).i();
+			ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
+			Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
+
+			ht.at(t) = ht_cur.at(0);
+			Ht.at(t) = Ht_cur.at(0,0);
+
+			ht_prev = ht_cur;
+			Ht_prev = Ht_cur;
+		}
+		
 		// Rcout << "\rSmoothing: " << n+1-t << "/" << n;
 	}
 	// Rcout << std::endl;
 
 	// t = 0
-	ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
-	Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
+	if (!R_IsNA(delta)) {
+		ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
+		Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
+	} else if (!R_IsNA(W)) {
+		Bt = Ct.slice(0) * Gt.slice(1).t() * Rt.slice(1).i();
+		ht_cur = mt.col(0) + Bt * (ht_prev - at.col(1));
+		Ht_cur = Ct.slice(0) + Bt*(Ht_prev - Rt.slice(1))*Bt.t();
+
+		ht.at(0) = ht_cur.at(0);
+		Ht.at(0) = Ht_cur.at(0,0);
+	}
+	
 }
 
 
@@ -519,6 +548,10 @@ Rcpp::List lbe_poisson(
 	const double W = NA_REAL,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue) {
+
+	if (R_IsNA(delta) && R_IsNA(W)) {
+		::Rf_error("Either evolution error W or discount factor delta must be provided.");
+	}
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
@@ -558,6 +591,22 @@ Rcpp::List lbe_poisson(
 	arma::vec ht(npad,arma::fill::zeros);
 	arma::vec Ht(npad,arma::fill::zeros);
 
+	arma::cube Gt(p,p,npad);
+	arma::mat Gt0(p,p,arma::fill::zeros);
+	Gt0.at(0,0) = 1.;
+	if (TransferCode == 0) { // Koyck
+		Gt0.at(1,1) = rho;
+	} else if (TransferCode == 1) { // Koyama
+		Gt0.diag(-1).ones();
+	} else if (TransferCode == 2) { // Solow
+		Gt0.at(1,1) = 2.*rho;
+		Gt0.at(1,2) = -rho*rho;
+		Gt0.at(2,1) = 1.;
+	}
+	for (unsigned int t=0; t<npad; t++) {
+		Gt.slice(t) = Gt0;
+	}
+
 	if (!m0_prior.isNull()) {
 		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
 	}
@@ -565,10 +614,8 @@ Rcpp::List lbe_poisson(
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
     
-	forwardFilter(mt,at,Ct,Rt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,delta);
-	if (!R_IsNA(delta)) {
-		backwardSmoother(ht,Ht,n,delta,mt,at,Ct,Rt);
-	}
+	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,delta);
+	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
 
 	Rcpp::List output;

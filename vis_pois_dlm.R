@@ -133,5 +133,69 @@ plot_mcmc = function(sim_dat,mcmc_dat,lbe_dat=NULL) {
     theme(axis.text.x = element_blank(),
           axis.title.x = element_blank())
   
-  return(list(p1,p2))
+  p3 = ggplot(data.frame(W=mcmc_dat$W)) +
+    geom_histogram(aes(x=W),position="identity",bins=50,alpha=0.8) +
+    geom_vline(xintercept=sim_dat$params$W,color="maroon") +
+    theme_light() + xlab("W: Evolution Variance")
+  
+  if (!is.null(lbe_dat)) {
+    p3 = p3 + geom_vline(xintercept=var(diff(lbe_dat$ht)),color="royalblue")
+  }
+  
+  p4 = ggplot(data.frame(index=1:length(mcmc_dat$W),W=mcmc_dat$W),
+              aes(x=index,y=W)) +
+    geom_line() + geom_hline(yintercept=sim_dat$params$W,color="maroon") +
+    theme_light() + xlab("Iteration") + ylab("W: Evolution Variance")
+  
+  return(list(p1,p2,p3,p4))
+}
+
+
+plot_vb = function(sim_dat,vb_dat,lbe_dat=NULL) {
+  require(ggplot2)
+  
+  n = length(sim_dat$y)
+  
+  psi = data.frame(lobnd=apply(vb_dat$ht[-1,],1,median)-2*sqrt(abs(apply(vb_dat$Ht[-1,],1,median))),
+                   est=apply(vb_dat$ht[-1,],1,median),
+                   hibnd=apply(vb_dat$ht[-1,],1,median)+2*sqrt(abs(apply(vb_dat$Ht[-1,],1,median))))
+  psi$true = sim_dat$psi
+  
+  if (!is.null(lbe_dat)) {
+    psi$lbe = lbe_dat$ht[-1]
+  }
+  psi$time = 1:n
+  
+  p1 = ggplot(psi,aes(x=time)) +
+    geom_line(aes(y=est,color="VB"),alpha=0.6) +
+    geom_ribbon(aes(ymin=lobnd,ymax=hibnd,y=est),
+                alpha=0.2, show.legend = FALSE, fill="royalblue")
+  
+  if (!is.null(lbe_dat)) {
+    p1 = p1 + geom_ribbon(aes(ymin=lbe_dat$ht[-1]-2*sqrt(lbe_dat$Ht[-1]),
+                              ymax=lbe_dat$ht[-1]+2*sqrt(lbe_dat$Ht[-1]),
+                              y=est),
+                          alpha=0.2,show.legend = FALSE, fill="black") +
+      geom_line(aes(y=lbe,color="LBE (Smoothed)"),alpha=0.6)
+  }
+  
+  p1 = p1 + geom_line(aes(y=true,color="True"),alpha=0.6) +
+    labs(x="Time",y="Gain Factor (psi)", color="Legend") +
+    scale_color_manual(values=c("black","royalblue","maroon")) +
+    theme_light() +
+    theme(legend.position="bottom")
+  
+  West = 1./rgamma(1000,vb_dat$aw, rate=vb_dat$bw)
+  
+  p3 = ggplot(data.frame(W=West)) +
+    geom_histogram(aes(x=W),position="identity",bins=50,alpha=0.8) +
+    theme_light() + xlab(paste0("W (true=",sim_dat$params$W,")"))
+  
+  if (!is.null(lbe_dat)) {
+    p3 = p3 + geom_vline(xintercept=var(diff(lbe_dat$ht)),color="royalblue")
+  }
+  
+  
+  
+  return(list(p1,p3))
 }

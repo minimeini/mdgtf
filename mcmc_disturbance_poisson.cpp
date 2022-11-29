@@ -322,6 +322,7 @@ Rcpp::List mcmc_disturbance_pois(
 	const double W_true = NA_REAL, // true value of state/evolution error variance
 	const Rcpp::Nullable<Rcpp::NumericVector>& wt_true = R_NilValue, // true value of system/evolution/state error/disturbance
 	const Rcpp::Nullable<Rcpp::NumericVector>& ht_ = R_NilValue, // (n+1) x 1, (h[0],h[1],...,h[n]), smoothing means or Taylor expansion locations of (psi[0],...,psi[n]) | Y
+	const double MH_var = 1.,
 	const bool use_lambda_bound = false,
 	const unsigned int nburnin = 0,
 	const unsigned int nthin = 1,
@@ -531,7 +532,7 @@ Rcpp::List mcmc_disturbance_pois(
 				}
       		    
       	    }
-			Btrt = std::sqrt(Bt);
+			Btrt = std::sqrt(Bt*MH_var);
 		    wt_new = R::rnorm(bt, Btrt);
 			if (!std::isfinite(wt_new)) {
 				// Just reject it and move onto next t.
@@ -604,7 +605,7 @@ Rcpp::List mcmc_disturbance_pois(
 				}
       		    
       	    }
-			Btrt = std::sqrt(Bt);
+			Btrt = std::sqrt(Bt*MH_var);
 			logq_old = R::dnorm(wt_old,bt,Btrt,true);
 			/* Part 4. */
 

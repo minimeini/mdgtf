@@ -4,6 +4,18 @@ using namespace Rcpp;
 // [[Rcpp::plugins(cpp11)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]
 
+
+/*
+--------------------------
+------ Related Code ------
+--------------------------
+
+- `mcmc_disturbance_poisson.cpp`
+- `sim_pois_dglm.R`
+*/
+
+
+
 /*
 ------------------------
 ------ Model Code ------

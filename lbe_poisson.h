@@ -50,7 +50,7 @@ arma::vec update_at(
 	const arma::mat& Gt, // p x p
 	const double y,  // n x 1
 	const double rho,
-	const unsigned int L);
+	const unsigned int L) ;
 
 
 
@@ -68,7 +68,7 @@ void update_Rt(
 	arma::mat& Rt, // p x p
 	const arma::mat& Ct, // p x p
 	const arma::mat& Gt, // p x p
-	const bool use_discount,
+	const bool use_discount, // true if !R_IsNA(delta)
 	const double W, // known evolution error of psi
 	const double delta);
 
@@ -79,7 +79,7 @@ void update_Ft(
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const unsigned int t, // current time point
 	const unsigned int L, // lag
-	const arma::vec& y,  // (n+1) x 1, obs
+	const arma::vec& Y,  // (n+1) x 1, obs
 	const arma::vec& Fphi);
 
 
@@ -89,6 +89,7 @@ void forwardFilter(
 	arma::mat& at, // p x (n+1)
 	arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
 	arma::cube& Rt, // p x p x (n+1)
+	arma::cube& Gt, // p x p x (n+1)
 	arma::vec& alphat, // (n+1) x 1
 	arma::vec& betat, // (n+1) x 1
 	const unsigned int ModelCode,
@@ -106,11 +107,15 @@ void forwardFilter(
 void backwardSmoother(
 	arma::vec& ht, // (n+1) x 1
 	arma::vec& Ht, // (n+1) x 1
-	const double G, // k x k, state transition matrix: assume time-invariant
-	const arma::vec& mt, // (n+1) x 1, t=0 is the mean for initial value theta[0]
-	const arma::vec& at, // (n+1) x 1
-	const arma::vec& Ct, // (n+1) x 1, t=0 is the var for initial value theta[0]
-	const arma::vec& Rt);
+	const unsigned int n,
+	const unsigned int p,
+	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+	const arma::mat& at, // p x (n+1)
+	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
+	const arma::cube& Rt,
+	const arma::cube& Gt,
+	const double W,
+	const double delta);
 
 
 Rcpp::List lbe_poisson(

@@ -30,7 +30,7 @@ sim_pois_dglm = function(
     psi0 = 0.,
     theta0 = 0., # initial value for the transfer function block; set it to NULL to sample from a uniform distribution(0,10).
     W = 0.01, # Evolution variance
-    L = 12, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
+    L = 0, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
     rng.seed = NULL) {
 
