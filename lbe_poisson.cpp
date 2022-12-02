@@ -33,44 +33,6 @@ using namespace Rcpp;
 */
 
 
-double trigamma_obj(
-	unsigned n,
-	const double *x, 
-	double *grad, 
-	void *my_func_data) {
-
-	double *q = (double*)my_func_data;
-
-	if (grad) {
-		grad[0] = 2*(R::trigamma(x[0])-(*q))*R::psigamma(x[0],2);
-	}
-
-	return std::pow(R::trigamma(x[0])-(*q),2);
-}
-
-
-
-double optimize_trigamma(double q) {
-	nlopt_opt opt;
-	opt = nlopt_create(NLOPT_LD_MMA, 1);
-
-	double lb[1] = {0}; // lower bound
-	nlopt_set_lower_bounds(opt,lb);
-	nlopt_set_xtol_rel(opt,1e-4);
-	nlopt_set_min_objective(opt,trigamma_obj,(void *) &q);
-
-	double x[1] = {1e-6};
-	double minf;
-	if (nlopt_optimize(opt, x, &minf) < 0) {
-    	Rprintf("nlopt failed!\\n");
-	}
-	
-	double result = x[0];
-	nlopt_destroy(opt);
-	return result;
-}
-
-
 
 arma::vec update_at(
 	const unsigned int p,

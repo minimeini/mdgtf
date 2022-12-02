@@ -210,4 +210,15 @@ arma::mat update_Fx_Koyama(
 
 
 
+double trigamma_obj(
+	unsigned n,
+	const double *x, 
+	double *grad, 
+	void *my_func_data);
+
+
+
+double optimize_trigamma(double q);
+
+
 #endif

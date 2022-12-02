@@ -326,7 +326,8 @@ Rcpp::List mcmc_disturbance_pois(
 	const bool use_lambda_bound = false,
 	const unsigned int nburnin = 0,
 	const unsigned int nthin = 1,
-	const unsigned int nsample = 1) { // n x 1
+	const unsigned int nsample = 1,
+	const bool verbose = true) { // n x 1
 
 	const double EBOUND = 700.;
 
@@ -773,10 +774,15 @@ Rcpp::List mcmc_disturbance_pois(
 			// E0_stored.at(idx_run) = E0;
 		}
 
-		Rcout << "\rProgress: " << b << "/" << ntotal-1;
+		if (verbose) {
+			Rcout << "\rProgress: " << b << "/" << ntotal-1;
+		}
+		
 	}
 
-	Rcout << std::endl;
+	if (verbose) {
+		Rcout << std::endl;
+	}
 
 	Rcpp::List output;
 	output["wt"] = Rcpp::wrap(wt_stored);
