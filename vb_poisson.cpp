@@ -36,6 +36,7 @@ Rcpp::List vb_poisson(
 	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7;
 	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8;
 	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6;
+    const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode;
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
@@ -43,17 +44,21 @@ Rcpp::List vb_poisson(
 		TransferCode = 0; 
 		p = 2;
 		L_ = 0;
-	}
-	if (is_koyama) { 
+	} else if (is_koyama) { 
 		TransferCode = 1; 
 		p = L;
 		L_ = L;
-	}
-	if (is_solow) { 
+	} else if (is_solow) { 
 		TransferCode = 2; 
 		p = 3;
 		L_ = 0;
-	}
+	} else if (is_vanilla) {
+        TransferCode = 3;
+        p = 1;
+        L_ = 0;
+    } else {
+        ::Rf_error("Unknown type of model.");
+    }
 
 
     /* ----- Hyperparameter and Initialization ----- */
@@ -91,7 +96,9 @@ Rcpp::List vb_poisson(
 		Gt0.at(1,1) = 2.*rho;
 		Gt0.at(1,2) = -rho*rho;
 		Gt0.at(2,1) = 1.;
-	}
+	} else if (TransferCode == 3) { // Vanilla
+        Gt0.at(0,0) = rho;
+    }
 	for (unsigned int t=0; t<npad; t++) {
 		Gt.slice(t) = Gt0;
 	}

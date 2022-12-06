@@ -45,6 +45,7 @@ arma::vec update_at(
 	const unsigned int L = 1) {
 	
 	arma::vec at(p,arma::fill::zeros);
+	const double UPBND = 100.;
 	
 	if (TransferCode == 2) { // Solow
 		/*------ START Solow ------*/
@@ -59,7 +60,8 @@ arma::vec update_at(
 			break;
 			case 3: // SolowEXP
 			{
-				at.at(1) = coef1*y*std::exp(mt.at(0));
+				// at.at(1) = coef1*y*std::exp(mt.at(0));
+				at.at(1) = coef1*y*std::exp(std::min(mt.at(0),UPBND));
 			}
 			break;
 			case 7: // SolowEye
@@ -86,7 +88,8 @@ arma::vec update_at(
 			break;
 			case 5: // KoyckExp
 			{
-				at.at(1) = y*std::exp(mt.at(0));
+				// at.at(1) = y*std::exp(mt.at(0));
+				at.at(1) = y*std::exp(std::min(mt.at(0),UPBND));
 			}
 			break;
 			case 8: // KoyckEye
@@ -102,13 +105,13 @@ arma::vec update_at(
 		at.at(1) += rho*mt.at(1);
 		/*------ END Koyck ------*/
 
-	} else if (TransferCode == 1) { // Koyama
+	} else if (TransferCode==1 || TransferCode==3) { // Koyama or Vanilla
 		/*------ START Koyama ------*/
 		at = Gt * mt;
 		/*------ END Koyama ------*/
 
 	} else {
-		::Rf_error("get_at function is only defined for Koyama, Solow, or Koyck's transmission kernels.");
+		::Rf_error("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
 	}
 
 	return at;
@@ -123,6 +126,8 @@ void update_Gt(
 	const arma::vec& mt, // p x 1
 	const double y = NA_REAL,  // obs
 	const double rho = NA_REAL) {
+
+	const double UPBND = 100.;
 	
 	if (TransferCode == 2) { // Solow
 		switch (ModelCode) {
@@ -134,7 +139,8 @@ void update_Gt(
 			break;
 			case 3: // SolowExp
 			{
-				Gt.at(1,0) = std::exp(mt.at(0));
+				// Gt.at(1,0) = std::exp(mt.at(0));
+				Gt.at(1,0) = std::exp(std::min(mt.at(0),UPBND));
 			}
 			break;
 			case 7: // SolowEye
@@ -158,7 +164,8 @@ void update_Gt(
 			break;
 			case 5: // KoyckExp
 			{
-				Gt.at(1,0) = std::exp(mt.at(0));
+				// Gt.at(1,0) = std::exp(mt.at(0));
+				Gt.at(1,0) = std::exp(std::min(mt.at(0),UPBND));
 			}
 			break;
 			case 8: // KoyckEye
@@ -245,14 +252,16 @@ void forwardFilter(
 	------ Initialization ------
 	*/
 	unsigned int LinkCode = 1; // 0 - exponential; 1 - identity
-	if (ModelCode > 5) {LinkCode = 0;}
-	const bool use_discount = !R_IsNA(delta); // Prioritize discount factor if it is given.
+	if (ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9) {LinkCode = 0;}
+	const bool use_discount = !R_IsNA(delta) && R_IsNA(W); // Not prioritize discount factor if it is given.
 
 
 	arma::vec Ft(p,arma::fill::zeros);
-	if (TransferCode != 1) {Ft.at(1) = 1.;} // not koyama
-
-	
+	if (TransferCode==0 || TransferCode==2) { // Koyck or Solow
+		Ft.at(1) = 1.;
+	} else if (TransferCode==3) { // Vanilla
+		Ft.at(0) = 1.;
+	}
 
 	arma::vec Fphi;
 	arma::vec Fy;
@@ -263,6 +272,8 @@ void forwardFilter(
 		Fphi = get_Fphi(L,mu,m,s);
 		Fy.zeros(L);
 	}
+
+	const double UPBND = 100.;
 	/*
 	------ Initialization ------
 	*/
@@ -287,6 +298,7 @@ void forwardFilter(
 			break;
 			case 1: // KoyamaExp
 			{
+				at.elem(arma::find(at>UPBND)).fill(UPBND);
 				Ft = Ft % arma::exp(at.col(1));
 				ft = arma::accu(Ft);
 				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
@@ -365,6 +377,7 @@ void forwardFilter(
 				break;
 				case 1: // KoyamaExp
 				{
+					at.elem(arma::find(at>UPBND)).fill(UPBND);
 					Ft = Ft % arma::exp(at.col(t));
 					ft = arma::accu(Ft);
 					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
@@ -381,7 +394,7 @@ void forwardFilter(
 					::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
 				}
 			} // END switch block
-		} else {
+		} else { // Vanilla, Koyck, Solow
 			ft = arma::as_scalar(Ft.t() * at.col(t));
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
 		}
@@ -434,22 +447,22 @@ void backwardSmoother(
 	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
 	const arma::mat& at, // p x (n+1)
 	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
-	const arma::cube& Rt,
+	const arma::cube& Rt, // p x p x (n+1)
 	const arma::cube& Gt,
 	const double W = NA_REAL,
-	const double delta = NA_REAL) { // p x p x (n+1)
+	const double delta = 0.9) { // 1: smoothing, 2: sampling (conditional)
 
 	ht.at(n) = mt.at(0,n);
 	Ht.at(n) = std::abs(Ct.at(0,0,n));
 
 	double coef1, coef2;
-	if (!R_IsNA(delta)) {
+	arma::mat Bt,Ht_prev,Ht_cur;
+	arma::vec ht_prev, ht_cur;
+	if (!R_IsNA(delta) && R_IsNA(W)) {
 		coef1 = 1. - delta;
 		coef2 = delta * delta;
 	}
-
-	arma::mat Bt,Ht_prev,Ht_cur;
-	arma::vec ht_prev, ht_cur;
+	
 	if (!R_IsNA(W)) {
 		Bt.set_size(p,p);
 		Ht_cur.set_size(p,p);
@@ -462,39 +475,165 @@ void backwardSmoother(
 	
 	for (unsigned int t=(n-1); t>0; t--) {
 		R_CheckUserInterrupt();
-		if (!R_IsNA(delta)) {
+		if (!R_IsNA(delta) && R_IsNA(W)) {
 			ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
 			Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
 		} else if (!R_IsNA(W)) {
-			Bt = Ct.slice(t) * Gt.slice(t+1).t() * Rt.slice(t+1).i();
-			ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
-			Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
+			try {
+				Bt = Ct.slice(t) * Gt.slice(t+1).t() * Rt.slice(t+1).i();
+				ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
+				Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
 
-			ht.at(t) = ht_cur.at(0);
-			Ht.at(t) = Ht_cur.at(0,0);
+				ht.at(t) = ht_cur.at(0);
+				Ht.at(t) = Ht_cur.at(0,0);
 
-			ht_prev = ht_cur;
-			Ht_prev = Ht_cur;
+				ht_prev = ht_cur;
+				Ht_prev = Ht_cur;
+			} catch (...) {
+				// Rcout << "t=" << t << std::endl;
+				// Rcout << "W=" << W << std::endl;
+				// Rcout << "R[t+1]=" << Rt.slice(t+1) << std::endl;
+				if (!R_IsNA(delta)) {
+					ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
+					Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
+				} else {
+					Bt = Ct.slice(t) * Gt.slice(t+1).t() * arma::pinv(Rt.slice(t+1),1.e-6);
+					ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
+					Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
+
+					ht.at(t) = ht_cur.at(0);
+					Ht.at(t) = Ht_cur.at(0,0);
+
+					ht_prev = ht_cur;
+					Ht_prev = Ht_cur;
+				}
+			}
+			
 		}
 		
-		// Rcout << "\rSmoothing: " << n+1-t << "/" << n;
+		// Rcout << "\rMarginal Smoothing: " << n+1-t << "/" << n;
 	}
 	// Rcout << std::endl;
 
 	// t = 0
-	if (!R_IsNA(delta)) {
+	if (!R_IsNA(delta) && R_IsNA(W)) {
 		ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
 		Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
 	} else if (!R_IsNA(W)) {
-		Bt = Ct.slice(0) * Gt.slice(1).t() * Rt.slice(1).i();
-		ht_cur = mt.col(0) + Bt * (ht_prev - at.col(1));
-		Ht_cur = Ct.slice(0) + Bt*(Ht_prev - Rt.slice(1))*Bt.t();
+		try {
+			Bt = Ct.slice(0) * Gt.slice(1).t() * Rt.slice(1).i();
+			ht_cur = mt.col(0) + Bt * (ht_prev - at.col(1));
+			Ht_cur = Ct.slice(0) + Bt*(Ht_prev - Rt.slice(1))*Bt.t();
 
-		ht.at(0) = ht_cur.at(0);
-		Ht.at(0) = Ht_cur.at(0,0);
+			ht.at(0) = ht_cur.at(0);
+			Ht.at(0) = Ht_cur.at(0,0);
+		} catch (...) {
+			if (!R_IsNA(delta)) {
+				ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
+				Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
+			} else {
+				Bt = Ct.slice(0) * Gt.slice(1).t() * arma::pinv(Rt.slice(1),1.e-6);
+				ht_cur = mt.col(0) + Bt * (ht_prev - at.col(1));
+				Ht_cur = Ct.slice(0) + Bt*(Ht_prev - Rt.slice(1))*Bt.t();
+
+				ht.at(0) = ht_cur.at(0);
+				Ht.at(0) = Ht_cur.at(0,0);
+			}
+			
+			// Rcout << "t=" << 0 << std::endl;
+			// Rcout << "W=" << W << std::endl;
+			// Rcout << "R[t+1]=" << Rt.slice(1) << std::endl;
+			// ::Rf_error("Inversion of R[t+1] failed.");
+		}
 	}
 	
 }
+
+
+
+void backwardSampler(
+	arma::vec& theta, // (n+1) x 1
+	const unsigned int n,
+	const unsigned int p,
+	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+	const arma::mat& at, // p x (n+1)
+	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
+	const arma::cube& Rt, // p x p x (n+1)
+	const arma::cube& Gt,
+	const double W = NA_REAL,
+	const double scale_sd = arma::datum::eps) {
+
+	arma::mat Bt(p,p);
+	arma::mat Ip(p,p,arma::fill::eye); Ip *= scale_sd;
+
+	arma::vec ht = mt.col(n);
+	arma::mat Ht = Ct.slice(n);
+	try{
+		Ht = arma::chol(arma::symmatu(Ht + Ip));
+	} catch(...) {
+		Rcout << "W=" << W << std::endl;
+		::Rf_error("Cholesky decomposition failed");
+	}
+	
+	arma::vec tmp = arma::randn(p,1);
+	arma::vec theta_prev = ht + Ht.t()*tmp;
+	theta.at(n) = theta_prev.at(0);
+
+	arma::vec theta_cur(p);
+	// Rcout << "start" << std::endl;
+	
+	for (unsigned int t=(n-1); t>0; t--) {
+		R_CheckUserInterrupt();
+		try {
+			Bt = Ct.slice(t) * Gt.slice(t+1).t() * Rt.slice(t+1).i();
+		} catch (...) {
+			Rcout << "t=" << t << std::endl;
+			Rcout << "W=" << W << std::endl;
+			Rcout << "R[t+1]=" << Rt.slice(t+1) << std::endl;
+			::Rf_error("Inversion of R[t+1] failed.");
+		}
+		
+
+		// Conditional Sampling
+		ht = mt.col(t) + Bt*(theta_prev - at.col(t+1));
+		Ht = Ct.slice(t) - Bt * Rt.slice(t+1) * Bt.t();
+		try {
+			Ht = arma::chol(arma::symmatu(Ht + Ip));
+		} catch(...) {
+			Rcout << "W=" << W << std::endl;
+			::Rf_error("Cholesky decomposition failed");
+		}
+		
+		tmp = arma::randn(p,1);
+		theta_cur = ht + Ht.t() * tmp;
+		theta.at(t) = theta_cur.at(0);
+
+		// Prep for the next iteration
+		theta_prev = theta_cur;
+
+		// Rcout << "\rConditional Sampling: " << n+1-t << "/" << n;
+	}
+	// Rcout << std::endl;
+
+	// t = 0
+	Bt = Ct.slice(0) * Gt.slice(1).t() * Rt.slice(1).i();
+
+	// Conditional Sampling
+	ht = mt.col(0) + Bt*(theta_prev - at.col(1));
+	Ht = Ct.slice(0) - Bt * Rt.slice(1) * Bt.t();
+	try {
+		Ht = arma::chol(Ht);
+		tmp = arma::randn(p,1);
+		theta_cur = ht + scale_sd*Ht.t() * tmp;
+		theta.at(0) = theta_cur.at(0);
+	} catch (...) {
+
+	}
+	
+
+	// Rcout << "Done" << std::endl;
+}
+
 
 
 
@@ -521,23 +660,28 @@ Rcpp::List lbe_poisson(
 	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7;
 	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8;
 	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6;
-	unsigned int TransferCode;
+	const bool is_vanilla = ModelCode == 9;
+	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
 	if (is_koyck) { 
 		TransferCode = 0; 
 		p = 2;
 		L_ = 0;
-	}
-	if (is_koyama) { 
+	} else if (is_koyama) { 
 		TransferCode = 1; 
 		p = L;
 		L_ = L;
-	}
-	if (is_solow) { 
+	} else if (is_solow) { 
 		TransferCode = 2; 
 		p = 3;
 		L_ = 0;
+	} else if (is_vanilla) {
+		TransferCode = 3;
+		p = 1;
+		L_ = 0;
+	} else {
+		::Rf_error("Unknown type of model.");
 	}
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
@@ -564,6 +708,8 @@ Rcpp::List lbe_poisson(
 		Gt0.at(1,1) = 2.*rho;
 		Gt0.at(1,2) = -rho*rho;
 		Gt0.at(2,1) = 1.;
+	} else if (TransferCode == 3) { // Vanilla
+		Gt0.at(0,0) = rho;
 	}
 	for (unsigned int t=0; t<npad; t++) {
 		Gt.slice(t) = Gt0;

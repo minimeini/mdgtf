@@ -11,15 +11,16 @@ Rcpp::sourceCpp(file.path(repo,"model_utils.cpp"))
 # ------ Model Code ------
 # ------------------------
 #
-# 0 - (KoyamaMax) Identity link    + LogNorm transmission delay kernel      + ramp function (aka max(x,0)) on gain factor (psi)
-# 1 - (KoyamaExp) Identity link    + LogNorm transmission delay kernel      + exponential function on gain factor
-# 2 - (SolowMax)  Identity link    + NegBinom transmission delay kernel     + ramp function on gain factor
-# 3 - (SolowExp)  Identity link    + NegBinom transmission delay kernel     + exponential function on gain factor
-# 4 - (KoyckMax)  Identity link    + Exponential transmission delay kernel  + ramp function on gain factor
-# 5 - (KoyckExp)  Identity link    + Exponential transmission delay kernel  + exponential function on gain factor
-# 6 - (KoyamaEye) Exponential link + LogNorm transmission delay kernel      + identity function on gain factor
-# 7 - (SolowEye)  Exponential link + NegBinom transmission delay kernel     + identity function on gain factor
-# 8 - (KoyckEye)  Exponential link + Exponential transmission delay kernel  + identity function on gain factor
+# 0 - (KoyamaMax) Identity link    + LogNorm transmission delay      + ramp function (aka max(x,0)) on gain factor (psi)
+# 1 - (KoyamaExp) Identity link    + LogNorm transmission delay      + exponential function on gain factor
+# 2 - (SolowMax)  Identity link    + NegBinom transmission delay     + ramp function on gain factor
+# 3 - (SolowExp)  Identity link    + NegBinom transmission delay     + exponential function on gain factor
+# 4 - (KoyckMax)  Identity link    + Exponential transmission delay  + ramp function on gain factor
+# 5 - (KoyckExp)  Identity link    + Exponential transmission delay  + exponential function on gain factor
+# 6 - (KoyamaEye) Exponential link + LogNorm transmission delay      + identity function on gain factor
+# 7 - (SolowEye)  Exponential link + NegBinom transmission delay     + identity function on gain factor
+# 8 - (KoyckEye)  Exponential link + Exponential transmission delay  + identity function on gain factor
+# 9 - (Vanilla)   Exponential link + Exponential transmission delay  + No gain
 
 
 
@@ -208,7 +209,7 @@ sim_pois_dglm = function(
         }
     } else if (ModelCode == 8) { # KoyckEye
         # <obs> y[t] ~ Pois(lambda[t])
-        # <link> lambda[t] = exp(theta[t])
+        # <link> lambda[t] = exp(mu0 + theta[t])
         # <state> theta[t] = rho*theta[t-1] + y[t-1]*psi[t-1]
         # <state> psi[t] = psi[t-1] + omega[t]
         theta[1] = .Machine$double.eps
@@ -221,6 +222,21 @@ sim_pois_dglm = function(
             lambda[t] = exp(min(c(mu0+theta[t],UPBND)))
             y[t] = rpois(1,lambda[t])
         }
+    } else if (ModelCode == 9) {
+        # <obs> y[t] ~ Pois(lambda[t])
+        # <link> lambda[t] = exp(mu0 + theta[t])
+        # <state> theta[t] = rho*theta[t-1] + omega[t]
+        theta[1] = .Machine$double.eps + rho*theta0 + wt[1]
+        lambda[1] = exp(min(c(mu0+theta[1],UPBND)))
+
+        if (!is.null(rng.seed)) { set.seed(rng.seed)}
+        y[1] = rpois(1,lambda[1])
+        for (t in 2:n) {
+            theta[t] = rho*theta[t-1] + wt[t]
+            lambda[t] = exp(min(c(mu0+theta[t],UPBND)))
+            y[t] = rpois(1,lambda[t])
+        }
+
     } else {
         stop("Not implemented yet.")
     }

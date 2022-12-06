@@ -107,6 +107,19 @@ void backwardSmoother(
 	const double delta);
 
 
+void backwardSampler(
+	arma::vec& theta, // (n+1) x 1
+	const unsigned int n,
+	const unsigned int p,
+	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+	const arma::mat& at, // p x (n+1)
+	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
+	const arma::cube& Rt, // p x p x (n+1)
+	const arma::cube& Gt,
+	const double W,
+	const double scale_sd);
+
+
 Rcpp::List lbe_poisson(
 	const arma::vec& Y, // n x 1, the observed response
 	const unsigned int ModelCode,

@@ -102,6 +102,9 @@ arma::vec get_Fphi(
     const double s);
 
 
+arma::vec get_Fphi(const unsigned int L);
+
+
 
 /*
 ------ update_Fx ------

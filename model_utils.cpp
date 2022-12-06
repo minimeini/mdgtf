@@ -136,6 +136,28 @@ arma::vec get_Fphi(
 
 
 
+arma::vec get_Fphi(const unsigned int L){ // number of Lags to be considered
+
+	const double mu = 2.2204e-16;
+    const double m = 4.7;
+    const double s = 2.9;
+
+    double tmpd;
+    const double sm2 = std::pow(s/m,2);
+    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
+    const double pk_sg2 = std::log(1.+sm2);
+
+    arma::vec Fphi(L,arma::fill::zeros);
+    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
+    for (unsigned int d=1; d<L; d++) {
+        tmpd = static_cast<double>(d) + 1.;
+        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
+    }
+    return Fphi;
+}
+
+
+
 
 //' @export
 // [[Rcpp::export]]
@@ -166,6 +188,8 @@ arma::mat update_Fx(
 			arma::vec Fphi(L,arma::fill::ones);
 			if (!Fphi_.isNull()) {
 				Fphi = Rcpp::as<arma::vec>(Fphi_);
+			} else {
+				Fphi = get_Fphi(L,2.2204e-16,4.7,2.9);
 			}
 
 			// Fill out the first two columns, starting from the second row of Fx
@@ -372,6 +396,18 @@ arma::mat update_Fx(
 			}
 		}
 		break;
+		case 9: // Vanilla
+		{
+			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
+				tmpd = 1.;
+				Fx.at(t-1,t-1) = tmpd;
+				for (unsigned int i=(t-1); i>=1; i--) { // i-1 is the column index in cpp, w[i]
+					tmpd *= rho;
+					Fx.at(t-1,i-1) = Fx.at(t-1,i) + tmpd;
+				}
+			}
+		}
+		break;
 		default:
 		{
 			::Rf_error("Undefined model.");
@@ -553,6 +589,15 @@ arma::vec update_theta0(
 					tmpd *= rho;
 					theta0.at(t-1) += tmpd*Ypad.at(i-1)*psi0;
 				}
+			}
+		}
+		break;
+		case 9: // Vanilla
+		{
+			double tmpd2 = 1.;
+			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
+				tmpd2 *= rho;
+				theta0.at(t-1) = tmpd2*theta00;
 			}
 		}
 		break;

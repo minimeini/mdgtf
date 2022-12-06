@@ -330,6 +330,7 @@ Rcpp::List mcmc_disturbance_pois(
 	const bool verbose = true) { // n x 1
 
 	const double EBOUND = 700.;
+	const bool use_exp_link = ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9;
 
 	const unsigned int n = Y.n_elem;
 	const double n_ = static_cast<double>(n);
@@ -431,7 +432,7 @@ Rcpp::List mcmc_disturbance_pois(
 			Rw = w1Prior_.at(1);
 		} else {
 			// Setting from Alves et al. (2010)
-			aw = 1.;
+			aw = 0.;
 			Rw = 100.;
 		}
 		Rwrt = std::sqrt(Rw);
@@ -483,7 +484,7 @@ Rcpp::List mcmc_disturbance_pois(
 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND); //**
 
 			// lambda filled with old values of wt[t]
-			if (ModelCode > 5) {
+			if (use_exp_link) {
 				// Exponential Link
 				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye
 				lambda = arma::exp(mu0_true+theta);
@@ -505,14 +506,14 @@ Rcpp::List mcmc_disturbance_pois(
 
 			/* Part 2. */
 			// Sample wt[t](new) given wt[t](old)
-			if (ModelCode > 5) {
+			if (use_exp_link) {
 				// Linearlisation for exponential link
 				Ytilde = theta + (Y - lambda) / lambda; 
 			} // Otherwise, Ytilde == Y.
 			
 		    Yhat = Ytilde - theta + Fx.col(t)*wt_old; // TODO - CHECK HERE
 		    if (t==0) {
-				if (ModelCode > 5) {
+				if (use_exp_link) {
 					// Exponential link, Variance V[t]= 1/lambda[t]
 					Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
         	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
@@ -522,7 +523,7 @@ Rcpp::List mcmc_disturbance_pois(
         	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/lambda));
 				}
       	    } else {
-				if (ModelCode > 5) {
+				if (use_exp_link) {
 					// Exponential link, Variance V[t] = 1/lambda[t]
 					Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
         	    	bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
@@ -549,9 +550,9 @@ Rcpp::List mcmc_disturbance_pois(
 			theta = th0tilde + Fx * wt;
 			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
 			// lambda filled with new values of wt[t]
-			if (ModelCode > 5) {
+			if (use_exp_link) {
 				// Exponential Link
-				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye
+				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye, 9 - Vanilla
 				lambda = arma::exp(mu0_true+theta);
 				if (use_lambda_bound && (lambda.has_inf() || lambda.has_nan())) {
 					wt.at(t) = wt_old; // Reject if out of bound
@@ -578,14 +579,14 @@ Rcpp::List mcmc_disturbance_pois(
 
 			/* Part 4. */
 			// Transition probability to wt[t](old) from wt[t](new)
-			if (ModelCode > 5) {
+			if (use_exp_link) {
 				// Linearlisation for exponential link
 				Ytilde = theta + (Y - lambda) / lambda; 
 			} // Otherwise, Ytilde == Y.
 
 		    Yhat = Ytilde - theta + Fx.col(t)*wt_new;
 			if (t==0) {
-				if (ModelCode > 5) {
+				if (use_exp_link) {
 					// Exponential link, Variance V[t]= 1/lambda[t]
 					Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
         	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
@@ -595,7 +596,7 @@ Rcpp::List mcmc_disturbance_pois(
         	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/lambda));
 				}
       	    } else {
-				if (ModelCode > 5) {
+				if (use_exp_link) {
 					// Exponential link, Variance V[t] = 1/lambda[t]
 					Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
         	    	bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));

@@ -1,0 +1,110 @@
+---
+title: "Variational Inference for State Space Models"
+author: "Meini Tang"
+date: "`r Sys.Date()`"
+output: 
+  bookdown::pdf_document2:
+    extra_dependencies: "subfig"
+    toc: false
+    number_sections: false
+    fig_caption: true
+    keep_tex: true
+header_includes:
+  \usepackage{dcolumn}
+  \usepackage{booktabs}
+abstract: |
+  This is a review and simulation-based comparison studies.
+keywords:
+  - dynamic generalized linear model
+  - transfer functions
+  - variational Bayes
+  - linear Bayes approximation
+  - Markov chain Monte Carlo
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE,echo=FALSE}
+rm(list=ls())
+knitr::opts_chunk$set(eval=TRUE,
+                      echo=FALSE, # show the code or not
+                      include=TRUE, # include the output or not
+                      results = "hide",
+                      warning=FALSE,
+                      message=FALSE,
+                      error=TRUE,
+                      highlight=FALSE,
+                      tidy=FALSE,
+                      fig.show="asis",
+                      fig.align='center',
+                      out.width="60%")
+```
+
+```{r load packages,eval=TRUE}
+pkgs = c("ggplot2", "gridExtra", "kableExtra")
+installed_pkgs = pkgs %in% rownames(installed.packages())
+if (any(installed_pkgs == FALSE)) {
+  install.packages(pkgs[!installed_pkgs])
+}
+
+invisible(lapply(pkgs,library,character.only=TRUE))
+```
+
+```{r,eval=TRUE}
+repo = "/Users/meinitang/Dropbox/Repository/poisson-dlm"
+source(file.path(repo,"model_info.R"))
+source(file.path(repo,"sim_pois_dglm.R"))
+source(file.path(repo,"vis_pois_dlm.R"))
+
+Rcpp::sourceCpp(file.path(repo,"model_utils.cpp"),verbose=FALSE)
+Rcpp::sourceCpp(file.path(repo,"vb_poisson.cpp"),verbose=FALSE)
+Rcpp::sourceCpp(file.path(repo,"hva_poisson.cpp"),verbose=FALSE)
+```
+
+# Introduction
+
+<!-- Plan  -->
+<!-- 1. Introduction to dynamic generalized linear model and DGLM with transfer function. -->
+<!-- 2. Introduction to difference inference methods: LBE -> MCMC -> SMC -> VB and its variants -->
+
+In this report, we consider a set of integer-valued univariate temporal dependent observations, $\{y_t\in\mathbb{N},t=1,\dots,n\}$. Common choices for the likelihood function include Poisson likelihood and negative binomial likelihood with a mean function $\lambda_t$. For dynamic generalized linear model (DGLM) [@WestHarrison1997], we begin with employing parametric assumption on the mean function via a link function, $\eta_t\equiv\varphi(\cdot)$,
+
+$$
+\eta_t \equiv \varphi(\lambda_t) = \mu_0 + \theta_t,\ t=1,\dots,n,
+$$
+
+where $\mu_0$ is called the baseline, $\theta_t$ is the unobserved latent states. Then, we make further modeling assumptions on the structure of $\theta_t$. DGLM is flexible enough to perform retrospective or predictive analysis, and access the effect of different covariates on the mean response. For example, $\theta_t = \rho \theta_{t-1} + \psi x_t$ captures the temporal dependency and the immediate impact of external covariates. However, sometimes it is also necessary to assume that (1) the effect of a regressor does not have only immediate impact on the mean response, but its effects also propagate to future times; (2) the responses can be self-exciting in the sense that the current response will be the regressor that impact the responses in the near future. To model such impact, we adopt transfer functions in the following form,
+
+$$
+\theta_t = \zeta(\boldsymbol{\theta}_{1:t-1}) + h(\boldsymbol{y}_{1:t-1};\boldsymbol{\psi}_{1:t-1}),
+$$
+
+where $\zeta(\cdot)$ is the memory of the previous states, $h(\cdot)$ is the gain from previous reponses, and $\psi_t$ is the gain factor with respect to $y_t$. For the rest of the report, we define $\boldsymbol{\theta}_{1:t}=(\theta_1,\dots,\theta_t)'$, $\boldsymbol{y}_{1:t}=(y_1,\dots,y_t)'$, and $\boldsymbol{\psi}_{1:t}=(\psi_1,\dots,\psi_t)'$. We call $\theta_t$ as the transfer function block. The self-exciting effects are often observed in infectious diseases such as COVID-19 [@Koyama_2021], earthquake aftershocks, and tweet-retweets events.
+
+For example, a Poisson DGLM that has a geometrically decaying memory of its previous states but not affected by any external effects or its own responses can be represented as
+$$
+\begin{aligned}
+<\text{obs}>\ &y_t | \lambda_t \overset{\text{ind}}{\sim}\text{Pois}(\lambda_t),\\
+<\text{link}>\ & \lambda_t = \exp(\mu_0 + \theta_t),\\
+<\text{state}>\ &\theta_t= \rho \theta_{t-1} + \omega_t,\\
+&\omega_t \sim \mathcal{N}(0,W).
+\end{aligned}
+$$
+
+If a Poisson DGLM has a geometrically decaying memory of its previous states and also self-excited by its own responses, we have
+$$
+\begin{aligned}
+<\text{obs}>\ &y_t | \lambda_t \overset{\text{ind}}{\sim}\text{Pois}(\lambda_t),\\
+<\text{link}>\ & \lambda_t = \exp(\mu_0 + \theta_t),\\
+<\text{state}>\ &\theta_t= \rho \theta_{t-1} + h(\psi_t) y_{t-1},\\
+&\psi_t = \psi_{t-1} + \omega_t,\\
+&\omega_t \sim \mathcal{N}(0,W),
+\end{aligned}
+$$
+where the gain factor, $\psi_t$, is modeled by a Normal random walk, and $h(\cdot)$ is a first-order differentiable function.
+
+
+Although this class of models has nice interpretability and flexibility, the difficulties for analytical Bayesian inference emerge from the non-Gaussian nature of the response and the non-linear structure is the transfer function block. @Alves_2010 extend the MCMC disturbance sampler proposed by @Gamerman1998 to DGLM with transfer functions using carefully-crafted Metropolis-Hastings proposal distributions. However, the authors later commented that the MCMC algorithm requires a substantial amount of information from the time series. In the mean time, its computational cost inhibit the potential extensions to higher dimensional state spaces and thus a larger number of latent variables. With computational efficiency in mind, approximate inference methods are good alternatives. Linear Bayes approximation [@]
+
+# Poisson Dynamic Linear Model
+
+

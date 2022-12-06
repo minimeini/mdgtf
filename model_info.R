@@ -2,19 +2,22 @@ get_model_list = function(ModelCode = NULL){
     ModelName = c(
         "KoyamaMax", "KoyamaExp", "SolowMax",
         "SolowExp", "KoyckMax", "KoyckExp",
-        "KoyamaEye", "SolowEye", "KoyckEye")
+        "KoyamaEye", "SolowEye", "KoyckEye",
+        "VanillaPois")
 
     ModelCode = c(
         0, 1, 2,
         3, 4, 5,
-        6, 7, 8)
+        6, 7, 8,
+        9)
 
     # ------ Transfer Function ------
     # State equation in transfer function form
     TransferKernel = c(
         "LogNorm", "LogNorm", "NegBinom",
         "NegBinom", "Exponential", "Exponential",
-        "LogNorm", "NegBinom", "Exponential")
+        "LogNorm", "NegBinom", "Exponential",
+        "Exponential")
     # ------ Transfer Function ------
 
     # ------ Reproduction Kernel ------
@@ -25,7 +28,8 @@ get_model_list = function(ModelCode = NULL){
     Reproduction = c(
         "Ramp", "Exponential", "Ramp",
         "Exponential", "Ramp", "Exponential",
-        "Identity", "Identity", "Identity")
+        "Identity", "Identity", "Identity",
+        "None")
     # ------ Reproduction Kernel ------
 
     # ------ Link Function ------
@@ -36,7 +40,8 @@ get_model_list = function(ModelCode = NULL){
     LinkFunction = c(
         "Identity", "Identity", "Identity",
         "Identity", "Identity", "Identity",
-        "Exponential", "Exponential", "Exponential")
+        "Exponential", "Exponential", "Exponential",
+        "Exponential")
     # ------ Link Function ------
 
     ModelList = data.frame(
