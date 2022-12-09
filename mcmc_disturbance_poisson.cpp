@@ -468,6 +468,7 @@ Rcpp::List mcmc_disturbance_pois(
 	double wt_old, wt_new;
 	double logp_old,logp_new,logq_old,logq_new,logratio;
 	
+	arma::mat theta_stored(n,nsample,arma::fill::zeros);
 	bool saveiter;
 
 	for (unsigned int b=0; b<ntotal; b++) {
@@ -771,6 +772,7 @@ Rcpp::List mcmc_disturbance_pois(
 
 			wt_stored.col(idx_run) = wt;
 			W_stored.at(idx_run) = W;
+			theta_stored.col(idx_run) = th0tilde + Fx * wt;
 			// rho_stored.at(idx_run) = rho;
 			// E0_stored.at(idx_run) = E0;
 		}
@@ -786,6 +788,7 @@ Rcpp::List mcmc_disturbance_pois(
 	}
 
 	Rcpp::List output;
+	output["theta"] = Rcpp::wrap(theta_stored);
 	output["wt"] = Rcpp::wrap(wt_stored);
 	wt_accept /= static_cast<double>(ntotal);
 	output["wt_accept"] = Rcpp::wrap(wt_accept);
