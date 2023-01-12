@@ -84,6 +84,12 @@ double knl(
     const double sd2);
 
 
+arma::vec knl(
+	const arma::vec& tvec,
+	const double mu,
+	const double sd2);
+
+
 /*
 ------ get_Fphi ------
 Update the log-normal transmission delay distribution

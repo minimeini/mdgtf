@@ -9,18 +9,21 @@ Rcpp::sourceCpp(file.path(repo,"model_utils.cpp"))
 
 # ------------------------
 # ------ Model Code ------
-# ------------------------
-#
-# 0 - (KoyamaMax) Identity link    + LogNorm transmission delay      + ramp function (aka max(x,0)) on gain factor (psi)
-# 1 - (KoyamaExp) Identity link    + LogNorm transmission delay      + exponential function on gain factor
-# 2 - (SolowMax)  Identity link    + NegBinom transmission delay     + ramp function on gain factor
-# 3 - (SolowExp)  Identity link    + NegBinom transmission delay     + exponential function on gain factor
-# 4 - (KoyckMax)  Identity link    + Exponential transmission delay  + ramp function on gain factor
-# 5 - (KoyckExp)  Identity link    + Exponential transmission delay  + exponential function on gain factor
-# 6 - (KoyamaEye) Exponential link + LogNorm transmission delay      + identity function on gain factor
-# 7 - (SolowEye)  Exponential link + NegBinom transmission delay     + identity function on gain factor
-# 8 - (KoyckEye)  Exponential link + Exponential transmission delay  + identity function on gain factor
-# 9 - (Vanilla)   Exponential link + Exponential transmission delay  + No gain
+# -----------------------------------------------------------------------------------------------------------
+#       NAME            LINK        |   Transmission Delay    |   Gain Function
+# -----------------------------------------------------------------------------------------------------------
+# 0  - (KoyamaMax)      Identity    |   LogNorm               |   ramp,           max(psi[t], 0)
+# 1  - (KoyamaExp)      Identity    |   LogNorm               |   exponential,    exp(psi[t])
+# 2  - (SolowMax)       Identity    |   NegBinom              |   ramp,           max(psi[t], 0)
+# 3  - (SolowExp)       Identity    |   NegBinom              |   exponential,    exp(psi[t])
+# 4  - (KoyckMax)       Identity    |   Exponential           |   ramp,           max(psi[t], 0)
+# 5  - (KoyckExp)       Identity    |   Exponential           |   exponential,    exp(psi[t])
+# 6  - (KoyamaEye)      Exponential |   LogNorm               |   identity,       psi[t]
+# 7  - (SolowEye)       Exponential |   NegBinom              |   identity,       psi[t]
+# 8  - (KoyckEye)       Exponential |   Exponential           |   identity,       psi[t]
+# 9  - (Vanilla)        Exponential |   Exponential           |   No gain
+# 10 - (KoyckSoftplus)  Identity    |   Exponential           |   Softplus,       ln( 1 + exp(psi[t]) )
+# -----------------------------------------------------------------------------------------------------------
 
 
 
@@ -28,14 +31,14 @@ sim_pois_dglm = function(
     n = 200, # number of observations
     ModelCode = 0, # 0 - KoyamaMax; 1 - KoyamaExp; 2 - SolowMax; 3 - SolowExp
     mu0 = 0., # the baseline intensity
-    psi0 = 0.,
-    theta0 = 0., # initial value for the transfer function block; set it to NULL to sample from a uniform distribution(0,10).
+    psi0 = 0., # initial value of the gain factor
+    theta0 = 0., # initial value for the transfer function block; set it to NULL to sample from a uniform distribution(0,10). Only used in Solow
     W = 0.01, # Evolution variance
     L = 0, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
     rng.seed = NULL) {
 
-    UPBND = 100
+    UPBND = 700
 
     c1 = 2*rho
     c2 = rho^2
@@ -69,7 +72,7 @@ sim_pois_dglm = function(
         # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
         hpsi[hpsi<.Machine$double.eps] = .Machine$double.eps # Reproduction number after maximum thresholding
         Fphi = get_Fphi(L)
-        lambda[1] = mu0
+        lambda[1] = mu0 + max(c(0,psi0))
 
         if (!is.null(rng.seed)) { set.seed(rng.seed)}
         y[1] = rpois(1,lambda[1])
@@ -222,7 +225,7 @@ sim_pois_dglm = function(
             lambda[t] = exp(min(c(mu0+theta[t],UPBND)))
             y[t] = rpois(1,lambda[t])
         }
-    } else if (ModelCode == 9) {
+    } else if (ModelCode == 9) { # VanillaPois
         # <obs> y[t] ~ Pois(lambda[t])
         # <link> lambda[t] = exp(mu0 + theta[t])
         # <state> theta[t] = rho*theta[t-1] + omega[t]
@@ -235,6 +238,61 @@ sim_pois_dglm = function(
             theta[t] = rho*theta[t-1] + wt[t]
             lambda[t] = exp(min(c(mu0+theta[t],UPBND)))
             y[t] = rpois(1,lambda[t])
+        }
+
+    } else if (ModelCode == 10) { # KoyckSoftplus
+        # <obs> y[t] ~ Pois(lambda[t])
+        # <link> lambda[t] = theta[t]
+        # <state> theta[t] = rho*theta[t-1] + y[t-1]*ln( 1+exp(psi[t-1]) )
+        # <state> psi[t] = psi[t-1] + omega[t]
+        hpsi = log(1. + exp(hpsi))
+        lambda[1] = mu0
+      
+        if (!is.null(rng.seed)) { set.seed(rng.seed)}
+        y[1] = rpois(1,lambda[1])
+        for (t in 2:n) {
+          theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
+          lambda[t] = mu0 + theta[t]
+          y[t] = rpois(1,lambda[t])
+        }
+    } else if (ModelCode == 11) { # KoyamaSoftplus
+        # <obs> y[t] | lambda[t] ~ Pois(lambda[t])
+        # <link> lambda[t] = lambda[0] + theta[t]
+        # <state> theta[t] = phi[1] exp(psi[t]) y[t-1] + phi[2] exp(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
+        # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
+        hpsi = log(1. + exp(hpsi)) # softplused reproduction number
+        Fphi = get_Fphi(L)
+        lambda[1] = mu0
+
+        if (!is.null(rng.seed)) { set.seed(rng.seed)}
+        y[1] = rpois(1,lambda[1])
+        for (t in 2:n) {
+            ytilde = y[(t-1):max(c(1,t-L))]
+            nlag = length(ytilde)
+            theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
+            lambda[t] = mu0 + theta[t] # <link - intensity>
+            y[t] = rpois(1,lambda[t]) # <obs>
+        }
+
+    } else if (ModelCode == 12) { # SolowSoftplus
+        # <obs> y[t] ~ Pois(lambda[t])
+        # <link> lambda[t] = mu0 + theta[t]
+        # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
+        # <state> psi[t] = psi[t-1] + omega[t]
+        hpsi = log(1. + exp(hpsi))
+        theta[1] = 2*rho*theta0
+        lambda[1] = mu0 + theta[1]
+        if (!is.null(rng.seed)) { set.seed(rng.seed)}
+        y[1] = rpois(1,lambda[1])
+
+        for (t in 2:n) {
+          if (t==2) {
+            theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+          } else {
+            theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+          }
+          lambda[t] = mu0 + theta[t]
+          y[t] = rpois(1,lambda[t])
         }
 
     } else {

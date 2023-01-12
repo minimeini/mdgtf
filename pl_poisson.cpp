@@ -1,12 +1,7 @@
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <cmath>
-#include <algorithm>
-#include <RcppArmadillo.h>
+#include "lbe_poisson.h"
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp11)]]
-// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::depends(RcppArmadillo,nloptr)]]
 
 
 
@@ -20,8 +15,6 @@ using namespace Rcpp;
 
 Unknown parameters: W, theta[0:n], beta[0:n]
 */
-//' @export
-// [[Rcpp::export]]
 Rcpp::List pl_pois_solow_eye_exp(
     const arma::vec& Y, // n x 1, the observed response
 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
@@ -170,8 +163,6 @@ Rcpp::List pl_pois_solow_eye_exp(
 Unknown parameters: theta[0:n], beta[0:n]
 Kwg: Identity link, exponential state space
 */
-//' @export
-// [[Rcpp::export]]
 Rcpp::List pl_pois_solow_eye_exp2(
     const arma::vec& Y, // n x 1, the observed response
 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
@@ -340,16 +331,16 @@ arma::mat bf_pois_koyama_max(
     const arma::vec& Y, // n x 1, the observed response
 	const double W,
 	const unsigned int N = 5000, // number of particles
-    const unsigned int B = 30, // step of backshift
+    const unsigned int L = 12, // lags
+    const unsigned int B = 12, // step of backshift
     const double rho = 34.08792, // parameter for negative binomial likelihood
-    const unsigned int obstype = 0){ // 0: negative binomial DLM; 1: poisson DLM
+    const unsigned int obstype = 1){ // 0: negative binomial DLM; 1: poisson DLM
 
     double tmpd; // store temporary double value
     unsigned int tmpi; // store temporary integer value
     arma::vec tmpv1(1);
     
     const unsigned int n = Y.n_elem; // number of observations
-    const unsigned int L = 30; // number of lags
 
     const double mu = arma::datum::eps;
     const double m = 4.7;
@@ -377,14 +368,13 @@ arma::mat bf_pois_koyama_max(
     }
 
     // Check Fphi and G - CORRECT
-    // Rcout << Fphi.t() << std::endl; 
-    // Rcout << G << std::endl;
 
     arma::vec Fy(L,arma::fill::zeros);
     arma::vec F(L);
 
     arma::cube theta_stored(L,N,B);
     arma::mat theta = arma::randu(L,N,arma::distr_param(0.,10.));
+
     arma::vec lambda(N);
     arma::vec omega(N);
     arma::vec w(N); // weight of each particle
@@ -403,6 +393,9 @@ arma::mat bf_pois_koyama_max(
         if (t>0) {
             // Checked Fy - CORRECT
             Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
+            if (t==(L+1)) {
+                Rcout << Fy.t() << std::endl;
+            }
         }
         F = Fphi % Fy; // L x 1
 
@@ -411,6 +404,7 @@ arma::mat bf_pois_koyama_max(
         using likelihood P(y[t]|lambda[t,i])
         */
         for (unsigned int i=0; i<N; i++) {
+            theta.elem(arma::find(theta<arma::datum::eps)).fill(arma::datum::eps);
             lambda.at(i) = mu + arma::as_scalar(F.t()*theta.col(i));
 
             if (obstype == 0) {
@@ -439,7 +433,7 @@ arma::mat bf_pois_koyama_max(
             theta.col(i) = G * theta_stored.slice(B-1).col(i);
         }
         theta.row(0) += omega.t();
-        theta.elem(arma::find(theta<mu)).fill(mu);
+        // theta.elem(arma::find(theta<mu)).fill(mu);
         theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
     }
 
@@ -458,152 +452,10 @@ arma::mat bf_pois_koyama_max(
 
 
 
-/*
----- Method ----
-- Bootstrap filtering with static parameter W known
-- Using the DLM formulation
-- Also known as Monte Carlo Filter by Kitagawa and Sato.
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1])
-<state> psi[t] = psi[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: psi[1:n]
-Known parameters: W, phi[1:L]
-Kwg: Identity link, exp(psi) state space
-*/
-//' @export
-// [[Rcpp::export]]
-arma::mat bf_pois_koyama_exp(
-    const arma::vec& Y, // n x 1, the observed response
-	const double W,
-	const unsigned int N = 5000, // number of particles
-    const unsigned int B = 30, // step of backshift
-    const double rho = 34.08792, // parameter for negative binomial likelihood
-    const unsigned int obstype = 0){ // 0: negative binomial DLM; 1: poisson DLM
-
-    double tmpd; // store temporary double value
-    unsigned int tmpi; // store temporary integer value
-    arma::vec tmpv1(1);
-    
-    const unsigned int n = Y.n_elem; // number of observations
-    const unsigned int L = 30; // number of lags
-
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-    const double pk_2sg = std::sqrt(2.*pk_sg2);
-
-    const double Wsqrt = std::sqrt(W);
-
-    arma::mat G(L,L,arma::fill::zeros);
-    arma::vec Fphi(L,arma::fill::zeros);
-    G.at(0,0) = 1.;
-    tmpv1.at(0) = pk_mu/pk_2sg;
-    Fphi.at(0) = 0.5*arma::as_scalar(arma::erfc(tmpv1));
-    for (unsigned int d=1; d<L; d++) {
-        G.at(d,d-1) = 1.;
-        tmpd = static_cast<double>(d) + 1.;
-        tmpv1.at(0) = -(std::log(tmpd)-pk_mu)/pk_2sg;
-        Fphi.at(d) = 0.5*arma::as_scalar(arma::erfc(tmpv1));
-        tmpd -= 1.;
-        tmpv1.at(0) = -(std::log(tmpd)-pk_mu)/pk_2sg;
-        Fphi.at(d) -= 0.5*arma::as_scalar(arma::erfc(tmpv1));
-    }
-
-    // Check Fphi and G - CORRECT
-    // Rcout << Fphi.t() << std::endl; 
-    // Rcout << G << std::endl;
-
-    arma::vec Fy(L,arma::fill::zeros);
-    arma::vec F(L);
-
-    arma::cube theta_stored(L,N,B);
-    arma::mat theta = arma::randu(L,N,arma::distr_param(0.,10.));
-    arma::vec lambda(N);
-    arma::vec omega(N);
-    arma::vec w(N); // weight of each particle
-
-    arma::mat R(n,3);
-    arma::vec qProb = {0.025,0.5,0.975};
-
-    Rcpp::IntegerVector idx_(N);
-    arma::uvec idx(N);
-
-    for (unsigned int t=0; t<n; t++) {
-        theta_stored.slice(B-1) = theta;
-
-        Fy.zeros();
-        tmpi = std::min(t,L);
-        if (t>0) {
-            // Checked Fy - CORRECT
-            Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
-        }
-        F = Fphi % Fy; // L x 1
-
-        /*
-        1. Resample lambda[t,i] for i=0,1,...,N, where i is the index of particles
-        using likelihood P(y[t]|lambda[t,i]).
-        ------
-        >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
-        */
-        for (unsigned int i=0; i<N; i++) {
-            lambda.at(i) = mu + arma::as_scalar(F.t()*arma::exp(theta.col(i)));
-
-            if (obstype == 0) {
-                w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho)+(lambda.at(i)/rho)*std::log(1./(1.+rho))+Y.at(t)*std::log(rho/(1.+rho)));
-            } else if (obstype == 1) {
-                w.at(i) = R::dpois(Y.at(t),lambda.at(i),false);
-            }
-            
-        }
-
-        idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-        idx = Rcpp::as<arma::uvec>(idx_) - 1;
-        for (unsigned int b=0; b<B; b++) {
-            theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-        }
-        // theta_stored = theta_stored(arma::span::all,idx,arma::span::all);
-        R.row(t) = arma::quantile(theta_stored.slice(0).row(0),qProb);
-        // theta = theta.cols(idx);
-
-        /*
-        2. Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N
-        using state evolution distribution P(theta[t+1,i]|theta[t,i]).
-        ------
-        >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
-        */
-        omega = arma::randn(N) * Wsqrt;
-        for (unsigned int i=0; i<N; i++) {
-            theta.col(i) = G * theta_stored.slice(B-1).col(i);
-        }
-        theta.row(0) += omega.t();
-        theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
-    }
-
-    /*
-    Up to now, the first L-1 rows of R will be zeros. We need to
-    (1) Shift the nonzero elements to the beginning of R
-    (2) calculate the quantiles the first L-1 rows of theta
-    */
-    R.rows(0,n-L) = R.rows(L-1,n-1);
-    for (unsigned int d=0; d<(L-1); d++) {
-        R.row(n-L+1+d) = arma::quantile(theta_stored.slice(d).row(0),qProb);
-    }
-
-    return R;
-}
-
-
 
 /*
 ---- Method ----
-- Monte Carlo Filtering with static parameter W known
+- Monte Carlo filtering with static parameter W known
 - Using the discretized Hawkes formulation
 - Reference: Kitagawa and Sato at Ch 9.3.4 of Doucet et al.
 - Note: 
@@ -779,7 +631,7 @@ arma::mat mcf_pois_koyama_exp(
 ---- Method ----
 - Monte Carlo Smoothing with static parameter W known
 - B-lag fixed-lag smoother (Anderson and Moore 1979)
-- Using the discretized Hawkes formulation
+- Using the DLM formulation
 - Reference: 
     Kitagawa and Sato at Ch 9.3.4 of Doucet et al.
     Check out Algorithm step 2-4L for the explanation of B-lag fixed-lag smoother
@@ -808,77 +660,142 @@ Kwg: Identity link, exp(psi) state space
 */
 //' @export
 // [[Rcpp::export]]
-arma::mat mcs_pois_koyama_exp(
+arma::mat mcs_poisson(
     const arma::vec& Y, // n x 1, the observed response
+    const unsigned int ModelCode,
 	const double W,
+    const double rho = 0.9,
     const unsigned int L = 12, // number of lags
+    const double mu0 = 0.,
     const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N = 5000, // number of particles
-    const double rho = 34.08792, // parameter for negative binomial likelihood
-    const unsigned int obstype = 0){ // 0: negative binomial DLM; 1: poisson DLM
+    const double rho_nb = 34.08792, // parameter for negative binomial likelihood
+    const unsigned int obstype = 1, // 0: negative binomial DLM; 1: poisson DLM
+    const bool verbose = false){ 
+
+    const double UPBND = 700.;
+    const double EPS = arma::datum::eps;
 
     double tmpd; // store temporary double value
     unsigned int tmpi; // store temporary integer value
     arma::vec tmpv1(1);
     
     const unsigned int n = Y.n_elem; // number of observations
-
-    const double mu = arma::datum::eps;
-    const double m = 4.7;
-    const double s = 2.9;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-    const double pk_2sg = std::sqrt(2.*pk_sg2);
-
     const double Wsqrt = std::sqrt(W);
 
-    arma::mat G(L,L,arma::fill::zeros); // L x L state transition matrix
-    arma::vec Fphi(L,arma::fill::zeros); // L x 1 transmission delay distribution
-    G.at(0,0) = 1.;
-    tmpv1.at(0) = pk_mu/pk_2sg;
-    Fphi.at(0) = 0.5*arma::as_scalar(arma::erfc(tmpv1));
-    for (unsigned int d=1; d<L; d++) {
-        G.at(d,d-1) = 1.;
-        tmpd = static_cast<double>(d) + 1.;
-        tmpv1.at(0) = -(std::log(tmpd)-pk_mu)/pk_2sg;
-        Fphi.at(d) = 0.5*arma::as_scalar(arma::erfc(tmpv1));
-        tmpd -= 1.;
-        tmpv1.at(0) = -(std::log(tmpd)-pk_mu)/pk_2sg;
-        Fphi.at(d) -= 0.5*arma::as_scalar(arma::erfc(tmpv1));
-    }
 
-    // Check Fphi and G - CORRECT
-    // Rcout << Fphi.t() << std::endl; 
-    // Rcout << G << std::endl;
+    /* 
+    Dimension of state space depends on type of transfer functions 
+    - p: diemsnion of DLM state space
+    */
+    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11;
+	const bool is_vanilla = ModelCode == 9;
+	unsigned int TransferCode; // integer indicator for the type of transfer function
+	unsigned int p; // dimension of DLM state space
+	unsigned int L_;
+	if (is_koyck) { 
+		TransferCode = 0; 
+		p = 2;
+		L_ = 0;
+	} else if (is_koyama) { 
+        if (L == 0) {
+            ::Rf_error("Lag should be greater than 0 for Koyama.");
+        }
+		TransferCode = 1; 
+		p = L;
+		L_ = L;
+	} else if (is_solow) { 
+		TransferCode = 2; 
+		p = 3;
+		L_ = 0;
+	} else if (is_vanilla) {
+		TransferCode = 3;
+		p = 1;
+		L_ = 0;
+	} else {
+		::Rf_error("Unknown type of model.");
+	}
+    /* Dimension of state space depends on type of transfer functions */
 
-    arma::vec Fy(L,arma::fill::zeros);
-    arma::vec F(L);
+    
+    /*
+    Ft: vector for the state-to-observation function
+    Gt: matrix for the state-to-state function
+    */
+    arma::vec Ft(p,arma::fill::zeros);
+    arma::vec Fphi(p);;
+    arma::vec Fy(p,arma::fill::zeros);
+    arma::mat Gt(p,p,arma::fill::zeros);
+    switch (TransferCode) {
+        case 0: // Koyck
+        {
+            Ft.at(1) = 1.; // Ft = (0,1)'
+        }
+        break;
+        case 1: // Koyama
+        {
+            double mu = 2.2204e-16;
+		    double m = 4.7;
+		    double s = 2.9;
+		    Fphi = get_Fphi(p,mu,m,s);
 
-    arma::cube theta_stored(L,N,B);
-    arma::mat theta = arma::randu(L,N,arma::distr_param(0.,10.));
-    arma::vec lambda(N);
-    arma::vec omega(N);
-    arma::vec w(N); // weight of each particle
+            Gt.at(0,0) = 1.;
+            Gt.diag(-1).ones();
 
-    arma::mat R(n,3);
+            // Check Fphi and G - CORRECT
+        }
+        break;
+        case 2: // Solow
+        {
+            Ft.at(1) = 1.; // Ft = (0,1,0)
+        }
+        break;
+        case 3: // Vanilla
+        {
+            Ft.at(0) = 1.;
+        }
+        break;
+        default:
+        {
+            ::Rf_error("Not supported transfer function.");
+        }
+    } // End switch Transfercode
+
+
+    // theta: DLM state vector
+    // p - dimension of state space
+    // N - number of particles
+    arma::cube theta_stored(p,N,B);
+    arma::mat theta = arma::randu(p,N,arma::distr_param(0.,10.));
+
+    arma::vec lambda(N); // instantaneous intensity
+    arma::vec omega(N); // evolution variance
+    arma::vec w(N); // importance weight of each particle
+
+    arma::mat R(n,3); // summarize statistics
     arma::vec qProb = {0.025,0.5,0.975};
 
     Rcpp::IntegerVector idx_(N);
     arma::uvec idx(N);
 
     for (unsigned int t=0; t<n; t++) {
-        // theta_stored: L x N x B, with B is the lag of the B-lag fixed-lag smoother
-        // theta: L x N
+        // theta_stored: p x N x B, with B is the lag of the B-lag fixed-lag smoother
+        // theta: p x N
         theta_stored.slice(B-1) = theta;
 
-        Fy.zeros();
-        tmpi = std::min(t,L);
-        if (t>0) {
-            // Checked Fy - CORRECT
-            Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
+        if (TransferCode == 1) { // Koyama
+            Fy.zeros();
+            tmpi = std::min(t,p);
+            if (t>0) {
+                // Checked Fy - CORRECT
+                Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
+            }
+
+            Ft = Fphi % Fy; // L(p) x 1
         }
-        F = Fphi % Fy; // L x 1
+        
 
         /*
         1. Resample lambda[t,i] for i=0,1,...,N, where i is the index of particles
@@ -886,22 +803,63 @@ arma::mat mcs_pois_koyama_exp(
         ------
         >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
         */
+        /*
+        ------ RESAMPLING STAGE ------
+        ------ Step 2-3 of Kitagawa and Sato ------
+        Namely, Compute the weights using likelihood/observational distribution, 
+        p(y[t]|lambda[t,i]), 
+        where lambda[t,i] is the i-th particle for lambda[t].
+        */ 
+        if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
+            // Exponential link and identity gain
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+            }
+            lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
+            lambda = arma::exp(lambda);
+        } else if (ModelCode==0){
+            // KoyamaMax with identity link and ramp gain
+            theta.elem(arma::find(theta<EPS)).fill(EPS);
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+            }
+        } else if (ModelCode==1) {
+            // KoyamaExp with identity link and exponential gain
+            theta.elem(arma::find(theta>UPBND)).fill(UPBND);
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*arma::exp(theta.col(i)));
+            }
+        } else if (ModelCode==11) {
+            // KoyamaSoftplus with identity link and softplus gain
+            theta.elem(arma::find(theta>UPBND)).fill(UPBND);
+            for (unsigned int i=0; i<N; i++) {
+                arma::vec htheta = arma::log(1. + arma::exp(theta.col(i)));
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*htheta);
+            }
+        } else {
+            // Koyck or Solow with identity link and different gain functions
+            // for (unsigned int i=0; i<N; i++) {
+            //     lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+            // }
+            lambda = mu0 + theta.row(1).t();
+        }
+
+        if (verbose) {
+            Rcout << "Quantiles of lambda[" << t+1 << "]: " << arma::quantile(lambda,qProb);
+        }
+
         for (unsigned int i=0; i<N; i++) {
-            /*
-            ------ RESAMPLING STAGE ------
-            ------ Step 2-3 of Kitagawa and Sato ------
-            Namely, Compute the weights using likelihood/observational distribution, 
-            p(y[t]|lambda[t,i]), 
-            where lambda[t,i] is the i-th particle for lambda[t].
-            */ 
-            lambda.at(i) = mu + arma::as_scalar(F.t()*arma::exp(theta.col(i)));
             if (obstype == 0) {
                 // negative binomial observational equation
-                w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho)+(lambda.at(i)/rho)*std::log(1./(1.+rho))+Y.at(t)*std::log(rho/(1.+rho)));
+                w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho_nb))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho_nb)+(lambda.at(i)/rho_nb)*std::log(1./(1.+rho_nb))+Y.at(t)*std::log(rho_nb/(1.+rho_nb)));
             } else if (obstype == 1) {
                 // poisson observational equation
                 w.at(i) = R::dpois(Y.at(t),lambda.at(i),false);
-            }   
+            }
+        } // End for loop of i, index of the particles
+
+        if (verbose) {
+            Rcout << "Quantiles of importance weight w[" << t+1 << "]: " << arma::quantile(w,qProb);
         }
 
         /*
@@ -935,22 +893,127 @@ arma::mat mcs_pois_koyama_exp(
         ------ Step 2-2 of Kitagawa and Sato ------
         Propagate from t to t+1 using the evolution distribution
         */
-        for (unsigned int i=0; i<N; i++) {
-            theta.col(i) = G * theta_stored.slice(B-1).col(i);
+
+        double hpsi;
+        if (TransferCode==1) {
+            // Koyama
+            for (unsigned int i=0; i<N; i++) {
+                theta.col(i) = Gt * theta_stored.slice(B-1).col(i);
+            }
+            theta.row(0) += omega.t();
+
+        } else {
+            switch (ModelCode) {
+                case 2: // SolowMax
+                {
+                    // Identity link + ramp gain
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = std::max(EPS,theta_stored.at(0,i,B-1));
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1), -mu0+EPS);
+                        theta.at(2,i) = theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 3: // SolowExp
+                {
+                    // Identity link + exponential gain
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = std::exp(std::min(theta_stored.at(0,i,B-1),UPBND));
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1),-mu0+EPS);
+                        theta.at(2,i) = theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 4: // KoyckMax
+                {
+                    // Identity link + ramp gain
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = std::max(EPS,theta_stored.at(0,i,B-1));
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = Y.at(t)*hpsi + rho*theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 5: // KoyckExp
+                {
+                    // Identity link + exponential gain
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = std::exp(std::min(theta_stored.at(0,i,B-1),UPBND));
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = Y.at(t)*hpsi + rho*theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 7: // SolowEye
+                {
+                    // Exponential link + identity gain
+                    for (unsigned int i=0; i<N; i++) {
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = (1.-rho)*(1.-rho)*Y.at(t)*theta_stored.at(0,i,B-1) + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1);
+                        theta.at(2,i) = theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 8: // KoyckEye
+                {
+                    // Exponential link + identity gain
+                    for (unsigned int i=0; i<N; i++) {
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = Y.at(t)*theta_stored.at(0,i,B-1) + rho*theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 9: // VanillaPois
+                {
+                    ::Rf_error("VanillaPois undefined.");
+                }
+                break;
+                case 10: // KoyckSoftplus
+                {
+                    // Identity link + softplus gain
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = std::log(1. + std::exp(std::min(theta_stored.at(0,i,B-1),UPBND)));
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = Y.at(t)*hpsi + rho*theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 12: // SolowSoftplus
+                {
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = std::log(1. + std::exp(std::min(theta_stored.at(0,i,B-1),UPBND)));
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1),-mu0+EPS);
+                        theta.at(2,i) = theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                default:
+                {
+                    ::Rf_error("Not supported model type.");
+                }
+            }
         }
-        theta.row(0) += omega.t();
+
+
+        if (verbose) {
+            Rcout << "quantiles for theta[" << t+1 << "]" << arma::quantile(theta.row(1),qProb);
+        }
+        
         theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
     }
 
     /*
     ------ R: an n x 3 matrix ------
-    Up to now, the first L-1 rows of R will be zeros. We need to
+    Up to now, the first B-1 rows of R will be zeros. We need to
     (1) Shift the nonzero elements to the beginning of R
-    (2) calculate the quantiles the first L-1 rows of theta
+    (2) calculate the quantiles the first B-1 rows of theta
     */
-    R.rows(0,n-L) = R.rows(L-1,n-1);
-    for (unsigned int b=0; b<L; b++) {
-        R.row(b) = arma::quantile(theta_stored.slice(b).row(0),qProb);
+    R.rows(0,n-B) = R.rows(B-1,n-1);
+    for (unsigned int b=0; b<(B-1); b++) {
+        R.row(n-B+1+b) = arma::quantile(theta_stored.slice(b).row(0),qProb);
     }
 
     return R;
@@ -973,8 +1036,6 @@ arma::mat mcs_pois_koyama_exp(
 Unknown parameters: theta[0:n], beta[0:n]
 Kwg: Identity link, max(beta,0) state space
 */
-//' @export
-// [[Rcpp::export]]
 Rcpp::List bf_pois_solow_eye_max(
     const arma::vec& Y, // n x 1, the observed response
 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
@@ -1057,98 +1118,6 @@ Rcpp::List bf_pois_solow_eye_max(
 
 /*
 ---- Method ----
-- Bootstrap filtering with all static parameters (rho,W) known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: theta[0:n], beta[0:n]
-Kwg: Identity link, max(beta,0) state space
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List bf_pois_solow_eye_exp(
-    const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-    const double rho,
-	const double Q,
-	const unsigned int N = 5000, // number of particles
-    const unsigned int B = 30) { // Step of particle backshifting
-
-    const unsigned int n = Y.n_elem; // number of observations
-
-    const double coef = (1.-rho)*(1.-rho);
-    const double rho2 = rho*rho;
-
-    arma::mat theta(3,N,arma::fill::zeros);
-    arma::mat theta_new(3,N,arma::fill::zeros);
-    arma::mat theta_stored(N,n);
-    arma::mat beta_stored(N,n);
-
-    Rcpp::IntegerVector idx_(N);
-    arma::uvec idx(N);
-    arma::uvec b = {2};
-    arma::vec vec_tmp(N);
-    arma::vec w(N);
-
-    for (unsigned int t=0; t<n; t++) {
-        theta = theta_new;
-        /* 
-        1. Resample theta[t,i] for i=0,1,...,N 
-        using likelihood P(y[t]|theta[t,i]) 
-        */
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = R::dpois(Y.at(t),theta.at(0,i),true);
-        }
-        w.elem(arma::find(w>100.)).fill(100.);
-        // w += arma::datum::eps;
-        w = arma::exp(w);
-        w /= arma::accu(w);
-
-        // Resample
-        idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-        idx = Rcpp::as<arma::uvec>(idx_) - 1;
-        theta = theta.cols(idx);
-
-        theta_stored.col(t) = theta.row(0).t();
-        beta_stored.col(t) = theta.row(2).t();
-
-        /* 
-        2. Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N 
-        using predictive distribution P(y[t+1]|theta[t,i])
-        */
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = R::rnorm(0,std::sqrt(Q));
-        }
-        theta_new.row(0) = 2.*rho*theta.row(0) - rho2*theta.row(1) + coef*X.at(t)*arma::exp(theta.row(2));
-        theta_new.row(1) = theta.row(0);
-        theta_new.row(2) = theta.row(2) + w.t();
-
-        b.at(0) = 0;
-        {
-            arma::uvec tmpp = arma::find(theta_new.row(0)<arma::datum::eps);
-            theta_new(b,tmpp).zeros();
-            theta_new(b,tmpp) += arma::datum::eps;
-        }
-    }
-
-    Rcpp::List output;
-    output["theta"] = Rcpp::wrap(theta_stored);
-    output["beta"] = Rcpp::wrap(beta_stored);
-
-    return output;
-}
-
-
-
-
-/*
----- Method ----
 - Auxiliary Particle filtering with all static parameters (rho,W) known
 - Using the DLM formulation
 
@@ -1162,8 +1131,6 @@ Rcpp::List bf_pois_solow_eye_exp(
 Unknown parameters: theta[0:n], beta[0:n]
 Kwg: Identity link, exponential state space
 */
-//' @export
-// [[Rcpp::export]]
 Rcpp::List apf_pois_solow_eye_exp(
     const arma::vec& Y, // n x 1, the observed response
 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
@@ -1285,8 +1252,6 @@ Rcpp::List apf_pois_solow_eye_exp(
 Unknown parameters: theta[0:n], beta[0:n], W
 Kwg: Identity link, max(beta,0) state space
 */
-//' @export
-// [[Rcpp::export]]
 Rcpp::List sf_pois_solow_eye_max(
     const arma::vec& Y, // n x 1, the observed response
 	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
@@ -1453,150 +1418,6 @@ Rcpp::List sf_pois_solow_eye_max(
             Rcout << "t = " << t+1 << std::endl;
             stop("beta[t] has NaN or infinite values.");
         }
-        b.at(0) = 0;
-        {
-            arma::uvec tmpp = arma::find(theta_new.row(0)<arma::datum::eps);
-            theta_new(b,tmpp).zeros();
-            theta_new(b,tmpp) += arma::datum::eps;
-        }
-    }
-
-    Rcpp::List output;
-    output["theta"] = Rcpp::wrap(theta_stored);
-    output["beta"] = Rcpp::wrap(beta_stored);
-    output["Q"] = Rcpp::wrap(Q);
-
-    return output;
-}
-
-
-
-/*
----- Method ----
-- Storvik's Filtering with rho known
-- Using the DLM formulation
-- Storvik's Filter can be viewed as an extension of 
-  bootstrap filter with inference of static parameter W
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: theta[0:n], beta[0:n], W
-Kwg: Identity link, max(beta,0) state space
-*/
-//' @export
-// [[Rcpp::export]]
-Rcpp::List sf_pois_solow_eye_exp(
-    const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-    const double rho,
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior = R_NilValue, // (aw, Rw), W ~ IG(aw/2, Rw/2), prior for v[1], the first state/evolution/state error/disturbance.
-	const double Q_init = NA_REAL,
-    const double Q_true = NA_REAL,
-	const unsigned int N = 5000, // number of particles
-    const unsigned int B = 30) { // Step of particle backshifting
-
-    const unsigned int n = Y.n_elem; // number of observations
-
-    const double coef = (1.-rho)*(1.-rho);
-    const double rho2 = rho*rho;
-
-    arma::mat theta(3,N,arma::fill::zeros);
-    arma::mat theta_new(3,N,arma::fill::zeros);
-    arma::mat theta_stored(N,n);
-    arma::mat beta_stored(N,n);
-
-    arma::vec aw(N);
-    arma::vec bw(N);
-	arma::vec Q(N);
-
-    Rcpp::IntegerVector idx_(N);
-    arma::uvec idx(N);
-    arma::uvec b = {2};
-    arma::vec vec_tmp(N);
-    arma::vec w(N);
-
-    /*
-    --- Initialization ---
-    */
-    bool Qflag;
-	if (R_IsNA(Q_true)) {
-		Qflag = true;
-		if (QPrior.isNull()) {
-			stop("Error: You must provide either true value or prior for Q.");
-		}
-		arma::vec QPrior_ = Rcpp::as<arma::vec>(QPrior);
-
-        /* --- Sufficient Statistics --- */
-		aw.fill(QPrior_.at(0));
-		bw.fill(QPrior_.at(1));
-        /* --- Sufficient Statistics --- */
-
-        /* --- Static Parameters --- */
-		if (R_IsNA(Q_init)) {
-            for (unsigned int i=0; i<N; i++) {
-                Q.at(i) = 1./R::rgamma(0.5*aw.at(i),2./bw.at(i));
-            }
-		} else {
-			Q.fill(Q_init);
-		}
-        /* --- Static Parameters --- */
-	} else {
-		Qflag = false;
-		Q.fill(Q_true);
-	}
-
-    for (unsigned int t=0; t<n; t++) {
-        theta = theta_new;
-        /* 
-        1. Resample theta[t,i] for i=0,1,...,N 
-        using likelihood P(y[t]|theta[t,i]) 
-        */
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = R::dpois(Y.at(t),theta.at(0,i),true);
-        }
-        w.elem(arma::find(w>100.)).fill(100.);
-        // w += arma::datum::eps;
-        w = arma::exp(w);
-        w /= arma::accu(w);
-
-        // Resample
-        idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-        idx = Rcpp::as<arma::uvec>(idx_) - 1;
-        theta = theta.cols(idx);
-        Q = Q.elem(idx);
-        aw = aw.elem(idx);
-        bw = bw.elem(idx);
-
-        theta_stored.col(t) = theta.row(0).t();
-        beta_stored.col(t) = theta.row(2).t();
-
-        if (Qflag) {
-            if (t>0) {
-                aw += 1.;
-                bw += arma::pow((beta_stored.col(t) - beta_stored.col(t-1)),2.);
-            }
-            
-            for (unsigned int i=0; i<N; i++) {
-                Q.at(i) = 1./R::rgamma(0.5*aw.at(i),2./bw.at(i));
-            }
-        }
-
-        /* 
-        2. Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N 
-        using predictive distribution P(y[t+1]|theta[t,i])
-        */
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = R::rnorm(0,std::sqrt(Q.at(i)));
-        }
-        theta_new.row(0) = 2.*rho*theta.row(0) - rho2*theta.row(1) + coef*X.at(t)*arma::exp(theta.row(2));
-        theta_new.row(1) = theta.row(0);
-        theta_new.row(2) = theta.row(2) + w.t();
-
         b.at(0) = 0;
         {
             arma::uvec tmpp = arma::find(theta_new.row(0)<arma::datum::eps);

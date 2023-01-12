@@ -2,24 +2,14 @@
 # Bootstrap Particle Filtering #
 ###                          ###
 
+# depends on `model_utils.cpp`
 
-Pd=function(d,mu,sigmasq){ # == `ln_cdf`
-  # `pracma::erfc`` is the complimentary error function
-  phid=0.5*pracma::erfc(-(log(d)-mu)/sqrt(2*sigmasq))
-  return(phid)
-}
 
 cauchyrnd=function(x0,gm,m){ # == `cauchyrnd`
   r = x0+gm*tan(pi*(runif(m)-0.5))
   r = matrix(r,nrow=1,ncol=m)
   r}
 
-knl=function(d,mu,sd2){ # == `knl`, 
-  # d from 1 to L
-  # mu = pk.mu
-  # sd2 = pk.sg2
-  Pd(d,mu,sd2)-Pd(d-1,mu,sd2)
-}
 
 
 calc_rho = function(v,d=7){
@@ -65,13 +55,13 @@ dnb3 <- function(x,lambda,rho,log=FALSE) {
 # Bootstrap Particle Filtering
 hawke_ss2 = function(
   cases,N=5000,
+  L=30,
   rho=34.08792,
   W=0.01,
   obstype="pois", # either "pois" or "nb"
   errtype="cauchy") { # either "cauchy" or "normal"
   
   T=length(cases) # number of observations 
-  L=30
   F=array(0,c(L,L)) # L x L state transition, G, matrix
   F[1,]=c(1,rep(0,L-1))
   F[2:(L),1:(L-1)]=diag((L-1))
@@ -123,7 +113,7 @@ hawke_ss2 = function(
     #      R[t-L+1](1)    ...     R[t-L+1](N)
     # theta is a L x N matrix
     # n0*knl = (phi[1]y[t-1], ..., phi[L]y[t-L]) is a 1 x L vector
-    FF = Fy*Fphi
+    FF = matrix(Fy*Fphi, nrow=1,ncol=L)
     lambda = mu + FF%*%theta # 1 x N
 
     ###

@@ -102,13 +102,29 @@ knl=function(t,mu,sd2){
  Pd(t,mu,sd2)-Pd(t-1,mu,sd2)
 }
 */
-//' @export
-// [[Rcpp::export]]
+
 double knl(
     const double t,
     const double mu,
     const double sd2) {
     return Pd(t,mu,sd2) - Pd(t-1.,mu,sd2);
+}
+
+
+//' @export
+// [[Rcpp::export]]
+arma::vec knl(
+	const arma::vec& tvec,
+	const double mu,
+	const double sd2) {
+	
+	const unsigned int n = tvec.n_elem;
+	arma::vec output(n);
+	for (unsigned int i=0; i<n; i++) {
+		output.at(i) = knl(tvec.at(i),mu,sd2);
+	}
+
+	return output;
 }
 
 

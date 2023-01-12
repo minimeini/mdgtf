@@ -45,7 +45,7 @@ arma::vec update_at(
 	const unsigned int L = 1) {
 	
 	arma::vec at(p,arma::fill::zeros);
-	const double UPBND = 100.;
+	const double UPBND = 700.;
 	
 	if (TransferCode == 2) { // Solow
 		/*------ START Solow ------*/
@@ -69,6 +69,11 @@ arma::vec update_at(
 				at.at(1) = coef1*y*mt.at(0);
 			}
 			break;
+			case 12: // SolowSoftplus
+			{
+				at.at(1) = coef1*y*std::log(1.+std::exp(std::min(mt.at(0),UPBND)));
+			}
+			break;
 			default:
 			{
 				::Rf_error("at - This block only support SolowMax(2), SolowExp(3), SolowEye(7)");
@@ -83,18 +88,24 @@ arma::vec update_at(
 		switch (ModelCode) { // theta[t]
 			case 4: // KoyckMax
 			{
-				at.at(1) = y*std::max(mt.at(0),arma::datum::eps); 
+				at.at(1) = y * std::max(mt.at(0),arma::datum::eps); 
 			}
 			break;
 			case 5: // KoyckExp
 			{
 				// at.at(1) = y*std::exp(mt.at(0));
-				at.at(1) = y*std::exp(std::min(mt.at(0),UPBND));
+				at.at(1) = y * std::exp(std::min(mt.at(0),UPBND));
 			}
 			break;
 			case 8: // KoyckEye
 			{
-				at.at(1) = y*mt.at(0);
+				at.at(1) = y * mt.at(0);
+			}
+			break;
+			case 10: // KoyckSoftplus
+			{
+				// at.at(1) = y * std::log(1. + std::exp(mt.at(0)));
+				at.at(1) = y * std::log(1. + std::exp(std::min(mt.at(0),UPBND)));
 			}
 			break;
 			default:
@@ -127,7 +138,7 @@ void update_Gt(
 	const double y = NA_REAL,  // obs
 	const double rho = NA_REAL) {
 
-	const double UPBND = 100.;
+	const double UPBND = 700.;
 	
 	if (TransferCode == 2) { // Solow
 		switch (ModelCode) {
@@ -146,6 +157,11 @@ void update_Gt(
 			case 7: // SolowEye
 			{
 				Gt.at(1,0) = 1.;
+			}
+			break;
+			case 12: // SolowSoftplus
+			{
+				Gt.at(1,0) = 1. / (1. + std::exp(std::min(-mt.at(0), UPBND)));
 			}
 			break;
 			default:
@@ -171,6 +187,12 @@ void update_Gt(
 			case 8: // KoyckEye
 			{
 				Gt.at(1,0) = 1.;
+			}
+			break;
+			case 10: // KoyckSoftplus
+			{
+				// Gt.at(1,0) = 1. / (1. + std::exp(-mt.at(0)));
+				Gt.at(1,0) = 1. / (1. + std::exp(std::min(-mt.at(0), UPBND)));
 			}
 			break;
 			default:
@@ -205,6 +227,12 @@ void update_Rt(
 }
 
 
+/*
+------------ update_Ft ------------
+- only for Koyama transmission delay.
+- only contain the phi[l]*y[t-l] part.
+- doesn't include the gain function.
+*/
 void update_Ft(
 	arma::vec& Ft, // L x 1
 	arma::vec& Fy, // L x 1
@@ -247,6 +275,8 @@ void forwardFilter(
 	const double mu0 = 0.,
 	const double W = NA_REAL,
 	const double delta = NA_REAL) { 
+
+	const double UPBND = 700.;
 	
 	/*
 	------ Initialization ------
@@ -272,8 +302,6 @@ void forwardFilter(
 		Fphi = get_Fphi(L,mu,m,s);
 		Fy.zeros(L);
 	}
-
-	const double UPBND = 100.;
 	/*
 	------ Initialization ------
 	*/
@@ -310,11 +338,22 @@ void forwardFilter(
 				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
 			}
 			break;
+			case 11: // KoyamaSoftplus
+			{
+				at.elem(arma::find(at>UPBND)).fill(UPBND);
+				arma::vec at_exp = arma::exp(at.col(1));
+				ft = arma::accu(Ft % arma::log(1. + at_exp));
+
+				Ft = Ft % at_exp / (1. + at_exp);
+				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+			}
+			break;
 			default:
 			{
 				::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
 			}
 		} // END switch block
+
 		/*
 		------ Moment Matching ------
 		Depends on specific link function
@@ -386,6 +425,16 @@ void forwardFilter(
 				case 6: // KoyamaEye
 				{
 					ft = arma::accu(Ft % at.col(t));
+					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+				}
+				break;
+				case 11: // KoyamaSoftplus
+				{
+					at.elem(arma::find(at>UPBND)).fill(UPBND);
+					arma::vec at_exp = arma::exp(at.col(t));
+					ft = arma::accu(Ft % arma::log(1. + at_exp));
+
+					Ft = Ft % at_exp / (1. + at_exp);
 					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
 				}
 				break;
@@ -657,9 +706,9 @@ Rcpp::List lbe_poisson(
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
 
-	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6;
+	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11;
 	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
