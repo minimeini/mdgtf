@@ -6,6 +6,7 @@
 #include <RcppArmadillo.h>
 #include "model_utils.h"
 #include "lbe_poisson.h"
+#include "pl_poisson.h"
 #include "yjtrans.h"
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp11)]]
@@ -177,9 +178,9 @@ Rcpp::List hva_poisson(
     /*
     ------ MCMC FFBS Sampler ------
     */
-    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6;
+    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11;
 	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
@@ -316,6 +317,7 @@ Rcpp::List hva_poisson(
         */
         // theta = rtheta_ffbs(Y,rho_true,W,m0,C0);
         rtheta_ffbs(theta,mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,L,rho_true,delta,mu0_true,scale_sd,rtheta_type);
+        
         // rtheta_disturbance(wt,wt_accept,Y,ModelCode,W,ht,Fphi,Fx,th0tilde,L,mu0_true,m0,C0,MH_var,false,nburnin,nthin,nsample);
         // if (ModelCode == 9) {
         //     for (unsigned int t=1; t<=n; t++) {
