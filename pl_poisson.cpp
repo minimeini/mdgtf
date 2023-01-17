@@ -393,9 +393,6 @@ arma::mat bf_pois_koyama_max(
         if (t>0) {
             // Checked Fy - CORRECT
             Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
-            if (t==(L+1)) {
-                Rcout << Fy.t() << std::endl;
-            }
         }
         F = Fphi % Fy; // L x 1
 
@@ -671,9 +668,12 @@ arma::mat mcs_poisson(
 	const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
     const double rho_nb = 34.08792, // parameter for negative binomial likelihood
+    const double delta_nb = 1.,
     const unsigned int obstype = 1, // 0: negative binomial DLM; 1: poisson DLM
-    const bool verbose = false){ 
+    const bool verbose = false,
+    const bool debug = false){ 
 
     const double UPBND = 700.;
     const double EPS = arma::datum::eps;
@@ -684,6 +684,10 @@ arma::mat mcs_poisson(
     
     const unsigned int n = Y.n_elem; // number of observations
     const double Wsqrt = std::sqrt(W);
+
+    if (verbose) {
+        Rcout << "Evolution variance W=" << W << std::endl;
+    }
 
 
     /* 
@@ -776,7 +780,12 @@ arma::mat mcs_poisson(
     arma::vec w(N); // importance weight of each particle
 
     arma::mat R(n+1,3); // summarize statistics
-    arma::vec qProb = {0.025,0.5,0.975};
+    arma::vec qProb;
+    if (qProb_.isNull()) {
+        qProb = {0.025,0.5,0.975};
+    } else {
+        qProb = Rcpp::as<arma::vec>(qProb_);
+    }
 
     Rcpp::IntegerVector idx_(N);
     arma::uvec idx(N);
@@ -786,7 +795,7 @@ arma::mat mcs_poisson(
         - Sample theta[-1] from the prior of theta[-1]
     
     ------
-    The first B-1 rows (indices from 0 to B-2) of R are all zeros, as illustrated as follows:
+    The first B-2 rows (indices from 0 to B-2) of R are all zeros, as illustrated as follows:
 
     At the beginning of t = 0
         - propagate to theta[0]
@@ -845,7 +854,7 @@ arma::mat mcs_poisson(
 		    C0 = Rcpp::as<arma::mat>(C0_prior);
             C0 = arma::chol(C0);
 	    }
-        
+
         for (unsigned int i=0; i<N; i++) {
             theta.col(i) = m0 + C0.t() * arma::randn(p);
         }
@@ -859,13 +868,6 @@ arma::mat mcs_poisson(
     ------ Step 1. Initialization at time t = 0 ------
     */
     
-
-    /*
-    (1) [Step 2.2] Calculate importance weights for theta[t-1]
-    (2) [Step 3] Resample
-    (3) Save to R
-    (4) [Step 2.1 Propagate]
-    */
 
     for (unsigned int t=0; t<n; t++) {
         // theta_stored: p x N x B, with B is the lag of the B-lag fixed-lag smoother
@@ -983,7 +985,7 @@ arma::mat mcs_poisson(
         }
 
         if (verbose) {
-            Rcout << "quantiles for theta[" << t+1 << "]" << arma::quantile(theta.row(1),qProb);
+            Rcout << "quantiles for hpsi[" << t+1 << "]" << arma::quantile(theta.row(1),qProb);
         }
         
         theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
@@ -1052,10 +1054,26 @@ arma::mat mcs_poisson(
 
         for (unsigned int i=0; i<N; i++) {
             if (obstype == 0) {
-                // negative binomial observational equation
-                w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho_nb))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho_nb)+(lambda.at(i)/rho_nb)*std::log(1./(1.+rho_nb))+Y.at(t)*std::log(rho_nb/(1.+rho_nb)));
+                /*
+                Negative-binomial likelihood
+                - mean: lambda.at(i)
+                - var: (1 + rho_nb) * lambda.at(i)
+                - rho_nb: degree of over-dispersion
+
+                sample variance exceeds the sample mean
+                */
+                // w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho_nb))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho_nb)+(lambda.at(i)/rho_nb)*std::log(1./(1.+rho_nb))+Y.at(t)*std::log(rho_nb/(1.+rho_nb)));
+
+                w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb)-R::lgammafn(Y.at(t)+1.)-R::lgammafn(delta_nb)+delta_nb*std::log(delta_nb/(delta_nb+lambda.at(i)))+Y.at(t)*std::log(lambda.at(i)/(delta_nb+lambda.at(i))));
+                
             } else if (obstype == 1) {
-                // poisson observational equation
+                /*
+                Poisson likelihood
+                - mean: lambda.at(i)
+                - var: lambda.at(i)
+
+                sample variance == sample mean
+                */
                 w.at(i) = R::dpois(Y.at(t),lambda.at(i),false);
             }
         } // End for loop of i, index of the particles
@@ -1072,15 +1090,20 @@ arma::mat mcs_poisson(
         */
         try{
             idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+            idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+            idx = Rcpp::as<arma::uvec>(idx_) - 1;
+            for (unsigned int b=0; b<B; b++) {
+                theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
+            }
         } catch(...) {
-            Rcout << "Resampling error at time t=" << t << std::endl;
-            ::Rf_error("Probabilities must be finite and non-negative!");
+            // If resampling doesn't work, then just don't resample
+            if (debug) {
+                Rcout << "Resampling skipped at time t=" << t << std::endl;
+            }
+            
+            // ::Rf_error("Probabilities must be finite and non-negative!");
         }
-        idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-        idx = Rcpp::as<arma::uvec>(idx_) - 1;
-        for (unsigned int b=0; b<B; b++) {
-            theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-        }
+        
         /*
         ------ Step  Resampling with Replacement ------
         */

@@ -90,7 +90,10 @@ void forwardFilter(
 	const double rho,
 	const double mu0,
 	const double W,
-	const double delta);
+	const double delta,
+	const double delta_nb,
+	const unsigned int obs_type,
+	const bool debug);
 
 
 void backwardSmoother(
@@ -129,7 +132,10 @@ Rcpp::List lbe_poisson(
     const double delta, 
 	const double W,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior);
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+	const double delta_nb,
+	const unsigned int obs_type,
+	const bool debug);
 
 
 
@@ -150,7 +156,9 @@ Rcpp::List get_optimal_delta(
     const unsigned int L,
 	const double mu0,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior);
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+	const double delta_nb,
+	const unsigned int obs_type);
 
 
 #endif

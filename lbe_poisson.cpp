@@ -168,7 +168,7 @@ void update_Gt(
 			{
 				::Rf_error("This block only supports Solow");
 			}
-		} // End switc block
+		} // End switch block
 		Gt.at(1,0) *= (1.-rho)*(1.-rho)*y;
 
 	} else if (TransferCode == 0) { // Koyck
@@ -274,7 +274,10 @@ void forwardFilter(
 	const double rho = 0.9,
 	const double mu0 = 0.,
 	const double W = NA_REAL,
-	const double delta = NA_REAL) { 
+	const double delta = NA_REAL,
+	const double delta_nb = 1.,
+	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM 
+	const bool debug = false) { 
 
 	const double UPBND = 700.;
 	
@@ -307,7 +310,7 @@ void forwardFilter(
 	*/
 
 	
-	double et,ft,Qt,ft_ast,Qt_ast;
+	double et,ft,Qt,ft_ast,Qt_ast,alpha_ast,beta_ast,phi;
 	arma::vec At(p);
 
 
@@ -358,18 +361,52 @@ void forwardFilter(
 		------ Moment Matching ------
 		Depends on specific link function
 		*/
-		if (LinkCode == 1) { // Identity Link
-			betat.at(1) = (mu0 + ft) / Qt;
-			alphat.at(1) = (mu0 + ft) * betat.at(1);
+		phi = mu0 + ft; // regression on link function
+		if (LinkCode == 1 && obs_type == 1) {
+			// Poisson DLM with Identity Link
+			if (debug) {
+				Rcout << "f[" << 1 << "]=" << ft << ", q["<< 1 << "]=" << Qt << std::endl;
+			}
+			
+
+			betat.at(1) = phi / Qt;
+			alphat.at(1) = phi * betat.at(1);
 			Qt_ast = (alphat.at(1)+Y.at(0)) / (betat.at(1)+1.) / (betat.at(1)+1.);
 			ft_ast = Qt_ast * (betat.at(1)+1.) - mu0;
 
-		} else if (LinkCode == 0) { // Exponential Link
+			if (debug) {
+				Rcout << "alpha[" << 1 << "]=" << alphat.at(1) << ", beta["<< 1 << "]=" << betat.at(1) << std::endl;
+				Rcout << "f_ast[" << 1 << "]=" << ft_ast << ", q_ast["<< 1 << "]=" << Qt_ast << std::endl;
+			}
+
+		} else if (LinkCode == 1 && obs_type == 0) {
+			// Negative-binomial DLM with Identity Link
+			if (debug) {
+				Rcout << "f[" << 1 << "]=" << ft << ", q["<< 1 << "]=" << Qt << std::endl;
+			}
+
+			// betat.at(1) = phi*(phi+delta_nb)/Qt + 2.;
+			// alphat.at(1) = phi/delta_nb * (betat.at(1) - 1.);
+			betat.at(1) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
+			alphat.at(1) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(1)-1.));
+			ft_ast = delta_nb*(alphat.at(1)+Y.at(0))/(betat.at(1)+delta_nb-1.) - mu0;
+			Qt_ast = (ft_ast+mu0)*delta_nb*(alphat.at(1)+Y.at(0)+betat.at(1)+delta_nb-1.)/(betat.at(1)+delta_nb-1.)/(betat.at(1)+delta_nb-2.);
+
+			if (debug) {
+				Rcout << "alpha[" << 1 << "]=" << alphat.at(1) << ", beta["<< 1 << "]=" << betat.at(1) << std::endl;
+				Rcout << "f_ast[" << 1 << "]=" << ft_ast << ", q_ast["<< 1 << "]=" << Qt_ast << std::endl;
+			}
+		} else if (LinkCode == 0 && obs_type == 1) {
+			// Poisson DLM with Exponential Link
 			alphat.at(1) = optimize_trigamma(Qt);
 			betat.at(1) = std::exp(R::digamma(alphat.at(1)) - mu0 - ft);
         	ft_ast = R::digamma(alphat.at(1)+Y.at(0)) - std::log(betat.at(1)+1.) - mu0;
 			Qt_ast = R::trigamma(alphat.at(1)+Y.at(0));
+
+		} else {
+			::Rf_error("This combination of likelihood and link function is not supported yet.");
 		}
+
         
 
 		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
@@ -404,6 +441,13 @@ void forwardFilter(
 		update_Gt(Gt.slice(t), ModelCode, TransferCode, mt.col(t-1), Y.at(t-1), rho);
 		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt.slice(t),Y.at(t-1),rho,L);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
+
+		if (t<10 && debug) {
+			Rcout << std::endl << "t=" << t << std::endl;
+			Rcout << "Gt = " << Gt.slice(t) << std::endl;
+			Rcout << "at = " << at.col(t).t() << std::endl;
+			Rcout << "Rt = " << Rt.slice(t) << std::endl;
+		}
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
 		if (TransferCode == 1) { // Koyama
@@ -452,17 +496,52 @@ void forwardFilter(
 		------ Moment Matching ------
 		Depends on specific link function
 		*/
-		if (LinkCode == 1) { // Identity Link
-			betat.at(t) = (mu0 + ft) / Qt;
-			alphat.at(t) = (mu0 + ft) * betat.at(t);
+		phi = mu0 + ft; // regression on link function
+		if (LinkCode == 1 && obs_type == 1) {
+			// Poisson DLM with Identity Link
+			if (debug) {
+				Rcout << "f[" << t << "]=" << ft << ", q["<< t << "]=" << Qt << std::endl;
+			}
+			
+
+			betat.at(t) = phi / Qt;
+			alphat.at(t) = phi * betat.at(t);
 			Qt_ast = (alphat.at(t)+Y.at(t)) / (betat.at(t)+1.) / (betat.at(t)+1.);
 			ft_ast = Qt_ast * (betat.at(t)+1.) - mu0;
 
-		} else if (LinkCode == 0) { // Exponential Link
+			if (debug) {
+				Rcout << "alpha[" << t << "]=" << alphat.at(t) << ", beta["<< t << "]=" << betat.at(t) << std::endl;
+				Rcout << "f_ast[" << t << "]=" << ft_ast << ", q_ast["<< t << "]=" << Qt_ast << std::endl;
+			}
+			
+		} else if (LinkCode == 1 && obs_type == 0) {
+			// Negative-binomial DLM with Identity Link
+			if (debug) {
+				Rcout << "f[" << t << "]=" << ft << ", q["<< t << "]=" << Qt << std::endl;
+			}
+			
+
+			// betat.at(t) = (mu0+ft)*(mu0+ft+delta_nb)/Qt + 2.;
+			// alphat.at(t) = (mu0+ft)/delta_nb * (betat.at(t) - 1.);
+			betat.at(t) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
+			alphat.at(t) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(t)-1.));
+			ft_ast = delta_nb*(alphat.at(t)+Y.at(t))/(betat.at(t)+delta_nb-1.) - mu0;
+			Qt_ast = (ft_ast+mu0)*delta_nb*(alphat.at(t)+Y.at(t)+betat.at(t)+delta_nb-1.)/(betat.at(t)+delta_nb-1.)/(betat.at(t)+delta_nb-2.);
+
+			if (debug) {
+				Rcout << "alpha[" << t << "]=" << alphat.at(t) << ", beta["<< t << "]=" << betat.at(t) << std::endl;
+				Rcout << "f_ast[" << t << "]=" << ft_ast << ", q_ast["<< t << "]=" << Qt_ast << std::endl;
+			}
+
+		} else if (LinkCode == 0 && obs_type == 1) {
+			// Poisson DLM with Exponential Link
 			alphat.at(t) = optimize_trigamma(Qt);
-			betat.at(t) = std::exp(R::digamma(alphat.at(t)) - mu0 - ft);
+			betat.at(t) = std::exp(R::digamma(alphat.at(t)) - phi);
         	ft_ast = R::digamma(alphat.at(t)+Y.at(t)) - std::log(betat.at(t)+1.) - mu0;
 			Qt_ast = R::trigamma(alphat.at(t)+Y.at(t));
+
+		} else {
+			::Rf_error("This combination of likelihood and link function is not supported yet.");
 		}
         
 
@@ -472,14 +551,9 @@ void forwardFilter(
 		mt.col(t) = at.col(t) + At * et;
 		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
 
-		// if (t<10) {
-		// 	Rcout << std::endl << "t=" << t << std::endl;
-		// 	Rcout << "Gt = " << Gt << std::endl;
-		// 	Rcout << "at = " << at.col(t).t() << std::endl;
-		// 	Rcout << "Rt = " << Rt.slice(t) << std::endl;
-		// 	Rcout << "(alphat=" << alphat << ", betat=" << betat << ")" << std::endl;
-		// 	Rcout << "(ft=" << ft << ", Qt=" << Qt << "), (ft*=" << ft_ast << ", Qt*=" << Qt_ast << std::endl; 
-		// }
+		if (debug) {
+			Rcout << std::endl;
+		}
 
 		// Rcout << "\rFiltering: " << t << "/" << n;
 	}
@@ -697,7 +771,10 @@ Rcpp::List lbe_poisson(
     const double delta = 0.9, 
 	const double W = NA_REAL,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue) {
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+	const double delta_nb = 1.,
+	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM
+	const bool debug = false) { 
 
 	if (R_IsNA(delta) && R_IsNA(W)) {
 		::Rf_error("Either evolution error W or discount factor delta must be provided.");
@@ -771,7 +848,7 @@ Rcpp::List lbe_poisson(
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
     
-	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,delta);
+	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
 
@@ -862,34 +939,45 @@ Rcpp::List get_optimal_delta(
     const unsigned int L = 0,
 	const double mu0 = 0.,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue) { // (n+1) x 1
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+	const double delta_nb = 1.,
+	const unsigned int obs_type = 1) { // 0: negative binomial DLM; 1: poisson DLM
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int m = delta_grid.n_elem;
 	const double W = NA_REAL;
 	const double n_ = static_cast<double>(n);
 
-	arma::vec logpred(m);
-	arma::vec mse(m);
-	arma::vec mae(m);
+	arma::vec logpred(m,arma::fill::zeros);
+	arma::vec mse(m,arma::fill::zeros);
+	arma::vec mae(m,arma::fill::zeros);
 	double delta;
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior);
+		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior,delta_nb,obs_type,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=1; j<=n; j++) {
 			// Marginal log predictive likelihood
-			prob_success = betat.at(j)/(1.+betat.at(j));
-			logpred.at(i) += R::dnbinom(Y.at(j-1),alphat.at(j),prob_success,true);
+			if (obs_type == 1) {
+				// Poisson DLM
+				prob_success = betat.at(j)/(1.+betat.at(j));
+				logpred.at(i) += R::dnbinom(Y.at(j-1),alphat.at(j),prob_success,true);
 
-			// MSE
-			ymean = (1.-prob_success)/prob_success*alphat.at(j);
-			mse.at(i) += (Y.at(j-1)-ymean)*(Y.at(j-1)-ymean);
+				// MSE
+				ymean = (1.-prob_success)/prob_success*alphat.at(j);
+				mse.at(i) += (Y.at(j-1)-ymean)*(Y.at(j-1)-ymean);
 
-			// MAE
-			mae.at(i) = std::abs(Y.at(j-1) - ymean);
+				// MAE
+				mae.at(i) = std::abs(Y.at(j-1) - ymean);
+
+			} else if (obs_type == 0) {
+				// Negative binomial DLM
+				logpred.at(i) += R::lgammafn(Y.at(j-1)+delta_nb)-R::lgammafn(delta_nb)-R::lgammafn(Y.at(j-1)+1.);
+				logpred.at(i) += R::lgammafn(alphat.at(j)+betat.at(j))-R::lgammafn(alphat.at(j))-R::lgammafn(betat.at(j));
+				logpred.at(i) += R::lgammafn(alphat.at(j)+Y.at(j-1))+R::lgammafn(betat.at(j)+delta_nb)-R::lgammafn(alphat.at(j)+Y.at(j-1)+betat.at(j)+delta_nb);
+			}
 		}
 	}
 
@@ -899,6 +987,7 @@ Rcpp::List get_optimal_delta(
 	Rcpp::List output;
 	output["delta"] = Rcpp::wrap(delta_grid);
 	output["logpred"] = Rcpp::wrap(logpred);
+
 	output["mse"] = Rcpp::wrap(mse);
 	output["mae"] = Rcpp::wrap(mae);
 

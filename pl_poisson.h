@@ -174,9 +174,12 @@ arma::mat mcs_poisson(
 	const unsigned int N, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const Rcpp::Nullable<Rcpp::NumericVector>& qProb_,
     const double rho_nb, // parameter for negative binomial likelihood
+    const double delta_nb,
     const unsigned int obstype, // 0: negative binomial DLM; 1: poisson DLM
-    const bool verbose);
+    const bool verbose,
+    const bool debug);
 
 
 /*

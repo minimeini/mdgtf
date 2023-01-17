@@ -13,8 +13,14 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppArmadillo)]]
 
 
+/*
+------ dlogJoint_dWtilde ------
+The derivative of the full joint density with respect to Wtilde=log(1/W), where W
+is the evolution variance that affects
+    psi[t] | psi[t-1] ~ N(psi[t-1], W)
 
-// No corresponding function in Matlab => DOUBLE CHECK IT.
+Therefore, this function remains unchanged as long as we using the same evolution equation for psi.
+*/
 double dlogJoint_dWtilde(
     const arma::vec& theta, // (n+1) x 1, (theta[0],theta[1],...,theta[n])
     const double G, // evolution transition matrix
@@ -92,9 +98,11 @@ void rtheta_ffbs(
     const double mu0 = 0.,
     const double scale_sd = 1.e-16,
     const unsigned int nsample = 1,
-    const unsigned int rtheta_type = 0) { // 0 - marginal smoothing; 1 - conditional sampling
+    const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling
+    const double delta_nb = 1.,
+    const unsigned int obs_type = 1) { // 0 - negative binomial; 1 - poisson
 
-    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,ypad,L,rho,mu0,W,NA_REAL);
+    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,ypad,L,rho,mu0,W,NA_REAL,delta_nb,obs_type,false);
     // Checked. OK.
 
     if (rtheta_type == 0) {
@@ -132,6 +140,8 @@ Rcpp::List hva_poisson(
     const double mu0_true = 0.,
     const Rcpp::Nullable<Rcpp::NumericVector>& ht_ = R_NilValue,
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling
+    const unsigned int sampler_type = 1, // 0 - FFBS; 1 - SMC
+    const unsigned int obs_type = 1, // 0 - negative binomial; 1 - poisson
     const double MH_var = 1.,
     const double scale_sd = 1.e-16,
     const double learn_rate = 0.95,
@@ -140,7 +150,10 @@ Rcpp::List hva_poisson(
     const unsigned int nburnin = 100,
     const unsigned int nthin = 2,
     const unsigned int nsample = 100,
-    const bool verbose = true) {
+    const double rho_nb = 34.08792,
+    const double delta_nb = 1.,
+    const bool verbose = false,
+    const bool debug = false) {
 
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
@@ -149,6 +162,10 @@ Rcpp::List hva_poisson(
 
     arma::vec eta(1,arma::fill::zeros); // ( Wtilde)
     arma::vec nu(1,arma::fill::zeros);
+
+    const unsigned int Blag = 12; // B-fixed-lags Monte Carlo smoother
+    const unsigned int N = 100; // number of particles for SMC
+    arma::vec qProb = {0.5};
 
     /*
     ------ MCMC Disturbance Sampler ------
@@ -314,9 +331,14 @@ Rcpp::List hva_poisson(
 
         /*
         Step 2. Sample state parameters via posterior
+            - theta: (n+1) x 1 vector
         */
-        // theta = rtheta_ffbs(Y,rho_true,W,m0,C0);
-        rtheta_ffbs(theta,mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,L,rho_true,delta,mu0_true,scale_sd,rtheta_type);
+        if (sampler_type==0) {
+            rtheta_ffbs(theta,mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,L,rho_true,delta,mu0_true,scale_sd,rtheta_type);
+        } else {
+            arma::mat theta_mat = mcs_poisson(Y,ModelCode,W,rho_true,L,mu0_true,Blag,N,R_NilValue,R_NilValue,R_NilValue,rho_nb,delta_nb,obs_type,verbose,debug);
+            theta = theta_mat.col(1);
+        }
         
         // rtheta_disturbance(wt,wt_accept,Y,ModelCode,W,ht,Fphi,Fx,th0tilde,L,mu0_true,m0,C0,MH_var,false,nburnin,nthin,nsample);
         // if (ModelCode == 9) {
@@ -327,7 +349,7 @@ Rcpp::List hva_poisson(
 
 
         /*
-        Step 3. Compute gradient of the log variational distribution
+        Step 3. Compute gradient of the log variational distribution (Model Dependent)
         */
         if (is_vanilla) {
             delta_logJoint = dlogJoint_deta(Y,theta,rho_true,W,aw,bw); // 1 x 1
