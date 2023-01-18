@@ -26,14 +26,29 @@ Thread model: posix
 InstalledDir: /Library/Developer/CommandLineTools/usr/bin
 ```
 
+The `R` version I am using is
+
+```
+R version 4.2.2 (2022-10-31) -- "Innocent and Trusting"
+Copyright (C) 2022 The R Foundation for Statistical Computing
+Platform: aarch64-apple-darwin20 (64-bit)
+```
+
+The `macOS` version I am using is
+
+```
+System Version: macOS 13.1 (22C65)
+Kernel Version: Darwin 22.2.0
+Processor: Apple M1 Pro
+```
 
 
 ## Inference
 
-- Method 1. [Done] Linear Bayes Filtering and Smoothing: `lbe_poisson.cpp`
-- Method 2. [Done] MCMC with Univariate MH Proposal via Reparameterisation: `mcmc_disturbance_poisson.cpp`
-- Method 3. [Ongoing] Particle Filtering and Smoothing: `pl_poisson.cpp`
-- Method 4. [Ongoing] Variational Inference: `vb_poisson.cpp` and `hva_poisson.cpp`
+- Method 1. Linear Bayes Filtering and Smoothing: `lbe_poisson.cpp`
+- Method 2. MCMC with Univariate MH Proposal via Reparameterisation: `mcmc_disturbance_poisson.cpp`
+- Method 3. Particle Filtering and Smoothing: `pl_poisson.cpp`
+- Method 4. Variational Inference: `vb_poisson.cpp` and `hva_poisson.cpp`
 
 
 ## Visualization
