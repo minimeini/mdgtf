@@ -163,7 +163,7 @@ Unknown parameters: psi[1:n]
 Known parameters: W, phi[1:L]
 Kwg: Identity link, exp(psi) state space
 */
-arma::mat mcs_poisson(
+Rcpp::List mcs_poisson(
     const arma::vec& Y, // n x 1, the observed response
     const unsigned int ModelCode,
 	const double W,

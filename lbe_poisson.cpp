@@ -33,7 +33,9 @@ using namespace Rcpp;
 */
 
 
-
+/*
+a[t] = gt(m[t-1])
+*/
 arma::vec update_at(
 	const unsigned int p,
 	const unsigned int ModelCode,
@@ -815,7 +817,8 @@ Rcpp::List lbe_poisson(
 	arma::mat mt(p,npad,arma::fill::zeros);
 	arma::mat at(p,npad,arma::fill::zeros);
 	arma::cube Ct(p,p,npad); 
-	const arma::mat Ip(p,p,arma::fill::eye);
+	arma::mat Ip(p,p,arma::fill::eye);
+	Ip *= 10.;
 	Ct.each_slice() = Ip;
 	arma::cube Rt(p,p,npad);
 	arma::vec alphat(npad,arma::fill::zeros);
@@ -853,12 +856,12 @@ Rcpp::List lbe_poisson(
 	
 
 	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt);
-	output["Ct"] = Rcpp::wrap(Ct);
-	output["ht"] = Rcpp::wrap(ht);
-	output["Ht"] = Rcpp::wrap(Ht);
-	output["alphat"] = Rcpp::wrap(alphat);
-	output["betat"] = Rcpp::wrap(betat);
+	output["mt"] = Rcpp::wrap(mt); // p x npad
+	output["Ct"] = Rcpp::wrap(Ct); // p x p x npad
+	output["ht"] = Rcpp::wrap(ht); // npad x 1
+	output["Ht"] = Rcpp::wrap(Ht); // npad x 1
+	output["alphat"] = Rcpp::wrap(alphat); // npad x 1
+	output["betat"] = Rcpp::wrap(betat); // npad x 1
 
 	return output;
 }

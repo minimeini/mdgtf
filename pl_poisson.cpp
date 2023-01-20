@@ -657,7 +657,7 @@ Kwg: Identity link, exp(psi) state space
 */
 //' @export
 // [[Rcpp::export]]
-arma::mat mcs_poisson(
+Rcpp::List mcs_poisson(
     const arma::vec& Y, // n x 1, the observed response
     const unsigned int ModelCode,
 	const double W,
@@ -779,7 +779,6 @@ arma::mat mcs_poisson(
     arma::vec omega(N); // evolution variance
     arma::vec w(N); // importance weight of each particle
 
-    arma::mat R(n+1,3); // summarize statistics
     arma::vec qProb;
     if (qProb_.isNull()) {
         qProb = {0.025,0.5,0.975};
@@ -868,8 +867,11 @@ arma::mat mcs_poisson(
     ------ Step 1. Initialization at time t = 0 ------
     */
     
-
+    arma::mat R(n+1,3); // quantiles
+    arma::vec Meff(n,arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(n,arma::fill::zeros);
     for (unsigned int t=0; t<n; t++) {
+        R_CheckUserInterrupt();
         // theta_stored: p x N x B, with B is the lag of the B-lag fixed-lag smoother
         // theta: p x N
         /*
@@ -1057,14 +1059,14 @@ arma::mat mcs_poisson(
                 /*
                 Negative-binomial likelihood
                 - mean: lambda.at(i)
-                - var: (1 + rho_nb) * lambda.at(i)
-                - rho_nb: degree of over-dispersion
+                - delta_nb: degree of over-dispersion
 
                 sample variance exceeds the sample mean
                 */
                 // w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho_nb))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho_nb)+(lambda.at(i)/rho_nb)*std::log(1./(1.+rho_nb))+Y.at(t)*std::log(rho_nb/(1.+rho_nb)));
 
-                w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb)-R::lgammafn(Y.at(t)+1.)-R::lgammafn(delta_nb)+delta_nb*std::log(delta_nb/(delta_nb+lambda.at(i)))+Y.at(t)*std::log(lambda.at(i)/(delta_nb+lambda.at(i))));
+                // w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb)-R::lgammafn(Y.at(t)+1.)-R::lgammafn(delta_nb)+delta_nb*std::log(delta_nb/(delta_nb+lambda.at(i)))+Y.at(t)*std::log(lambda.at(i)/(delta_nb+lambda.at(i))));
+                w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb) - R::lgammafn(Y.at(t)+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda.at(i))) + Y.at(t)*(std::log(lambda.at(i))-std::log(delta_nb+lambda.at(i))));
                 
             } else if (obstype == 1) {
                 /*
@@ -1078,6 +1080,7 @@ arma::mat mcs_poisson(
             }
         } // End for loop of i, index of the particles
 
+
         if (verbose) {
             Rcout << "Quantiles of importance weight w[" << t+1 << "]: " << arma::quantile(w.t(),qProb);
         }
@@ -1088,21 +1091,31 @@ arma::mat mcs_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
-        try{
-            idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-            idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-            idx = Rcpp::as<arma::uvec>(idx_) - 1;
-            for (unsigned int b=0; b<B; b++) {
-                theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
+        if (arma::accu(w)>EPS) { // normalize the particle weights
+            w /= arma::accu(w);
+            Meff.at(t) = 1./arma::dot(w,w);
+            try{
+                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+                idx = Rcpp::as<arma::uvec>(idx_) - 1;
+                for (unsigned int b=0; b<B; b++) {
+                    theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
+                }
+                resample_status.at(t) = 1;
+            } catch(...) {
+                // If resampling doesn't work, then just don't resample
+                resample_status.at(t) = 0;
             }
-        } catch(...) {
-            // If resampling doesn't work, then just don't resample
-            if (debug) {
-                Rcout << "Resampling skipped at time t=" << t << std::endl;
-            }
-            
+        } else {
+            resample_status.at(t) = 0;
+            Meff.at(t) = 0.;
+        }
+
+        if (debug && resample_status.at(t) == 0) {
+            Rcout << "Resampling skipped at time t=" << t << std::endl;
             // ::Rf_error("Probabilities must be finite and non-negative!");
         }
+        
         
         /*
         ------ Step  Resampling with Replacement ------
@@ -1124,7 +1137,13 @@ arma::mat mcs_poisson(
         R.row(n-B+2+b) = arma::quantile(theta_stored.slice(b+1).row(0),qProb);
     }
 
-    return R;
+    Rcpp::List output;
+    output["quantiles"] = Rcpp::wrap(R); // (n+1) x 3
+    output["theta_last"] = Rcpp::wrap(theta_stored.slice(B-1)); // p x N
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
+
+    return output;
 }
 
 

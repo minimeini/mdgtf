@@ -2,6 +2,7 @@ cdir = getwd()
 repo = "/Users/meinitang/Dropbox/Repository/poisson-dlm"
 
 Rcpp::sourceCpp(file.path(repo,"model_utils.cpp"))
+Rcpp::sourceCpp(file.path(repo,"lbe_poisson.cpp"))
 
 # TODO
 # R can only parse default values in the Cpp file not the header file.
@@ -38,7 +39,8 @@ sim_pois_dglm = function(
     L = 0, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
     delta_nb = 1., # rho_nb = 34.08792
-    rng.seed = NULL) {
+    rng.seed = NULL,
+    delta_grid = seq(from=0.7,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
   UPBND = 700
   
@@ -458,7 +460,23 @@ sim_pois_dglm = function(
     stop("Not implemented yet.")
   }
   
-  params = list(ModelCode=ModelCode,mu0=mu0,theta0=theta0,W=W,psi0=psi0,rho=rho,L=L)
+  delta = NULL
+  if (!(ModelCode %in% c(0,2,4))) {
+    tryCatch({
+      delta = get_optimal_delta(y,ModelCode,delta_grid,
+                                rho=rho,L=L,mu0=mu0,
+                                delta_nb=delta_nb,
+                                obs_type=obs_type)$delta_optim[1]
+    })
+  }
+  
+  
+  
+  params = list(ModelCode=ModelCode,obs_type=obs_type,
+                mu0=mu0,theta0=theta0,psi0=psi0,
+                W=W,rho=rho,L=L,
+                delta_nb=delta_nb,
+                delta_lbe=delta)
   
   return(list(y=y, # Observation
               lambda=lambda, # Intensity
@@ -633,8 +651,6 @@ sim_transfer_function = function(
   } else {
     stop("Not implemented yet.")
   }
-  
-  params = list(ModelCode=ModelCode,mu0=mu0,theta0=theta0,W=W,psi0=psi0,rho=rho,L=L)
   
   return(list(theta=theta, # Transfer Function Block
               psi=psi, # Gain Factor

@@ -154,7 +154,6 @@ arma::vec get_Fphi(
 
 arma::vec get_Fphi(const unsigned int L){ // number of Lags to be considered
 
-	const double mu = 2.2204e-16;
     const double m = 4.7;
     const double s = 2.9;
 
@@ -772,7 +771,6 @@ arma::mat update_Fx_Koyama(
     // Fx.at(0,0) = X.at(0);
 	Fx.at(0,0) = 0.; 
 
-	double coef,idx_diff;
     double tmp;
     unsigned int tmpi;
 

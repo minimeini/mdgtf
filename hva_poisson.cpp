@@ -1,10 +1,3 @@
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <cmath>
-#include <algorithm>
-#include <RcppArmadillo.h>
-#include "model_utils.h"
 #include "lbe_poisson.h"
 #include "pl_poisson.h"
 #include "yjtrans.h"
@@ -76,8 +69,7 @@ arma::vec dlogJoint_deta(
 /*
 Forward Filtering and Backward Sampling
 */
-void rtheta_ffbs(
-    arma::vec& theta, // (n+1)
+arma::vec rtheta_ffbs(
     arma::mat& mt, // p x (n+1)
     arma::mat& at, // p x (n+1)
     arma::cube& Ct, // p x p x (n+1)
@@ -101,6 +93,8 @@ void rtheta_ffbs(
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling
     const double delta_nb = 1.,
     const unsigned int obs_type = 1) { // 0 - negative binomial; 1 - poisson
+    
+    arma::vec theta(n+1,arma::fill::zeros);
 
     forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,ypad,L,rho,mu0,W,NA_REAL,delta_nb,obs_type,false);
     // Checked. OK.
@@ -109,6 +103,9 @@ void rtheta_ffbs(
         backwardSmoother(theta,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
     } else if (rtheta_type == 1) {
         backwardSampler(theta,n,p,mt,at,Ct,Rt,Gt,W,scale_sd);
+    } else if (rtheta_type == 2) {
+        theta = mt.row(0).t();
+        Ht = arma::vectorise(Ct.tube(0,0));
     }
     
     // arma::vec theta_tmp = theta;
@@ -119,6 +116,7 @@ void rtheta_ffbs(
     // theta /= static_cast<double>(nsample);
     // 
     // Checked. OK.
+    return theta;
 }
 
 
@@ -130,7 +128,7 @@ Rcpp::List hva_poisson(
     const unsigned int ModelCode,
     const double rho_true = 0.9,
     const double L = 0,
-    const double delta = NA_REAL,
+    const double delta = NA_REAL, // discount factor
     const double aw = 0.1,
     const double bw = 0.1,
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
@@ -139,6 +137,7 @@ Rcpp::List hva_poisson(
     const double psi0_true = 0.,
     const double mu0_true = 0.,
     const Rcpp::Nullable<Rcpp::NumericVector>& ht_ = R_NilValue,
+    const double W_init = NA_REAL,
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling
     const unsigned int sampler_type = 1, // 0 - FFBS; 1 - SMC
     const unsigned int obs_type = 1, // 0 - negative binomial; 1 - poisson
@@ -163,7 +162,7 @@ Rcpp::List hva_poisson(
     arma::vec eta(1,arma::fill::zeros); // ( Wtilde)
     arma::vec nu(1,arma::fill::zeros);
 
-    const unsigned int Blag = 12; // B-fixed-lags Monte Carlo smoother
+    const unsigned int Blag = static_cast<unsigned int>(0.1*n); // B-fixed-lags Monte Carlo smoother
     const unsigned int N = 100; // number of particles for SMC
     arma::vec qProb = {0.5};
 
@@ -310,6 +309,10 @@ Rcpp::List hva_poisson(
     arma::mat theta_stored(n+1,niter);
     arma::vec W_stored(niter);
 
+    arma::mat Meff(n,niter);
+    arma::mat resample_status(n,niter);
+    arma::mat theta_last(p,niter);
+
     
     for (unsigned int s=0; s<niter; s++) {
         R_CheckUserInterrupt();
@@ -318,12 +321,19 @@ Rcpp::List hva_poisson(
         Step 1. Sample static parameters from the variational distribution
         using reparameterisation.
         */
-        eta = rtheta(xi,eps,gamma,mu,B,d);
-        nu = tYJ(eta,gamma);
-        W = std::exp(-eta.at(0));
+        if (s==0 && !R_IsNA(W_init)) {
+            // Initial value
+            W = W_init;
+        } else {
+            eta = rtheta(xi,eps,gamma,mu,B,d);
+            nu = tYJ(eta,gamma);
+            W = std::exp(-eta.at(0));
+        }
+        
+
         if (!std::isfinite(W)) {
-            Rcout << "iter=" << s+1 << std::endl;
-            Rcout << "eta=" << eta.at(0) << std::endl;
+            Rcout << "iter=" << s+1 << ", ";
+            Rcout << "eta=" << eta.at(0) << ", ";
             Rcout << "W=" << W << std::endl;
             ::Rf_error("W is NA.");
         }
@@ -333,11 +343,17 @@ Rcpp::List hva_poisson(
         Step 2. Sample state parameters via posterior
             - theta: (n+1) x 1 vector
         */
-        if (sampler_type==0) {
-            rtheta_ffbs(theta,mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,L,rho_true,delta,mu0_true,scale_sd,rtheta_type);
+        if (s==0 && !ht_.isNull()) {
+            theta = Rcpp::as<arma::vec>(ht_);
+        } else if (sampler_type==0) {
+            theta = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,L,rho_true,delta,mu0_true,scale_sd,rtheta_type,delta_nb,obs_type);
         } else {
-            arma::mat theta_mat = mcs_poisson(Y,ModelCode,W,rho_true,L,mu0_true,Blag,N,R_NilValue,R_NilValue,R_NilValue,rho_nb,delta_nb,obs_type,verbose,debug);
+            Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,W,rho_true,L,mu0_true,Blag,N,R_NilValue,R_NilValue,R_NilValue,rho_nb,delta_nb,obs_type,verbose,debug);
+            arma::mat theta_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
+            Meff.col(s) = Rcpp::as<arma::vec>(mcs_output["Meff"]);
+            resample_status.col(s) = Rcpp::as<arma::vec>(mcs_output["resample_status"]);
             theta = theta_mat.col(1);
+            theta_last.col(s) = arma::median(Rcpp::as<arma::mat>(mcs_output["theta_last"]),1);
         }
         
         // rtheta_disturbance(wt,wt_accept,Y,ModelCode,W,ht,Fphi,Fx,th0tilde,L,mu0_true,m0,C0,MH_var,false,nburnin,nthin,nsample);
@@ -439,9 +455,9 @@ Rcpp::List hva_poisson(
         theta_stored.col(s) = theta;
         W_stored.at(s) = W;
 
-        // if (verbose) {
-		// 	Rcout << "\rProgress: " << s+1 << "/" << niter;
-		// }
+        if (verbose) {
+			Rcout << "\rProgress: " << s+1 << "/" << niter;
+		}
     }
 
     if (verbose) {
@@ -452,8 +468,11 @@ Rcpp::List hva_poisson(
     output["mu"] = Rcpp::wrap(mu_stored);
     output["d"] = Rcpp::wrap(d_stored);
     output["gamma"] = Rcpp::wrap(gamma_stored);
-    output["theta_stored"] = Rcpp::wrap(theta_stored);
-    output["W_stored"] = Rcpp::wrap(W_stored);
+    output["theta_stored"] = Rcpp::wrap(theta_stored); // (n+1) x niter
+    output["W_stored"] = Rcpp::wrap(W_stored); // niter
+    output["theta_last"] = Rcpp::wrap(theta_last); // p x niter
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
 
     return output;
 }
