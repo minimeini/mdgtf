@@ -13,23 +13,26 @@ Rcpp::sourceCpp(file.path(repo,"lbe_poisson.cpp"))
 # ---------------------------------------------------------------------------------------
 #       NAME           LINK        |  Transmission  |  Gain Function
 # ---------------------------------------------------------------------------------------
-# 0  - (KoyamaMax)     Identity    |  LogNorm       |  ramp,         max(psi[t], 0)
-# 1  - (KoyamaExp)     Identity    |  LogNorm       |  exponential,  exp(psi[t])
-# 2  - (SolowMax)      Identity    |  NegBinom      |  ramp,         max(psi[t], 0)
-# 3  - (SolowExp)      Identity    |  NegBinom      |  exponential,  exp(psi[t])
-# 4  - (KoyckMax)      Identity    |  Exponential   |  ramp,         max(psi[t], 0)
-# 5  - (KoyckExp)      Identity    |  Exponential   |  exponential,  exp(psi[t])
-# 6  - (KoyamaEye)     Exponential |  LogNorm       |  identity,     psi[t]
-# 7  - (SolowEye)      Exponential |  NegBinom      |  identity,     psi[t]
-# 8  - (KoyckEye)      Exponential |  Exponential   |  identity,     psi[t]
+# 0  - (KoyamaMax)     Identity    |  LogNorm       |  ramp,        max(psi[t],0)
+# 1  - (KoyamaExp)     Identity    |  LogNorm       |  exponential, exp(psi[t])
+# 2  - (SolowMax)      Identity    |  NegBinom      |  ramp,        max(psi[t],0)
+# 3  - (SolowExp)      Identity    |  NegBinom      |  exponential, exp(psi[t])
+# 4  - (KoyckMax)      Identity    |  Exponential   |  ramp,        max(psi[t],0)
+# 5  - (KoyckExp)      Identity    |  Exponential   |  exponential, exp(psi[t])
+# 6  - (KoyamaEye)     Exponential |  LogNorm       |  identity,    psi[t]
+# 7  - (SolowEye)      Exponential |  NegBinom      |  identity,    psi[t]
+# 8  - (KoyckEye)      Exponential |  Exponential   |  identity,    psi[t]
 # 9  - (Vanilla)       Exponential |  Exponential   |  No gain
-# 10 - (KoyckSoftplus) Identity    |  Exponential   |  Softplus,     ln(1 + exp(psi[t]))
+# 10 - (KoyckSoftplus) Identity    |  Exponential   |  Softplus,    ln(1+exp(psi[t]))
+# 11 - (KoyamaSoftplus)Identity    |  Exponential   |  Softplus,    ln(1+exp(psi[t]))
+# 12 - (SolowSoftplus) Identity    |  Exponential   |  Softplus,    ln(1+exp(psi[t]))
 # ---------------------------------------------------------------------------------------
 
 
 
 sim_pois_dglm = function(
-    n = 200, # number of observations
+    n = 200, # number of observations for training
+    m = 20, # number of observations for testing
     ModelCode = 0, # 0 - KoyamaMax; 1 - KoyamaExp; 2 - SolowMax; 3 - SolowExp
     obs_type = 1, # 0 - negative-binomial; 1 - poisson
     mu0 = 0., # the baseline intensity
@@ -48,9 +51,11 @@ sim_pois_dglm = function(
   c2 = rho^2
   c3 = (1-rho)^2
   
-  wt = rep(0,n)
+  ntotal = m + n
+  
+  wt = rep(0,ntotal)
   if (!is.null(rng.seed)) { set.seed(rng.seed)}
-  wt[2:n] = rnorm(n-1,0,sqrt(W)) # wt[1] = 0
+  wt[2:ntotal] = rnorm(ntotal-1,0,sqrt(W)) # wt[1] = 0
   
   if (is.null(psi0)) {
     set.seed(rng.seed)
@@ -60,9 +65,9 @@ sim_pois_dglm = function(
   psi[psi>UPBND] = UPBND
   hpsi = psi
   
-  theta = rep(0,n)
-  lambda = rep(0,n)
-  y = rep(0,n)
+  theta = rep(0,ntotal)
+  lambda = rep(0,ntotal)
+  y = rep(0,ntotal)
   
   if (is.null(theta0)) {
     set.seed(rng.seed)
@@ -87,7 +92,7 @@ sim_pois_dglm = function(
       stop("Not supported likelihood.")
     }
     
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       ytilde = y[(t-1):max(c(1,t-L))]
       nlag = length(ytilde)
       theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
@@ -118,7 +123,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       ytilde = y[(t-1):max(c(1,t-L))]
       nlag = length(ytilde)
       theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
@@ -147,7 +152,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       if (t==2) {
         theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
       } else {
@@ -180,7 +185,7 @@ sim_pois_dglm = function(
       stop("Not supported likelihood.")
     }
     
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       if (t==2) {
         theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
       } else {
@@ -211,7 +216,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
       lambda[t] = mu0 + theta[t]
       if (obs_type==1) { # Poisson
@@ -239,7 +244,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
       lambda[t] = mu0 + theta[t]
       if (obs_type==1) { # Poisson
@@ -267,7 +272,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       ytilde = y[(t-1):max(c(1,t-L))]
       nlag = length(ytilde)
       theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
@@ -296,7 +301,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       if (t==2) {
         theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
       } else {
@@ -327,7 +332,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
       lambda[t] = exp(min(c(mu0+theta[t],UPBND)))
       if (obs_type==1) { # Poisson
@@ -353,7 +358,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       theta[t] = rho*theta[t-1] + wt[t]
       lambda[t] = exp(min(c(mu0+theta[t],UPBND)))
       if (obs_type==1) { # Poisson
@@ -381,7 +386,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
       lambda[t] = mu0 + theta[t]
       if (obs_type==1) { # Poisson
@@ -409,7 +414,7 @@ sim_pois_dglm = function(
     } else {
       stop("Not supported likelihood.")
     }
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       ytilde = y[(t-1):max(c(1,t-L))]
       nlag = length(ytilde)
       theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
@@ -440,7 +445,7 @@ sim_pois_dglm = function(
       stop("Not supported likelihood.")
     }
     
-    for (t in 2:n) {
+    for (t in 2:ntotal) {
       if (t==2) {
         theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
       } else {
@@ -463,7 +468,7 @@ sim_pois_dglm = function(
   delta = NULL
   if (!(ModelCode %in% c(0,2,4))) {
     tryCatch({
-      delta = get_optimal_delta(y,ModelCode,delta_grid,
+      delta = get_optimal_delta(y[1:n],ModelCode,delta_grid,
                                 rho=rho,L=L,mu0=mu0,
                                 delta_nb=delta_nb,
                                 obs_type=obs_type)$delta_optim[1]
@@ -477,14 +482,19 @@ sim_pois_dglm = function(
                 W=W,rho=rho,L=L,
                 delta_nb=delta_nb,
                 delta_lbe=delta)
+  pred = list(y=y[(n+1):ntotal],
+              psi=psi[(n+1):ntotal],
+              theta=theta[(n+1):ntotal],
+              lambda=lambda[(n+1):ntotal])
   
-  return(list(y=y, # Observation
-              lambda=lambda, # Intensity
-              theta=theta, # Transfer Function Block
-              psi=psi, # Gain Factor
-              hpsi=hpsi, # Reproduction Number - Function of the Gain Factor
-              wt=wt, # Evolution Variance
-              params=params)) # Model settings and initial values
+  return(list(y=y[1:n], # Observation
+              lambda=lambda[1:n], # Intensity
+              theta=theta[1:n], # Transfer Function Block
+              psi=psi[1:n], # Gain Factor
+              hpsi=hpsi[1:n], # Reproduction Number - Function of the Gain Factor
+              wt=wt[1:n], # Evolution Variance
+              params=params,
+              pred=pred)) # Model settings and initial values
 }
 
 

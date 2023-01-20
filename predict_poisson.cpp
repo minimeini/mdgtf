@@ -18,19 +18,25 @@ Rcpp::List predict_poisson(
     const arma::vec& W_sample, // nsample x 1 for LBE or HVB, or 1 x 1 for MCS
     const arma::mat& theta_last, // p x nsample for MCS or HVB, or p x 1 for LBE
     const Rcpp::Nullable<Rcpp::NumericMatrix>& Ct_last = R_NilValue, // p x p for LBE
+    const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
     const double rho = 0.9,
     const unsigned int L = 0,
     const double mu0 = 0.,
     const double delta_nb = 1.,
-    const unsigned int obs_type = 1.,
-    const double aw = 0.1,
-    const double bw = 0.1) {
+    const unsigned int obs_type = 1.) {
 
     const double UPBND = 700.;
     const double EPS = arma::datum::eps;
 
     const unsigned int n = Y.n_elem; // number of observed counts
     const unsigned int npred = n+m;
+
+    arma::vec qProb;
+    if (qProb_.isNull()) {
+        qProb = {0.025,0.5,0.975};
+    } else {
+        qProb = Rcpp::as<arma::vec>(qProb_);
+    }
 
     const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
 	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
@@ -39,8 +45,7 @@ Rcpp::List predict_poisson(
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
-    arma::mat Gt(p,p,arma::fill::zeros);
-    Gt.at(0,0) = 1.;
+    arma::mat Gt;
 	if (is_koyck) { 
 		TransferCode = 0; 
 		p = 2;
@@ -49,6 +54,9 @@ Rcpp::List predict_poisson(
 		TransferCode = 1; 
 		p = L;
 		L_ = L;
+        Gt.set_size(p,p);
+        Gt.zeros();
+        Gt.at(0,0) = 1.;
         Gt.diag(-1).ones();
 	} else if (is_solow) { 
 		TransferCode = 2; 
@@ -88,9 +96,10 @@ Rcpp::List predict_poisson(
     arma::mat theta_last_(p,nsample);
     if (theta_last.n_cols == 1) {
         arma::vec mt = arma::vectorise(theta_last);
-        arma::mat Ct_chol = arma::chol(Rcpp::as<arma::mat>(Ct_last));
+        // arma::mat Ct_chol = arma::chol(Rcpp::as<arma::mat>(Ct_last));
         for (unsigned int i=0; i<nsample; i++) {
-            theta_last_.col(i) = mt + Ct_chol.t()*arma::randn(p);
+            theta_last_.col(i) = mt;
+            // theta_last_.col(i) = mt + Ct_chol.t()*arma::randn(p);
         }
     } else {
         theta_last_ = theta_last;
@@ -188,8 +197,8 @@ Rcpp::List predict_poisson(
     }
     
     Rcpp::List output;
-    output["ypred"] = Rcpp::wrap(ypred_stored);
-    output["lambda"] = Rcpp::wrap(lambda_stored);
-    output["psi"] = Rcpp::wrap(psi_stored);
+    output["ypred"] = Rcpp::wrap(arma::quantile(ypred_stored,qProb,1));
+    output["lambda"] = Rcpp::wrap(arma::quantile(lambda_stored,qProb,1));
+    output["psi"] = Rcpp::wrap(arma::quantile(psi_stored,qProb,1));
     return output;
 }

@@ -1000,3 +1000,20 @@ Rcpp::List get_optimal_delta(
 
 	return output;
 }
+
+
+
+//' @export
+// [[Rcpp::export]]
+double lbe_What(
+    const arma::vec& ht, // (n+1) x 1
+    const unsigned int nsample = 2000,
+    const double aw = 0.1,
+    const double bw = 0.1) {
+    
+    double n_ = static_cast<double>(ht.n_elem) - 1.;
+    double aw_new = aw + 0.5*n_;
+    double bw_new = bw + 0.5* arma::accu(arma::pow(arma::diff(ht),2));
+    double What = bw_new / (aw_new - 1.);
+    return What;
+}
