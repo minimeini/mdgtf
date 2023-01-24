@@ -1,23 +1,30 @@
 # Comparison of Different Inference Methods for Poisson/Negative-Binomial DGLM
 
+## Dependencies
+
+- C++ libraries: [Armadillo](https://arma.sourceforge.net) and [NLopt](https://nlopt.readthedocs.io/en/latest/).
+- R packages: RcppArmadillo, nloptr
+
 ## Setting up Rcpp Compiler for Apple Silicon
 
 1. Follow [R COMPILER TOOLS FOR RCPP ON MACOS](https://thecoatlessprofessor.com/programming/cpp/r-compiler-tools-for-rcpp-on-macos/)
 2. Regarding the `gfortran` part, do NOT follow the first link. Instead, check out [Tools - R for Mac OS X](https://mac.r-project.org/tools/)
 
-Run `xcode-select -v`, you should see
+## Sanity Check
+
+Run `xcode-select -v`, I get
 
 ```
 xcode-select version 2396.
 ```
 
-Run `xcode-select -p`, you should see
+Run `xcode-select -p`, I get
 
 ```
 /Library/Developer/CommandLineTools
 ```
 
-Run `gcc --version`, you should see
+Run `gcc --version`, I get
 
 ```
 Apple clang version 14.0.0 (clang-1400.0.29.202)
@@ -26,12 +33,11 @@ Thread model: posix
 InstalledDir: /Library/Developer/CommandLineTools/usr/bin
 ```
 
-The `R` version I am using is
+Check `R.version.string` in `R` version, I get
 
 ```
-R version 4.2.2 (2022-10-31) -- "Innocent and Trusting"
-Copyright (C) 2022 The R Foundation for Statistical Computing
-Platform: aarch64-apple-darwin20 (64-bit)
+> R.version.string
+[1] "R version 4.2.2 (2022-10-31)"
 ```
 
 The `macOS` version I am using is
@@ -40,6 +46,15 @@ The `macOS` version I am using is
 System Version: macOS 13.1 (22C65)
 Kernel Version: Darwin 22.2.0
 Processor: Apple M1 Pro
+```
+
+The R-related headers are location in 
+
+```
+> R.home()
+[1] "/Library/Frameworks/R.framework/Resources"
+> RcppArmadillo:::CxxFlags()
+-I"/Library/Frameworks/R.framework/Versions/4.2-arm64/Resources/library/RcppArmadillo/include"
 ```
 
 
