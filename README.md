@@ -57,6 +57,26 @@ The R-related headers are location in
 -I"/Library/Frameworks/R.framework/Versions/4.2-arm64/Resources/library/RcppArmadillo/include"
 ```
 
+## Available Models
+
+| Name           | ID   | Transmission Delay | Gain Function      | Link Function |
+|----------------|------|--------------------|--------------------|---------------|
+| KoyamaMax      | 0    | Log-normal         | Ramp               | Identity      |
+| KoyamaExp      | 1    | Log-normal         | Exponential        | Identity      |
+| SolowMax       | 2    | Negative-binomial  | Ramp               | Identity      |
+| SolowExp       | 3    | Negative-binomial  | Exponential        | Identity      |
+| KoyckMax       | 4    | Exponential        | Ramp               | Identity      |
+| KoyckExp       | 5    | Exponential        | Exponential        | Identity      |
+| KoyamaEye      | 6    | Log-normal         | Identity           | Exponential   |
+| SolowEye       | 7    | Negative-binomial  | Identity           | Exponential   |
+| KoyckEye       | 8    | Exponential        | Identity           | Exponential   |
+| VanillaPois    | 9    | Exponential        | No                 | Exponential   |
+| KoyckSoftplus  | 10   | Exponential        | Softplus           | Identity      |
+| KoyamaSoftplus | 11   | Log-normal         | Softplus           | Identity      |
+| SolowSoftplus  | 12   | Negative-binomial  | Softplus           | Identity      |
+| KoyckTanh      | 13   | Exponential        | Hyperbolic Tangent | Identity      |
+| KoyamaTanh     | 14   | Log-normal         | Hyperbolic Tangent | Identity      |
+| SolowTanh      | 15   | Negative-binomial  | Hyperbolic Tangent | Identity      |
 
 ## Inference
 
