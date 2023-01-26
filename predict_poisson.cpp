@@ -19,6 +19,7 @@ Rcpp::List predict_poisson(
     const arma::mat& theta_last, // p x nsample for MCS or HVB, or p x 1 for LBE
     const Rcpp::Nullable<Rcpp::NumericMatrix>& Ct_last = R_NilValue, // p x p for LBE
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
     const double rho = 0.9,
     const unsigned int L = 0,
     const double mu0 = 0.,
@@ -37,10 +38,14 @@ Rcpp::List predict_poisson(
     } else {
         qProb = Rcpp::as<arma::vec>(qProb_);
     }
+    arma::vec ctanh_ = {0.3,-1.,3.};
+	if (!ctanh.isNull()) {
+		ctanh_ = Rcpp::as<arma::vec>(ctanh);
+	}
 
-    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11;
+    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
 	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
@@ -127,7 +132,7 @@ Rcpp::List predict_poisson(
 
         for (unsigned int t=n; t<npred; t++) {
             // state - theta, especially psi
-            theta_pred.col(t) = update_at(p,ModelCode,TransferCode,theta_pred.col(t-1),Gt,ypred.at(t-1),rho,L_);
+            theta_pred.col(t) = update_at(p,ModelCode,TransferCode,theta_pred.col(t-1),Gt,ctanh_,ypred.at(t-1),rho,L_);
             theta_pred.at(0,t) += wt.at(t);
 
             // Link - phi

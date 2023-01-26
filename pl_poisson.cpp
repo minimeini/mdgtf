@@ -669,6 +669,7 @@ Rcpp::List mcs_poisson(
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
     const double rho_nb = 34.08792, // parameter for negative binomial likelihood
     const double delta_nb = 1.,
     const unsigned int obstype = 1, // 0: negative binomial DLM; 1: poisson DLM
@@ -694,9 +695,9 @@ Rcpp::List mcs_poisson(
     Dimension of state space depends on type of transfer functions 
     - p: diemsnion of DLM state space
     */
-    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11;
+    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
 	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
@@ -785,6 +786,10 @@ Rcpp::List mcs_poisson(
     } else {
         qProb = Rcpp::as<arma::vec>(qProb_);
     }
+    arma::vec ctanh_ = {0.3,-1.,3.};
+	if (!ctanh.isNull()) {
+		ctanh_ = Rcpp::as<arma::vec>(ctanh);
+	}
 
     Rcpp::IntegerVector idx_(N);
     arma::uvec idx(N);
@@ -979,6 +984,26 @@ Rcpp::List mcs_poisson(
                     }
                 }
                 break;
+                case 13: // KoyckTanh
+                {
+                    // Identity link + softplus gain
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = ctanh_.at(2) * (std::tanh(ctanh_.at(0)*theta_stored.at(0,i,B-1)+ctanh_.at(1)) + 1.);
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = Y.at(t)*hpsi + rho*theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
+                case 15: // SolowTanh
+                {
+                    for (unsigned int i=0; i<N; i++) {
+                        hpsi = ctanh_.at(2) * (std::tanh(ctanh_.at(0)*theta_stored.at(0,i,B-1)+ctanh_.at(1)) + 1.);
+                        theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
+                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1),-mu0+EPS);
+                        theta.at(2,i) = theta_stored.at(1,i,B-1);
+                    }
+                }
+                break;
                 default:
                 {
                     ::Rf_error("Not supported model type.");
@@ -1040,6 +1065,12 @@ Rcpp::List mcs_poisson(
             theta.elem(arma::find(theta>UPBND)).fill(UPBND);
             for (unsigned int i=0; i<N; i++) {
                 arma::vec htheta = arma::log(1. + arma::exp(theta.col(i)));
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*htheta);
+            }
+        } else if (ModelCode==14) {
+            // KoyamaTanh with identity link and tanh gain
+            for (unsigned int i=0; i<N; i++) {
+                arma::vec htheta = ctanh_.at(2) * (arma::tanh(ctanh_.at(0)*theta.col(i)+ctanh_.at(1)) + 1.);
                 lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*htheta);
             }
         } else {

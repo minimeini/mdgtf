@@ -29,7 +29,8 @@ double dlogJoint_dWtilde(
     }
     res *= 0.5;
     res += bw;
-    res /= -W;
+    // res /= -W;
+    res = -std::exp(std::log(res) - std::log(W));
     res += aw + 0.5*n;
     return res;
 }
@@ -84,6 +85,7 @@ arma::vec rtheta_ffbs(
     const unsigned int p,
     const arma::vec& ypad, // (n+1) x 1
     const double W,
+    const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain
     const unsigned int L = 0,
     const double rho = 0.9,
     const double delta = 0.9,
@@ -96,7 +98,7 @@ arma::vec rtheta_ffbs(
     
     arma::vec theta(n+1,arma::fill::zeros);
 
-    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,ypad,L,rho,mu0,W,NA_REAL,delta_nb,obs_type,false);
+    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,ypad,ctanh,L,rho,mu0,W,NA_REAL,delta_nb,obs_type,false);
     // Checked. OK.
 
     if (rtheta_type == 0) {
@@ -133,6 +135,7 @@ Rcpp::List hva_poisson(
     const double bw = 0.1,
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
     const double th0_true = 0.,
     const double psi0_true = 0.,
     const double mu0_true = 0.,
@@ -194,9 +197,9 @@ Rcpp::List hva_poisson(
     /*
     ------ MCMC FFBS Sampler ------
     */
-    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11;
+    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
 	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
@@ -229,6 +232,10 @@ Rcpp::List hva_poisson(
 	if (!C0_prior.isNull()) {
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
+    arma::vec ctanh_ = {0.3,-1.,3.};
+	if (!ctanh.isNull()) {
+		ctanh_ = Rcpp::as<arma::vec>(ctanh);
+	}
 
     arma::mat at(p,n+1,arma::fill::zeros);
     arma::cube Rt(p,p,n+1,arma::fill::zeros);
@@ -254,12 +261,6 @@ Rcpp::List hva_poisson(
 		Gt.slice(t) = Gt0;
 	}
 
-	if (!m0_prior.isNull()) {
-		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
-	}
-	if (!C0_prior.isNull()) {
-		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
-	}
     /*
     ------ MCMC FFBS Sampler ------
     */
@@ -313,6 +314,9 @@ Rcpp::List hva_poisson(
     arma::mat resample_status(n,niter);
     arma::mat theta_last(p,niter);
 
+    const unsigned int max_iter = 10;
+    unsigned int cnt = 0;
+
     
     for (unsigned int s=0; s<niter; s++) {
         R_CheckUserInterrupt();
@@ -325,9 +329,15 @@ Rcpp::List hva_poisson(
             // Initial value
             W = W_init;
         } else {
-            eta = rtheta(xi,eps,gamma,mu,B,d);
-            nu = tYJ(eta,gamma);
-            W = std::exp(-eta.at(0));
+            cnt = 0;
+            while(cnt<max_iter) {
+                eta = rtheta(xi,eps,gamma,mu,B,d);
+                nu = tYJ(eta,gamma);
+                W = std::exp(-eta.at(0));
+                cnt++;
+                if (std::isfinite(W)) {break;}
+            }
+            
         }
         
 
@@ -346,9 +356,9 @@ Rcpp::List hva_poisson(
         if (s==0 && !ht_.isNull()) {
             theta = Rcpp::as<arma::vec>(ht_);
         } else if (sampler_type==0) {
-            theta = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,L,rho_true,delta,mu0_true,scale_sd,rtheta_type,delta_nb,obs_type);
+            theta = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,W,ctanh_,L,rho_true,delta,mu0_true,scale_sd,rtheta_type,delta_nb,obs_type);
         } else {
-            Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,W,rho_true,L,mu0_true,Blag,N,R_NilValue,R_NilValue,R_NilValue,rho_nb,delta_nb,obs_type,verbose,debug);
+            Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,W,rho_true,L,mu0_true,Blag,N,R_NilValue,R_NilValue,R_NilValue,ctanh,rho_nb,delta_nb,obs_type,verbose,debug);
             arma::mat theta_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
             Meff.col(s) = Rcpp::as<arma::vec>(mcs_output["Meff"]);
             resample_status.col(s) = Rcpp::as<arma::vec>(mcs_output["resample_status"]);

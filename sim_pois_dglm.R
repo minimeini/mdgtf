@@ -35,6 +35,7 @@ sim_pois_dglm = function(
     m = 20, # number of observations for testing
     ModelCode = 0, # 0 - KoyamaMax; 1 - KoyamaExp; 2 - SolowMax; 3 - SolowExp
     obs_type = 1, # 0 - negative-binomial; 1 - poisson
+    err_type = 0, # 0 - gaussian N(0,W); 1 - laplace; 2 - cauchy
     mu0 = 0., # the baseline intensity
     psi0 = 0., # initial value of the gain factor
     theta0 = 0., # initial value for the transfer function block; set it to NULL to sample from a uniform distribution(0,10). Only used in Solow
@@ -42,6 +43,7 @@ sim_pois_dglm = function(
     L = 0, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
     delta_nb = 1., # rho_nb = 34.08792
+    coef = c(0.3,-1,3), # coefficients for the hyperbolic tangent gain function
     rng.seed = NULL,
     delta_grid = seq(from=0.7,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
@@ -55,7 +57,15 @@ sim_pois_dglm = function(
   
   wt = rep(0,ntotal)
   if (!is.null(rng.seed)) { set.seed(rng.seed)}
-  wt[2:ntotal] = rnorm(ntotal-1,0,sqrt(W)) # wt[1] = 0
+  
+  if (err_type == 0) {
+    wt[2:ntotal] = rnorm(ntotal-1,0,sqrt(W)) # wt[1] = 0
+  } else if (err_type == 1) {
+    wt[2:ntotal] = rmutil::rlaplace(ntotal-1,0,sqrt(W))
+  } else if (err_type == 2) {
+    wt[2:ntotal] = rcauchy(ntotal-1,0,sqrt(W))
+  }
+ 
   
   if (is.null(psi0)) {
     set.seed(rng.seed)
@@ -461,6 +471,95 @@ sim_pois_dglm = function(
       }
     }
     
+  } else if (ModelCode == 13) { # KoyckTanh
+    # <obs> y[t] ~ Pois(lambda[t])
+    # <link> lambda[t] = theta[t]
+    # <state> theta[t] = rho*theta[t-1] + y[t-1]*c*{tanh(a*psi[t]+b)+1}
+    # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi = coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
+    lambda[1] = mu0
+    
+    if (!is.null(rng.seed)) { set.seed(rng.seed)}
+    if (obs_type==1) { # Poisson
+      y[1] = rpois(1,lambda[1])
+    } else if (obs_type==0) { # Negative-binomial
+      y[1] = rnbinom(1, delta_nb, delta_nb/(lambda[1]+delta_nb))
+    } else {
+      stop("Not supported likelihood.")
+    }
+    for (t in 2:ntotal) {
+      theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
+      lambda[t] = mu0 + theta[t]
+      if (obs_type==1) { # Poisson
+        y[t] = rpois(1,lambda[t])
+      } else if (obs_type==0) { # Negative-binomial
+        y[t] = rnbinom(1, delta_nb, delta_nb/(lambda[t]+delta_nb))
+      } else {
+        stop("Not supported likelihood.")
+      }
+    }
+  } else if (ModelCode == 14) { # KoyamaTanh
+    # <obs> y[t] | lambda[t] ~ Pois(lambda[t])
+    # <link> lambda[t] = lambda[0] + theta[t]
+    # <state> theta[t] = phi[1] h(psi[t]) y[t-1] + phi[2] h(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
+    # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
+    hpsi = coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
+    Fphi = get_Fphi(L)
+    lambda[1] = mu0
+    
+    if (!is.null(rng.seed)) { set.seed(rng.seed)}
+    if (obs_type==1) { # Poisson
+      y[1] = rpois(1,lambda[1])
+    } else if (obs_type==0) { # Negative-binomial
+      y[1] = rnbinom(1, delta_nb, delta_nb/(lambda[1]+delta_nb))
+    } else {
+      stop("Not supported likelihood.")
+    }
+    for (t in 2:ntotal) {
+      ytilde = y[(t-1):max(c(1,t-L))]
+      nlag = length(ytilde)
+      theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
+      lambda[t] = mu0 + theta[t] # <link - intensity>
+      if (obs_type==1) { # Poisson
+        y[t] = rpois(1,lambda[t])
+      } else if (obs_type==0) { # Negative-binomial
+        y[t] = rnbinom(1, delta_nb, delta_nb/(lambda[t]+delta_nb))
+      } else {
+        stop("Not supported likelihood.")
+      }
+    }
+  } else if (ModelCode == 15) { # SolowTanh
+    # <obs> y[t] ~ Pois(lambda[t])
+    # <link> lambda[t] = mu0 + theta[t]
+    # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
+    # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi = coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
+    theta[1] = 2*rho*theta0
+    lambda[1] = mu0 + theta[1]
+    if (!is.null(rng.seed)) { set.seed(rng.seed)}
+    if (obs_type==1) { # Poisson
+      y[1] = rpois(1,lambda[1])
+    } else if (obs_type==0) { # Negative-binomial
+      y[1] = rnbinom(1, delta_nb, delta_nb/(lambda[1]+delta_nb))
+    } else {
+      stop("Not supported likelihood.")
+    }
+    
+    for (t in 2:ntotal) {
+      if (t==2) {
+        theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+      } else {
+        theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+      }
+      lambda[t] = mu0 + theta[t]
+      if (obs_type==1) { # Poisson
+        y[t] = rpois(1,lambda[t])
+      } else if (obs_type==0) { # Negative-binomial
+        y[t] = rnbinom(1, delta_nb, delta_nb/(lambda[t]+delta_nb))
+      } else {
+        stop("Not supported likelihood.")
+      }
+    }
   } else {
     stop("Not implemented yet.")
   }
@@ -472,7 +571,7 @@ sim_pois_dglm = function(
                                 rho=rho,L=L,mu0=mu0,
                                 delta_nb=delta_nb,
                                 obs_type=obs_type)$delta_optim[1]
-    })
+    },error=function(e){delta=NA})
   }
   
   
@@ -481,7 +580,8 @@ sim_pois_dglm = function(
                 mu0=mu0,theta0=theta0,psi0=psi0,
                 W=W,rho=rho,L=L,
                 delta_nb=delta_nb,
-                delta_lbe=delta)
+                delta_lbe=delta,
+                ctanh=coef)
   pred = list(y=y[(n+1):ntotal],
               psi=psi[(n+1):ntotal],
               theta=theta[(n+1):ntotal],
