@@ -12,19 +12,19 @@
 
 ## Sanity Check
 
-Run `xcode-select -v`, I get
+Output of `xcode-select -v`:
 
 ```
 xcode-select version 2396.
 ```
 
-Run `xcode-select -p`, I get
+Output of `xcode-select -p`:
 
 ```
 /Library/Developer/CommandLineTools
 ```
 
-Run `gcc --version`, I get
+Output of `gcc --version`:
 
 ```
 Apple clang version 14.0.0 (clang-1400.0.29.202)
@@ -33,14 +33,14 @@ Thread model: posix
 InstalledDir: /Library/Developer/CommandLineTools/usr/bin
 ```
 
-Check `R.version.string` in `R` version, I get
+Output of `R.version.string` in `R`:
 
 ```
 > R.version.string
 [1] "R version 4.2.2 (2022-10-31)"
 ```
 
-The `macOS` version I am using is
+My `macOS` version:
 
 ```
 System Version: macOS 13.1 (22C65)
@@ -48,7 +48,7 @@ Kernel Version: Darwin 22.2.0
 Processor: Apple M1 Pro
 ```
 
-The R-related headers are location in 
+Locations of R-related headers:
 
 ```
 > R.home()
