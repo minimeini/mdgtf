@@ -230,4 +230,33 @@ double trigamma_obj(
 double optimize_trigamma(double q);
 
 
+
+double calc_power_sum(
+	const double rho, // rho for the negative-binomial distribution
+	const double M, // upper bound of the gain function h(.)
+	const unsigned int TransferCode,
+	const double alpha_min, // lower bound of the power
+	const double alpha_max, // upper bound of the power
+	const double prec, // precision
+	const unsigned int ntrunc);
+
+
+Rcpp::List calc_power_sum2(
+	const double rho, // rho for the negative-binomial distribution
+	const double M, // upper bound of the gain function h(.)
+	const unsigned int TransferCode,
+	const double alpha_min, // lower bound of the power
+	const double alpha_max, // upper bound of the power
+	const double prec, // precision
+	unsigned int ntrunc);
+
+
+
+Rcpp::List calc_power_sum3(
+	const double rho, // rho for the negative-binomial distribution
+	const double M, // upper bound of the gain function h(.)
+	unsigned int ntrunc);
+
+
+
 #endif

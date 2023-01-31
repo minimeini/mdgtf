@@ -845,3 +845,157 @@ double optimize_trigamma(double q) {
 	nlopt_destroy(opt);
 	return result;
 }
+
+
+/*
+Return the minimum value of alpha such that
+	sum_{l=1}^{ntrunc} \phi_{l}^{alpha} = 1/M.
+
+We search alpha in a linearly spaced grid {alpha_min:prec:alpha_max}
+*/
+
+//' @export
+// [[Rcpp::export]]
+double calc_power_sum(
+	const double rho, // rho for the negative-binomial distribution
+	const double M, // upper bound of the gain function h(.)
+	const unsigned int TransferCode, // 0 - Koyck; 1 - Koyama; 2 - Solow; 3 - Vanilla
+	const double alpha_min = 1., // lower bound of the power
+	const double alpha_max = 2., // upper bound of the power
+	const double prec = 1.e-4, // precision
+	const unsigned int ntrunc=30) {
+
+	const double mu = 2.2204e-16;
+    const double m = 4.7;
+    const double s = 2.9;
+
+	arma::vec alpha_grid = arma::regspace(alpha_min,prec,alpha_max);
+	const unsigned int nalpha = alpha_grid.n_elem;
+	arma::vec pfunc(nalpha,arma::fill::zeros);
+
+	arma::vec phi(ntrunc,arma::fill::zeros);
+	switch (TransferCode) {
+		case 0: // Koyck
+		{
+			for (unsigned int i=0; i<ntrunc; i++) {
+				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.);
+			}
+		}
+		break;
+		case 1: // Koyama
+		{
+			phi = get_Fphi(ntrunc,mu,m,s);
+		}
+		break;
+		case 2: // Solow
+		{
+			for (unsigned int i=0; i<ntrunc; i++) {
+				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.)*(static_cast<double>(i)+1.);
+			}
+			phi *= (1.-rho) * (1.-rho);
+		}
+		break;
+		default:
+		{
+			::Rf_error("Unsupported distributed lag kernel.");
+		}
+	}
+
+	for (unsigned int i=0; i<nalpha; i++) {
+		pfunc.at(i) = arma::accu(arma::pow(phi,alpha_grid.at(i)));
+	}
+
+	pfunc = arma::abs(pfunc - 1./M);
+
+	return alpha_grid.at(pfunc.index_min());
+}
+
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List calc_power_sum2(
+	const double rho, // rho for the negative-binomial distribution
+	const double M, // upper bound of the gain function h(.)
+	const unsigned int TransferCode, // 0 - Koyck; 1 - Koyama; 2 - Solow; 3 - Vanilla
+	const double alpha_min = 1., // lower bound of the power
+	const double alpha_max = 2., // upper bound of the power
+	const double prec = 1.e-4, // precision
+	unsigned int ntrunc=30) {
+
+	const double mu = 2.2204e-16;
+    const double m = 4.7;
+    const double s = 2.9;
+
+	arma::vec alpha_grid = arma::regspace(alpha_min,prec,alpha_max);
+	const unsigned int nalpha = alpha_grid.n_elem;
+	arma::vec pfunc(nalpha,arma::fill::zeros);
+
+	arma::vec phi(ntrunc,arma::fill::zeros);
+	switch (TransferCode) {
+		case 0: // Koyck
+		{
+			for (unsigned int i=0; i<ntrunc; i++) {
+				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.);
+			}
+		}
+		break;
+		case 1: // Koyama
+		{
+			phi = get_Fphi(ntrunc,mu,m,s);
+		}
+		break;
+		case 2: // Solow
+		{
+			for (unsigned int i=0; i<ntrunc; i++) {
+				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.)*(static_cast<double>(i)+1.);
+			}
+			phi *= (1.-rho) * (1.-rho);
+		}
+		break;
+		default:
+		{
+			::Rf_error("Unsupported distributed lag kernel.");
+		}
+	}
+	
+
+	for (unsigned int i=0; i<nalpha; i++) {
+		pfunc.at(i) = arma::accu(arma::pow(phi,alpha_grid.at(i)));
+	}
+
+	Rcpp::List output;
+	output["alpha"] = Rcpp::wrap(alpha_grid);
+	output["psum"] = Rcpp::wrap(pfunc);
+
+	pfunc = arma::abs(pfunc - 1./M);
+	double alpha_equal = alpha_grid.at(pfunc.index_min());
+	output["alpha_equal"] = alpha_equal;
+	output["phi"] = Rcpp::wrap(arma::pow(phi,alpha_equal));
+
+	return output;
+}
+
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List calc_power_sum3(
+	const double rho, // rho for the negative-binomial distribution
+	const double M, // upper bound of the gain function h(.)
+	unsigned int ntrunc=30) {
+
+	double alpha_equal = 1. - 0.5*std::log(M)/std::log(1.-rho);
+
+	arma::vec phi(ntrunc,arma::fill::zeros);
+	for (unsigned int i=0; i<ntrunc; i++) {
+		phi.at(i) = std::pow(rho,static_cast<double>(i)+1.)*(static_cast<double>(i)+1.);
+	}
+	phi *= std::pow(1.-rho, alpha_equal);
+	
+	Rcpp::List output;
+	output["alpha_equal"] = alpha_equal;
+	output["phi"] = Rcpp::wrap(phi);
+
+	return output;
+}

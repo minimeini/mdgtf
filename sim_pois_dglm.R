@@ -33,10 +33,12 @@ Rcpp::sourceCpp(file.path(repo,"lbe_poisson.cpp"))
 sim_pois_dglm = function(
     n = 200, # number of observations for training
     m = 20, # number of observations for testing
-    ModelCode = 0, # 0 - KoyamaMax; 1 - KoyamaExp; 2 - SolowMax; 3 - SolowExp
+    ModelCode = 0, # 
     obs_type = 1, # 0 - negative-binomial; 1 - poisson
-    err_type = 0, # 0 - gaussian N(0,W); 1 - laplace; 2 - cauchy
+    err_type = 0, # 0 - gaussian N(0,W); 1 - laplace; 2 - cauchy; 3 - left skewed normal
     mu0 = 0., # the baseline intensity
+    alpha = 1, # power on the transmission delay
+    solow_alpha = 0, # 0 - raise AR coef to alpha; 1 - raise MA & AR coef to alpha
     psi0 = 0., # initial value of the gain factor
     theta0 = 0., # initial value for the transfer function block; set it to NULL to sample from a uniform distribution(0,10). Only used in Solow
     W = 0.01, # Evolution variance
@@ -52,18 +54,22 @@ sim_pois_dglm = function(
   c1 = 2*rho
   c2 = rho^2
   c3 = (1-rho)^2
+  alpha2 = ifelse(solow_alpha==1,alpha,1)
   
   ntotal = m + n
   
   wt = rep(0,ntotal)
   if (!is.null(rng.seed)) { set.seed(rng.seed)}
   
-  if (err_type == 0) {
+  if (err_type == 0) { # Normal
     wt[2:ntotal] = rnorm(ntotal-1,0,sqrt(W)) # wt[1] = 0
-  } else if (err_type == 1) {
+  } else if (err_type == 1) { # Laplace
     wt[2:ntotal] = rmutil::rlaplace(ntotal-1,0,sqrt(W))
-  } else if (err_type == 2) {
+  } else if (err_type == 2) { # Cauchy
     wt[2:ntotal] = rcauchy(ntotal-1,0,sqrt(W))
+  } else if (err_type == 3) { # left skewed normal
+    wt[2:ntotal] = sn::rsn(ntotal-1,xi=0,omega=sqrt(W),alpha=-0.1)
+    
   }
  
   
@@ -90,7 +96,7 @@ sim_pois_dglm = function(
     # <state> theta[t] = phi[1] max(psi[t],0) y[t-1] + phi[2] max(psi[t-1],0) y[t-2] + ... + phi[L] max(psi[t-L+1],0) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
     hpsi[hpsi<.Machine$double.eps] = .Machine$double.eps # Reproduction number after maximum thresholding
-    Fphi = get_Fphi(L)
+    Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0 + max(c(0,psi0))
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -122,7 +128,7 @@ sim_pois_dglm = function(
     # <state> theta[t] = phi[1] exp(psi[t]) y[t-1] + phi[2] exp(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
     hpsi = exp(hpsi) # exponentiated reproduction number
-    Fphi = get_Fphi(L)
+    Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -164,9 +170,9 @@ sim_pois_dglm = function(
     }
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
-        theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
       lambda[t] = mu0 + theta[t]
       if (obs_type==1) { # Poisson
@@ -184,7 +190,7 @@ sim_pois_dglm = function(
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
     hpsi = exp(hpsi)
-    theta[1] = 2*rho*theta0
+    theta[1] = (2*rho)^alpha2*theta0
     lambda[1] = mu0 + theta[1]
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
     if (obs_type==1) { # Poisson
@@ -197,9 +203,9 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
-        theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
       lambda[t] = mu0 + theta[t]
       
@@ -270,7 +276,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = exp(theta[t])
     # <state> theta[t] = phi[1] psi[t] y[t-1] + phi[2] psi[t-1] y[t-2] + ... + phi[L] psi[t-L+1] y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
-    Fphi = get_Fphi(L)
+    Fphi = get_Fphi(L)^alpha
     theta[1] = .Machine$double.eps
     lambda[1] = exp(min(c(mu0+theta[1],UPBND)))
     
@@ -313,9 +319,9 @@ sim_pois_dglm = function(
     }
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
-        theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
       lambda[t] =  exp(min(c(mu0+theta[t],UPBND)))
       if (obs_type==1) { # Poisson
@@ -413,7 +419,7 @@ sim_pois_dglm = function(
     # <state> theta[t] = phi[1] exp(psi[t]) y[t-1] + phi[2] exp(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
     hpsi = log(1. + exp(hpsi)) # softplused reproduction number
-    Fphi = get_Fphi(L)
+    Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -444,7 +450,7 @@ sim_pois_dglm = function(
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
     hpsi = log(1. + exp(hpsi))
-    theta[1] = 2*rho*theta0
+    theta[1] = (2*rho)^alpha2*theta0
     lambda[1] = mu0 + theta[1]
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
     if (obs_type==1) { # Poisson
@@ -457,9 +463,9 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
-        theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
       lambda[t] = mu0 + theta[t]
       if (obs_type==1) { # Poisson
@@ -476,7 +482,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = theta[t]
     # <state> theta[t] = rho*theta[t-1] + y[t-1]*c*{tanh(a*psi[t]+b)+1}
     # <state> psi[t] = psi[t-1] + omega[t]
-    hpsi = coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
+    hpsi = 0.5*coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
     lambda[1] = mu0
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -503,8 +509,8 @@ sim_pois_dglm = function(
     # <link> lambda[t] = lambda[0] + theta[t]
     # <state> theta[t] = phi[1] h(psi[t]) y[t-1] + phi[2] h(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
-    hpsi = coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
-    Fphi = get_Fphi(L)
+    hpsi = 0.5*coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
+    Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -533,8 +539,8 @@ sim_pois_dglm = function(
     # <link> lambda[t] = mu0 + theta[t]
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
-    hpsi = coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
-    theta[1] = 2*rho*theta0
+    hpsi = 0.5*coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1)
+    theta[1] = (2*rho)^alpha2*theta0
     lambda[1] = mu0 + theta[1]
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
     if (obs_type==1) { # Poisson
@@ -547,9 +553,98 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1*theta[1] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
-        theta[t] = c1*theta[t-1] - c2*theta[t-2] + c3*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
+      }
+      lambda[t] = mu0 + theta[t]
+      if (obs_type==1) { # Poisson
+        y[t] = rpois(1,lambda[t])
+      } else if (obs_type==0) { # Negative-binomial
+        y[t] = rnbinom(1, delta_nb, delta_nb/(lambda[t]+delta_nb))
+      } else {
+        stop("Not supported likelihood.")
+      }
+    }
+  } else if (ModelCode == 16) { # KoyckLogistic
+    # <obs> y[t] ~ Pois(lambda[t])
+    # <link> lambda[t] = theta[t]
+    # <state> theta[t] = rho*theta[t-1] + y[t-1]*c/{exp(-a*psi[t]+a*b)+1}
+    # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi = coef[3] / (exp(-coef[1]*hpsi + coef[1]*coef[2]) + 1)
+    lambda[1] = mu0
+    
+    if (!is.null(rng.seed)) { set.seed(rng.seed)}
+    if (obs_type==1) { # Poisson
+      y[1] = rpois(1,lambda[1])
+    } else if (obs_type==0) { # Negative-binomial
+      y[1] = rnbinom(1, delta_nb, delta_nb/(lambda[1]+delta_nb))
+    } else {
+      stop("Not supported likelihood.")
+    }
+    for (t in 2:ntotal) {
+      theta[t] = rho*theta[t-1] + y[t-1]*hpsi[t-1]
+      lambda[t] = mu0 + theta[t]
+      if (obs_type==1) { # Poisson
+        y[t] = rpois(1,lambda[t])
+      } else if (obs_type==0) { # Negative-binomial
+        y[t] = rnbinom(1, delta_nb, delta_nb/(lambda[t]+delta_nb))
+      } else {
+        stop("Not supported likelihood.")
+      }
+    }
+  } else if (ModelCode == 17) { # KoyamaLogistic
+    # <obs> y[t] | lambda[t] ~ Pois(lambda[t])
+    # <link> lambda[t] = lambda[0] + theta[t]
+    # <state> theta[t] = phi[1] h(psi[t]) y[t-1] + phi[2] h(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
+    # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
+    hpsi = coef[3] / (exp(-coef[1]*hpsi + coef[1]*coef[2]) + 1)
+    Fphi = get_Fphi(L)^alpha
+    lambda[1] = mu0
+    
+    if (!is.null(rng.seed)) { set.seed(rng.seed)}
+    if (obs_type==1) { # Poisson
+      y[1] = rpois(1,lambda[1])
+    } else if (obs_type==0) { # Negative-binomial
+      y[1] = rnbinom(1, delta_nb, delta_nb/(lambda[1]+delta_nb))
+    } else {
+      stop("Not supported likelihood.")
+    }
+    for (t in 2:ntotal) {
+      ytilde = y[(t-1):max(c(1,t-L))]
+      nlag = length(ytilde)
+      theta[t] = sum(Fphi[1:nlag]*hpsi[t:(t-nlag+1)]*ytilde) # <state>
+      lambda[t] = mu0 + theta[t] # <link - intensity>
+      if (obs_type==1) { # Poisson
+        y[t] = rpois(1,lambda[t])
+      } else if (obs_type==0) { # Negative-binomial
+        y[t] = rnbinom(1, delta_nb, delta_nb/(lambda[t]+delta_nb))
+      } else {
+        stop("Not supported likelihood.")
+      }
+    }
+  } else if (ModelCode == 18) { # SolowLogistic
+    # <obs> y[t] ~ Pois(lambda[t])
+    # <link> lambda[t] = mu0 + theta[t]
+    # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
+    # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi = coef[3] / (exp(-coef[1]*hpsi + coef[1]*coef[2]) + 1)
+    theta[1] = (2*rho)^alpha2*theta0
+    lambda[1] = mu0 + theta[1]
+    if (!is.null(rng.seed)) { set.seed(rng.seed)}
+    if (obs_type==1) { # Poisson
+      y[1] = rpois(1,lambda[1])
+    } else if (obs_type==0) { # Negative-binomial
+      y[1] = rnbinom(1, delta_nb, delta_nb/(lambda[1]+delta_nb))
+    } else {
+      stop("Not supported likelihood.")
+    }
+    
+    for (t in 2:ntotal) {
+      if (t==2) {
+        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
+      } else {
+        theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
       lambda[t] = mu0 + theta[t]
       if (obs_type==1) { # Poisson
@@ -609,6 +704,8 @@ sim_transfer_function = function(
     W = 0.01, # Evolution variance
     L = 12, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
+    coef = c(0.3,-1,3), # coefficients for the hyperbolic tangent gain function
+    alpha = 1.,
     rng.seed = NULL) {
   
   n = length(x)
