@@ -43,13 +43,14 @@ arma::vec update_at(
 	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
 	const arma::mat& Gt, // p x p
 	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const double alpha = 1.,
 	const double y = NA_REAL,  // n x 1
 	const double rho = NA_REAL,
 	const unsigned int L = 1) {
 	
 	arma::vec at(p,arma::fill::zeros);
 	const double UPBND = 700.;
-	const double coef1 = (1.-rho)*(1.-rho);
+	const double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
 	
 	if (TransferCode == 2) { // Solow
 		/*------ START Solow ------*/
@@ -80,7 +81,7 @@ arma::vec update_at(
 			break;
 			case 15: // SolowTanh
 			{
-				at.at(1) = coef1 * y * ctanh.at(2)*(std::tanh(ctanh.at(0)*mt.at(0)+ctanh.at(1)) + 1.);
+				at.at(1) = 0.5*coef1 * y * ctanh.at(2)*(std::tanh(ctanh.at(0)*mt.at(0)+ctanh.at(1)) + 1.);
 			}
 			break;
 			default:
@@ -119,7 +120,7 @@ arma::vec update_at(
 			break;
 			case 13: // KoyckTanh
 			{
-				at.at(1) = y * ctanh.at(2)*(std::tanh(ctanh.at(0)*mt.at(0)+ctanh.at(1)) + 1.);
+				at.at(1) = y * 0.5*ctanh.at(2)*(std::tanh(ctanh.at(0)*mt.at(0)+ctanh.at(1)) + 1.);
 			}
 			break;
 			default:
@@ -152,6 +153,7 @@ void update_Gt(
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1
 	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const double alpha = 1.,
 	const double y = NA_REAL, // obs
 	const double rho = NA_REAL) { 
 
@@ -183,7 +185,7 @@ void update_Gt(
 			break;
 			case 15: // SolowTanh
 			{
-				Gt.at(1,0) = ctanh.at(0)*ctanh.at(2)/std::pow(std::cosh(ctanh.at(0)*mt.at(0)+ctanh.at(1)),2);
+				Gt.at(1,0) = 0.5*ctanh.at(0)*ctanh.at(2)/std::pow(std::cosh(ctanh.at(0)*mt.at(0)+ctanh.at(1)),2);
 			}
 			break;
 			default:
@@ -191,7 +193,7 @@ void update_Gt(
 				::Rf_error("This block only supports Solow");
 			}
 		} // End switch block
-		Gt.at(1,0) *= (1.-rho)*(1.-rho)*y;
+		Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 
 	} else if (TransferCode == 0) { // Koyck
 		switch (ModelCode) {
@@ -219,7 +221,7 @@ void update_Gt(
 			break;
 			case 13: // KoyckTanh
 			{
-				Gt.at(1,0) = ctanh.at(0)*ctanh.at(2)/std::pow(std::cosh(ctanh.at(0)*mt.at(0)+ctanh.at(1)),2);
+				Gt.at(1,0) = 0.5*ctanh.at(0)*ctanh.at(2)/std::pow(std::cosh(ctanh.at(0)*mt.at(0)+ctanh.at(1)),2);
 			}
 			break;
 			default:
@@ -267,7 +269,8 @@ void update_Ft(
 	const unsigned int t, // current time point
 	const unsigned int L, // lag
 	const arma::vec& Y,  // (n+1) x 1, obs
-	const arma::vec& Fphi) { // L x 1
+	const arma::vec& Fphi, // L x 1
+	const double alpha = 1.) { 
 		
 	if (TransferCode == 1) { // Koyama
 		double L_ = static_cast<double>(L);
@@ -298,6 +301,7 @@ void forwardFilter(
 	const unsigned int p, // dimension of the state space
 	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
 	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const double alpha = 1.,
 	const unsigned int L = 0,
 	const double rho = 0.9,
 	const double mu0 = 0.,
@@ -331,6 +335,7 @@ void forwardFilter(
 		const double m = 4.7;
 		const double s = 2.9;
 		Fphi = get_Fphi(L,mu,m,s);
+		Fphi = arma::pow(Fphi,alpha);
 		Fy.zeros(L);
 	}
 	/*
@@ -346,7 +351,7 @@ void forwardFilter(
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 	if (TransferCode == 1 && L>0) { // Koyama
-		at.col(1) = update_at(p,ModelCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,Y.at(0),rho,L);
+		at.col(1) = update_at(p,ModelCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho,L);
 		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
 		update_Ft(Ft, Fy, TransferCode, 0, L, Y, Fphi);
 		switch (ModelCode) {
@@ -382,10 +387,10 @@ void forwardFilter(
 			case 14: // KoyamaTanh
 			{
 				at.elem(arma::find(at>UPBND)).fill(UPBND);
-				arma::vec at_tanh = ctanh.at(2) * (arma::tanh(ctanh.at(0)*at.col(1)+ctanh.at(1)) + 1.);
+				arma::vec at_tanh = 0.5*ctanh.at(2) * (arma::tanh(ctanh.at(0)*at.col(1)+ctanh.at(1)) + 1.);
 				ft = arma::accu(Ft % at_tanh); // use gt(.)
 
-				at_tanh = ctanh.at(0)*ctanh.at(2)/arma::pow(arma::cosh(ctanh.at(0)*at.col(1)+ctanh.at(1)),2); // first order derivative of h(.)
+				at_tanh = 0.5*ctanh.at(0)*ctanh.at(2)/arma::pow(arma::cosh(ctanh.at(0)*at.col(1)+ctanh.at(1)),2); // first order derivative of h(.)
 				Ft = Ft % at_tanh;
 				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
 			}
@@ -477,8 +482,8 @@ void forwardFilter(
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		update_Gt(Gt.slice(t), ModelCode, TransferCode, mt.col(t-1), ctanh, Y.at(t-1), rho);
-		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt.slice(t), ctanh, Y.at(t-1),rho,L);
+		update_Gt(Gt.slice(t), ModelCode, TransferCode, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
+		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt.slice(t), ctanh, alpha, Y.at(t-1),rho,L);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 
 		if (t<10 && debug) {
@@ -524,10 +529,10 @@ void forwardFilter(
 				case 14: // KoyamaTanh
 				{
 					at.elem(arma::find(at>UPBND)).fill(UPBND);
-					arma::vec at_tanh = ctanh.at(2) * (arma::tanh(ctanh.at(0)*at.col(t)+ctanh.at(1)) + 1.);
+					arma::vec at_tanh = 0.5*ctanh.at(2) * (arma::tanh(ctanh.at(0)*at.col(t)+ctanh.at(1)) + 1.);
 					ft = arma::accu(Ft % at_tanh); // use gt(.)
 					
-					at_tanh = ctanh.at(0)*ctanh.at(2)/arma::pow(arma::cosh(ctanh.at(0)*at.col(t)+ctanh.at(1)),2); // first order derivative of h(.)
+					at_tanh = 0.5*ctanh.at(0)*ctanh.at(2)/arma::pow(arma::cosh(ctanh.at(0)*at.col(t)+ctanh.at(1)),2); // first order derivative of h(.)
 					Ft = Ft % at_tanh;
 					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
 				}
@@ -822,7 +827,8 @@ Rcpp::List lbe_poisson(
 	const double W = NA_REAL,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
+	const Rcpp::Nullable<Rcpp::NumericVector>& ctanh = R_NilValue,
+	const double alpha = 1.,
 	const double delta_nb = 1.,
 	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM
 	const bool debug = false) { 
@@ -904,7 +910,7 @@ Rcpp::List lbe_poisson(
 		ctanh_ = Rcpp::as<arma::vec>(ctanh);
 	}
     
-	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,ctanh_,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
+	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,ctanh_,alpha,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
 
@@ -927,6 +933,7 @@ Rcpp::List get_eta_koyama(
 	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
 	const arma::cube& Ct, // p x p x (n+1)
 	const unsigned int ModelCode,
+	const double alpha = 1.,
 	const double mu0 = 0.) {
 	
 	const unsigned int n = Y.n_elem;
@@ -950,7 +957,7 @@ Rcpp::List get_eta_koyama(
 	}
 
 	for (unsigned int t=0; t<=n; t++) {
-		update_Ft(Ft, Fy, TransferCode, t, p, Y, Fphi);
+		update_Ft(Ft, Fy, TransferCode, t, p, Y, Fphi, alpha);
 		switch (ModelCode) {
 			case 0: // KoyamaMax
 			{
@@ -996,7 +1003,8 @@ Rcpp::List get_optimal_delta(
 	const double mu0 = 0.,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
+	const Rcpp::Nullable<Rcpp::NumericVector>& ctanh = R_NilValue,
+	const double alpha = 1.,
 	const double delta_nb = 1.,
 	const unsigned int obs_type = 1) { // 0: negative binomial DLM; 1: poisson DLM
 
@@ -1012,7 +1020,7 @@ Rcpp::List get_optimal_delta(
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,delta_nb,obs_type,false);
+		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,obs_type,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=1; j<=n; j++) {

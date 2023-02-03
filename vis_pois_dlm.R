@@ -11,6 +11,10 @@ plot_sim = function(sim_dat) {
     geom_line() + ylab("Reproduction Number") +
     theme_light()
   
+  if (!is.null(sim_dat$params$ctanh)) {
+    p2 = p2 + scale_y_continuous(limits=c(0,sim_dat$params$ctanh[3]))
+  }
+  
   p3 = ggplot(data.frame(Time=1:n,psi=sim_dat$psi),aes(x=Time,y=psi)) +
     geom_line() + ylab("Gain Factor") + theme_light()
   
@@ -25,7 +29,10 @@ plot_results = function(sim_dat=NULL,
                         hvb_output=NULL,
                         nburnin=2000,
                         tstart=0,
-                        n=NA) {# number of observations
+                        n=NA,# number of observations
+                        plot_hpsi=FALSE, # if FALSE, plot psi by default
+                        plot_coverage=TRUE,
+                        plot_theta=TRUE) {
   if (is.null(mcs_output)&is.null(lbe_output)&is.null(hvb_output)) {
     return(NULL)
   }
@@ -34,47 +41,138 @@ plot_results = function(sim_dat=NULL,
   }
   ####
   ####
+  
   if (!is.null(sim_dat)) {
     psi_vec = c(sim_dat$params$psi0,sim_dat$psi) # 1:(n+1) <=> 0:n
+    if (plot_hpsi) {
+      psi_vec = c(psi2hpsi(matrix(psi_vec,ncol=1),
+                           sim_dat$params$ModelCode,
+                           coef=sim_dat$params$ctanh))
+    }
     if (tstart>0) {
       psi = cbind(psi_vec[-c(1:tstart)],tstart:length(sim_dat$y))
     } else { # tstart==0
       psi = cbind(psi_vec,0:length(sim_dat$y))
     }
-    
     colnames(psi) = c("true","time")
+    psi = as.data.frame(psi)
+    
+    if (plot_theta) {
+      theta_vec = sim_dat$theta
+      if (tstart>0) {
+        theta = data.frame(true=theta_vec[-c(1:tstart)],
+                           time=(tstart+1):length(sim_dat$y))
+      } else {
+        theta = data.frame(true=theta_vec,
+                           time=1:length(sim_dat$y))
+      }
+    }
     ncol = 2
   } else {
     psi = data.frame(time=tstart:n)
+    if (plot_theta) {theta=data.frame(time=tstart:n)}
     ncol = 1
   }
   
   ####
   if (!is.null(mcs_output)) {
     tmp = mcs_output$quantiles
+    tmp2 = psi2hpsi(tmp,sim_dat$params$ModelCode,
+                    coef=sim_dat$params$ctanh)
+    if (plot_hpsi) { tmp = tmp2 }
+    
     if (tstart>0) {tmp = tmp[-c(1:tstart),]}
     psi = cbind(psi,tmp)
-    ncol = ncol + 3
+    ncol = dim(psi)[2]
     colnames(psi)[(ncol-2):ncol] = c("mcs_lobnd", "mcs", "mcs_hibnd")
+    
+    
+    if (plot_theta) {
+      theta_tmp = hpsi2theta(tmp2,sim_dat$y,
+                             sim_dat$params$ModelCode,
+                             sim_dat$params$theta0,
+                             sim_dat$params$alpha,
+                             sim_dat$params$L,
+                             sim_dat$params$rho)
+      if (tstart>0) {theta_tmp = theta_tmp[-c(1:tstart),]}
+      theta = cbind(theta,theta_tmp)
+      ncol = dim(theta)[2]
+      colnames(theta)[(ncol-2):ncol] = c("mcs_lobnd", "mcs", "mcs_hibnd")
+    }
+    
+    
+    if (plot_coverage) {
+      psi$mcs_width = psi$mcs_hibnd - psi$mcs_lobnd
+      if (plot_hpsi & !is.null(sim_dat$params$ctanh)) {
+        psi$mcs_width = 100 * psi$mcs_width / sim_dat$params$ctanh[3]
+      }
+    }
   }
   ####
   if (!is.null(lbe_output)) {
     tmp = cbind(lbe_output$ht-2*sqrt(abs(lbe_output$Ht)),
                 lbe_output$ht,
                 lbe_output$ht+2*sqrt(abs(lbe_output$Ht)))
+    tmp2 = psi2hpsi(tmp,sim_dat$params$ModelCode,
+                    coef=sim_dat$params$ctanh)
+    if (plot_hpsi) { tmp = tmp2 }
     if (tstart>0) {tmp = tmp[-c(1:tstart),]}
     psi = cbind(psi,tmp)
-    ncol = ncol + 3
+    ncol = dim(psi)[2]
     colnames(psi)[(ncol-2):ncol] = c("lbe_lobnd","lbe","lbe_hibnd")
+    
+    if (plot_theta) {
+      theta_tmp = hpsi2theta(tmp2,sim_dat$y,
+                             sim_dat$params$ModelCode,
+                             sim_dat$params$theta0,
+                             sim_dat$params$alpha,
+                             sim_dat$params$L,
+                             sim_dat$params$rho)
+      if (tstart>0) {theta_tmp = theta_tmp[-c(1:tstart),]}
+      theta = cbind(theta,theta_tmp)
+      ncol = dim(theta)[2]
+      colnames(theta)[(ncol-2):ncol] = c("lbe_lobnd", "lbe", "lbe_hibnd")
+    }
+    
+    if (plot_coverage) {
+      psi$lbe_width = psi$lbe_hibnd - psi$lbe_lobnd
+      if (plot_hpsi & !is.null(sim_dat$params$ctanh)) {
+        psi$lbe_width = 100 * psi$lbe_width / sim_dat$params$ctanh[3]
+      }
+    }
   }
   ####
   if (!is.null(hvb_output)) {
-    tmp = t(apply(hvb_output$theta_stored[,-c(1:nburnin)],1,
-                  quantile,c(0.025,0.5,0.975)))
+    tmp = hvb_output$psi_stored[,-c(1:nburnin)]
+    tmp2 = psi2hpsi(tmp,sim_dat$params$ModelCode,
+                    coef=sim_dat$params$ctanh)
+    if (plot_hpsi) { tmp = tmp2 }
+    tmp = t(apply(tmp,1,quantile,c(0.025,0.5,0.975)))
     if (tstart>0) {tmp = tmp[-c(1:tstart),]}
     psi = cbind(psi,tmp)
-    ncol = ncol + 3
+    ncol = dim(psi)[2]
     colnames(psi)[(ncol-2):ncol] = c("hvb_lobnd","hvb","hvb_hibnd")
+    
+    if (plot_theta) {
+      theta_tmp = hpsi2theta(tmp2,sim_dat$y,
+                             sim_dat$params$ModelCode,
+                             sim_dat$params$theta0,
+                             sim_dat$params$alpha,
+                             sim_dat$params$L,
+                             sim_dat$params$rho)
+      theta_tmp = t(apply(theta_tmp,1,quantile,c(0.025,0.5,0.975)))
+      if (tstart>0) {theta_tmp = theta_tmp[-c(1:tstart),]}
+      theta = cbind(theta,theta_tmp)
+      ncol = dim(theta)[2]
+      colnames(theta)[(ncol-2):ncol] = c("hvb_lobnd", "hvb", "hvb_hibnd")
+    }
+    
+    if (plot_coverage) {
+      psi$hvb_width = psi$hvb_hibnd - psi$hvb_lobnd
+      if (plot_hpsi & !is.null(sim_dat$params$ctanh)) {
+        psi$hvb_width = 100 * psi$hvb_width / sim_dat$params$ctanh[3]
+      }
+    }
   }
   psi = as.data.frame(psi)
   ####
@@ -82,46 +180,122 @@ plot_results = function(sim_dat=NULL,
   labs = NULL
   cols = NULL
   p = ggplot(psi,aes(x=time))
+  p2 = ggplot(psi,aes(x=time))
+  p3 = ggplot(theta,aes(x=time))
   
   if (!is.null(sim_dat)) {
     labs = c(labs,"True")
     cols = c(cols,"black")
     p = p + geom_line(aes(y=true,color="black"), na.rm=TRUE)
+    
+    if (plot_theta) {
+      p3 = p3 + geom_line(aes(y=true,color="black"), na.rm=TRUE)
+    }
   }
   
   if (!is.null(mcs_output)) {
+    labs = c(labs,"MCS")
+    cols = c(cols,"royalblue")
+    
     p = p + geom_line(aes(y=mcs,color="royalblue"), na.rm=TRUE) +
       geom_ribbon(aes(y=mcs,ymin=mcs_lobnd,
                       ymax=mcs_hibnd,fill="royalblue"), 
                   alpha=0.2,na.rm=TRUE)
-    labs = c(labs,"MCS")
-    cols = c(cols,"royalblue")
+    
+    if (plot_coverage) {
+      p2 = p2 + geom_area(aes(y=mcs_width,fill="royalblue"),
+                          alpha=0.2,na.rm=TRUE)
+    }
+    if (plot_theta) {
+      p3 = p3 + geom_line(aes(y=mcs,color="royalblue"), na.rm=TRUE) +
+        geom_ribbon(aes(y=mcs,ymin=mcs_lobnd,
+                        ymax=mcs_hibnd,fill="royalblue"), 
+                    alpha=0.2,na.rm=TRUE)
+    }
   }
   ####
   if (!is.null(lbe_output)) {
+    labs = c(labs,"LBE")
+    cols = c(cols,"maroon")
     p = p + geom_line(aes(y=lbe,color="maroon"), na.rm=TRUE) +
       geom_ribbon(aes(y=lbe,ymin=lbe_lobnd,
                       ymax=lbe_hibnd,fill="maroon"), 
                   alpha=0.2,na.rm=TRUE) 
-    labs = c(labs,"LBE")
-    cols = c(cols,"maroon")
+    
+    if (plot_coverage) {
+      p2 = p2 + geom_area(aes(y=lbe_width,fill="maroon"),
+                          alpha=0.2,na.rm=TRUE)
+    }
+    
+    if (plot_theta) {
+      p3 = p3 + geom_line(aes(y=lbe,color="maroon"), na.rm=TRUE) +
+        geom_ribbon(aes(y=lbe,ymin=lbe_lobnd,
+                        ymax=lbe_hibnd,fill="maroon"), 
+                    alpha=0.2,na.rm=TRUE)
+    }
   }
   ####
   if (!is.null(hvb_output)) {
+    labs = c(labs,"HVB")
+    cols = c(cols,"purple")
     p = p + geom_line(aes(y=hvb,color="purple"), na.rm=TRUE) +
       geom_ribbon(aes(y=hvb,ymin=hvb_lobnd,
                       ymax=hvb_hibnd,fill="purple"), 
                   alpha=0.2,na.rm=TRUE)
-    labs = c(labs,"HVB")
-    cols = c(cols,"purple")
+    
+    if (plot_coverage) {
+      p2 = p2 + geom_area(aes(y=hvb_width,fill="purple"),
+                          alpha=0.2,na.rm=TRUE)
+    }
+    
+    if (plot_theta) {
+      p3 = p3 + geom_line(aes(y=hvb,color="purple"), na.rm=TRUE) +
+        geom_ribbon(aes(y=hvb,ymin=hvb_lobnd,
+                        ymax=hvb_hibnd,fill="purple"), 
+                    alpha=0.2,na.rm=TRUE)
+    }
   }
   ####
   p = p + theme_light() +
-    scale_color_identity(name = "Method", breaks=cols, 
+    scale_color_identity(name ="Method", breaks=cols, 
                          labels=labs, guide="legend") +
     scale_fill_identity(name = "Method", breaks=cols, labels=labs) +
-    theme(legend.position = "bottom")
-  return(p)
+    theme(legend.position = "bottom") + xlab("Time")
+  if (plot_hpsi & !is.null(sim_dat$params$ctanh)) {
+    p = p + scale_y_continuous(limits=c(0,sim_dat$params$ctanh[3])) +
+      ylab("Reproduction Number")
+  } else {
+    p = p + ylab("Gain Factor")
+  }
+  
+  if (plot_theta) {
+    p3 = p3 + theme_light() +
+      scale_color_identity(name ="Method", breaks=cols, 
+                           labels=labs, guide="legend") +
+      scale_fill_identity(name = "Method", breaks=cols, labels=labs) +
+      theme(legend.position = "bottom") +
+      ylab(expression(theta[t])) + xlab("Time")
+  }
+  
+  
+  if (plot_coverage) {
+    p2 = p2 + theme_light() +
+      scale_fill_identity(name = "Method", breaks=cols, labels=labs,
+                          guide="legend") +
+      theme(legend.position = "bottom") +
+      ylab("Width of CI (%)") + xlab("Time")
+  }
+  
+  
+  if (plot_coverage & plot_theta) {
+    return(list(p,p2,p3))
+  } else if (plot_coverage) {
+    return(list(p,p2))
+  } else if (plot_theta) {
+    return(list(p,p3))
+  } else {
+    return(p)
+  }
 }
 
 
@@ -206,10 +380,10 @@ plot_pred = function(sim_dat,
   
   if (!is.null(hvb_output)) {
     hvb_pred = predict_poisson(sim_dat$y[(n-nplot):n],m,
-                               dim(hvb_output$theta_last)[2],
+                               dim(hvb_output$psi_last)[2],
                                sim_dat$params$ModelCode,
                                hvb_output$W_stored,
-                               hvb_output$theta_last,
+                               hvb_output$psi_last,
                                L=sim_dat$params$L,
                                mu0=sim_dat$params$mu0,
                                delta_nb=sim_dat$params$delta_nb,

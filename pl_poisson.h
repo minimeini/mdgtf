@@ -168,6 +168,7 @@ Rcpp::List mcs_poisson(
     const unsigned int ModelCode,
 	const double W,
     const double rho,
+    const double alpha,
     const unsigned int L, // number of lags
     const double mu0,
     const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
@@ -175,8 +176,7 @@ Rcpp::List mcs_poisson(
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_,
-    const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh,
-    const double rho_nb, // parameter for negative binomial likelihood
+    const Rcpp::Nullable<Rcpp::NumericVector>& ctanh,
     const double delta_nb,
     const unsigned int obstype, // 0: negative binomial DLM; 1: poisson DLM
     const bool verbose,

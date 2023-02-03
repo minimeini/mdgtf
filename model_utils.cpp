@@ -999,3 +999,189 @@ Rcpp::List calc_power_sum3(
 
 	return output;
 }
+
+
+
+//' @export
+// [[Rcpp::export]]
+arma::mat psi2hpsi(
+	const arma::mat& psi,
+	const unsigned int ModelCode,
+	const Rcpp::Nullable<Rcpp::NumericVector>& coef = R_NilValue) {
+	
+	const double EPS = arma::datum::eps;
+	const double UPBND = 700.;
+
+	unsigned int GainCode = -1; 
+	if (ModelCode==0 || ModelCode==2 || ModelCode==4) {
+		GainCode = 0; // 0 - Ramp
+	} else if (ModelCode==1 || ModelCode==3 || ModelCode==5) {
+		GainCode = 1; // 1 - Exponential
+	} else if (ModelCode==6 || ModelCode==7 || ModelCode==8) {
+		GainCode = 2; // 2 - Identity
+	} else if (ModelCode==10 || ModelCode==11 || ModelCode==12) {
+		GainCode = 3; // 3 - Softplus
+	} else if (ModelCode==13 || ModelCode==14 || ModelCode==15) {
+		GainCode = 4; // 4 - Hyperbolic Tangent with coefficients (a,b,c)
+	} else if (ModelCode==16 || ModelCode==17 || ModelCode==18) {
+		GainCode = 5; // 5 - Logistic with coefficients (a,b,c)
+	} else {
+		::Rf_error("Unsupported model.");
+	}
+
+	arma::mat hpsi;
+	hpsi.copy_size(psi);
+
+	switch (GainCode) {
+		case 0: // Ramp
+		{
+			hpsi = psi;
+			hpsi.elem(arma::find(psi<EPS)).fill(0.);
+		}
+		break;
+		case 1: // Exponential
+		{
+			hpsi = psi;
+			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
+			hpsi = arma::exp(hpsi);
+		}
+		break;
+		case 2: // Identity
+		{
+			hpsi = psi;
+		}
+		break;
+		case 3: // Softplus
+		{
+			hpsi = psi;
+			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
+			hpsi = arma::log(1. + arma::exp(hpsi));
+		}
+		break;
+		case 4: // Hyperbolic Tangent
+		{
+			arma::vec c = Rcpp::as<arma::vec>(coef);
+			hpsi = 0.5*c.at(2) * (arma::tanh(c.at(0)*psi + c.at(1)) + 1.);
+		}
+		break;
+		case 5: // Logistic
+		{
+			arma::vec c = Rcpp::as<arma::vec>(coef);
+			hpsi = -c.at(0) * (psi-c.at(1));
+			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
+			hpsi = c.at(2) / (1. + arma::exp(hpsi));
+		}
+		break;
+		default:
+		{
+			::Rf_error("Not supported gain function.");
+		}
+	}
+
+
+	return hpsi;
+}
+
+
+
+//' @export
+// [[Rcpp::export]]
+arma::mat hpsi2theta(
+	const arma::mat& hpsi, // (n+1) x k
+	const arma::vec& y, // n x 1
+	const unsigned int ModelCode,
+	const double theta0 = 0.,
+	const double alpha = 1.,
+	const unsigned int L = 0,
+	const double rho = 0.9) {
+	
+	const unsigned int n = y.n_elem;
+	const unsigned int k = hpsi.n_cols;
+	
+	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
+	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
+	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
+	const bool is_vanilla = ModelCode == 9;
+	unsigned int TransferCode; // integer indicator for the type of transfer function
+	unsigned int p; // dimension of DLM state space
+	unsigned int L_;
+	arma::vec Fphi;
+	arma::vec Fy;
+	arma::mat Fhpsi;
+	if (is_koyck) { 
+		TransferCode = 0; 
+		p = 2;
+		L_ = 0;
+	} else if (is_koyama) { 
+		TransferCode = 1; 
+		p = L;
+		L_ = L;
+
+		double mu = 2.2204e-16;
+		double m = 4.7;
+		double s = 2.9;
+		Fphi = get_Fphi(p,mu,m,s);
+        Fphi = arma::pow(Fphi,alpha);
+		Fy.set_size(p);
+		Fhpsi.set_size(p,k);
+	} else if (is_solow) { 
+		TransferCode = 2; 
+		p = 3;
+		L_ = 0;
+	} else if (is_vanilla) {
+		TransferCode = 3;
+		p = 1;
+		L_ = 0;
+	} else {
+		::Rf_error("Unknown type of model.");
+	}
+
+	arma::mat theta(n,k,arma::fill::zeros);
+
+	switch(TransferCode) {
+		case 0: // Koyck
+		{
+			theta.row(0).fill(rho*theta0);
+			for (unsigned int t=1; t<n; t++) {
+				// theta: if t = 1 in cpp <=> t = 2 in math
+				// y: if t = 1 in cpp <=> t = 2 in math
+				// hpsi: if t = 1 in cpp <=> t = 1 in math
+				theta.row(t) = rho*theta.row(t-1) + hpsi.row(t)*y.at(t-1);
+			}
+		}
+		break;
+		case 1: // Koyama
+		{
+			theta.row(0).zeros();
+			unsigned int tmpi;
+			for (unsigned int t=1; t<n; t++) {
+				Fy.zeros();
+				tmpi = std::min(t,p);
+				Fy.head(tmpi) = arma::reverse(y.subvec(t-tmpi,t-1)); // p x 1
+				Fhpsi.zeros();
+				Fhpsi.head_rows(tmpi) = arma::reverse(hpsi.rows(t-tmpi+1,t)); // p x k
+				for (unsigned int i=0; i<k; i++) {
+					theta.at(t,i) = arma::accu(Fphi%Fy%Fhpsi.col(i));
+				}
+			}
+		}
+		break;
+		case 2: // Solow
+		{
+			double c1 = 2.*rho;
+			double c2 = rho*rho;
+			double c3 = std::pow((1.-rho)*(1.-rho),alpha);
+			theta.row(0).fill(2.*rho*theta0);
+			theta.row(1) = c1*theta.row(0) - c2*theta0 + c3*hpsi.row(1)*y.at(0);
+			for (unsigned int t=2; t<n; t++) {
+				theta.row(t) = c1*theta.row(t-1) - c2*theta.row(t-2) + c3*hpsi.row(t)*y.at(t-1);
+			}
+		}
+		break;
+		default: // Otherwise
+		{
+			::Rf_error("Unsupported type of transfer function.");
+		}
+	}
+	return theta;
+}

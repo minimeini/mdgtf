@@ -20,6 +20,7 @@ Rcpp::List predict_poisson(
     const Rcpp::Nullable<Rcpp::NumericMatrix>& Ct_last = R_NilValue, // p x p for LBE
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
     const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
+    const double alpha = 1.,
     const double rho = 0.9,
     const unsigned int L = 0,
     const double mu0 = 0.,
@@ -132,14 +133,14 @@ Rcpp::List predict_poisson(
 
         for (unsigned int t=n; t<npred; t++) {
             // state - theta, especially psi
-            theta_pred.col(t) = update_at(p,ModelCode,TransferCode,theta_pred.col(t-1),Gt,ctanh_,ypred.at(t-1),rho,L_);
+            theta_pred.col(t) = update_at(p,ModelCode,TransferCode,theta_pred.col(t-1),Gt,ctanh_,alpha,ypred.at(t-1),rho,L_);
             theta_pred.at(0,t) += wt.at(t);
 
             // Link - phi
             psi_stored.at(t-n,i) = theta_pred.at(0,t);
 
             if (TransferCode == 1 && L>0) { // Koyama
-                update_Ft(Ft, Fy, TransferCode, t, L_, ypred, Fphi);
+                update_Ft(Ft, Fy, TransferCode, t, L_, ypred, Fphi, alpha);
 			    switch (ModelCode) {
 				    case 0: // KoyamaMax
 				    {

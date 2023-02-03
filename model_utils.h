@@ -259,4 +259,21 @@ Rcpp::List calc_power_sum3(
 
 
 
+arma::mat psi2hpsi(
+	const arma::mat& psi,
+	const unsigned int ModelCode,
+	const Rcpp::Nullable<Rcpp::NumericVector>& coef);
+
+
+
+arma::mat hpsi2theta(
+	const arma::mat& hpsi, // (n+1) x k
+	const arma::vec& y, // n x 1
+	const unsigned int ModelCode,
+	const double theta0,
+	const double alpha,
+	const unsigned int L,
+	const double rho);
+
+
 #endif

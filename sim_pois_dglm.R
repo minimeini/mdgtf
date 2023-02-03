@@ -45,7 +45,7 @@ sim_pois_dglm = function(
     L = 0, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
     delta_nb = 1., # rho_nb = 34.08792
-    coef = c(0.3,-1,3), # coefficients for the hyperbolic tangent gain function
+    coef = NULL, # coefficients for the hyperbolic tangent gain function
     rng.seed = NULL,
     delta_grid = seq(from=0.7,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
@@ -62,13 +62,13 @@ sim_pois_dglm = function(
   if (!is.null(rng.seed)) { set.seed(rng.seed)}
   
   if (err_type == 0) { # Normal
-    wt[2:ntotal] = rnorm(ntotal-1,0,sqrt(W)) # wt[1] = 0
+    wt = rnorm(ntotal,0,sqrt(W)) # wt[1] = 0
   } else if (err_type == 1) { # Laplace
-    wt[2:ntotal] = rmutil::rlaplace(ntotal-1,0,sqrt(W))
+    wt = rmutil::rlaplace(ntotal,0,sqrt(W))
   } else if (err_type == 2) { # Cauchy
-    wt[2:ntotal] = rcauchy(ntotal-1,0,sqrt(W))
+    wt = rcauchy(ntotal-1,0,sqrt(W))
   } else if (err_type == 3) { # left skewed normal
-    wt[2:ntotal] = sn::rsn(ntotal-1,xi=0,omega=sqrt(W),alpha=-0.1)
+    wt = sn::rsn(ntotal,xi=0,omega=sqrt(W),alpha=-0.1)
     
   }
  
@@ -78,7 +78,6 @@ sim_pois_dglm = function(
     psi0 = rnorm(1,0,sd=1)
   }
   psi = cumsum(wt) + psi0
-  psi[psi>UPBND] = UPBND
   hpsi = psi
   
   theta = rep(0,ntotal)
@@ -127,6 +126,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = lambda[0] + theta[t]
     # <state> theta[t] = phi[1] exp(psi[t]) y[t-1] + phi[2] exp(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = exp(hpsi) # exponentiated reproduction number
     Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0
@@ -189,6 +189,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = mu0 + theta[t]
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = exp(hpsi)
     theta[1] = (2*rho)^alpha2*theta0
     lambda[1] = mu0 + theta[1]
@@ -203,7 +204,7 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] - c2^alpha2*theta0 + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
         theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
@@ -249,6 +250,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = theta[t]
     # <state> theta[t] = rho*theta[t-1] + y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = exp(hpsi)
     lambda[1] = mu0
     
@@ -306,7 +308,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = exp(theta[t])
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*psi[t-1]
     # <state> psi[t] = psi[t-1] + omega[t]
-    theta[1] = .Machine$double.eps
+    theta[1] = 2.*rho*theta0
     lambda[1] = exp(min(c(mu0+theta[1],UPBND)))
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -319,7 +321,7 @@ sim_pois_dglm = function(
     }
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] - c2^alpha2*theta0 + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
         theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
@@ -391,6 +393,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = theta[t]
     # <state> theta[t] = rho*theta[t-1] + y[t-1]*ln( 1+exp(psi[t-1]) )
     # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = log(1. + exp(hpsi))
     lambda[1] = mu0
     
@@ -418,6 +421,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = lambda[0] + theta[t]
     # <state> theta[t] = phi[1] exp(psi[t]) y[t-1] + phi[2] exp(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = log(1. + exp(hpsi)) # softplused reproduction number
     Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0
@@ -449,6 +453,7 @@ sim_pois_dglm = function(
     # <link> lambda[t] = mu0 + theta[t]
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = log(1. + exp(hpsi))
     theta[1] = (2*rho)^alpha2*theta0
     lambda[1] = mu0 + theta[1]
@@ -463,7 +468,7 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] - c2^alpha2*theta0 + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
         theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
@@ -553,7 +558,7 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] - c2^alpha2*theta0 + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
         theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
@@ -571,7 +576,9 @@ sim_pois_dglm = function(
     # <link> lambda[t] = theta[t]
     # <state> theta[t] = rho*theta[t-1] + y[t-1]*c/{exp(-a*psi[t]+a*b)+1}
     # <state> psi[t] = psi[t-1] + omega[t]
-    hpsi = coef[3] / (exp(-coef[1]*hpsi + coef[1]*coef[2]) + 1)
+    hpsi = -coef[1]*hpsi + coef[1]*coef[2]
+    hpsi[hpsi>UPBND] = UPBND
+    hpsi = coef[3] / (exp(hpsi) + 1)
     lambda[1] = mu0
     
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -598,7 +605,9 @@ sim_pois_dglm = function(
     # <link> lambda[t] = lambda[0] + theta[t]
     # <state> theta[t] = phi[1] h(psi[t]) y[t-1] + phi[2] h(psi[t-1]) y[t-2] + ... + phi[L] exp(psi[t-L+1]) y[t-L]
     # <state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
-    hpsi = coef[3] / (exp(-coef[1]*hpsi + coef[1]*coef[2]) + 1)
+    hpsi = -coef[1]*hpsi + coef[1]*coef[2]
+    hpsi[hpsi>UPBND] = UPBND
+    hpsi = coef[3] / (exp(hpsi) + 1)
     Fphi = get_Fphi(L)^alpha
     lambda[1] = mu0
     
@@ -628,7 +637,9 @@ sim_pois_dglm = function(
     # <link> lambda[t] = mu0 + theta[t]
     # <state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*y[t-1]*exp(psi[t-1])
     # <state> psi[t] = psi[t-1] + omega[t]
-    hpsi = coef[3] / (exp(-coef[1]*hpsi + coef[1]*coef[2]) + 1)
+    hpsi = -coef[1]*hpsi + coef[1]*coef[2]
+    hpsi[hpsi>UPBND] = UPBND
+    hpsi = coef[3] / (exp(hpsi) + 1)
     theta[1] = (2*rho)^alpha2*theta0
     lambda[1] = mu0 + theta[1]
     if (!is.null(rng.seed)) { set.seed(rng.seed)}
@@ -642,7 +653,7 @@ sim_pois_dglm = function(
     
     for (t in 2:ntotal) {
       if (t==2) {
-        theta[t] = c1^alpha2*theta[1] + c3^alpha*y[t-1]*hpsi[t-1]
+        theta[t] = c1^alpha2*theta[1] - c2^alpha2*theta0 + c3^alpha*y[t-1]*hpsi[t-1]
       } else {
         theta[t] = c1^alpha2*theta[t-1] - c2^alpha2*theta[t-2] + c3^alpha*y[t-1]*hpsi[t-1]
       }
@@ -671,12 +682,13 @@ sim_pois_dglm = function(
   
   
   
-  params = list(ModelCode=ModelCode,obs_type=obs_type,
+  params = list(ModelCode=ModelCode,
+                obs_type=obs_type,
                 mu0=mu0,theta0=theta0,psi0=psi0,
                 W=W,rho=rho,L=L,
                 delta_nb=delta_nb,
                 delta_lbe=delta,
-                ctanh=coef)
+                ctanh=coef,alpha=alpha)
   pred = list(y=y[(n+1):ntotal],
               psi=psi[(n+1):ntotal],
               theta=theta[(n+1):ntotal],

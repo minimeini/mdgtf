@@ -662,6 +662,7 @@ Rcpp::List mcs_poisson(
     const unsigned int ModelCode,
 	const double W,
     const double rho = 0.9,
+    const double alpha = 1.,
     const unsigned int L = 12, // number of lags
     const double mu0 = 0.,
     const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
@@ -669,8 +670,7 @@ Rcpp::List mcs_poisson(
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
-    const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
-    const double rho_nb = 34.08792, // parameter for negative binomial likelihood
+    const Rcpp::Nullable<Rcpp::NumericVector>& ctanh = R_NilValue,
     const double delta_nb = 1.,
     const unsigned int obstype = 1, // 0: negative binomial DLM; 1: poisson DLM
     const bool verbose = false,
@@ -732,7 +732,7 @@ Rcpp::List mcs_poisson(
     Gt: matrix for the state-to-state function
     */
     arma::vec Ft(p,arma::fill::zeros);
-    arma::vec Fphi(p);;
+    arma::vec Fphi(p);
     arma::vec Fy(p,arma::fill::zeros);
     arma::mat Gt(p,p,arma::fill::zeros);
     switch (TransferCode) {
@@ -747,6 +747,7 @@ Rcpp::List mcs_poisson(
 		    double m = 4.7;
 		    double s = 2.9;
 		    Fphi = get_Fphi(p,mu,m,s);
+            Fphi = arma::pow(Fphi,alpha);
 
             Gt.at(0,0) = 1.;
             Gt.diag(-1).ones();
@@ -774,8 +775,6 @@ Rcpp::List mcs_poisson(
     // theta: DLM state vector
     // p - dimension of state space
     // N - number of particles
-    arma::cube theta_stored(p,N,B);
-
     arma::vec lambda(N); // instantaneous intensity
     arma::vec omega(N); // evolution variance
     arma::vec w(N); // importance weight of each particle
@@ -847,6 +846,7 @@ Rcpp::List mcs_poisson(
     */
         
     arma::mat theta(p,N);
+    arma::cube theta_stored(p,N,B);
     if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
         // Exponential Link
         arma::vec m0(p,arma::fill::zeros);
@@ -871,6 +871,9 @@ Rcpp::List mcs_poisson(
     /*
     ------ Step 1. Initialization at time t = 0 ------
     */
+    const double c1 = std::pow((1.-rho)*(1.-rho),alpha);
+    const double c2 = 2.*rho;
+    const double c3 = -rho*rho;
     
     arma::mat R(n+1,3); // quantiles
     arma::vec Meff(n,arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
@@ -904,7 +907,7 @@ Rcpp::List mcs_poisson(
                     for (unsigned int i=0; i<N; i++) {
                         hpsi = std::max(EPS,theta_stored.at(0,i,B-1));
                         theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
-                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1), -mu0+EPS);
+                        theta.at(1,i) = std::max(c1*Y.at(t)*hpsi + c2*theta_stored.at(1,i,B-1) + c3*theta_stored.at(2,i,B-1), -mu0+EPS);
                         theta.at(2,i) = theta_stored.at(1,i,B-1);
                     }
                 }
@@ -915,7 +918,7 @@ Rcpp::List mcs_poisson(
                     for (unsigned int i=0; i<N; i++) {
                         hpsi = std::exp(std::min(theta_stored.at(0,i,B-1),UPBND));
                         theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
-                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1),-mu0+EPS);
+                        theta.at(1,i) = std::max(c1*Y.at(t)*hpsi + c2*theta_stored.at(1,i,B-1) + c3*theta_stored.at(2,i,B-1),-mu0+EPS);
                         theta.at(2,i) = theta_stored.at(1,i,B-1);
                     }
                 }
@@ -945,7 +948,7 @@ Rcpp::List mcs_poisson(
                     // Exponential link + identity gain
                     for (unsigned int i=0; i<N; i++) {
                         theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
-                        theta.at(1,i) = (1.-rho)*(1.-rho)*Y.at(t)*theta_stored.at(0,i,B-1) + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1);
+                        theta.at(1,i) = c1*Y.at(t)*theta_stored.at(0,i,B-1) + c2*theta_stored.at(1,i,B-1) + c3*theta_stored.at(2,i,B-1);
                         theta.at(2,i) = theta_stored.at(1,i,B-1);
                     }
                 }
@@ -979,7 +982,7 @@ Rcpp::List mcs_poisson(
                     for (unsigned int i=0; i<N; i++) {
                         hpsi = std::log(1. + std::exp(std::min(theta_stored.at(0,i,B-1),UPBND)));
                         theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
-                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1),-mu0+EPS);
+                        theta.at(1,i) = std::max(c1*Y.at(t)*hpsi + c2*theta_stored.at(1,i,B-1) + c3*theta_stored.at(2,i,B-1),-mu0+EPS);
                         theta.at(2,i) = theta_stored.at(1,i,B-1);
                     }
                 }
@@ -988,7 +991,7 @@ Rcpp::List mcs_poisson(
                 {
                     // Identity link + softplus gain
                     for (unsigned int i=0; i<N; i++) {
-                        hpsi = ctanh_.at(2) * (std::tanh(ctanh_.at(0)*theta_stored.at(0,i,B-1)+ctanh_.at(1)) + 1.);
+                        hpsi = 0.5*ctanh_.at(2) * (std::tanh(ctanh_.at(0)*theta_stored.at(0,i,B-1)+ctanh_.at(1)) + 1.);
                         theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
                         theta.at(1,i) = Y.at(t)*hpsi + rho*theta_stored.at(1,i,B-1);
                     }
@@ -997,9 +1000,9 @@ Rcpp::List mcs_poisson(
                 case 15: // SolowTanh
                 {
                     for (unsigned int i=0; i<N; i++) {
-                        hpsi = ctanh_.at(2) * (std::tanh(ctanh_.at(0)*theta_stored.at(0,i,B-1)+ctanh_.at(1)) + 1.);
+                        hpsi = 0.5*ctanh_.at(2) * (std::tanh(ctanh_.at(0)*theta_stored.at(0,i,B-1)+ctanh_.at(1)) + 1.);
                         theta.at(0,i) = theta_stored.at(0,i,B-1) + omega.at(i);
-                        theta.at(1,i) = std::max((1.-rho)*(1.-rho)*Y.at(t)*hpsi + 2.*rho*theta_stored.at(1,i,B-1) - rho*rho*theta_stored.at(2,i,B-1),-mu0+EPS);
+                        theta.at(1,i) = std::max(c1*Y.at(t)*hpsi + c2*theta_stored.at(1,i,B-1) + c3*theta_stored.at(2,i,B-1),-mu0+EPS);
                         theta.at(2,i) = theta_stored.at(1,i,B-1);
                     }
                 }
@@ -1070,7 +1073,7 @@ Rcpp::List mcs_poisson(
         } else if (ModelCode==14) {
             // KoyamaTanh with identity link and tanh gain
             for (unsigned int i=0; i<N; i++) {
-                arma::vec htheta = ctanh_.at(2) * (arma::tanh(ctanh_.at(0)*theta.col(i)+ctanh_.at(1)) + 1.);
+                arma::vec htheta = 0.5*ctanh_.at(2) * (arma::tanh(ctanh_.at(0)*theta.col(i)+ctanh_.at(1)) + 1.);
                 lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*htheta);
             }
         } else {
@@ -1094,9 +1097,6 @@ Rcpp::List mcs_poisson(
 
                 sample variance exceeds the sample mean
                 */
-                // w.at(i) = std::exp(R::lgammafn(Y.at(t)+(lambda.at(i)/rho_nb))-R::lgammafn(Y.at(t)+1.)-R::lgammafn(lambda.at(i)/rho_nb)+(lambda.at(i)/rho_nb)*std::log(1./(1.+rho_nb))+Y.at(t)*std::log(rho_nb/(1.+rho_nb)));
-
-                // w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb)-R::lgammafn(Y.at(t)+1.)-R::lgammafn(delta_nb)+delta_nb*std::log(delta_nb/(delta_nb+lambda.at(i)))+Y.at(t)*std::log(lambda.at(i)/(delta_nb+lambda.at(i))));
                 w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb) - R::lgammafn(Y.at(t)+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda.at(i))) + Y.at(t)*(std::log(lambda.at(i))-std::log(delta_nb+lambda.at(i))));
                 
             } else if (obstype == 1) {
@@ -1171,8 +1171,12 @@ Rcpp::List mcs_poisson(
     Rcpp::List output;
     output["quantiles"] = Rcpp::wrap(R); // (n+1) x 3
     output["theta_last"] = Rcpp::wrap(theta_stored.slice(B-1)); // p x N
-    output["Meff"] = Rcpp::wrap(Meff);
-    output["resample_status"] = Rcpp::wrap(resample_status);
+
+    if (debug) {
+        output["Meff"] = Rcpp::wrap(Meff);
+        output["resample_status"] = Rcpp::wrap(resample_status);
+    }
+    
 
     return output;
 }
@@ -1591,3 +1595,14 @@ Rcpp::List sf_pois_solow_eye_max(
 
     return output;
 }
+
+
+
+arma::mat hpsi2theta(
+	const arma::mat& hpsi, // (n+1) x k
+	const arma::vec& y, // n x 1
+	const unsigned int ModelCode,
+	const double theta0,
+	const double alpha,
+	const unsigned int L,
+	const double rho);
