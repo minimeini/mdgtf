@@ -5,6 +5,41 @@
 - C++ libraries: [Armadillo](https://arma.sourceforge.net) and [NLopt](https://nlopt.readthedocs.io/en/latest/).
 - R packages: RcppArmadillo, nloptr, EpiEstim
 
+## Available Models
+
+| Name           | ID   | Transmission Delay | Gain Function      | Link Function |
+|----------------|------|--------------------|--------------------|---------------|
+| KoyamaMax      | 0    | Log-normal         | Ramp               | Identity      |
+| KoyamaExp      | 1    | Log-normal         | Exponential        | Identity      |
+| SolowMax       | 2    | Negative-binomial  | Ramp               | Identity      |
+| SolowExp       | 3    | Negative-binomial  | Exponential        | Identity      |
+| KoyckMax       | 4    | Exponential        | Ramp               | Identity      |
+| KoyckExp       | 5    | Exponential        | Exponential        | Identity      |
+| KoyamaEye      | 6    | Log-normal         | Identity           | Exponential   |
+| SolowEye       | 7    | Negative-binomial  | Identity           | Exponential   |
+| KoyckEye       | 8    | Exponential        | Identity           | Exponential   |
+| VanillaPois    | 9    | Exponential        | No                 | Exponential   |
+| KoyckSoftplus  | 10   | Exponential        | Softplus           | Identity      |
+| KoyamaSoftplus | 11   | Log-normal         | Softplus           | Identity      |
+| SolowSoftplus  | 12   | Negative-binomial  | Softplus           | Identity      |
+| KoyckTanh      | 13   | Exponential        | Hyperbolic Tangent | Identity      |
+| KoyamaTanh     | 14   | Log-normal         | Hyperbolic Tangent | Identity      |
+| SolowTanh      | 15   | Negative-binomial  | Hyperbolic Tangent | Identity      |
+
+## Inference
+
+- Method 1. Linear Bayes Filtering and Smoothing: `lbe_poisson.cpp`
+- Method 2. MCMC with Univariate MH Proposal via Reparameterisation: `mcmc_disturbance_poisson.cpp`
+- Method 3. Particle Filtering and Smoothing: `pl_poisson.cpp`
+- Method 4. Variational Inference: `vb_poisson.cpp` and `hva_poisson.cpp`
+
+
+## Demo
+
+- `script_model_sample_data.R`: Sample data provided by Koyama.
+- `script_model_country_data.R`: Country level Covid daily new confirmed cases from March 1, 2020 to Dec 1, 2020.
+
+
 ## Setting up Rcpp Compiler for Apple Silicon
 
 1. Follow [R COMPILER TOOLS FOR RCPP ON MACOS](https://thecoatlessprofessor.com/programming/cpp/r-compiler-tools-for-rcpp-on-macos/)
@@ -56,37 +91,3 @@ Locations of R-related headers:
 > RcppArmadillo:::CxxFlags()
 -I"/Library/Frameworks/R.framework/Versions/4.2-arm64/Resources/library/RcppArmadillo/include"
 ```
-
-## Available Models
-
-| Name           | ID   | Transmission Delay | Gain Function      | Link Function |
-|----------------|------|--------------------|--------------------|---------------|
-| KoyamaMax      | 0    | Log-normal         | Ramp               | Identity      |
-| KoyamaExp      | 1    | Log-normal         | Exponential        | Identity      |
-| SolowMax       | 2    | Negative-binomial  | Ramp               | Identity      |
-| SolowExp       | 3    | Negative-binomial  | Exponential        | Identity      |
-| KoyckMax       | 4    | Exponential        | Ramp               | Identity      |
-| KoyckExp       | 5    | Exponential        | Exponential        | Identity      |
-| KoyamaEye      | 6    | Log-normal         | Identity           | Exponential   |
-| SolowEye       | 7    | Negative-binomial  | Identity           | Exponential   |
-| KoyckEye       | 8    | Exponential        | Identity           | Exponential   |
-| VanillaPois    | 9    | Exponential        | No                 | Exponential   |
-| KoyckSoftplus  | 10   | Exponential        | Softplus           | Identity      |
-| KoyamaSoftplus | 11   | Log-normal         | Softplus           | Identity      |
-| SolowSoftplus  | 12   | Negative-binomial  | Softplus           | Identity      |
-| KoyckTanh      | 13   | Exponential        | Hyperbolic Tangent | Identity      |
-| KoyamaTanh     | 14   | Log-normal         | Hyperbolic Tangent | Identity      |
-| SolowTanh      | 15   | Negative-binomial  | Hyperbolic Tangent | Identity      |
-
-## Inference
-
-- Method 1. Linear Bayes Filtering and Smoothing: `lbe_poisson.cpp`
-- Method 2. MCMC with Univariate MH Proposal via Reparameterisation: `mcmc_disturbance_poisson.cpp`
-- Method 3. Particle Filtering and Smoothing: `pl_poisson.cpp`
-- Method 4. Variational Inference: `vb_poisson.cpp` and `hva_poisson.cpp`
-
-
-## Demo
-
-- `script_model_sample_data.R`: Sample data provided by Koyama.
-- `script_model_country_data.R`: Country level Covid daily new confirmed cases from March 1, 2020 to Dec 1, 2020.
