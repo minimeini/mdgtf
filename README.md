@@ -3,7 +3,7 @@
 ## Dependencies
 
 - C++ libraries: [Armadillo](https://arma.sourceforge.net) and [NLopt](https://nlopt.readthedocs.io/en/latest/).
-- R packages: RcppArmadillo, nloptr
+- R packages: RcppArmadillo, nloptr, EpiEstim
 
 ## Setting up Rcpp Compiler for Apple Silicon
 
@@ -86,6 +86,7 @@ Locations of R-related headers:
 - Method 4. Variational Inference: `vb_poisson.cpp` and `hva_poisson.cpp`
 
 
-## Visualization
+## Demo
 
-`vis_pois_dlm.R`
+- `script_model_sample_data.R`: Sample data provided by Koyama.
+- `script_model_country_data.R`: Country level Covid daily new confirmed cases from March 1, 2020 to Dec 1, 2020.

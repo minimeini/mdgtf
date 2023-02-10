@@ -468,6 +468,7 @@ Rcpp::List hva_poisson(
     arma::mat gamma_stored(m,niter);
     arma::mat psi_stored(n+1,niter);
     arma::vec W_stored(niter);
+    arma::vec mu0_stored(niter);
 
     arma::mat Meff(n,niter);
     arma::mat resample_status(n,niter);
@@ -615,6 +616,7 @@ Rcpp::List hva_poisson(
         gamma_stored.col(s) = gamma;
         psi_stored.col(s) = psi;
         W_stored.at(s) = eta.at(0);
+        mu0_stored.at(s) = eta.at(1);
 
         if (verbose) {
 			Rcout << "\rProgress: " << s+1 << "/" << niter;
@@ -631,6 +633,7 @@ Rcpp::List hva_poisson(
     output["gamma"] = Rcpp::wrap(gamma_stored);
     output["psi_stored"] = Rcpp::wrap(psi_stored); // (n+1) x niter
     output["W_stored"] = Rcpp::wrap(W_stored); // niter
+    output["mu0_stored"] = Rcpp::wrap(mu0_stored); // niter
     output["psi_last"] = Rcpp::wrap(psi_last); // p x niter
 
     if (debug) {

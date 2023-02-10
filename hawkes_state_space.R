@@ -1,7 +1,7 @@
 ###                          ###
-# Bootstrap Particle Filtering #
+# Monte Carlo Smoothing #
 ###                          ###
-
+# Source: https://github.com/shigerushinomoto/COVID
 # depends on `model_utils.cpp`
 
 
@@ -29,7 +29,7 @@ calc_rho = function(v,d=7){
 #     suma=0
 #     for (t in (time-lags):(time-1)){
 #       if (t>0){
-#       suma=suma+data[t]*max(c(0,states[l,t]))*Pd(time-t,pk.mu,pk.sg2)}
+#       suma=suma+data[t]*max(c(0,states[l,t]))*Pd(time-t,pk.mu,pk.sg2)}no
 #     }
 #     result[l]=suma
 #   }
@@ -58,7 +58,7 @@ hawke_ss2 = function(
   L=30,
   rho=34.08792,
   W=0.01,
-  obstype="pois", # either "pois" or "nb"
+  obstype="nb", # either "pois" or "nb"
   errtype="cauchy") { # either "cauchy" or "normal"
   
   T=length(cases) # number of observations 
@@ -157,7 +157,7 @@ hawke_ss2 = function(
     # This is the step 2-2 by Kitagawa and Sato
     theta = F%*%theta_stored[,,L] + G%*%err
     
-    theta[theta<.Machine$double.eps] = .Machine$double.eps # Rt is nonnegative
+    theta[theta<.Machine$double.eps] = .Machine$double.eps # Ramp function - Rt is nonnegative
 #   aux=exp(aux)
     theta_stored[,,1:(L-1)]=theta_stored[,,2:L]
     # Rt_stored[t,] = theta[1,]
@@ -186,9 +186,7 @@ hawke_ss2 = function(
   rate[t] = mu+h;
   }
 
-  return(list(rate=rate,
-    R=Rfinal_median,
-    itvl=rbind(Rfinal_lci,Rfinal_uci)))
+  return(cbind(Rfinal_lci,Rfinal_median,Rfinal_uci))
 }
 
 

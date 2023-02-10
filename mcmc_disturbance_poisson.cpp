@@ -29,27 +29,27 @@ using namespace Rcpp;
 */
 
 
-//' @export
-// [[Rcpp::export]]
-arma::vec update_Et(
-	const unsigned int n,
-	const arma::mat& Fx,
-	const arma::vec& w,
-	const double rho = 1.,
-	const double E0 = 0.) {
+// //' @export
+// // [[Rcpp::export]]
+// arma::vec update_Et(
+// 	const unsigned int n,
+// 	const arma::mat& Fx,
+// 	const arma::vec& w,
+// 	const double rho = 1.,
+// 	const double E0 = 0.) {
 	
-	arma::vec E0tilde(n,arma::fill::zeros);
-	if (E0 != 0.) {
-		E0tilde.at(0) = E0;
-   		for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
-			E0tilde.at(t) = rho*E0tilde.at(t-1);
-			// E0tilde.at(t) = std::pow(rho,static_cast<double>(t))*E0;
-    	}
-	}
+// 	arma::vec E0tilde(n,arma::fill::zeros);
+// 	if (E0 != 0.) {
+// 		E0tilde.at(0) = E0;
+//    		for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
+// 			E0tilde.at(t) = rho*E0tilde.at(t-1);
+// 			// E0tilde.at(t) = std::pow(rho,static_cast<double>(t))*E0;
+//     	}
+// 	}
 	
-	arma::vec Et = E0tilde + Fx * w;
-	return Et; 
-}
+// 	arma::vec Et = E0tilde + Fx * w;
+// 	return Et; 
+// }
 
 
 
@@ -475,7 +475,7 @@ Rcpp::List mcmc_disturbance_pois(
 		R_CheckUserInterrupt();
 		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
 
-		// [OK] Update evolution/state disturbances/errors, denoted by vt.
+		// [OK] Update evolution/state disturbances/errors, denoted by wt.
 		for (unsigned int t=0; t<n; t++) {
 			if (!wt_flag) { break; }
 
@@ -1359,18 +1359,3 @@ Rcpp::List mcmc_disturbance_pois(
 // 	output["rho_accept"] = rho_accept / static_cast<double>(ntotal);
 // 	return output;
 // }
-
-
-double update_obs_eq_koyama_exp(
-	const arma::vec& Fphi, // L x 1 transmission delay distribution
-	const arma::vec& Fy, // L x 1, (y[t-1],y[t-2],...,y[t-L])
-	const arma::vec& theta) { // L x 1, theta = (psi[t],psi[t-1],...,psi[t-L+1])
-
-	arma::vec F = Fphi % Fy; // L x 1
-	const double mu = arma::datum::eps;
-	const unsigned int L = Fphi.n_elem;
-
-	double lambda = mu + arma::as_scalar(F.t()*arma::exp(theta));
-	return lambda;
-}
-
