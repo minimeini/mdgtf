@@ -38,106 +38,46 @@ a[t] = gt(m[t-1])
 */
 arma::vec update_at(
 	const unsigned int p,
-	const unsigned int ModelCode,
+	const unsigned int GainCode,
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
 	const arma::mat& Gt, // p x p
-	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const double y = NA_REAL,  // n x 1
-	const double rho = NA_REAL,
-	const unsigned int L = 1) {
+	const double rho = NA_REAL) {
 	
 	arma::vec at(p,arma::fill::zeros);
-	const double UPBND = 700.;
-	const double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
-	
-	if (TransferCode == 2) { // Solow
-		/*------ START Solow ------*/
-		at.at(0) = mt.at(0); // psi[t]
-		at.at(2) = mt.at(1); // theta[t-1]
-		
-		switch (ModelCode) { // theta[t]
-			case 2: // SolowMax
-			{
-				at.at(1) = coef1*y*std::max(mt.at(0),arma::datum::eps);
-			}
-			break;
-			case 3: // SolowEXP
-			{
-				// at.at(1) = coef1*y*std::exp(mt.at(0));
-				at.at(1) = coef1*y*std::exp(std::min(mt.at(0),UPBND));
-			}
-			break;
-			case 7: // SolowEye
-			{
-				at.at(1) = coef1*y*mt.at(0);
-			}
-			break;
-			case 12: // SolowSoftplus
-			{
-				at.at(1) = coef1*y*std::log(1.+std::exp(std::min(mt.at(0),UPBND)));
-			}
-			break;
-			case 15: // SolowTanh
-			{
-				at.at(1) = 0.5*coef1 * y * ctanh.at(2)*(std::tanh(ctanh.at(0)*mt.at(0)+ctanh.at(1)) + 1.);
-			}
-			break;
-			default:
-			{
-				::Rf_error("at - This block only support SolowMax(2), SolowExp(3), SolowEye(7)");
-			}
-		} // END switch block
-		at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
-		/*------ END Solow ------*/
+	double hpsi = psi2hpsi(mt.at(0),GainCode,ctanh);
 
-	} else if (TransferCode == 0) { // Koyck
-		/*------ START Koyck ------*/
-		at.at(0) = mt.at(0); // psi[t]
-		switch (ModelCode) { // theta[t]
-			case 4: // KoyckMax
-			{
-				at.at(1) = y * std::max(mt.at(0),arma::datum::eps); 
-			}
-			break;
-			case 5: // KoyckExp
-			{
-				// at.at(1) = y*std::exp(mt.at(0));
-				at.at(1) = y * std::exp(std::min(mt.at(0),UPBND));
-			}
-			break;
-			case 8: // KoyckEye
-			{
-				at.at(1) = y * mt.at(0);
-			}
-			break;
-			case 10: // KoyckSoftplus
-			{
-				// at.at(1) = y * std::log(1. + std::exp(mt.at(0)));
-				at.at(1) = y * std::log(1. + std::exp(std::min(mt.at(0),UPBND)));
-			}
-			break;
-			case 13: // KoyckTanh
-			{
-				at.at(1) = y * 0.5*ctanh.at(2)*(std::tanh(ctanh.at(0)*mt.at(0)+ctanh.at(1)) + 1.);
-			}
-			break;
-			default:
-			{
-				::Rf_error("at - This block only support KoyckMax(4), KoyckExp(5), KoyckEye(8)");
-			}
-		} // END switch block
-		at.at(1) += rho*mt.at(1);
-		/*------ END Koyck ------*/
-
-	} else if (TransferCode==1 || TransferCode==3) { // Koyama or Vanilla
-		/*------ START Koyama ------*/
-		at = Gt * mt;
-		/*------ END Koyama ------*/
-
-	} else {
-		::Rf_error("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
+	switch (TransferCode) {
+		case 0: // Koyck
+		{
+			at.at(1) = y * hpsi;
+			at.at(1) += rho*mt.at(1);
+		}
+		break;
+		case 1: // Koyama
+		{
+			at = Gt * mt;
+		}
+		break;
+		case 2: // Solow
+		{
+			double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
+			at.at(1) = coef1*y*hpsi;
+			at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
+		}
+		break;
+		case 3: // Vanilla
+		{
+			at = Gt * mt;
+		}
+		break;
+		default:
+		{
+			::Rf_error("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
+		}
 	}
 
 	return at;
@@ -149,91 +89,23 @@ matrix Gt is the derivative of gt(.)
 */
 void update_Gt(
 	arma::mat& Gt, // p x p
-	const unsigned int ModelCode, 
+	const unsigned int GainCode, 
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1
-	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const double y = NA_REAL, // obs
 	const double rho = NA_REAL) { 
 
-	const double UPBND = 700.;
-	
 	if (TransferCode == 2) { // Solow
-		switch (ModelCode) {
-			case 2: // SolowMax
-			{
-				// Gt.at(1,0) = std::max(mt.at(0),arma::datum::eps);
-				::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
-			}
-			break;
-			case 3: // SolowExp
-			{
-				// Gt.at(1,0) = std::exp(mt.at(0));
-				Gt.at(1,0) = std::exp(std::min(mt.at(0),UPBND));
-			}
-			break;
-			case 7: // SolowEye
-			{
-				Gt.at(1,0) = 1.;
-			}
-			break;
-			case 12: // SolowSoftplus 
-			{
-				Gt.at(1,0) = 1. / (1. + std::exp(std::min(-mt.at(0), UPBND)));
-			}
-			break;
-			case 15: // SolowTanh
-			{
-				Gt.at(1,0) = 0.5*ctanh.at(0)*ctanh.at(2)/std::pow(std::cosh(ctanh.at(0)*mt.at(0)+ctanh.at(1)),2);
-			}
-			break;
-			default:
-			{
-				::Rf_error("This block only supports Solow");
-			}
-		} // End switch block
+		Gt.at(1,0) = hpsi_deriv(mt.at(0),GainCode,ctanh);
 		Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 
 	} else if (TransferCode == 0) { // Koyck
-		switch (ModelCode) {
-			case 4: // KoyckMax
-			{
-				::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
-			}
-			break;
-			case 5: // KoyckExp
-			{
-				// Gt.at(1,0) = std::exp(mt.at(0));
-				Gt.at(1,0) = std::exp(std::min(mt.at(0),UPBND));
-			}
-			break;
-			case 8: // KoyckEye
-			{
-				Gt.at(1,0) = 1.;
-			}
-			break;
-			case 10: // KoyckSoftplus
-			{
-				// Gt.at(1,0) = 1. / (1. + std::exp(-mt.at(0)));
-				Gt.at(1,0) = 1. / (1. + std::exp(std::min(-mt.at(0), UPBND)));
-			}
-			break;
-			case 13: // KoyckTanh
-			{
-				Gt.at(1,0) = 0.5*ctanh.at(0)*ctanh.at(2)/std::pow(std::cosh(ctanh.at(0)*mt.at(0)+ctanh.at(1)),2);
-			}
-			break;
-			default:
-			{
-				::Rf_error("This block only supports Koyck");
-			}
-		} // End switch block
-
+		Gt.at(1,0) = hpsi_deriv(mt.at(0),GainCode,ctanh);
 		Gt.at(1,0) *= y;
-
 	}
-	
+	return;
 }
 
 
@@ -300,7 +172,7 @@ void forwardFilter(
 	const unsigned int n, // number of observations
 	const unsigned int p, // dimension of the state space
 	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
-	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const unsigned int L = 0,
 	const double rho = 0.9,
@@ -310,12 +182,11 @@ void forwardFilter(
 	const double delta_nb = 1.,
 	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM 
 	const bool debug = false) { 
-
-	const double UPBND = 700.;
 	
 	/*
 	------ Initialization ------
 	*/
+	const unsigned int GainCode = get_gaincode(ModelCode);
 	unsigned int LinkCode = 1; // 0 - exponential; 1 - identity
 	if (ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9) {LinkCode = 0;}
 	const bool use_discount = !R_IsNA(delta) && R_IsNA(W); // Not prioritize discount factor if it is given.
@@ -345,61 +216,21 @@ void forwardFilter(
 	
 	double et,ft,Qt,ft_ast,Qt_ast,alpha_ast,beta_ast,phi;
 	arma::vec At(p);
-
+	arma::vec hpsi(p);
+	arma::vec hph(p);
 
 	/*
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 	if (TransferCode == 1 && L>0) { // Koyama
-		at.col(1) = update_at(p,ModelCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho,L);
+		at.col(1) = update_at(p,GainCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho);
 		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
 		update_Ft(Ft, Fy, TransferCode, 0, L, Y, Fphi);
-		switch (ModelCode) {
-			case 0: // KoyamaMax
-			{
-				::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
-			}
-			break;
-			case 1: // KoyamaExp
-			{
-				at.elem(arma::find(at>UPBND)).fill(UPBND);
-				Ft = Ft % arma::exp(at.col(1));
-				ft = arma::accu(Ft);
-				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
-			}
-			break;
-			case 6: // KoyamaEye
-			{
-				ft = arma::accu(Ft % at.col(1));
-				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
-			}
-			break;
-			case 11: // KoyamaSoftplus
-			{
-				at.elem(arma::find(at>UPBND)).fill(UPBND);
-				arma::vec at_exp = arma::exp(at.col(1));
-				ft = arma::accu(Ft % arma::log(1. + at_exp)); // use gt(.) <= h(.)
-
-				Ft = Ft % at_exp / (1. + at_exp); // first order derivative of h(.)
-				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
-			}
-			break;
-			case 14: // KoyamaTanh
-			{
-				at.elem(arma::find(at>UPBND)).fill(UPBND);
-				arma::vec at_tanh = 0.5*ctanh.at(2) * (arma::tanh(ctanh.at(0)*at.col(1)+ctanh.at(1)) + 1.);
-				ft = arma::accu(Ft % at_tanh); // use gt(.)
-
-				at_tanh = 0.5*ctanh.at(0)*ctanh.at(2)/arma::pow(arma::cosh(ctanh.at(0)*at.col(1)+ctanh.at(1)),2); // first order derivative of h(.)
-				Ft = Ft % at_tanh;
-				Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
-			}
-			break;
-			default:
-			{
-				::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
-			}
-		} // END switch block
+		hpsi = psi2hpsi(at.col(1),GainCode,ctanh);
+		hph = hpsi_deriv(at.col(1),GainCode,ctanh);
+		ft = arma::accu(Ft % hpsi);
+		Ft = Ft % hph;
+		Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
 
 		/*
 		------ Moment Matching ------
@@ -482,8 +313,8 @@ void forwardFilter(
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		update_Gt(Gt.slice(t), ModelCode, TransferCode, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
-		at.col(t) = update_at(p,ModelCode,TransferCode,mt.col(t-1),Gt.slice(t), ctanh, alpha, Y.at(t-1),rho,L);
+		update_Gt(Gt.slice(t), GainCode, TransferCode, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
+		at.col(t) = update_at(p,GainCode,TransferCode,mt.col(t-1),Gt.slice(t), ctanh, alpha, Y.at(t-1),rho);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 
 		if (t<10 && debug) {
@@ -496,52 +327,11 @@ void forwardFilter(
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
 		if (TransferCode == 1) { // Koyama
 			update_Ft(Ft, Fy, TransferCode, t, L, Y, Fphi);
-			switch (ModelCode) {
-				case 0: // KoyamaMax
-				{
-					::Rf_error("How are we gonna do Taylor Expansion on the ramp function?");
-				}
-				break;
-				case 1: // KoyamaExp
-				{
-					at.elem(arma::find(at>UPBND)).fill(UPBND);
-					Ft = Ft % arma::exp(at.col(t));
-					ft = arma::accu(Ft);
-					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-				}
-				break;
-				case 6: // KoyamaEye
-				{
-					ft = arma::accu(Ft % at.col(t));
-					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-				}
-				break;
-				case 11: // KoyamaSoftplus
-				{
-					at.elem(arma::find(at>UPBND)).fill(UPBND);
-					arma::vec at_exp = arma::exp(at.col(t));
-					ft = arma::accu(Ft % arma::log(1. + at_exp));
-
-					Ft = Ft % at_exp / (1. + at_exp);
-					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-				}
-				break;
-				case 14: // KoyamaTanh
-				{
-					at.elem(arma::find(at>UPBND)).fill(UPBND);
-					arma::vec at_tanh = 0.5*ctanh.at(2) * (arma::tanh(ctanh.at(0)*at.col(t)+ctanh.at(1)) + 1.);
-					ft = arma::accu(Ft % at_tanh); // use gt(.)
-					
-					at_tanh = 0.5*ctanh.at(0)*ctanh.at(2)/arma::pow(arma::cosh(ctanh.at(0)*at.col(t)+ctanh.at(1)),2); // first order derivative of h(.)
-					Ft = Ft % at_tanh;
-					Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-				}
-				break;
-				default:
-				{
-					::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
-				}
-			} // END switch block
+			hpsi = psi2hpsi(at.col(t),GainCode,ctanh);
+			hph = hpsi_deriv(at.col(t),GainCode,ctanh);
+			ft = arma::accu(Ft % hpsi);
+			Ft = Ft % hph;
+			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
 		} else { // Vanilla, Koyck, Solow
 			ft = arma::as_scalar(Ft.t() * at.col(t));
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
@@ -827,10 +617,11 @@ Rcpp::List lbe_poisson(
 	const double W = NA_REAL,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericVector>& ctanh = R_NilValue,
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
 	const double alpha = 1.,
 	const double delta_nb = 1.,
 	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM
+	const bool summarize_return = false,
 	const bool debug = false) { 
 
 	if (R_IsNA(delta) && R_IsNA(W)) {
@@ -840,32 +631,11 @@ Rcpp::List lbe_poisson(
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
 
-	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
-	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
-	if (is_koyck) { 
-		TransferCode = 0; 
-		p = 2;
-		L_ = 0;
-	} else if (is_koyama) { 
-		TransferCode = 1; 
-		p = L;
-		L_ = L;
-	} else if (is_solow) { 
-		TransferCode = 2; 
-		p = 3;
-		L_ = 0;
-	} else if (is_vanilla) {
-		TransferCode = 3;
-		p = 1;
-		L_ = 0;
-	} else {
-		::Rf_error("Unknown type of model.");
-	}
+	get_transcode(TransferCode,p,L_,ModelCode,L);
+
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y;
@@ -905,22 +675,27 @@ Rcpp::List lbe_poisson(
 	if (!C0_prior.isNull()) {
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
-	arma::vec ctanh_ = {0.3,-1.,3.};
-	if (!ctanh.isNull()) {
-		ctanh_ = Rcpp::as<arma::vec>(ctanh);
-	}
-    
-	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,ctanh_,alpha,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
+
+	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
 
 	Rcpp::List output;
-	output["mt"] = Rcpp::wrap(mt); // p x npad
-	output["Ct"] = Rcpp::wrap(Ct); // p x p x npad
-	output["ht"] = Rcpp::wrap(ht); // npad x 1
-	output["Ht"] = Rcpp::wrap(Ht); // npad x 1
-	output["alphat"] = Rcpp::wrap(alphat); // npad x 1
-	output["betat"] = Rcpp::wrap(betat); // npad x 1
+	
+	if (summarize_return) {
+		arma::mat psi(npad,3);
+		psi.col(0) = ht - 2.*arma::sqrt(arma::abs(Ht));
+		psi.col(1) = ht;
+		psi.col(2) = ht + 2.*arma::sqrt(arma::abs(Ht));
+		output["psi"] = Rcpp::wrap(psi);
+	} else {
+		output["mt"] = Rcpp::wrap(mt); // p x npad
+		output["Ct"] = Rcpp::wrap(Ct); // p x p x npad
+		output["ht"] = Rcpp::wrap(ht); // npad x 1
+		output["Ht"] = Rcpp::wrap(Ht); // npad x 1
+		output["alphat"] = Rcpp::wrap(alphat); // npad x 1
+		output["betat"] = Rcpp::wrap(betat); // npad x 1
+	}
 
 	return output;
 }
@@ -1003,7 +778,7 @@ Rcpp::List get_optimal_delta(
 	const double mu0 = 0.,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericVector>& ctanh = R_NilValue,
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
 	const double alpha = 1.,
 	const double delta_nb = 1.,
 	const unsigned int obs_type = 1) { // 0: negative binomial DLM; 1: poisson DLM
@@ -1020,7 +795,7 @@ Rcpp::List get_optimal_delta(
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,obs_type,false);
+		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,obs_type,false,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=1; j<=n; j++) {

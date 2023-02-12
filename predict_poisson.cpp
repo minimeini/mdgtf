@@ -19,7 +19,7 @@ Rcpp::List predict_poisson(
     const arma::mat& theta_last, // p x nsample for MCS or HVB, or p x 1 for LBE
     const Rcpp::Nullable<Rcpp::NumericMatrix>& Ct_last = R_NilValue, // p x p for LBE
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
-    const Rcpp::Nullable<Rcpp::NumericMatrix>& ctanh = R_NilValue,
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
     const double alpha = 1.,
     const double rho = 0.9,
     const unsigned int L = 0,
@@ -39,60 +39,51 @@ Rcpp::List predict_poisson(
     } else {
         qProb = Rcpp::as<arma::vec>(qProb_);
     }
-    arma::vec ctanh_ = {0.3,-1.,3.};
-	if (!ctanh.isNull()) {
-		ctanh_ = Rcpp::as<arma::vec>(ctanh);
-	}
 
-    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
-	const bool is_vanilla = ModelCode == 9;
+
+    const unsigned int GainCode = get_gaincode(ModelCode);
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
+    get_transcode(TransferCode,p,L_,ModelCode,L);
     arma::mat Gt;
-	if (is_koyck) { 
-		TransferCode = 0; 
-		p = 2;
-		L_ = 0;
-	} else if (is_koyama) { 
-		TransferCode = 1; 
-		p = L;
-		L_ = L;
-        Gt.set_size(p,p);
-        Gt.zeros();
-        Gt.at(0,0) = 1.;
-        Gt.diag(-1).ones();
-	} else if (is_solow) { 
-		TransferCode = 2; 
-		p = 3;
-		L_ = 0;
-	} else if (is_vanilla) {
-		TransferCode = 3;
-		p = 1;
-		L_ = 0;
-	} else {
-		::Rf_error("Unknown type of model.");
-	}
-
-
     arma::vec Ft(p,arma::fill::zeros);
-	if (TransferCode==0 || TransferCode==2) { // Koyck or Solow
-		Ft.at(1) = 1.;
-	} else if (TransferCode==3) { // Vanilla
-		Ft.at(0) = 1.;
-	}
-
-	arma::vec Fphi;
+    arma::vec Fphi;
 	arma::vec Fy;
-	if (TransferCode == 1 && L>0) { // koyama
-		const double mu = 2.2204e-16;
-		const double m = 4.7;
-		const double s = 2.9;
-		Fphi = get_Fphi(L,mu,m,s);
-		Fy.zeros(L);
-	}
+    switch (TransferCode) {
+        case 0: // Koyck
+        {
+            Ft.at(1) = 1.;
+        }
+        break;
+        case 1: // Koyama
+        {
+            Gt.set_size(p,p);
+            Gt.zeros();
+            Gt.at(0,0) = 1.;
+            Gt.diag(-1).ones();
+            const double mu = 2.2204e-16;
+		    const double m = 4.7;
+		    const double s = 2.9;
+		    Fphi = get_Fphi(L,mu,m,s);
+		    Fy.zeros(L);
+        }
+        break;
+        case 2: // Solow
+        {
+            Ft.at(1) = 1.;
+        }
+        break;
+        case 3: // Vanilla
+        {
+            Ft.at(0) = 1.;
+        }
+        break;
+        default:
+        {
+            ::Rf_error("Unknown transfer function.");
+        }
+    }
 
 
     arma::vec ypred(npred,arma::fill::zeros);
@@ -133,7 +124,7 @@ Rcpp::List predict_poisson(
 
         for (unsigned int t=n; t<npred; t++) {
             // state - theta, especially psi
-            theta_pred.col(t) = update_at(p,ModelCode,TransferCode,theta_pred.col(t-1),Gt,ctanh_,alpha,ypred.at(t-1),rho,L_);
+            theta_pred.col(t) = update_at(p,GainCode,TransferCode,theta_pred.col(t-1),Gt,ctanh,alpha,ypred.at(t-1),rho);
             theta_pred.at(0,t) += wt.at(t);
 
             // Link - phi

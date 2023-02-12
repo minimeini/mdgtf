@@ -33,26 +33,25 @@
 
 arma::vec update_at(
 	const unsigned int p,
-	const unsigned int ModelCode,
+	const unsigned int GainCode,
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
 	const arma::mat& Gt, // p x p
-	const arma::vec& ctanh, // 3 x 1
+	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
 	const double y,  // n x 1
-	const double rho,
-	const unsigned int L) ;
+	const double rho);
 
 
 
 void update_Gt(
 	arma::mat& Gt, // p x p
-	const unsigned int ModelCode, 
+	const unsigned int GainCode, 
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1
-	const arma::vec& ctanh, // 3 x 1
+	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
-	const double y,  // obs
+	const double y, // obs
 	const double rho);
 
 
@@ -91,7 +90,7 @@ void forwardFilter(
 	const unsigned int n, // number of observations
 	const unsigned int p, // dimension of the state space
 	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
-	const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
 	const unsigned int L,
 	const double rho,
@@ -140,10 +139,11 @@ Rcpp::List lbe_poisson(
 	const double W,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-	const Rcpp::Nullable<Rcpp::NumericVector>& ctanh,
+	const Rcpp::NumericVector& ctanh,
 	const double alpha,
 	const double delta_nb,
 	const unsigned int obs_type,
+	const bool summarize_return,
 	const bool debug);
 
 
@@ -167,7 +167,7 @@ Rcpp::List get_optimal_delta(
 	const double mu0,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-	const Rcpp::Nullable<Rcpp::NumericVector>& ctanh,
+	const Rcpp::NumericVector& ctanh,
 	const double alpha,
 	const double delta_nb,
 	const unsigned int obs_type);

@@ -1,4 +1,3 @@
-#include "lbe_poisson.h"
 #include "pl_poisson.h"
 #include "yjtrans.h"
 using namespace Rcpp;
@@ -245,8 +244,8 @@ arma::vec rtheta_ffbs(
     const unsigned int p,
     const arma::vec& ypad, // (n+1) x 1
     const double W,
-    const arma::vec& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain
     const double alpha,
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
     const unsigned int L = 0,
     const double rho = 0.9,
     const double delta = 0.9,
@@ -314,7 +313,7 @@ Rcpp::List hva_poisson(
     const double delta = NA_REAL, // discount factor
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-    const Rcpp::NumericVector ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, the last one is M will be updated by eta[3] at each step
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, the last one is M will be updated by eta[3] at each step
     const Rcpp::Nullable<Rcpp::NumericVector>& psi_init = R_NilValue, // previously `ht_`
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling. Only used for FFBS (sampler_type=0)
     const unsigned int sampler_type = 1, // 0 - FFBS; 1 - SMC
@@ -323,14 +322,15 @@ Rcpp::List hva_poisson(
     const double scale_sd = 1.e-16,
     const double learn_rate = 0.95,
     const double eps_step = 1.e-6,
-    const unsigned int niter = 100,
+    const unsigned int nsample = 100,
     const unsigned int nburnin = 100,
     const unsigned int nthin = 2,
-    const unsigned int nsample = 100,
     const double delta_nb = 1.,
+    const bool summarize_return = false,
     const bool verbose = false,
     const bool debug = false) {
 
+    const unsigned int ntotal = nburnin + nthin*nsample + 1;
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
     arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
@@ -354,38 +354,15 @@ Rcpp::List hva_poisson(
     /* ------ Define SMC ------ */
     const unsigned int Blag = static_cast<unsigned int>(0.1*n); // B-fixed-lags Monte Carlo smoother
     const unsigned int N = 100; // number of particles for SMC
-    arma::vec qProb = {0.5};
     /* ------ Define SMC ------ */
 
 
     /* ------ Define Model ------ */
     Rcpp::NumericVector ctanh_ = ctanh;
-    const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
-	const bool is_vanilla = ModelCode == 9;
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
-	if (is_koyck) { 
-		TransferCode = 0; 
-		p = 2;
-		L_ = 0;
-	} else if (is_koyama) { 
-		TransferCode = 1; 
-		p = L;
-		L_ = L;
-	} else if (is_solow) { 
-		TransferCode = 2; 
-		p = 3;
-		L_ = 0;
-	} else if (is_vanilla) {
-		TransferCode = 3;
-		p = 1;
-		L_ = 0;
-	} else {
-		::Rf_error("Unknown type of model.");
-	}
+    get_transcode(TransferCode,p,L_,ModelCode,L);
     /* ------ Define Model ------ */
 
 
@@ -463,21 +440,24 @@ Rcpp::List hva_poisson(
     /*  ------ Define HVB ------ */
 
 
-    arma::mat mu_stored(m,niter);
-    arma::mat d_stored(m,niter);
-    arma::mat gamma_stored(m,niter);
-    arma::mat psi_stored(n+1,niter);
-    arma::vec W_stored(niter);
-    arma::vec mu0_stored(niter);
+    // arma::mat mu_stored(m,niter);
+    // arma::mat d_stored(m,niter);
+    // arma::mat gamma_stored(m,niter);
+    arma::mat psi_stored(n+1,nsample);
+    arma::vec W_stored(nsample);
+    arma::vec mu0_stored(nsample);
 
-    arma::mat Meff(n,niter);
-    arma::mat resample_status(n,niter);
-    arma::mat psi_last(p,niter);
+    arma::mat Meff(n,nsample);
+    arma::mat resample_status(n,nsample);
+    // arma::mat theta_last(p,nsample);
+    // arma::vec theta(p);
 
     const unsigned int max_iter = 10;
     unsigned int cnt = 0;
-    for (unsigned int s=0; s<niter; s++) {
+    bool saveiter;
+    for (unsigned int s=0; s<ntotal; s++) {
         R_CheckUserInterrupt();
+		saveiter = s > nburnin && ((s-nburnin-1)%nthin==0);
 
         /*
         Step 2. Sample state parameters via posterior
@@ -487,17 +467,18 @@ Rcpp::List hva_poisson(
         ctanh_[2] = eta.at(3);
         if (s==0 && !psi_init.isNull()) {
             psi = Rcpp::as<arma::vec>(psi_init);
-        } else if (sampler_type==0) {
-            psi = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,eta.at(0),ctanh_,alpha,L,eta.at(2),delta,eta.at(1),scale_sd,rtheta_type,delta_nb,obs_type);
+        // } else if (sampler_type==0) {
+        //     psi = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,eta.at(0),ctanh_,alpha,L,eta.at(2),delta,eta.at(1),scale_sd,rtheta_type,delta_nb,obs_type);
         } else {
-            Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type,verbose,debug);
-            arma::mat psi_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
-            psi = psi_mat.col(1);
-            psi_last.col(s) = arma::median(Rcpp::as<arma::mat>(mcs_output["theta_last"]),1);
-            if (debug) {
-                Meff.col(s) = Rcpp::as<arma::vec>(mcs_output["Meff"]);
-                resample_status.col(s) = Rcpp::as<arma::vec>(mcs_output["resample_status"]);
-            }
+            mcs_poisson(psi,Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type);
+            // Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type,verbose,debug);
+            // arma::mat psi_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
+            // psi = psi_mat.col(1);
+            // theta = arma::median(Rcpp::as<arma::mat>(mcs_output["theta_last"]),1);
+            // if (debug) {
+            //     Meff.col(s) = Rcpp::as<arma::vec>(mcs_output["Meff"]);
+            //     resample_status.col(s) = Rcpp::as<arma::vec>(mcs_output["resample_status"]);
+            // }
         }
 
 
@@ -611,15 +592,26 @@ Rcpp::List hva_poisson(
             ::Rf_error("W is NA.");
         }
 
-        mu_stored.col(s) = mu;
-        d_stored.col(s) = d;
-        gamma_stored.col(s) = gamma;
-        psi_stored.col(s) = psi;
-        W_stored.at(s) = eta.at(0);
-        mu0_stored.at(s) = eta.at(1);
+
+        if (saveiter || s==(ntotal-1)) {
+			unsigned int idx_run;
+			if (saveiter) {
+				idx_run = (s-nburnin-1)/nthin;
+			} else {
+				idx_run = nsample - 1;
+			}
+
+			// mu_stored.col(s) = mu;
+            // d_stored.col(s) = d;
+            // gamma_stored.col(s) = gamma;
+            psi_stored.col(idx_run) = psi;
+            W_stored.at(idx_run) = eta.at(0);
+            mu0_stored.at(idx_run) = eta.at(1);
+            // theta_last.col(idx_run) = theta;
+		}
 
         if (verbose) {
-			Rcout << "\rProgress: " << s+1 << "/" << niter;
+			Rcout << "\rProgress: " << s << "/" << ntotal-1;
 		}
     }
 
@@ -628,18 +620,23 @@ Rcpp::List hva_poisson(
 	}
 
     Rcpp::List output;
-    output["mu"] = Rcpp::wrap(mu_stored);
-    output["d"] = Rcpp::wrap(d_stored);
-    output["gamma"] = Rcpp::wrap(gamma_stored);
-    output["psi_stored"] = Rcpp::wrap(psi_stored); // (n+1) x niter
-    output["W_stored"] = Rcpp::wrap(W_stored); // niter
-    output["mu0_stored"] = Rcpp::wrap(mu0_stored); // niter
-    output["psi_last"] = Rcpp::wrap(psi_last); // p x niter
-
-    if (debug) {
-        output["Meff"] = Rcpp::wrap(Meff);
-        output["resample_status"] = Rcpp::wrap(resample_status);
+    // output["mu"] = Rcpp::wrap(mu_stored);
+    // output["d"] = Rcpp::wrap(d_stored);
+    // output["gamma"] = Rcpp::wrap(gamma_stored);
+    if (summarize_return) {
+        arma::vec qProb = {0.025,0.5,0.975};
+        output["psi"] = Rcpp::wrap(arma::quantile(psi_stored,qProb,1)); // (n+1) x 3
+    } else {
+        output["psi"] = Rcpp::wrap(psi_stored); // (n+1) x niter
     }
+    output["W"] = Rcpp::wrap(W_stored); // niter
+    output["mu0"] = Rcpp::wrap(mu0_stored); // niter
+    // output["theta_last"] = Rcpp::wrap(theta_last); // p x niter
+
+    // if (debug) {
+    //     output["Meff"] = Rcpp::wrap(Meff);
+    //     output["resample_status"] = Rcpp::wrap(resample_status);
+    // }
     
 
     return output;

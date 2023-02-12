@@ -156,4 +156,4 @@ ggsave(file.path(opath,"country",fname),grobs)
 
 
 rm(list=ls())
-
+gc(verbose=FALSE,reset=TRUE,full=TRUE)

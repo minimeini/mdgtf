@@ -23,26 +23,18 @@ plot_sim = function(sim_dat) {
 }
 
 
-plot_results = function(sim_dat=NULL,
-                        mcs_output=NULL,
-                        lbe_output=NULL,
-                        hvb_output=NULL,
-                        epi_output=NULL,
-                        wt_output=NULL,
-                        koyama_output=NULL,
-                        nburnin=2000,
-                        tstart=0,
-                        opts=NULL,# number of observations
-                        ytrue=NULL,
-                        plot_hpsi=FALSE, # if FALSE, plot psi by default
-                        plot_coverage=TRUE,
-                        plot_lambda=TRUE) {
-  if (is.null(mcs_output)&is.null(lbe_output)&is.null(hvb_output)) {
-    return(NULL)
-  }
-  if (is.null(sim_dat)&&is.null(opts)) {
-    return(NULL)
-  }
+plot_psi = function(sim_dat=NULL,
+                    psi_list = NULL,
+                    tstart=0,
+                    opts=NULL,# number of observations
+                    ytrue=NULL,
+                    plot_hpsi=FALSE, # if FALSE, plot psi by default
+                    plot_lambda=FALSE,
+                    methods = NULL,
+                    cols = NULL) {
+  mlist = c("True","EpiEstim","WT","Koyama2021","MCS","LBE","HVB")
+  clist = c("black","lightseagreen","orange","burlywood4","royalblue","maroon","purple")
+  
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
     y = sim_dat$y
   } else if (!is.null(ytrue)) {
@@ -50,347 +42,172 @@ plot_results = function(sim_dat=NULL,
   } else {
     y = NULL
   }
-  ####
-  ####
   
+  if (plot_lambda) {plot_hpsi=TRUE}
+  
+  if (is.null(methods)) {
+    methods = names(psi_list)
+  }
+  
+  if (is.null(cols) & !is.null(sim_dat)) {
+    cols = clist[1:(length(psi_list)+1)]
+  } else if (is.null(cols)) {
+    cols = clist[1:length(psi_list)]
+  }
+  ####
+  ####
+
   if (!is.null(sim_dat)) {
     opts = sim_dat$params
-    psi_vec = c(opts$psi0,sim_dat$psi) # 1:(n+1) <=> 0:n
-    if (plot_hpsi) {
-      psi_vec = c(psi2hpsi(matrix(psi_vec,ncol=1),
-                           opts$ModelCode,
-                           coef=opts$ctanh))
+    if (is.null(opts$ctanh)) {
+      opts$ctanh = c(0.3,0,1)
     }
-    if (tstart>0) {
-      psi = cbind(psi_vec[-c(1:tstart)],tstart:length(y))
-    } else { # tstart==0
-      psi = cbind(psi_vec,0:length(y))
-    }
-    colnames(psi) = c("true","time")
-    psi = as.data.frame(psi)
-    
-    if (plot_lambda) {
-      theta_vec = sim_dat$theta
-      if (tstart>0) {
-        theta = data.frame(true=theta_vec[-c(1:tstart)],
-                           time=(tstart+1):length(y))
-      } else {
-        theta = data.frame(true=theta_vec,
-                           time=1:length(y))
-      }
-    }
-    ncol = 2
-  } else {
-    psi = data.frame(time=tstart:opts$n)
-    if (plot_lambda) {theta=data.frame(time=tstart:opts$n)}
-    ncol = 1
+    psi_list$True = as.matrix(c(opts$psi0,sim_dat$psi),ncol=1)
+    methods = c(methods,"True")
   }
   
-  ####
-  if (!is.null(mcs_output)) {
-    tmp = mcs_output$quantiles
-    if (plot_hpsi) {
-      tmp2 = psi2hpsi(tmp,opts$ModelCode,
-                      coef=opts$ctanh)
-      tmp = tmp2 
-    }
-    
-    if (tstart>0) {tmp = tmp[-c(1:tstart),]}
-    psi = cbind(psi,tmp)
-    ncol = dim(psi)[2]
-    colnames(psi)[(ncol-2):ncol] = c("mcs_lobnd", "mcs", "mcs_hibnd")
-    
-    
-    if (plot_lambda) {
-      theta_tmp = hpsi2theta(tmp,y,
-                             opts$ModelCode,
-                             opts$theta0,
-                             opts$alpha,
-                             opts$L,
-                             opts$rho)
-      if (tstart>0) {theta_tmp = theta_tmp[-c(1:tstart),]}
-      theta_tmp = theta_tmp + opts$mu0
-      if (dim(theta_tmp)[1]-dim(theta)[1]==-1) {
-        theta_tmp = rbind(rep(NA,3),theta_tmp)
-      }
-      theta = cbind(theta,theta_tmp)
-      ncol = dim(theta)[2]
-      colnames(theta)[(ncol-2):ncol] = c("mcs_lobnd", "mcs", "mcs_hibnd")
-    }
-    
-    
-    if (plot_coverage) {
-      psi$mcs_width = psi$mcs_hibnd - psi$mcs_lobnd
-      if (plot_hpsi & !is.null(opts$ctanh)) {
-        psi$mcs_width = 100 * psi$mcs_width / opts$ctanh[3]
-      }
-    }
-  }
-  ####
-  if (!is.null(lbe_output)) {
-    tmp = cbind(lbe_output$ht-2*sqrt(abs(lbe_output$Ht)),
-                lbe_output$ht,
-                lbe_output$ht+2*sqrt(abs(lbe_output$Ht)))
-    if (plot_hpsi) {
-      tmp2 = psi2hpsi(tmp,opts$ModelCode,
-                      coef=opts$ctanh)
-      tmp = tmp2
-    }
-    if (tstart>0) {tmp = tmp[-c(1:tstart),]}
-    psi = cbind(psi,tmp)
-    ncol = dim(psi)[2]
-    colnames(psi)[(ncol-2):ncol] = c("lbe_lobnd","lbe","lbe_hibnd")
-    
-    if (plot_lambda) {
-      theta_tmp = hpsi2theta(tmp,y,
-                             opts$ModelCode,
-                             opts$theta0,
-                             opts$alpha,
-                             opts$L,
-                             opts$rho)
-      if (tstart>0) {theta_tmp = theta_tmp[-c(1:tstart),]}
-      theta_tmp = theta_tmp + opts$mu0
-      if (dim(theta_tmp)[1]-dim(theta)[1]==-1) {
-        theta_tmp = rbind(rep(NA,3),theta_tmp)
-      }
-      theta = cbind(theta,theta_tmp)
-      ncol = dim(theta)[2]
-      colnames(theta)[(ncol-2):ncol] = c("lbe_lobnd", "lbe", "lbe_hibnd")
-    }
-    
-    if (plot_coverage) {
-      psi$lbe_width = psi$lbe_hibnd - psi$lbe_lobnd
-      if (plot_hpsi & !is.null(opts$ctanh)) {
-        psi$lbe_width = 100 * psi$lbe_width / opts$ctanh[3]
-      }
-    }
-  }
-  ####
-  if (!is.null(hvb_output)) {
-    tmp = hvb_output$psi_stored[,-c(1:nburnin)]
-    if (plot_hpsi) {
-      tmp2 = psi2hpsi(tmp,opts$ModelCode,
-                      coef=opts$ctanh)
-      tmp = tmp2 
-    }
-    tmp = t(apply(tmp,1,quantile,c(0.025,0.5,0.975)))
-    if (tstart>0) {tmp = tmp[-c(1:tstart),]}
-    psi = cbind(psi,tmp)
-    ncol = dim(psi)[2]
-    colnames(psi)[(ncol-2):ncol] = c("hvb_lobnd","hvb","hvb_hibnd")
-    
-    if (plot_lambda) {
-      theta_tmp = hpsi2theta(tmp,y,
-                             opts$ModelCode,
-                             opts$theta0,
-                             opts$alpha,
-                             opts$L,
-                             opts$rho)
-      theta_tmp = t(apply(theta_tmp,1,quantile,c(0.025,0.5,0.975)))
-      if (tstart>0) {theta_tmp = theta_tmp[-c(1:tstart),]}
-      mu0_tmp = quantile(c(hvb_output$mu0_stored),c(0.025,0.5,0.975))
-      theta_tmp = t(apply(theta_tmp,1,function(row,mu0){row+mu0},mu0_tmp))
-      if (dim(theta_tmp)[1]-dim(theta)[1]==-1) {
-        theta_tmp = rbind(rep(NA,3),theta_tmp)
-      }
-      theta = cbind(theta,theta_tmp)
-      ncol = dim(theta)[2]
-      colnames(theta)[(ncol-2):ncol] = c("hvb_lobnd", "hvb", "hvb_hibnd")
-    }
-    
-    if (plot_coverage) {
-      psi$hvb_width = psi$hvb_hibnd - psi$hvb_lobnd
-      if (plot_hpsi & !is.null(opts$ctanh)) {
-        psi$hvb_width = 100 * psi$hvb_width / opts$ctanh[3]
-      }
-    }
-  }
-  psi = as.data.frame(psi)
-  ####
-  ####
-  labs = NULL
-  cols = NULL
-  p = ggplot(psi,aes(x=time))
-  p2 = ggplot(psi,aes(x=time))
-  if (plot_lambda) {
-    p3 = ggplot(theta,aes(x=time))
-  }
-  
-  
-  if (!is.null(sim_dat)) {
-    labs = c(labs,"True")
-    cols = c(cols,"black")
-    p = p + geom_line(aes(y=true,color="black"), na.rm=TRUE)
-    
-    if (plot_lambda) {
-      p3 = p3 + geom_line(aes(y=true,color="black"), na.rm=TRUE)
-    }
-  }
-  
-  ####
+  nl = length(psi_list)
+  lambda_list = vector(mode="list",length=nl)
+  TransferCode = get_transcode(opts$ModelCode)
   if (plot_hpsi) {
-    if (!is.null(epi_output)) {
-      labs = c(labs,"EpiEstim")
-      cols = c(cols,"lightseagreen")
-      p = p + geom_line(aes(y=EpiEstim,x=time,col="lightseagreen"),
-                        data=epi_output,na.rm=TRUE,alpha=0.8) +
-        geom_ribbon(aes(x=time,y=EpiEstim,ymin=lobnd,
-                        ymax=hibnd,fill="lightseagreen"),
-                    data=epi_output,alpha=0.2,na.rm=TRUE)
+    for (i in 1:nl) {
+      psi_list[[i]] = psi2hpsi(psi_list[[i]],
+                               opts$ModelCode,
+                               coef=opts$ctanh)
+      if (plot_lambda) {
+        lambda_list[[i]] = hpsi2theta(psi_list[[i]],y,
+                                      TransferCode,
+                                      opts$theta0,
+                                      opts$alpha,
+                                      opts$L,opts$rho)
+        lambda_list[[i]] = lambda_list[[i]] + opts$mu0
+      }
+      
     }
-    if (!is.null(wt_output)) {
-      labs = c(labs,"WT")
-      cols = c(cols,"orange")
-      p = p + geom_line(aes(y=WT,x=time,col="orange"),
-                        data=wt_output,na.rm=TRUE,alpha=0.8) +
-        geom_ribbon(aes(x=time,y=WT,ymin=lobnd,
-                        ymax=hibnd,fill="orange"),
-                    data=wt_output,alpha=0.2,na.rm=TRUE)
-    }
-    if (!is.null(koyama_output)) {
-      labs = c(labs,"Koyama2021")
-      cols = c(cols,"burlywood4")
-      p = p + geom_line(aes(x=time,y=Koyama2021,col="burlywood4"),
-                        data=koyama_output,na.rm=TRUE,alpha=0.8) +
-        geom_ribbon(aes(x=time,y=Koyama2021,ymin=lobnd,
-                        ymax=hibnd,fill="burlywood4"),
-                    data=koyama_output,alpha=0.2,na.rm=TRUE)
+    if (plot_lambda & !is.null(sim_dat) & "lambda" %in% names(sim_dat)) {
+      lambda_list[[nl]] = matrix(sim_dat$lambda,ncol=1)
+      names(lambda_list) = names(psi_list)
     }
   }
-  ####
   
-  if (!is.null(mcs_output)) {
-    labs = c(labs,"MCS")
-    cols = c(cols,"royalblue")
-    
-    p = p + geom_line(aes(y=mcs,color="royalblue"), na.rm=TRUE) +
-      geom_ribbon(aes(y=mcs,ymin=mcs_lobnd,
-                      ymax=mcs_hibnd,fill="royalblue"), 
-                  alpha=0.2,na.rm=TRUE)
-    
-    if (plot_coverage) {
-      p2 = p2 + geom_area(aes(y=mcs_width,fill="royalblue"),
-                          alpha=0.2,na.rm=TRUE)
+  for (i in 1:nl) {
+    tmp = psi_list[[i]]
+    if (tstart>0) {tmp = tmp[-c(1:tstart),]}
+    psi_list[[i]] = as.data.frame(tmp)
+    if (dim(psi_list[[i]])[2]>=3) {
+      colnames(psi_list[[i]])[1:3] = c("lobnd", "est", "hibnd")
+    } else {
+      colnames(psi_list[[i]]) = "est"
     }
-    if (plot_lambda) {
-      p3 = p3 + geom_line(aes(y=mcs,color="royalblue"), na.rm=TRUE) +
-        geom_ribbon(aes(y=mcs,ymin=mcs_lobnd,
-                        ymax=mcs_hibnd,fill="royalblue"), 
-                    alpha=0.2,na.rm=TRUE)
-    }
-  }
-  ####
-  if (!is.null(lbe_output)) {
-    labs = c(labs,"LBE")
-    cols = c(cols,"maroon")
-    p = p + geom_line(aes(y=lbe,color="maroon"), na.rm=TRUE) +
-      geom_ribbon(aes(y=lbe,ymin=lbe_lobnd,
-                      ymax=lbe_hibnd,fill="maroon"), 
-                  alpha=0.2,na.rm=TRUE) 
     
-    if (plot_coverage) {
-      p2 = p2 + geom_area(aes(y=lbe_width,fill="maroon"),
-                          alpha=0.2,na.rm=TRUE)
-    }
+    psi_list[[i]]$time = (1:dim(psi_list[[i]])[1]) + tstart
     
     if (plot_lambda) {
-      p3 = p3 + geom_line(aes(y=lbe,color="maroon"), na.rm=TRUE) +
-        geom_ribbon(aes(y=lbe,ymin=lbe_lobnd,
-                        ymax=lbe_hibnd,fill="maroon"), 
-                    alpha=0.2,na.rm=TRUE)
-    }
-  }
-  ####
-  if (!is.null(hvb_output)) {
-    labs = c(labs,"HVB")
-    cols = c(cols,"purple")
-    p = p + geom_line(aes(y=hvb,color="purple"), na.rm=TRUE) +
-      geom_ribbon(aes(y=hvb,ymin=hvb_lobnd,
-                      ymax=hvb_hibnd,fill="purple"), 
-                  alpha=0.2,na.rm=TRUE)
-    
-    if (plot_coverage) {
-      p2 = p2 + geom_area(aes(y=hvb_width,fill="purple"),
-                          alpha=0.2,na.rm=TRUE)
-    }
-    
-    if (plot_lambda) {
-      p3 = p3 + geom_line(aes(y=hvb,color="purple"), na.rm=TRUE) +
-        geom_ribbon(aes(y=hvb,ymin=hvb_lobnd,
-                        ymax=hvb_hibnd,fill="purple"), 
-                    alpha=0.2,na.rm=TRUE)
+      tmp = lambda_list[[i]]
+      if (tstart>0) {tmp = tmp[-c(1:tstart),]}
+      lambda_list[[i]] = as.data.frame(tmp)
+      if (dim(lambda_list[[i]])[2]>=3) {
+        colnames(lambda_list[[i]])[1:3] = c("lobnd", "est", "hibnd")
+      } else {
+        colnames(lambda_list[[i]]) = "est"
+      }
+      lambda_list[[i]]$time = (1:dim(lambda_list[[i]])[1]) + tstart
     }
   }
   
   ####
-  p = p + theme_light() +
-    scale_color_identity(name ="Method", breaks=cols, 
-                         labels=labs, guide="legend") +
-    scale_fill_identity(name = "Method", breaks=cols, labels=labs) +
-    theme(legend.position = "right") + xlab("Time")
+  p = ggplot(psi_list[[1]],aes(x=time,y=est)) +
+    geom_line(col=cols[1],na.rm=TRUE)
+  if ("lobnd"%in%colnames(psi_list[[1]]) & "hibnd"%in%colnames(psi_list[[1]])) {
+    p = p + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),fill=cols[1],
+                        alpha=0.2,na.rm=TRUE)
+  }
+  if (nl>1) {
+    for (i in 2:nl) {
+      p = p + geom_line(col=cols[i],data=psi_list[[i]],na.rm=TRUE)
+      if ("lobnd"%in%colnames(psi_list[[i]]) & "hibnd"%in%colnames(psi_list[[i]])) {
+        p = p + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),data=psi_list[[i]],
+                            fill=cols[i],alpha=0.2,na.rm=TRUE)
+      }
+    }
+  }
+  
+  
+  p = p + theme_light() + xlab("Time")
+  
+  # p = p + 
+  #   scale_color_identity(name ="Method", breaks=cols, 
+  #                        labels=methods, guide="legend") +
+  #   scale_fill_identity(name = "Method", breaks=cols, labels=methods) +
+  #   theme(legend.position = "right")
   if (plot_hpsi) {
     p = p + ylab(expression(R[t])) +
       geom_hline(yintercept=1,col="black",linetype=2)
-    if (!is.null(opts$ctanh)) {
-      p = p + scale_y_continuous(limits=c(0,opts$ctanh[3]))
-    }
+    # if (!is.null(opts$ctanh)) {
+    #   p = p + scale_y_continuous(limits=c(0,opts$ctanh[3]))
+    # }
   } else {
     p = p + ylab("Gain Factor")
   }
-
   
   if (plot_lambda) {
-    p3 = p3 + theme_light() +
-      scale_color_identity(name ="Method", breaks=cols, 
-                           labels=labs,guide="legend") +
-      scale_fill_identity(name = "Method", breaks=cols, labels=labs) +
-      geom_point(aes(y=y),data=data.frame(time=1:length(y),y=y),size=1,alpha=0.8) +
-      ylab(expression(lambda[t])) + xlab("Time") +
-      theme(legend.position = "right")
-  }
-  
-  
-  if (plot_coverage) {
+    p2 = ggplot(lambda_list[[1]],aes(x=time,y=est)) +
+      geom_line(col=cols[1],na.rm=TRUE)
+    if ("lobnd"%in%colnames(lambda_list[[1]]) & "hibnd"%in%colnames(lambda_list[[1]])) {
+      p2 = p2 + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
+                            fill=cols[1],alpha=0.2,na.rm=TRUE)
+    }
+    
+    if (nl>1) {
+      for (i in 2:nl) {
+        p2 = p2 + geom_line(col=cols[i],data=lambda_list[[i]],na.rm=TRUE)
+        if ("lobnd"%in%colnames(lambda_list[[i]]) & "hibnd"%in%colnames(lambda_list[[i]])) {
+          p2 = p2 + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),fill=cols[i],
+                                data=lambda_list[[i]],alpha=0.2,na.rm=TRUE)
+        }
+      }
+    }
+    
     p2 = p2 + theme_light() +
-      scale_fill_identity(name = "Method", breaks=cols, 
-                          labels=labs,guide="legend") +
-      ylab("Width of CI (%)") + xlab("Time") +
-      theme(legend.position="right")
+      ylab(expression(lambda[t])) + xlab("Time")
+    # p2 = p2 + 
+    #   scale_color_identity(name ="Method", breaks=cols, 
+    #                        labels=methods,guide="legend") +
+    #   scale_fill_identity(name = "Method", breaks=cols, labels=methods) +
+    #   geom_point(aes(y=y),data=data.frame(time=1:length(y),y=y),size=1,alpha=0.8) +
+    #   theme(legend.position = "right")
   }
   
   
-  if (plot_coverage & plot_lambda) {
-    return(list(p,p2,p3))
-  } else if (plot_coverage) {
+  ####
+  
+  
+  if (plot_lambda) {
     return(list(p,p2))
-  } else if (plot_lambda) {
-    return(list(p,p3))
   } else {
-    return(p)
+    return(list(p))
   }
 }
 
 
-plot_eta = function(vname,hvb_output,opts=NULL,nburnin=2000) {
+plot_eta = function(vname,hvb_output,opts=NULL) {
   if (vname == "W") {
-    nkeep = length(hvb_output$W_stored) - nburnin
-    tmp = data.frame(Iteration=1:nkeep + nburnin,
-                     W=hvb_output$W_stored[-c(1:nburnin)])
+    tmp = data.frame(Iteration=1:length(hvb_output$W_stored),
+                     W=hvb_output$W_stored)
     p = ggplot(tmp,aes(x=Iteration,y=W)) +
       geom_point(size=1,col="mediumpurple1") +
-      geom_hline(yintercept=median(hvb_output$W_stored[-c(1:nburnin)]),
+      geom_hline(yintercept=median(hvb_output$W_stored),
                  col="purple",linewidth=1) +
       theme_light() + ylab(expression(W))
     if (!is.null(opts) & ("W" %in% names(opts))) {
       p = p + geom_hline(yintercept=opts$W,col="black")
     }
   } else if (vname == "mu0") {
-    nkeep = length(hvb_output$mu0_stored) - nburnin
-    tmp = data.frame(Iteration=1:nkeep + nburnin,
-                     mu0=hvb_output$mu0_stored[-c(1:nburnin)])
+    tmp = data.frame(Iteration=1:length(hvb_output$mu0_stored),
+                     mu0=hvb_output$mu0_stored)
     p = ggplot(tmp,aes(x=Iteration,y=mu0)) +
       geom_point(size=1,col="mediumpurple1") +
-      geom_hline(yintercept=median(hvb_output$mu0_stored[-c(1:nburnin)]),
+      geom_hline(yintercept=median(hvb_output$mu0_stored),
                  col="purple",linewidth=1) +
       theme_light() + ylab(expression(mu[0]))
     if (!is.null(opts) & ("mu0" %in% names(opts))) {

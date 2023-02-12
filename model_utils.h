@@ -67,6 +67,39 @@
 
 
 /*
+Gain Code
+
+0 - Ramp
+1 - Exponential
+2 - Identity
+3 - Softplus
+4 - Hyperbolic Tangent
+5 - Logistic
+*/
+unsigned int get_gaincode(
+	const unsigned int ModelCode);
+
+
+
+/*
+Transfer Code
+
+0 - Koyck
+1 - Koyama
+2 - Solow
+3 - Vanilla
+*/
+void get_transcode(
+	unsigned int& TransferCode, // integer indicator for the type of transfer function
+	unsigned int& p, // dimension of DLM state space
+	unsigned int& L_,
+	const unsigned int ModelCode,
+	const unsigned int L);
+
+unsigned int get_transcode(
+	const unsigned int ModelCode);
+
+/*
 CDF of the log-normal distribution.
 */
 double Pd(
@@ -117,14 +150,15 @@ arma::vec get_Fphi(const unsigned int L);
 
 ------ Default settings ------
 const unsigned int ModelCode = 0
+Checked. OK.
 */
 arma::mat update_Fx(
-	const unsigned int ModelCode,
+	const unsigned int TransferCode,
 	const unsigned int n, // number of observations
 	const arma::vec& Y, // n x 1, (y[1],...,y[n]), observtions
+	const arma::vec& hph,// (n+1) x 1, derivative of the gain function at h[t]
 	const double rho, // memory of previous state, for exponential and negative binomial transmission delay kernel
 	const unsigned int L, // length of nonzero transmission delay for log-normal
-	const Rcpp::Nullable<Rcpp::NumericVector>& ht_, // (n+1) x 1, (h[0],h[1],...,h[n]), smoothing means of (psi[0],...,psi[n]) | Y
 	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_);
 
 
@@ -133,11 +167,10 @@ arma::vec update_theta0(
 	const unsigned int ModelCode,
 	const unsigned int n, // number of observations
 	const arma::vec& Y, // n x 1, observations, (Y[1],...,Y[n])
+	const arma::vec& hhat, // (n+1) x 1, 1st Taylor expansion of h(psi[t]) at h[t]
 	const double theta00, // Initial value of the transfer function block
-	const double psi0, // Initial value of the evolution error
 	const double rho, // memory of previous state, for exponential and negative binomial transmission delay kernel
 	const unsigned int L, // length of nonzero transmission delay for log-normal
-	const Rcpp::Nullable<Rcpp::NumericVector>& ht_, // (n+1) x 1, (h[0],h[1],...,h[n]), smoothing means of (psi[0],...,psi[n]) | Y
 	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_);
 
 
@@ -174,48 +207,6 @@ arma::vec update_lambda(
     const arma::vec& lambda0, // n x 1
     const unsigned int ModelCode,
     const bool ApproxModel);
-
-
-
-/*
------- KoyckEye with ModelCode == 8 and Y[t] == 1 ------
-Koyck's exponential decaying kernel with no external input or y[t]==1.
-*/
-arma::mat update_Fx0(
-	const unsigned int n,
-	const double G);
-
-
-/*
------- KoyckEye with ModelCode == 8 ------
-Koyck's exponential transmission kernel using y[t-1] as input at time t
-*/
-arma::mat update_Fx1(
-	const unsigned int n,
-	const double G,
-	const arma::vec& X);
-
-
-/*
------- SolowEye with ModelCode == 7 ------
-Solow's negative-binomial transmission kernel using y[t-1] as input at time t
-*/
-arma::mat update_Fx_Solow(
-	const unsigned int n,
-	const double rho,
-	const arma::vec& X);
-
-
-
-/*
------- KoyamaEye with ModelCode == 0 ------
-Solow's negative-binomial transmission kernel using y[t-1] as input at time t
-*/
-arma::mat update_Fx_Koyama(
-	const unsigned int n, // number of observations
-    const unsigned int L, // number of transmission delays
-	const arma::vec& Fphi, // L x 1, Fphi = (phi[1],...,phi[L])
-	const arma::vec& Y);
 
 
 
@@ -261,15 +252,41 @@ Rcpp::List calc_power_sum3(
 
 arma::mat psi2hpsi(
 	const arma::mat& psi,
-	const unsigned int ModelCode,
-	const Rcpp::Nullable<Rcpp::NumericVector>& coef);
+	const unsigned int GainCode,
+	const Rcpp::NumericVector& coef);
 
+
+
+double psi2hpsi(
+	const double psi,
+	const unsigned int GainCode,
+	const Rcpp::NumericVector& coef);
+
+
+
+void hpsi_deriv(
+	arma::mat& hpsi,
+	const arma::mat& psi,
+	const unsigned int GainCode,
+	const Rcpp::NumericVector& coef);
+
+
+double hpsi_deriv(
+	const double psi,
+	const unsigned int GainCode,
+	const Rcpp::NumericVector& coef);
+
+
+arma::mat hpsi_deriv(
+	const arma::mat& psi,
+	const unsigned int GainCode,
+	const Rcpp::NumericVector& coef);
 
 
 arma::mat hpsi2theta(
 	const arma::mat& hpsi, // (n+1) x k
 	const arma::vec& y, // n x 1
-	const unsigned int ModelCode,
+	const unsigned int TransferCode,
 	const double theta0,
 	const double alpha,
 	const unsigned int L,

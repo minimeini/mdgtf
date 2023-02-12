@@ -310,6 +310,7 @@ Rcpp::List mcmc_disturbance_pois(
 	const unsigned int ModelCode, 
 	const double rho = 0.9, // For Koyck's or Solow's model
 	const double L = 12, // For Koyama's model
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
 	const Rcpp::Nullable<Rcpp::NumericVector>& th0_prior = R_NilValue, // (m_th0,C_th0)
 	const Rcpp::Nullable<Rcpp::NumericVector>& W_prior = R_NilValue, // (nw,Sw), prior for W~IG(nw/2,nw*Sw/2), the evolution variance
 	const Rcpp::Nullable<Rcpp::NumericVector>& w1_prior = R_NilValue, // (aw, Rw), w1 ~ N(aw, Rw), prior for w[1], the first state/evolution/state error/disturbance.
@@ -327,10 +328,12 @@ Rcpp::List mcmc_disturbance_pois(
 	const unsigned int nburnin = 0,
 	const unsigned int nthin = 1,
 	const unsigned int nsample = 1,
+	const bool summarize_return = false,
 	const bool verbose = true) { // n x 1
 
-	const double EBOUND = 700.;
 	const bool use_exp_link = ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9;
+	const unsigned int GainCode = get_gaincode(ModelCode);
+	const unsigned int TransferCode = get_transcode(ModelCode);
 
 	const unsigned int n = Y.n_elem;
 	const double n_ = static_cast<double>(n);
@@ -450,14 +453,19 @@ Rcpp::List mcmc_disturbance_pois(
 	if (!ht_.isNull()) {
 		ht = Rcpp::as<arma::vec>(ht_);
 	}
+	// First-order Taylor expansion of h(psi[t]) at h[t]
+	arma::vec hh(n+1,arma::fill::zeros);
+	psi2hpsi(hh,ht,GainCode,ctanh);
+	arma::vec hph(n+1,arma::fill::zeros);
+	hpsi_deriv(hph,ht,GainCode,ctanh);
+	arma::vec hhat = hh + hph%(psi0_true-ht); 
 
 	double mu = 2.2204e-16;
     double m = 4.7;
     double s = 2.9;
 	arma::vec Fphi = get_Fphi(L,mu,m,s); // L x 1
-
-	arma::mat Fx = update_Fx(ModelCode,n,Y,rho,L,Rcpp::wrap(ht),Rcpp::wrap(Fphi));
-	arma::vec th0tilde = update_theta0(ModelCode,n,Y,th0,psi0_true,rho,L,Rcpp::wrap(ht),Rcpp::wrap(Fphi));
+	arma::mat Fx = update_Fx(TransferCode,n,Y,hph,rho,L,Rcpp::wrap(Fphi));
+	arma::vec th0tilde = update_theta0(ModelCode,n,Y,hhat,th0,rho,L,Rcpp::wrap(Fphi));
 	arma::vec theta(n,arma::fill::zeros); // n x 1
 	arma::vec lambda(n,arma::fill::zeros); // n x 1
 
@@ -788,8 +796,16 @@ Rcpp::List mcmc_disturbance_pois(
 	}
 
 	Rcpp::List output;
-	output["theta"] = Rcpp::wrap(theta_stored);
-	output["wt"] = Rcpp::wrap(wt_stored);
+	output["theta"] = Rcpp::wrap(theta_stored); // n x nsample
+	arma::mat psi_stored(n+1,nsample);
+	psi_stored.tail_rows(n) = arma::cumsum(wt_stored,0);
+	psi_stored += psi0_true;
+	if (summarize_return) {
+		arma::vec qProb = {0.025,0.5,0.975};
+		output["psi"] = Rcpp::wrap(arma::quantile(psi_stored,qProb,1)); // (n+1) x 3
+	} else {
+		output["psi"] = Rcpp::wrap(psi_stored);
+	}
 	wt_accept /= static_cast<double>(ntotal);
 	output["wt_accept"] = Rcpp::wrap(wt_accept);
 	output["W"] = Rcpp::wrap(W_stored);
@@ -799,6 +815,8 @@ Rcpp::List mcmc_disturbance_pois(
 	// output["E0_accept"] = E0_accept / static_cast<double>(ntotal);
 	return output;
 }
+
+
 
 
 // /*

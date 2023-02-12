@@ -4,7 +4,6 @@
 #include "lbe_poisson.h"
 
 
-
 /*
 ------------------------
 ------ Model Code ------
@@ -68,68 +67,6 @@ Rcpp::List pl_pois_solow_eye_exp2(
     const unsigned int B,
     const bool resample);
 
-/*
----- Method ----
-- Bootstrap filtering with static parameter W known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = phi[1]*y[t-1]*max(psi[t],0) + ... + phi[L]*y[t-L]*max(psi[t-L+1],0)
-<state> psi[t] = psi[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: psi[1:n]
-Known parameters: W, phi[1:L]
-Kwg: Identity link, max(psi,0) state space
-*/
-arma::mat bf_pois_koyama_max(
-    const arma::vec& Y, // n x 1, the observed response
-	const double W,
-	const unsigned int N, // number of particles
-    const unsigned int L, // lags
-    const unsigned int B, // step of backshift
-    const double rho, // parameter for negative binomial likelihood
-    const unsigned int obstype);
-
-
-/*
----- Method ----
-- Monte Carlo filtering with static parameter W known
-- Using the discretized Hawkes formulation
-- Reference: Kitagawa and Sato at Ch 9.3.4 of Doucet et al.
-- Note: 
-    1. Initial version is copied from the `bf_pois_koyama_exp`
-    2. This is intended to be the modified Rcpp version of `hawkes_state_space.R`
-    3. The difference is that the R version the states are backshifted L times, 
-        where L is the maximum transmission delay to be considered.
-        To make this a Monte Carlo filtering, we don't backshifting/smoot.
-
----- Algorithm ----
-
-1. Generate a random number psi[0](j) ~ an initial distribution.
-2. Repeat the following steps for t = 1,...,n:
-    2-1. Generate a random number omega[t] ~ Normal(0,W)
-
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1])
-<state> psi[t] = psi[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: psi[1:n]
-Known parameters: W, phi[1:L]
-Kwg: Identity link, exp(psi) state space
-*/
-arma::mat mcf_pois_koyama_exp(
-    const arma::vec& Y, // n x 1, the observed response
-	const double W,
-    const unsigned int L, // number of lags
-	const unsigned int N, // number of particles
-    const double rho, // parameter for negative binomial likelihood
-    const unsigned int obstype);
-
 
 
 /*
@@ -175,36 +112,32 @@ Rcpp::List mcs_poisson(
 	const unsigned int N, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-    const Rcpp::Nullable<Rcpp::NumericVector>& qProb_,
-    const Rcpp::Nullable<Rcpp::NumericVector>& ctanh,
+    const Rcpp::NumericVector& qProb,
+    const Rcpp::NumericVector& ctanh,
     const double delta_nb,
     const unsigned int obstype, // 0: negative binomial DLM; 1: poisson DLM
     const bool verbose,
     const bool debug);
 
 
-/*
----- Method ----
-- Bootstrap filtering with all static parameters (rho,W) known
-- Using the DLM formulation
 
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*max(beta[t-1],0)
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: theta[0:n], beta[0:n]
-Kwg: Identity link, max(beta,0) state space
-*/
-Rcpp::List bf_pois_solow_eye_max(
+void mcs_poisson(
+    arma::vec& R, // (n+1) x 1
     const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
+    const unsigned int ModelCode,
+	const double W,
     const double rho,
-	const double Q,
+    const double alpha,
+    const unsigned int L, // number of lags
+    const double mu0,
+    const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N, // number of particles
-    const unsigned int B);
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const Rcpp::NumericVector& ctanh,
+    const double delta_nb,
+    const unsigned int obstype);
+
 
 
 /*

@@ -109,4 +109,4 @@ for (pp in p) {plot(pp)}
 dev.off()
 
 rm(list=ls())
-
+gc(verbose=FALSE,reset=TRUE,full=TRUE)
