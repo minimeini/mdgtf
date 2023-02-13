@@ -45,9 +45,9 @@ sim_pois_dglm = function(
     L = 0, # length of nonzero transmission delay (Koyama - ModelCode = 0 or 1)
     rho = 0.7, # parameter for negative binomial transmission delay (Solow - ModelCode = 2 or 3)
     delta_nb = 1., # rho_nb = 34.08792
-    coef = NULL, # coefficients for the hyperbolic tangent gain function
+    coef = c(0.3,0,1), # coefficients for the hyperbolic tangent gain function
     rng.seed = NULL,
-    delta_grid = seq(from=0.7,to=0.99,by=0.01)) { # searching range for LBE discount factor
+    delta_grid = seq(from=0.8,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
   UPBND = 700
   
@@ -676,6 +676,7 @@ sim_pois_dglm = function(
       delta = get_optimal_delta(y[1:n],ModelCode,delta_grid,
                                 rho=rho,L=L,mu0=mu0,
                                 delta_nb=delta_nb,
+                                ctanh=coef,
                                 obs_type=obs_type)$delta_optim[1]
     },error=function(e){delta=NA})
   }

@@ -53,6 +53,7 @@ arma::vec update_at(
 	switch (TransferCode) {
 		case 0: // Koyck
 		{
+            at.at(0) = mt.at(0); // psi[t]
 			at.at(1) = y * hpsi;
 			at.at(1) += rho*mt.at(1);
 		}
@@ -65,8 +66,10 @@ arma::vec update_at(
 		case 2: // Solow
 		{
 			double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
+            at.at(0) = mt.at(0); // psi[t]
 			at.at(1) = coef1*y*hpsi;
 			at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
+            at.at(2) = mt.at(1); // theta[t-1]
 		}
 		break;
 		case 3: // Vanilla
@@ -84,6 +87,7 @@ arma::vec update_at(
 }
 
 
+
 /*
 matrix Gt is the derivative of gt(.)
 */
@@ -95,9 +99,9 @@ void update_Gt(
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const double y = NA_REAL, // obs
-	const double rho = NA_REAL) { 
+	const double rho = NA_REAL) {
 
-	if (TransferCode == 2) { // Solow
+    if (TransferCode == 2) { // Solow
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),GainCode,ctanh);
 		Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 
@@ -105,7 +109,6 @@ void update_Gt(
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),GainCode,ctanh);
 		Gt.at(1,0) *= y;
 	}
-	return;
 }
 
 
@@ -124,7 +127,6 @@ void update_Rt(
 	} else {
 		Rt.at(0,0) += W;
 	}
-
 }
 
 
@@ -182,33 +184,34 @@ void forwardFilter(
 	const double delta_nb = 1.,
 	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM 
 	const bool debug = false) { 
+
+	const double UPBND = 700.;
 	
 	/*
 	------ Initialization ------
 	*/
-	const unsigned int GainCode = get_gaincode(ModelCode);
+    const unsigned int GainCode = get_gaincode(ModelCode);
 	unsigned int LinkCode = 1; // 0 - exponential; 1 - identity
 	if (ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9) {LinkCode = 0;}
 	const bool use_discount = !R_IsNA(delta) && R_IsNA(W); // Not prioritize discount factor if it is given.
 
 
 	arma::vec Ft(p,arma::fill::zeros);
+    arma::vec Fphi;
+	arma::vec Fy;
 	if (TransferCode==0 || TransferCode==2) { // Koyck or Solow
 		Ft.at(1) = 1.;
 	} else if (TransferCode==3) { // Vanilla
 		Ft.at(0) = 1.;
-	}
-
-	arma::vec Fphi;
-	arma::vec Fy;
-	if (TransferCode == 1 && L>0) { // koyama
-		const double mu = 2.2204e-16;
+	} else if (TransferCode==1 && L>0) { // Koyama
+        const double mu = 2.2204e-16;
 		const double m = 4.7;
 		const double s = 2.9;
 		Fphi = get_Fphi(L,mu,m,s);
 		Fphi = arma::pow(Fphi,alpha);
 		Fy.zeros(L);
-	}
+    }
+
 	/*
 	------ Initialization ------
 	*/
@@ -216,17 +219,17 @@ void forwardFilter(
 	
 	double et,ft,Qt,ft_ast,Qt_ast,alpha_ast,beta_ast,phi;
 	arma::vec At(p);
-	arma::vec hpsi(p);
+    arma::vec hpsi(p);
 	arma::vec hph(p);
 
 	/*
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 	if (TransferCode == 1 && L>0) { // Koyama
-		at.col(1) = update_at(p,GainCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho);
+        at.col(1) = update_at(p,GainCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho);
 		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
 		update_Ft(Ft, Fy, TransferCode, 0, L, Y, Fphi);
-		hpsi = psi2hpsi(at.col(1),GainCode,ctanh);
+        hpsi = psi2hpsi(at.col(1),GainCode,ctanh);
 		hph = hpsi_deriv(at.col(1),GainCode,ctanh);
 		ft = arma::accu(Ft % hpsi);
 		Ft = Ft % hph;
@@ -242,7 +245,6 @@ void forwardFilter(
 			if (debug) {
 				Rcout << "f[" << 1 << "]=" << ft << ", q["<< 1 << "]=" << Qt << std::endl;
 			}
-			
 
 			betat.at(1) = phi / Qt;
 			alphat.at(1) = phi * betat.at(1);
@@ -313,8 +315,8 @@ void forwardFilter(
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		update_Gt(Gt.slice(t), GainCode, TransferCode, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
-		at.col(t) = update_at(p,GainCode,TransferCode,mt.col(t-1),Gt.slice(t), ctanh, alpha, Y.at(t-1),rho);
+		update_Gt(Gt.slice(t),GainCode, TransferCode, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
+        at.col(t) = update_at(p,GainCode,TransferCode,mt.col(t-1),Gt.slice(t),ctanh,alpha,Y.at(t-1),rho);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 
 		if (t<10 && debug) {
@@ -325,7 +327,7 @@ void forwardFilter(
 		}
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-		if (TransferCode == 1) { // Koyama
+        if (TransferCode == 1) { // Koyama
 			update_Ft(Ft, Fy, TransferCode, t, L, Y, Fphi);
 			hpsi = psi2hpsi(at.col(t),GainCode,ctanh);
 			hph = hpsi_deriv(at.col(t),GainCode,ctanh);
@@ -619,10 +621,11 @@ Rcpp::List lbe_poisson(
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
 	const double alpha = 1.,
-	const double delta_nb = 1.,
-	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM
-	const bool summarize_return = false,
+	const double delta_nb = 10.,
+	const unsigned int obs_type = 0, // 0: negative binomial DLM; 1: poisson DLM
+    const bool summarize_return = false,
 	const bool debug = false) { 
+
 
 	if (R_IsNA(delta) && R_IsNA(W)) {
 		::Rf_error("Either evolution error W or discount factor delta must be provided.");
@@ -630,12 +633,10 @@ Rcpp::List lbe_poisson(
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
-
 	unsigned int TransferCode; // integer indicator for the type of transfer function
 	unsigned int p; // dimension of DLM state space
 	unsigned int L_;
 	get_transcode(TransferCode,p,L_,ModelCode,L);
-
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y;
@@ -676,12 +677,12 @@ Rcpp::List lbe_poisson(
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
 
+    
 	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
 
 	Rcpp::List output;
-	
 	if (summarize_return) {
 		arma::mat psi(npad,3);
 		psi.col(0) = ht - 2.*arma::sqrt(arma::abs(Ht));

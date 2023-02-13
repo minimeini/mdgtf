@@ -20,12 +20,15 @@ default_opts = function(n=NA,ModelCode=NA){
 }
 
 
-test_model = function(ModelCode,M,alpha,psi0,
+test_model = function(ModelCode,M=1,alpha=1,psi0=0,
                       n=200,W=0.01,L=12,rho=0.8,
                       mu0=1,theta0=NULL,delta_nb=5,
                       err_type = 0,
-                      eta_prior_type = c(0,0,0,0),
-                      eta_select = c(1,0,0,0)) {
+                      eta_prior_type = c(0,0,0,0,0,0),
+                      eta_select = c(1,0,0,0,0,0),
+                      nburnin = 50000,
+                      nthin = 5,
+                      nsample = 5000) {
   
   if (ModelCode %in% c(0,1,6,11,14,17)) {
     TransferCode = 1 # Koyama
@@ -127,13 +130,14 @@ test_model = function(ModelCode,M,alpha,psi0,
 
 
 test_model_real = function(y,opts,
-                           eta_select=c(1,0,0,0),
-                           eta_prior_type=c(0,0,0,0),
+                           eta_select=c(1,0,0,0,0,0),
+                           eta_prior_type=c(0,0,0,0,0,0),
                            model_compare=c(1,1,1),
-                           mcsN=5000,hvbN=10000,hvbBurnin=NULL) {
-  if (is.null(hvbBurnin)) {
-    hvbBurnin = round(0.7*hvbN)
-  }
+                           mcsN=5000,
+                           nburnin = 50000,
+                           nthin = 5,
+                           nsample = 5000) {
+
   # Run LBE and MCS with mu0 and W set to their initial values
   lbe_out1 = lbe_poisson(y,opts$ModelCode,
                         L=opts$L,rho=opts$rho,
@@ -143,7 +147,8 @@ test_model_real = function(y,opts,
                         ctanh=opts$ctanh,
                         m0_prior=opts$m0,C0_prior=opts$C0,
                         obs_type=opts$obs_type, 
-                        delta_nb=opts$delta_nb)
+                        delta_nb=opts$delta_nb,
+                        summarize_return=TRUE)
   
   mcs_out1 = mcs_poisson(y, opts$ModelCode, opts$W, 
                         L=opts$L, rho=opts$rho,
@@ -165,8 +170,10 @@ test_model_real = function(y,opts,
                ifelse(is.null(opts$ctanh),1,opts$ctanh[3]))
   
   hvb_out = hva_poisson(y,opts$ModelCode,
-                        eta_select, eta_init,
-                        eta_prior_type, eta_prior_val,
+                        eta_select[1:4], 
+                        eta_init[1:4],
+                        eta_prior_type[1:4], 
+                        eta_prior_val[,1:4],
                         L = opts$L,
                         delta = opts$delta,
                         m0_prior=opts$m0,C0_prior=opts$C0,
@@ -176,7 +183,8 @@ test_model_real = function(y,opts,
                         rtheta_type = 0,sampler_type = 1,
                         obs_type = 0,
                         delta_nb=opts$delta_nb,
-                        niter=hvbN,verbose=FALSE)
+                        nsample=nsample,nburnin=nburnin,nthin=nthin,
+                        summarize_return=TRUE,verbose=FALSE)
   
   if (eta_select[2]==1) {
     mu0_hat = mean(hvb_out$mu0_stored[-c(1:hvbBurnin)])
@@ -202,7 +210,8 @@ test_model_real = function(y,opts,
                          ctanh=opts$ctanh,
                          m0_prior=opts$m0,C0_prior=opts$C0,
                          obs_type=opts$obs_type, 
-                         delta_nb=opts$delta_nb)
+                         delta_nb=opts$delta_nb,
+                         summarize_return=TRUE)
   
   if (model_compare[1]==1) {
     koyama_out = hawke_ss2(y)

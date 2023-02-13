@@ -527,10 +527,10 @@ arma::vec update_lambda(
 
 
 double trigamma_obj(
-	unsigned n,
+	unsigned n, // not sure what it is for
 	const double *x, 
 	double *grad, 
-	void *my_func_data) {
+	void *my_func_data) { // extra parameters: q
 
 	double *q = (double*)my_func_data;
 
@@ -561,6 +561,108 @@ double optimize_trigamma(double q) {
 	double result = x[0];
 	nlopt_destroy(opt);
 	return result;
+}
+
+
+/*
+postW_gamma_obj
+
+Objective function should be in the convex form with minimum.
+
+1. Evaluate the objective function and return the value in the output
+2. Update first-order derivative via input arguments
+
+
+Testing example:
+------ IMPLEMENTATION IN R
+> optim(0.1,function(w){-(-5*w - 1.e2*exp(w)-0.5*exp(-w))},gr=function(w){-(-5-1.e2*exp(w)+0.5*exp(-w))},method="BFGS")
+$par
+[1] -2.995732
+------
+
+------ IMPLEMENTATION IN CPP
+double test_postW_gamma(){
+	coef_W coef[1] = {{-5.,1.e2,0.5}};
+	double What = optimize_postW_gamma(coef[0]);
+	return What;
+}
+
+> test_postW_gamma()
+[1] -2.995733
+------
+*/
+double postW_gamma_obj(
+	unsigned n,
+	const double *x, // Wtilde = log(W)
+	double *grad,
+	void *my_func_data){
+	
+	coef_W *coef = (coef_W*)my_func_data;
+	double a1 = coef -> a1;
+	double a2 = coef -> a2;
+	double a3 = coef -> a3;
+
+	// logarithm of the conditional posterior of Wtilde = log(W)
+	double logpost = a1*x[0]-a2*std::exp(x[0])-a3*std::exp(-x[0]);
+	logpost *= -1.; // flip concave function to convex
+
+	// First-order derivative
+	if (grad) {
+		grad[0] = a1-a2*std::exp(x[0])+a3*std::exp(-x[0]);
+		grad[0] *= -1.;
+	}
+
+	return logpost;
+}
+
+
+double optimize_postW_gamma(coef_W& coef) {
+	nlopt_opt opt;
+	opt = nlopt_create(NLOPT_LD_MMA, 1); // algorithm and dimensionality
+
+	double lb[1] = {-700.}; // lower bound
+	double ub[1] = {700.}; // upper bound
+	
+	nlopt_set_lower_bounds(opt,lb);
+	nlopt_set_upper_bounds(opt,ub);
+	nlopt_set_xtol_rel(opt,1e-4);
+	nlopt_set_min_objective(opt,postW_gamma_obj,(void *) &coef);
+
+	double x[1] = {1e-6};
+	double minf;
+	if (nlopt_optimize(opt, x, &minf) < 0) {
+    	Rprintf("nlopt failed!\\n");
+	}
+	
+	double result = x[0];
+	nlopt_destroy(opt);
+	return result;
+}
+
+
+/*
+Testing example:
+------ IMPLEMENTATION IN R
+> optim(0.1,function(w){-(-5*w - 1.e2*exp(w)-0.5*exp(-w))},gr=function(w){-(-5-1.e2*exp(w)+0.5*exp(-w))},method="BFGS")
+$par
+[1] -2.995732
+------
+
+------ IMPLEMENTATION IN CPP
+double test_postW_gamma(){
+	coef_W coef[1] = {{-5.,1.e2,0.5}};
+	double What = optimize_postW_gamma(coef[0]);
+	return What;
+}
+
+> test_postW_gamma()
+[1] -2.995733
+------
+*/
+double test_postW_gamma(){
+	coef_W coef[1] = {{-5.,1.e2,0.5}};
+	double What = optimize_postW_gamma(coef[0]);
+	return What;
 }
 
 
@@ -1085,3 +1187,37 @@ arma::mat hpsi2theta(
 }
 
 
+
+double loglike_obs(
+	const double y, 
+	const double lambda,
+	const unsigned int obs_type = 1,
+	const double delta_nb = 1.,
+	const bool return_log = false) {
+	
+	double loglike;
+	if (obs_type == 0) {
+        /*
+        Negative-binomial likelihood
+        - mean: lambda.at(i)
+        - delta_nb: degree of over-dispersion
+
+        sample variance exceeds the sample mean
+        */
+        loglike = R::lgammafn(y+delta_nb) - R::lgammafn(y+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda)) + y*(std::log(lambda)-std::log(delta_nb+lambda));
+		if (!return_log) {
+			loglike = std::exp(loglike);
+		}
+                
+    } else if (obs_type == 1) {
+        /*
+        Poisson likelihood
+        - mean: lambda.at(i)
+        - var: lambda.at(i)
+
+        sample variance == sample mean
+        */
+        loglike = R::dpois(y,lambda,return_log);
+    }
+	return loglike;
+}

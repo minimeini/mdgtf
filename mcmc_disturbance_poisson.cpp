@@ -302,35 +302,37 @@ using namespace Rcpp;
 
 /*
 MCMC disturbance sampler for different transfer kernels, link functions, and reproduction number functions.
+
+Unknown Parameters
+	- local parameters: psi[1:n]
+	- global parameters `eta`: W, mu0, rho, M,th0, psi0
 */
 //' @export
 // [[Rcpp::export]]
 Rcpp::List mcmc_disturbance_pois(
 	const arma::vec& Y, // n x 1, the observed response
 	const unsigned int ModelCode, 
-	const double rho = 0.9, // For Koyck's or Solow's model
+	const arma::uvec& eta_select, // 6 x 1, indicator for unknown (=1) or known (=0), global parameters: W, mu0, rho, M,th0, psi0
+    const arma::vec& eta_init, // 6 x 1, if true/initial values should be provided here
+    const arma::uvec& eta_prior_type, // 6 x 1
+    const arma::mat& eta_prior_val, // 2 x 6, priors for each element of eta
 	const double L = 12, // For Koyama's model
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
-	const Rcpp::Nullable<Rcpp::NumericVector>& th0_prior = R_NilValue, // (m_th0,C_th0)
-	const Rcpp::Nullable<Rcpp::NumericVector>& W_prior = R_NilValue, // (nw,Sw), prior for W~IG(nw/2,nw*Sw/2), the evolution variance
 	const Rcpp::Nullable<Rcpp::NumericVector>& w1_prior = R_NilValue, // (aw, Rw), w1 ~ N(aw, Rw), prior for w[1], the first state/evolution/state error/disturbance.
-	const double th0_init = NA_REAL, // initial value of the transfer function block at time t = 0
-	const double W_init = NA_REAL, // initial value of evolution variance
 	const Rcpp::Nullable<Rcpp::NumericVector>& wt_init = R_NilValue, // initial value of the evolution error at time t = 1
-    const double th0_true = NA_REAL, // initial value of the transfer function block, not using at this moment since we set E0=0 in the simulation
-	const double psi0_true = 0., // initial value of the evolution error of the transfer function
-	const double mu0_true = 0., // baseline intensity
-	const double W_true = NA_REAL, // true value of state/evolution error variance
 	const Rcpp::Nullable<Rcpp::NumericVector>& wt_true = R_NilValue, // true value of system/evolution/state error/disturbance
 	const Rcpp::Nullable<Rcpp::NumericVector>& ht_ = R_NilValue, // (n+1) x 1, (h[0],h[1],...,h[n]), smoothing means or Taylor expansion locations of (psi[0],...,psi[n]) | Y
-	const double MH_var = 1.,
+	const Rcpp::NumericVector& MH_sd = Rcpp::NumericVector::create(1.4,0.01), // wt, W
 	const bool use_lambda_bound = false,
+	const unsigned int obs_type = 1, // 0: NB; 1: Pois
+	const double delta_nb = 1.,
 	const unsigned int nburnin = 0,
 	const unsigned int nthin = 1,
 	const unsigned int nsample = 1,
 	const bool summarize_return = false,
 	const bool verbose = true) { // n x 1
 
+	const double UPBND = 700.;
 	const bool use_exp_link = ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9;
 	const unsigned int GainCode = get_gaincode(ModelCode);
 	const unsigned int TransferCode = get_transcode(ModelCode);
@@ -339,86 +341,33 @@ Rcpp::List mcmc_disturbance_pois(
 	const double n_ = static_cast<double>(n);
 	const unsigned int ntotal = nburnin + nthin*nsample + 1;
 
-	// Hyperparameter
-	double th0, m_th0, C_th0, C_th0rt;
+	// Global Parameter
+	// eta = (W, mu0, rho, M, th0, psi0, w1)
+	double W = eta_init.at(0);
+	arma::vec W_stored(nsample);
+	double nw = eta_prior_val.at(0,0);
+	double nSw = eta_prior_val.at(0,0)*eta_prior_val.at(1,0);
+	double nw_new = nw + n_ - 1.;
+	double nSw_new;
+	double Wrt = std::sqrt(W);
+	double W_new;
+
+	double mu0 = eta_init.at(1);
+	double rho = eta_init.at(2);
+
+	
+	double th0 = eta_init.at(4);
+	arma::vec th0_stored(nsample);
+	double m_th0 = eta_prior_val.at(0,4);
+	double C_th0 = eta_prior_val.at(1,4);
+	double C_th0rt = std::sqrt(C_th0);
 	double m_th, C_th, C_thrt; 
 	double th0_new;
 	double th0_accept = 0.;
-	arma::vec th0_stored(nsample);
-	bool th0_flag;
-	if (R_IsNA(th0_true)) {
-		th0_flag = true;
-		if (th0_prior.isNull()) {
-			m_th0 = 0.;
-			C_th0 = 100.;
-		} else {
-			arma::vec theta0Prior_ = Rcpp::as<arma::vec>(th0_prior);
-			m_th0 = theta0Prior_.at(0);
-			C_th0 = theta0Prior_.at(1);
-		}
-		
-		C_th0rt = std::sqrt(C_th0);
-		if (R_IsNA(th0_init)) {
-			th0 = R::rnorm(m_th0,C_th0rt);
-		} else {
-			th0 = th0_init;
-		}
-	} else {
-		th0_flag = false;
-		th0 = th0_true;
-	}
-	
-	
 
-	double W,nw,nSw,nw_new,nSw_new;
-	arma::vec W_stored(nsample);
-	bool W_flag;
-	if (R_IsNA(W_true)) {
-		W_flag = true;
-		if (W_prior.isNull()) {
-			// Setting from Alves et al. (2010)
-			nw = 1.e-5;
-			nSw = 1.e-5;
-		} else {
-			arma::vec WPrior_ = Rcpp::as<arma::vec>(W_prior);
-			nw = WPrior_.at(0);
-			nSw = nw*WPrior_.at(1);
-		}
-		
-		nw_new = nw + n_ - 1.;
-		if (R_IsNA(W_init)) {
-			W = 1./R::rgamma(0.5*nw,2./nSw);
-		} else {
-			W = W_init;
-		}
-		
-	} else {
-		W_flag = false;
-		W = W_true;
-	}
-	double Wrt = std::sqrt(W);
+	double psi0 = eta_init.at(5);
 
-
-	// double rho, xi, xi_old, xi_new, rho_sq;
-	// arma::vec rho_stored(nsample);
-	// double rho_accept = 0.;
-	// bool rhoflag;
-	// if (R_IsNA(rho_true)) {
-	// 	rhoflag = true;
-	// 	if (R_IsNA(Vxi)) {
-	// 		stop("Error: You must provide either true value or prior for rho.");
-	// 	}
-	// 	if (R_IsNA(rho_init)) {
-	// 		rho = 0.5;
-	// 	} else {
-	// 		rho = rho_init;
-	// 	}
-	// } else {
-	// 	rhoflag = false;
-	// 	rho = rho_true;
-	// }
-	// rho_sq = rho * rho;
-
+	// Local Parameter
 	bool wt_flag = true;
 	double aw,Rw,Rwrt;
 	arma::vec wt(n); 
@@ -447,18 +396,41 @@ Rcpp::List mcmc_disturbance_pois(
 		}
 	}
 
+
+	// double rho, xi, xi_old, xi_new, rho_sq;
+	// arma::vec rho_stored(nsample);
+	// double rho_accept = 0.;
+	// bool rhoflag;
+	// if (R_IsNA(rho_true)) {
+	// 	rhoflag = true;
+	// 	if (R_IsNA(Vxi)) {
+	// 		stop("Error: You must provide either true value or prior for rho.");
+	// 	}
+	// 	if (R_IsNA(rho_init)) {
+	// 		rho = 0.5;
+	// 	} else {
+	// 		rho = rho_init;
+	// 	}
+	// } else {
+	// 	rhoflag = false;
+	// 	rho = rho_true;
+	// }
+	// rho_sq = rho * rho;
+
+	
+
 	// Initialize the states via linear bayes smoothing
 	// Implemented: KoyamaMax (ModelCode = 0)
 	arma::vec ht(n+1,arma::fill::zeros); // (h[0],h[1],...,h[n])
 	if (!ht_.isNull()) {
 		ht = Rcpp::as<arma::vec>(ht_);
+		ht.at(0) = psi0;
 	}
 	// First-order Taylor expansion of h(psi[t]) at h[t]
-	arma::vec hh(n+1,arma::fill::zeros);
-	psi2hpsi(hh,ht,GainCode,ctanh);
+	arma::vec hh = psi2hpsi(ht,GainCode,ctanh);
 	arma::vec hph(n+1,arma::fill::zeros);
 	hpsi_deriv(hph,ht,GainCode,ctanh);
-	arma::vec hhat = hh + hph%(psi0_true-ht); 
+	arma::vec hhat = hh + hph%(psi0-ht); 
 
 	double mu = 2.2204e-16;
     double m = 4.7;
@@ -468,6 +440,7 @@ Rcpp::List mcmc_disturbance_pois(
 	arma::vec th0tilde = update_theta0(ModelCode,n,Y,hhat,th0,rho,L,Rcpp::wrap(Fphi));
 	arma::vec theta(n,arma::fill::zeros); // n x 1
 	arma::vec lambda(n,arma::fill::zeros); // n x 1
+	arma::vec Vt(n,arma::fill::ones);
 
     double bt,Bt,Btrt;
 	arma::vec Ytilde = Y;
@@ -496,15 +469,15 @@ Rcpp::List mcmc_disturbance_pois(
 			if (use_exp_link) {
 				// Exponential Link
 				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye
-				lambda = arma::exp(mu0_true+theta);
+				lambda = arma::exp(mu0+theta);
 			} else {
 				// Others using identity link.
-				lambda = arma::datum::eps+mu0_true+theta;
+				lambda = mu0+theta;
 			}
 
 			logp_old = 0.;
 			for (unsigned int j=t;j<n;j++) {
-				logp_old += R::dpois(Y.at(j),lambda.at(j),true);
+				logp_old += loglike_obs(Y.at(j), lambda.at(j), obs_type, delta_nb,true);
 			}
 			if (t==0) {
 				logp_old += R::dnorm(wt_old,aw,Rwrt,true);
@@ -521,29 +494,22 @@ Rcpp::List mcmc_disturbance_pois(
 			} // Otherwise, Ytilde == Y.
 			
 		    Yhat = Ytilde - theta + Fx.col(t)*wt_old; // TODO - CHECK HERE
-		    if (t==0) {
-				if (use_exp_link) {
-					// Exponential link, Variance V[t]= 1/lambda[t]
-					Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-				} else {
-					// Identity link, Variance V[t] = lambda[t]
-					Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) / lambda));
-        	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/lambda));
-				}
-      	    } else {
-				if (use_exp_link) {
-					// Exponential link, Variance V[t] = 1/lambda[t]
-					Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    	bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-				} else {
-					// Identity link
-					Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.) / lambda));
-        	    	bt = Bt * (arma::accu(Fx.col(t)%Yhat/lambda));
-				}
-      		    
-      	    }
-			Btrt = std::sqrt(Bt*MH_var);
+			if (obs_type==1 && use_exp_link) {
+				Vt = 1./lambda;
+			} else if (obs_type==1 && !use_exp_link) {
+				Vt = lambda;
+			} else if (obs_type==0) {
+				Vt = lambda % (lambda+delta_nb) / delta_nb;
+			}
+			if (t==0) {
+				Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
+        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/Vt));
+			} else {
+				Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
+        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat/Vt));
+			}
+
+			Btrt = std::sqrt(Bt)*MH_sd[0];
 		    wt_new = R::rnorm(bt, Btrt);
 			if (!std::isfinite(wt_new)) {
 				// Just reject it and move onto next t.
@@ -562,14 +528,14 @@ Rcpp::List mcmc_disturbance_pois(
 			if (use_exp_link) {
 				// Exponential Link
 				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye, 9 - Vanilla
-				lambda = arma::exp(mu0_true+theta);
+				lambda = arma::exp(mu0+theta);
 				if (use_lambda_bound && (lambda.has_inf() || lambda.has_nan())) {
 					wt.at(t) = wt_old; // Reject if out of bound
 					continue;
 				}
 			} else {
 				// Others using identity link.
-				lambda = arma::datum::eps+mu0_true+theta;
+				lambda = mu0+theta;
 				if (use_lambda_bound && arma::any(lambda<arma::datum::eps)) {
 					wt.at(t) = wt_old; // Reject if out of bound
 					continue;
@@ -577,7 +543,7 @@ Rcpp::List mcmc_disturbance_pois(
 			}
 			logp_new = 0.;
 			for (unsigned int j=t;j<n;j++) {
-				logp_new += R::dpois(Y.at(j),lambda.at(j),true);
+				logp_new += loglike_obs(Y.at(j), lambda.at(j), obs_type, delta_nb,true);
 			}
 			if (t==0) {
 				logp_new += R::dnorm(wt_new,aw,Rwrt,true);
@@ -594,29 +560,22 @@ Rcpp::List mcmc_disturbance_pois(
 			} // Otherwise, Ytilde == Y.
 
 		    Yhat = Ytilde - theta + Fx.col(t)*wt_new;
+			if (obs_type==1 && use_exp_link) {
+				Vt = 1./lambda;
+			} else if (obs_type==1 && !use_exp_link) {
+				Vt = lambda;
+			} else if (obs_type==0) {
+				Vt = lambda % (lambda+delta_nb) / delta_nb;
+			}
 			if (t==0) {
-				if (use_exp_link) {
-					// Exponential link, Variance V[t]= 1/lambda[t]
-					Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat%lambda));
-				} else {
-					// Identity link, Variance V[t] = lambda[t]
-					Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.) / lambda));
-        	    	bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/lambda));
-				}
-      	    } else {
-				if (use_exp_link) {
-					// Exponential link, Variance V[t] = 1/lambda[t]
-					Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.) % lambda));
-        	    	bt = Bt * (arma::accu(Fx.col(t)%Yhat%lambda));
-				} else {
-					// Identity link
-					Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.) / lambda));
-        	    	bt = Bt * (arma::accu(Fx.col(t)%Yhat/lambda));
-				}
-      		    
-      	    }
-			Btrt = std::sqrt(Bt*MH_var);
+				Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
+        	    bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/Vt));
+			} else {
+				Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
+        	    bt = Bt * (arma::accu(Fx.col(t)%Yhat/Vt));
+			}
+
+			Btrt = std::sqrt(Bt)*MH_sd[0];
 			logq_old = R::dnorm(wt_old,bt,Btrt,true);
 			/* Part 4. */
 
@@ -630,9 +589,36 @@ Rcpp::List mcmc_disturbance_pois(
 
 
 		// [OK] Update state/evolution error variance
-		if (W_flag) {
-			nSw_new = nSw + arma::accu(arma::pow(wt.tail(n-1),2.));
-			W = 1./R::rgamma(0.5*nw_new,2./nSw_new);
+		if (eta_select.at(0)==1) {
+			switch (eta_prior_type.at(0)) {
+				case 0: // Gamma(aw=shape, bw=rate)
+				{
+					double res = arma::accu(arma::pow(wt.tail(n-1),2.));
+					logp_old = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W) - eta_prior_val.at(1,0)*W - 0.5*res/W;
+
+					W_new = std::exp(std::min(R::rnorm(std::log(W),MH_sd[1]),UPBND));
+
+					logp_new = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W_new) - eta_prior_val.at(1,0)*W_new - 0.5*res/W_new;
+
+					logratio = std::min(0.,logp_new-logp_old);
+					if (std::log(R::runif(0.,1.)) < logratio) { // accept
+						W = W_new;
+					}
+				}
+				break;
+				case 1: // Half-Cauchy(aw=location==0, bw=scale)
+				{
+
+				}
+				break;
+				case 2: // Inverse-Gamma(nw=shape, nSw=rate)
+				{
+					nSw_new = nSw + arma::accu(arma::pow(wt.tail(n-1),2.));
+					W = 1./R::rgamma(0.5*nw_new,2./nSw_new);
+				}
+			}
+			
+			Wrt = std::sqrt(W);
 		}
 
 
@@ -799,7 +785,7 @@ Rcpp::List mcmc_disturbance_pois(
 	output["theta"] = Rcpp::wrap(theta_stored); // n x nsample
 	arma::mat psi_stored(n+1,nsample);
 	psi_stored.tail_rows(n) = arma::cumsum(wt_stored,0);
-	psi_stored += psi0_true;
+	psi_stored += psi0;
 	if (summarize_return) {
 		arma::vec qProb = {0.025,0.5,0.975};
 		output["psi"] = Rcpp::wrap(arma::quantile(psi_stored,qProb,1)); // (n+1) x 3

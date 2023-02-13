@@ -61,6 +61,10 @@ if (length(args)>=7) {
 }
 
 
+nburnin = 100000
+nthin = 5
+nsample = 5000
+
 delta_grid = seq(from=0.8,to=0.95,by=0.01)
 y = unlist(as.vector(read.table(file.path(opath,"sample.csv"),sep=",",header=FALSE)))
 n = length(y)

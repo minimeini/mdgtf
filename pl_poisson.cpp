@@ -627,26 +627,7 @@ Rcpp::List mcs_poisson(
         }
 
         for (unsigned int i=0; i<N; i++) {
-            if (obstype == 0) {
-                /*
-                Negative-binomial likelihood
-                - mean: lambda.at(i)
-                - delta_nb: degree of over-dispersion
-
-                sample variance exceeds the sample mean
-                */
-                w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb) - R::lgammafn(Y.at(t)+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda.at(i))) + Y.at(t)*(std::log(lambda.at(i))-std::log(delta_nb+lambda.at(i))));
-                
-            } else if (obstype == 1) {
-                /*
-                Poisson likelihood
-                - mean: lambda.at(i)
-                - var: lambda.at(i)
-
-                sample variance == sample mean
-                */
-                w.at(i) = R::dpois(Y.at(t),lambda.at(i),false);
-            }
+            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obstype,delta_nb,false);
         } // End for loop of i, index of the particles
 
 
@@ -985,26 +966,7 @@ void mcs_poisson(
 
 
         for (unsigned int i=0; i<N; i++) {
-            if (obstype == 0) {
-                /*
-                Negative-binomial likelihood
-                - mean: lambda.at(i)
-                - delta_nb: degree of over-dispersion
-
-                sample variance exceeds the sample mean
-                */
-                w.at(i) = std::exp(R::lgammafn(Y.at(t)+delta_nb) - R::lgammafn(Y.at(t)+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda.at(i))) + Y.at(t)*(std::log(lambda.at(i))-std::log(delta_nb+lambda.at(i))));
-                
-            } else if (obstype == 1) {
-                /*
-                Poisson likelihood
-                - mean: lambda.at(i)
-                - var: lambda.at(i)
-
-                sample variance == sample mean
-                */
-                w.at(i) = R::dpois(Y.at(t),lambda.at(i),false);
-            }
+            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obstype,delta_nb,false);
         } // End for loop of i, index of the particles
 
 

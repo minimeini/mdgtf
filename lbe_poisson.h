@@ -49,9 +49,9 @@ void update_Gt(
 	const unsigned int GainCode, 
 	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1
-	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh, // 3 x 1
 	const double alpha,
-	const double y, // obs
+	const double y,  // obs
 	const double rho);
 
 

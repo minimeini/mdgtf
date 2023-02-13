@@ -25,7 +25,6 @@ plot_sim = function(sim_dat) {
 
 plot_psi = function(sim_dat=NULL,
                     psi_list = NULL,
-                    tstart=0,
                     opts=NULL,# number of observations
                     ytrue=NULL,
                     plot_hpsi=FALSE, # if FALSE, plot psi by default
@@ -69,10 +68,11 @@ plot_psi = function(sim_dat=NULL,
   nl = length(psi_list)
   lambda_list = vector(mode="list",length=nl)
   TransferCode = get_transcode(opts$ModelCode)
+  GainCode = get_gaincode(opts$ModelCode)
   if (plot_hpsi) {
     for (i in 1:nl) {
       psi_list[[i]] = psi2hpsi(psi_list[[i]],
-                               opts$ModelCode,
+                               GainCode,
                                coef=opts$ctanh)
       if (plot_lambda) {
         lambda_list[[i]] = hpsi2theta(psi_list[[i]],y,
@@ -92,7 +92,6 @@ plot_psi = function(sim_dat=NULL,
   
   for (i in 1:nl) {
     tmp = psi_list[[i]]
-    if (tstart>0) {tmp = tmp[-c(1:tstart),]}
     psi_list[[i]] = as.data.frame(tmp)
     if (dim(psi_list[[i]])[2]>=3) {
       colnames(psi_list[[i]])[1:3] = c("lobnd", "est", "hibnd")
@@ -100,18 +99,17 @@ plot_psi = function(sim_dat=NULL,
       colnames(psi_list[[i]]) = "est"
     }
     
-    psi_list[[i]]$time = (1:dim(psi_list[[i]])[1]) + tstart
+    psi_list[[i]]$time = (1:dim(psi_list[[i]])[1])
     
     if (plot_lambda) {
       tmp = lambda_list[[i]]
-      if (tstart>0) {tmp = tmp[-c(1:tstart),]}
       lambda_list[[i]] = as.data.frame(tmp)
       if (dim(lambda_list[[i]])[2]>=3) {
         colnames(lambda_list[[i]])[1:3] = c("lobnd", "est", "hibnd")
       } else {
         colnames(lambda_list[[i]]) = "est"
       }
-      lambda_list[[i]]$time = (1:dim(lambda_list[[i]])[1]) + tstart
+      lambda_list[[i]]$time = (1:dim(lambda_list[[i]])[1])
     }
   }
   

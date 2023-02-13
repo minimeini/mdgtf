@@ -221,6 +221,42 @@ double trigamma_obj(
 double optimize_trigamma(double q);
 
 
+typedef struct {
+	double a1,a2,a3;
+} coef_W;
+
+
+
+double postW_gamma_obj(
+	unsigned n,
+	const double *x, // Wtilde = log(W)
+	double *grad,
+	void *my_func_data);
+
+
+double optimize_postW_gamma(coef_W& coef);
+
+
+/*
+Testing example:
+------ IMPLEMENTATION IN R
+> optim(0.1,function(w){-(-5*w - 1.e2*exp(w)-0.5*exp(-w))},gr=function(w){-(-5-1.e2*exp(w)+0.5*exp(-w))},method="BFGS")
+$par
+[1] -2.995732
+------
+
+------ IMPLEMENTATION IN CPP
+double test_postW_gamma(){
+	coef_W coef[1] = {{-5.,1.e2,0.5}};
+	double What = optimize_postW_gamma(coef[0]);
+	return What;
+}
+
+> test_postW_gamma()
+[1] -2.995733
+------
+*/
+double test_postW_gamma();
 
 double calc_power_sum(
 	const double rho, // rho for the negative-binomial distribution
@@ -291,6 +327,16 @@ arma::mat hpsi2theta(
 	const double alpha,
 	const unsigned int L,
 	const double rho);
+
+
+
+double loglike_obs(
+	const double y, 
+	const double lambda,
+	const unsigned int obs_type,
+	const double delta_nb,
+	const bool return_log);
+
 
 
 #endif
