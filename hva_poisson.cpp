@@ -1,7 +1,7 @@
 #include "pl_poisson.h"
 #include "yjtrans.h"
 using namespace Rcpp;
-// [[Rcpp::plugins(cpp11)]]
+// [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
 
@@ -154,7 +154,7 @@ double dlogJoint_dlogmu0(
     const double amu, // shape parameter of the Gamma prior for mu[0]
     const double bmu, // rate parameter of the Gamma prior for mu[0]
     const double delta_nb = 1.,
-    const unsigned int obs_type = 0) { // 0 - negative binomial; 1 - poisson
+    const unsigned int obs_code = 0) { // 0 - negative binomial; 1 - poisson
     /*
     Wtilde = -log(W)
     */
@@ -165,9 +165,9 @@ double dlogJoint_dlogmu0(
     for (unsigned int t=0; t<n; t++) {
         lambda = mu0 + theta.at(t+1);
         res += Y.at(t) / lambda;
-        if (obs_type == 0) { // negative binomial
+        if (obs_code == 0) { // negative binomial
             res -= (Y.at(t)+delta_nb)/(lambda+delta_nb);
-        } else if (obs_type == 1) {
+        } else if (obs_code == 1) {
             res -= 1.;
         } else {
             ::Rf_error("Unknown likelihood.");
@@ -191,7 +191,7 @@ arma::vec dlogJoint_deta(
     const arma::mat& eta_prior_val, // 2 x 4
     const unsigned int m,
     const double delta_nb = 1.,
-    const unsigned int obs_type = 0) { // 0 - NegBinom; 1 - Poisson
+    const unsigned int obs_code = 0) { // 0 - NegBinom; 1 - Poisson
     arma::vec deriv(m);
     for (unsigned int i=0; i<m; i++) {
         switch(idx_select.at(i)) {
@@ -202,7 +202,7 @@ arma::vec dlogJoint_deta(
             break;
             case 1: // logmu0 = log(mu0)
             {
-                deriv.at(i) = dlogJoint_dlogmu0(y,psi,eta.at(1),eta_prior_val.at(0,1),eta_prior_val.at(1,1),delta_nb,obs_type);
+                deriv.at(i) = dlogJoint_dlogmu0(y,psi,eta.at(1),eta_prior_val.at(0,1),eta_prior_val.at(1,1),delta_nb,obs_code);
             }
             break;
             case 2: // rho - undefined
@@ -238,14 +238,13 @@ arma::vec rtheta_ffbs(
     arma::vec& alphat, // (n+1) x 1
     arma::vec& betat, // (n+1) x 1
     arma::vec& Ht, // (n+1) x 1
-    const unsigned int ModelCode,
-    const unsigned int TransferCode,
+    const arma::uvec& model_code,
     const unsigned int n,
     const unsigned int p,
     const arma::vec& ypad, // (n+1) x 1
     const double W,
     const double alpha,
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
     const unsigned int L = 0,
     const double rho = 0.9,
     const double delta = 0.9,
@@ -253,12 +252,17 @@ arma::vec rtheta_ffbs(
     const double scale_sd = 1.e-16,
     const unsigned int nsample = 1,
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling
-    const double delta_nb = 1.,
-    const unsigned int obs_type = 1) { // 0 - negative binomial; 1 - poisson
+    const double delta_nb = 1.) {
+
+    const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
     
     arma::vec theta(n+1,arma::fill::zeros);
 
-    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,ypad,ctanh,alpha,L,rho,mu0,W,NA_REAL,delta_nb,obs_type,false);
+    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,ypad,ctanh,alpha,L,rho,mu0,W,NA_REAL,delta_nb,false);
     // Checked. OK.
 
     if (rtheta_type == 0) {
@@ -303,21 +307,21 @@ eta = (W,mu[0],rho,M)
 // [[Rcpp::export]]
 Rcpp::List hva_poisson(
     const arma::vec& Y, // n x 1
-    const unsigned int ModelCode,
+    const arma::uvec& model_code,
     const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
     const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
     const arma::uvec& eta_prior_type, // 4 x 1
     const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
-    const double L = 0,
+    const double L = 2,
     const double alpha = 1.,
     const double delta = NA_REAL, // discount factor
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, the last one is M will be updated by eta[3] at each step
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, the last one is M will be updated by eta[3] at each step
     const Rcpp::Nullable<Rcpp::NumericVector>& psi_init = R_NilValue, // previously `ht_`
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling. Only used for FFBS (sampler_type=0)
     const unsigned int sampler_type = 1, // 0 - FFBS; 1 - SMC
-    const unsigned int obs_type = 1, // 0 - negative binomial; 1 - poisson
+    const double Blag_pct = 0.15,
     const double MH_var = 1.,
     const double scale_sd = 1.e-16,
     const double learn_rate = 0.95,
@@ -334,6 +338,12 @@ Rcpp::List hva_poisson(
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
     arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
+
+    const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
 
 
     /* ------ Define Local Parameters ------ */
@@ -352,17 +362,15 @@ Rcpp::List hva_poisson(
 
 
     /* ------ Define SMC ------ */
-    const unsigned int Blag = static_cast<unsigned int>(0.1*n); // B-fixed-lags Monte Carlo smoother
+    const unsigned int Blag = static_cast<unsigned int>(Blag_pct*n); // B-fixed-lags Monte Carlo smoother
     const unsigned int N = 100; // number of particles for SMC
     /* ------ Define SMC ------ */
 
 
     /* ------ Define Model ------ */
     Rcpp::NumericVector ctanh_ = ctanh;
-	unsigned int TransferCode; // integer indicator for the type of transfer function
-	unsigned int p; // dimension of DLM state space
-	unsigned int L_;
-    get_transcode(TransferCode,p,L_,ModelCode,L);
+	unsigned int p, L_;
+    init_by_trans(p,L_,trans_code,L);
     /* ------ Define Model ------ */
 
 
@@ -385,15 +393,19 @@ Rcpp::List hva_poisson(
     arma::cube Gt(p,p,npad);
 	arma::mat Gt0(p,p,arma::fill::zeros);
 	Gt0.at(0,0) = 1.;
-	if (TransferCode == 0) { // Koyck
+	if (trans_code == 0) { // Koyck
 		Gt0.at(1,1) = eta.at(2);
-	} else if (TransferCode == 1) { // Koyama
+	} else if (trans_code == 1) { // Koyama
 		Gt0.diag(-1).ones();
-	} else if (TransferCode == 2) { // Solow
-		Gt0.at(1,1) = 2.*eta.at(2);
-		Gt0.at(1,2) = -eta.at(2)*eta.at(2);
-		Gt0.at(2,1) = 1.;
-	} else if (TransferCode == 3) { // Vanilla
+	} else if (trans_code == 2) { // Solow
+        double coef2 = -eta.at(2);
+		Gt0.at(1,1) = -binom(L,1)*coef2;
+		for (unsigned int k=2; k<p; k++) {
+			coef2 *= -eta.at(2);
+			Gt0.at(1,k) = -binom(L,k)*coef2;
+			Gt0.at(k,k-1) = 1.;
+		}
+	} else if (trans_code == 3) { // Vanilla
 		Gt0.at(0,0) = eta.at(2);
 	}
 	for (unsigned int t=0; t<npad; t++) {
@@ -470,7 +482,7 @@ Rcpp::List hva_poisson(
         // } else if (sampler_type==0) {
         //     psi = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,eta.at(0),ctanh_,alpha,L,eta.at(2),delta,eta.at(1),scale_sd,rtheta_type,delta_nb,obs_type);
         } else {
-            mcs_poisson(psi,Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type);
+            mcs_poisson(psi,Y,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
             // Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type,verbose,debug);
             // arma::mat psi_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
             // psi = psi_mat.col(1);
@@ -488,7 +500,7 @@ Rcpp::List hva_poisson(
         // if (is_vanilla) {
         //     delta_logJoint = dlogJoint_deta(Y,psi,eta.at(2),eta.at(0),aw,bw,prior_type); // 1 x 1
         // } else {
-        delta_logJoint = dlogJoint_deta(Y,psi,eta,idx_select,eta_prior_type,eta_prior_val,m,delta_nb,obs_type); // m x 1
+        delta_logJoint = dlogJoint_deta(Y,psi,eta,idx_select,eta_prior_type,eta_prior_val,m,delta_nb,obs_code); // m x 1
         // }
 
         if (!std::isfinite(delta_logJoint.at(0))) {

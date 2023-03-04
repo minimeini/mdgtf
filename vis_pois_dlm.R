@@ -1,5 +1,6 @@
 plot_sim = function(sim_dat) {
   require(ggplot2)
+  GainCode = sim_dat$params$model_code[4]
   
   n = length(sim_dat$y)
   p1 = ggplot(data.frame(Time=1:n, lambda=sim_dat$lambda, y=sim_dat$y), 
@@ -11,7 +12,7 @@ plot_sim = function(sim_dat) {
     geom_line() + ylab("Reproduction Number") +
     theme_light()
   
-  if (!is.null(sim_dat$params$ctanh)) {
+  if (GainCode==4 | GainCode==5) {
     p2 = p2 + scale_y_continuous(limits=c(0,sim_dat$params$ctanh[3]))
   }
   
@@ -28,11 +29,9 @@ plot_psi = function(sim_dat=NULL,
                     opts=NULL,# number of observations
                     ytrue=NULL,
                     plot_hpsi=FALSE, # if FALSE, plot psi by default
-                    plot_lambda=FALSE,
-                    methods = NULL,
-                    cols = NULL) {
-  mlist = c("True","EpiEstim","WT","Koyama2021","MCS","LBE","HVB")
-  clist = c("black","lightseagreen","orange","burlywood4","royalblue","maroon","purple")
+                    plot_lambda=FALSE) {
+  mlist = c("EpiEstim","WT","Koyama2021","MCS","LBE","HVB","MCMC","True","VB")
+  clist = c("seagreen","orange","burlywood4","royalblue","maroon","purple","cyan","black","salmon")
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
     y = sim_dat$y
@@ -43,16 +42,6 @@ plot_psi = function(sim_dat=NULL,
   }
   
   if (plot_lambda) {plot_hpsi=TRUE}
-  
-  if (is.null(methods)) {
-    methods = names(psi_list)
-  }
-  
-  if (is.null(cols) & !is.null(sim_dat)) {
-    cols = clist[1:(length(psi_list)+1)]
-  } else if (is.null(cols)) {
-    cols = clist[1:length(psi_list)]
-  }
   ####
   ####
 
@@ -61,83 +50,87 @@ plot_psi = function(sim_dat=NULL,
     if (is.null(opts$ctanh)) {
       opts$ctanh = c(0.3,0,1)
     }
-    psi_list$True = as.matrix(c(opts$psi0,sim_dat$psi),ncol=1)
-    methods = c(methods,"True")
+    psi_list$True = cbind(c(opts$psi0,sim_dat$psi),
+                          c(opts$psi0,sim_dat$psi),
+                          c(opts$psi0,sim_dat$psi))
   }
   
   nl = length(psi_list)
-  lambda_list = vector(mode="list",length=nl)
-  TransferCode = get_transcode(opts$ModelCode)
-  GainCode = get_gaincode(opts$ModelCode)
-  if (plot_hpsi) {
-    for (i in 1:nl) {
+  n = max(c(unlist(lapply(psi_list,function(psi){dim(psi)[1]})),length(y)))
+  
+  nl2 = sum(names(psi_list)%in%c("LBE","MCS","HVB","MCMC"))
+  if (!is.null(sim_dat) & "lambda" %in% names(sim_dat)) {nl2 = nl2 + 1}
+  lambda_list = vector(mode="list",length=nl2)
+  
+  TransferCode = opts$model_code[3]
+  # GainCode = get_gaincode(opts$ModelCode)
+  GainCode = opts$model_code[4]
+  
+  PsiMethod = NULL
+  lambdaMethod = NULL
+  cnt = 1
+
+  for (i in 1:nl) {
+    if (plot_hpsi & names(psi_list)[i]%in%c("LBE","MCS","HVB","MCMC","VB","True")) {
       psi_list[[i]] = psi2hpsi(psi_list[[i]],
                                GainCode,
                                coef=opts$ctanh)
-      if (plot_lambda) {
-        lambda_list[[i]] = hpsi2theta(psi_list[[i]],y,
+    }
+    
+    if (plot_lambda & names(psi_list)[i]%in%c("LBE","MCS","HVB","MCMC","VB")) {
+      lambda_list[[cnt]] = hpsi2theta(psi_list[[i]],y,
                                       TransferCode,
                                       opts$theta0,
                                       opts$alpha,
                                       opts$L,opts$rho)
-        lambda_list[[i]] = lambda_list[[i]] + opts$mu0
-      }
-      
+      lambda_list[[cnt]] = lambda_list[[cnt]] + opts$mu0
     }
-    if (plot_lambda & !is.null(sim_dat) & "lambda" %in% names(sim_dat)) {
-      lambda_list[[nl]] = matrix(sim_dat$lambda,ncol=1)
-      names(lambda_list) = names(psi_list)
+    
+    psi_list[[i]] = cbind(psi_list[[i]],
+                          (n-dim(psi_list[[i]])[1]+1) : n)
+    PsiMethod = c(PsiMethod,rep(names(psi_list)[i],dim(psi_list[[i]])[1]))
+    colnames(psi_list[[i]]) = c("lobnd","est","hibnd","time")
+    
+    if (plot_lambda & names(psi_list)[i]%in%c("LBE","MCS","HVB","MCMC","VB")) {
+      lambda_list[[cnt]] = cbind(lambda_list[[cnt]],
+                                 (n-dim(lambda_list[[cnt]])[1]+1) : n)
+      lambdaMethod = c(lambdaMethod,rep(names(psi_list)[cnt],dim(lambda_list[[cnt]])[1]))
+      colnames(lambda_list[[cnt]]) = c("lobnd","est","hibnd","time")
+      cnt = cnt + 1
     }
   }
+  if (plot_lambda & !is.null(sim_dat) & "lambda" %in% names(sim_dat)) {
+    lambda_list[[cnt]] = cbind(sim_dat$lambda,
+                               sim_dat$lambda,
+                               sim_dat$lambda)
+    
+    lambda_list[[cnt]] = cbind(lambda_list[[cnt]],
+                               (n-dim(lambda_list[[cnt]])[1]+1) : n)
+    lambdaMethod = c(lambdaMethod,rep(names(psi_list)[cnt],dim(lambda_list[[cnt]])[1]))
+    colnames(lambda_list[[cnt]]) = c("lobnd","est","hibnd","time")
+  }
+
   
-  for (i in 1:nl) {
-    tmp = psi_list[[i]]
-    psi_list[[i]] = as.data.frame(tmp)
-    if (dim(psi_list[[i]])[2]>=3) {
-      colnames(psi_list[[i]])[1:3] = c("lobnd", "est", "hibnd")
-    } else {
-      colnames(psi_list[[i]]) = "est"
-    }
-    
-    psi_list[[i]]$time = (1:dim(psi_list[[i]])[1])
-    
-    if (plot_lambda) {
-      tmp = lambda_list[[i]]
-      lambda_list[[i]] = as.data.frame(tmp)
-      if (dim(lambda_list[[i]])[2]>=3) {
-        colnames(lambda_list[[i]])[1:3] = c("lobnd", "est", "hibnd")
-      } else {
-        colnames(lambda_list[[i]]) = "est"
-      }
-      lambda_list[[i]]$time = (1:dim(lambda_list[[i]])[1])
-    }
-  }
+  psi_list = do.call(rbind,psi_list)
+  psi_list = as.data.frame(psi_list)
+  psi_list$method = PsiMethod
+  lambda_list = do.call(rbind,lambda_list)
+  lambda_list = as.data.frame(lambda_list)
+  lambda_list$method = lambdaMethod
+  
   
   ####
-  p = ggplot(psi_list[[1]],aes(x=time,y=est)) +
-    geom_line(col=cols[1],na.rm=TRUE)
-  if ("lobnd"%in%colnames(psi_list[[1]]) & "hibnd"%in%colnames(psi_list[[1]])) {
-    p = p + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),fill=cols[1],
-                        alpha=0.2,na.rm=TRUE)
-  }
-  if (nl>1) {
-    for (i in 2:nl) {
-      p = p + geom_line(col=cols[i],data=psi_list[[i]],na.rm=TRUE)
-      if ("lobnd"%in%colnames(psi_list[[i]]) & "hibnd"%in%colnames(psi_list[[i]])) {
-        p = p + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),data=psi_list[[i]],
-                            fill=cols[i],alpha=0.2,na.rm=TRUE)
-      }
-    }
-  }
+  methods = unique(psi_list$method)
+  cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
+  cols = clist[cols]
+  p = ggplot(psi_list,aes(x=time,y=est,group=method)) +
+    geom_line(aes(color=method),na.rm=TRUE) +
+    geom_ribbon(aes(ymin=lobnd,ymax=hibnd,fill=method),
+                alpha=0.2,na.rm=TRUE) +
+    scale_color_manual(name="Method",breaks=methods,values=cols) +
+    scale_fill_manual(name="Method",breaks=methods,values=cols) +
+    theme_light() + xlab("Time")
   
-  
-  p = p + theme_light() + xlab("Time")
-  
-  # p = p + 
-  #   scale_color_identity(name ="Method", breaks=cols, 
-  #                        labels=methods, guide="legend") +
-  #   scale_fill_identity(name = "Method", breaks=cols, labels=methods) +
-  #   theme(legend.position = "right")
   if (plot_hpsi) {
     p = p + ylab(expression(R[t])) +
       geom_hline(yintercept=1,col="black",linetype=2)
@@ -145,67 +138,73 @@ plot_psi = function(sim_dat=NULL,
     #   p = p + scale_y_continuous(limits=c(0,opts$ctanh[3]))
     # }
   } else {
-    p = p + ylab("Gain Factor")
+    p = p + ylab(expression(psi[t]))
   }
   
   if (plot_lambda) {
-    p2 = ggplot(lambda_list[[1]],aes(x=time,y=est)) +
-      geom_line(col=cols[1],na.rm=TRUE)
-    if ("lobnd"%in%colnames(lambda_list[[1]]) & "hibnd"%in%colnames(lambda_list[[1]])) {
-      p2 = p2 + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),
-                            fill=cols[1],alpha=0.2,na.rm=TRUE)
-    }
+    methods = unique(lambda_list$method)
+    cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
+    cols = clist[cols]
+    p2 = ggplot(lambda_list,aes(x=time,y=est,group=method)) +
+      geom_line(aes(color=method),na.rm=TRUE) +
+      geom_ribbon(aes(ymin=lobnd,ymax=hibnd,fill=method),
+                  alpha=0.2,na.rm=TRUE) +
+      scale_color_manual(name="Method",breaks=methods,values=cols) +
+      scale_fill_manual(name="Method",breaks=methods,values=cols) +
+      theme_light() + xlab("Time") + ylab(expression(lambda[t])) +
+      geom_point(aes(y=y),data=data.frame(time=1:length(y),y=y,
+                                          method=rep("True",length(y))),
+                 size=1,alpha=0.8)
     
-    if (nl>1) {
-      for (i in 2:nl) {
-        p2 = p2 + geom_line(col=cols[i],data=lambda_list[[i]],na.rm=TRUE)
-        if ("lobnd"%in%colnames(lambda_list[[i]]) & "hibnd"%in%colnames(lambda_list[[i]])) {
-          p2 = p2 + geom_ribbon(aes(ymin=lobnd,ymax=hibnd),fill=cols[i],
-                                data=lambda_list[[i]],alpha=0.2,na.rm=TRUE)
-        }
-      }
-    }
-    
-    p2 = p2 + theme_light() +
-      ylab(expression(lambda[t])) + xlab("Time")
-    # p2 = p2 + 
-    #   scale_color_identity(name ="Method", breaks=cols, 
-    #                        labels=methods,guide="legend") +
-    #   scale_fill_identity(name = "Method", breaks=cols, labels=methods) +
-    #   geom_point(aes(y=y),data=data.frame(time=1:length(y),y=y),size=1,alpha=0.8) +
-    #   theme(legend.position = "right")
-  }
-  
-  
-  ####
-  
-  
-  if (plot_lambda) {
     return(list(p,p2))
   } else {
     return(list(p))
   }
+
 }
 
 
-plot_eta = function(vname,hvb_output,opts=NULL) {
+plot_eta = function(vname,eta_list,opts=NULL) {
+  mlist = c("EpiEstim","WT","Koyama2021","MCS","LBE","HVB","MCMC","True","VB")
+  clist = c("seagreen","orange","burlywood4","royalblue","maroon","purple","cyan","black","salmon")
+  
   if (vname == "W") {
-    tmp = data.frame(Iteration=1:length(hvb_output$W_stored),
-                     W=hvb_output$W_stored)
-    p = ggplot(tmp,aes(x=Iteration,y=W)) +
-      geom_point(size=1,col="mediumpurple1") +
-      geom_hline(yintercept=median(hvb_output$W_stored),
-                 col="purple",linewidth=1) +
-      theme_light() + ylab(expression(W))
-    if (!is.null(opts) & ("W" %in% names(opts))) {
-      p = p + geom_hline(yintercept=opts$W,col="black")
+    methods = names(eta_list)[names(eta_list) %in% c("HVB","MCMC","VB")]
+    cols = sapply(methods,function(m){which(mlist %in% m)})
+    cols = clist[cols]
+    eta_mat = NULL
+    cname = NULL
+    if ("HVB" %in% methods) {
+      eta_mat = cbind(eta_mat,eta_list$HVB)
+      cname = c(cname,"HVB")
+    }
+    if ("MCMC" %in% methods) {
+      eta_mat = cbind(eta_mat,eta_list$MCMC)
+      cname = c(cname,"MCMC")
+    }
+    if ("VB" %in% methods) {
+      eta_mat = cbind(eta_mat,eta_list$VB)
+      cname = c(cname,"VB")
+    }
+    colnames(eta_mat) = cname
+    eta_mat = as.data.frame(eta_mat)
+    eta_mat = reshape2::melt(eta_mat)
+    
+    p = ggplot(eta_mat) +
+      geom_histogram(aes(x=value,group=variable,fill=variable),
+                     position="identity",alpha=0.5,bins=100) +
+      scale_fill_manual(name="Method",values=cols,labels=methods) +
+      theme_light() + xlab(expression(W))
+    if ("LBE" %in% names(eta_list)) {
+      p = p + geom_vline(xintercept=rev(eta_list$LBE)[1],
+                         col=clist[which(mlist %in% "LBE")])
     }
   } else if (vname == "mu0") {
-    tmp = data.frame(Iteration=1:length(hvb_output$mu0_stored),
-                     mu0=hvb_output$mu0_stored)
+    tmp = data.frame(Iteration=1:length(hvb_output$mu0),
+                     mu0=hvb_output$mu0)
     p = ggplot(tmp,aes(x=Iteration,y=mu0)) +
       geom_point(size=1,col="mediumpurple1") +
-      geom_hline(yintercept=median(hvb_output$mu0_stored),
+      geom_hline(yintercept=median(hvb_output$mu0),
                  col="purple",linewidth=1) +
       theme_light() + ylab(expression(mu[0]))
     if (!is.null(opts) & ("mu0" %in% names(opts))) {

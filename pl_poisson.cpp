@@ -1,6 +1,6 @@
 #include "pl_poisson.h"
 using namespace Rcpp;
-// [[Rcpp::plugins(cpp11)]]
+// [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]
 
 
@@ -71,7 +71,7 @@ Rcpp::List pl_pois_solow_eye_exp(
         } else {
             theta_next = 2.*rho*theta.col(t) - rho2*theta.col(t-1) + coef*X.at(t)*arma::exp(beta.col(t));
         }
-        theta_next.elem(arma::find(theta_next<=0)).fill(arma::datum::eps);
+        theta_next.elem(arma::find(theta_next<=0)).fill(EPS);
         // P(y[t+1]|theta[t,i]) = P(y[t+1]|theta[t+1,i])
         for (unsigned int i=0; i<N; i++) {
             w.at(i) = R::dpois(Y.at(t),theta_next.at(i),true);
@@ -106,7 +106,7 @@ Rcpp::List pl_pois_solow_eye_exp(
         beta.col(t+1) = beta.col(t) + w;
 
         theta_next = theta.col(t+1);
-        theta_next.elem(arma::find(theta_next<=0)).fill(arma::datum::eps);
+        theta_next.elem(arma::find(theta_next<EPS)).fill(EPS);
         theta.col(t+1) = theta_next;
         
         for (unsigned int i=0; i<N; i++) {
@@ -292,9 +292,9 @@ Rcpp::List pl_pois_solow_eye_exp2(
         theta_new.row(2) = theta.row(2) + err.col(t).t();
 
         b.at(0) = 0;
-        arma::uvec tmpp = arma::find(theta_new.row(0)<arma::datum::eps);
+        arma::uvec tmpp = arma::find(theta_new.row(0)<EPS);
         theta_new(b,tmpp).zeros();
-        theta_new(b,tmpp) += arma::datum::eps;
+        theta_new(b,tmpp) += EPS;
 
 
 
@@ -346,7 +346,7 @@ Kwg: Identity link, exp(psi) state space
 // [[Rcpp::export]]
 Rcpp::List mcs_poisson(
     const arma::vec& Y, // n x 1, the observed response
-    const unsigned int ModelCode,
+    const arma::uvec& model_code,
 	const double W,
     const double rho = 0.9,
     const double alpha = 1.,
@@ -357,15 +357,11 @@ Rcpp::List mcs_poisson(
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
     const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
     const double delta_nb = 1.,
-    const unsigned int obstype = 1, // 0: negative binomial DLM; 1: poisson DLM
     const bool verbose = false,
     const bool debug = false){ 
     
-    const double UPBND = 700.;
-    const double EPS = arma::datum::eps;
-
     unsigned int tmpi; // store temporary integer value
     const unsigned int n = Y.n_elem; // number of observations
     const double Wsqrt = std::sqrt(W);
@@ -378,58 +374,24 @@ Rcpp::List mcs_poisson(
     /* 
     Dimension of state space depends on type of transfer functions 
     - p: diemsnion of DLM state space
+    - Ft: vector for the state-to-observation function
+    - Gt: matrix for the state-to-state function
     */
-    const unsigned int GainCode = get_gaincode(ModelCode);
-    unsigned int TransferCode; // integer indicator for the type of transfer function
-	unsigned int p; // dimension of DLM state space
-	unsigned int L_;
-	get_transcode(TransferCode,p,L_,ModelCode,L);
+    const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
+	unsigned int p, L_;
+	arma::vec Ft, Fphi;
+    arma::mat Gt;
+    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+
+    Fphi = arma::pow(Fphi,alpha);
+    arma::vec Fy(p,arma::fill::zeros);
     /* Dimension of state space depends on type of transfer functions */
 
-    
-    /*
-    Ft: vector for the state-to-observation function
-    Gt: matrix for the state-to-state function
-    */
-    arma::vec Ft(p,arma::fill::zeros);
-    arma::vec Fphi(p);
-    arma::vec Fy(p,arma::fill::zeros);
-    arma::mat Gt(p,p,arma::fill::zeros);
-    switch (TransferCode) {
-        case 0: // Koyck
-        {
-            Ft.at(1) = 1.; // Ft = (0,1)'
-        }
-        break;
-        case 1: // Koyama
-        {
-            double mu = 2.2204e-16;
-		    double m = 4.7;
-		    double s = 2.9;
-		    Fphi = get_Fphi(p,mu,m,s);
-            Fphi = arma::pow(Fphi,alpha);
 
-            Gt.at(0,0) = 1.;
-            Gt.diag(-1).ones();
-
-            // Check Fphi and G - CORRECT
-        }
-        break;
-        case 2: // Solow
-        {
-            Ft.at(1) = 1.; // Ft = (0,1,0)
-        }
-        break;
-        case 3: // Vanilla
-        {
-            Ft.at(0) = 1.;
-        }
-        break;
-        default:
-        {
-            ::Rf_error("Not supported transfer function.");
-        }
-    } // End switch Transfercode
 
 
     // theta: DLM state vector
@@ -496,7 +458,7 @@ Rcpp::List mcs_poisson(
     arma::mat theta(p,N);
     arma::cube theta_stored(p,N,B);
     arma::mat hpsi;
-    if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
+    if (link_code==1) {
         // Exponential Link
         arma::vec m0(p,arma::fill::zeros);
         arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
@@ -520,9 +482,13 @@ Rcpp::List mcs_poisson(
     /*
     ------ Step 1. Initialization at time t = 0 ------
     */
-    const double c1 = std::pow((1.-rho)*(1.-rho),alpha);
-    const double c2 = 2.*rho;
-    const double c3 = -rho*rho;
+    const double c1 = std::pow(1.-rho,static_cast<double>(L_)*alpha);
+    double c2 = -rho;
+
+    // const double c1_ = std::pow((1.-rho)*(1.-rho),alpha);
+    // const double c2_ = 2.*rho;
+    // const double c3_ = -rho*rho;
+
     
     arma::mat R(n+1,3); // quantiles
     arma::vec Meff(n,arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
@@ -540,11 +506,11 @@ Rcpp::List mcs_poisson(
         >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
         */
         omega = arma::randn(N) * Wsqrt;
-        if (TransferCode != 1) {
-            hpsi = psi2hpsi(theta_stored.slice(B-1).row(0),GainCode,ctanh); // hpsi: 1 x N
+        if (trans_code != 1) {
+            hpsi = psi2hpsi(theta_stored.slice(B-1).row(0),gain_code,ctanh); // hpsi: 1 x N
         }
         
-        switch (TransferCode) {
+        switch (trans_code) {
             case 0: // Koyck
             {
                 theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
@@ -559,11 +525,26 @@ Rcpp::List mcs_poisson(
                 theta.row(0) += omega.t();
             }
             break;
-            case 2: // Solow
+            case 2: // Solow - Checked. Correct.
             {
+                // DLM Form
                 theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
-                theta.row(2) = theta_stored.slice(B-1).row(1);
-                theta.row(1) = c1*Y.at(t)*hpsi.row(0) + c2*theta_stored.slice(B-1).row(1) + c3*theta_stored.slice(B-1).row(2);
+                c2 = -rho;
+                theta.row(1) = c1*Y.at(t)*hpsi.row(0) - binom(L_,1)*c2*theta_stored.slice(B-1).row(1);
+                for (unsigned int k=2; k<p; k++) {
+                    c2 *= -rho;
+                    theta.row(1) -= binom(L_,k)*c2*theta_stored.slice(B-1).row(k);
+                    theta.row(k) = theta_stored.slice(B-1).row(k-1);
+                }
+
+                // arma::rowvec theta_r1 = c1_*Y.at(t)*hpsi.row(0) + c2_*theta_stored.slice(B-1).row(1) + c3_*theta_stored.slice(B-1).row(2);
+
+
+                // if (t<5) {
+                //     Rcout << "theta.row(1) = " << theta.submat(1,0,1,5);
+                //     Rcout << " vs " << theta_r1.head(5) << std::endl;
+                // }
+                
             }
             break;
             case 3: // Vanilla
@@ -597,14 +578,14 @@ Rcpp::List mcs_poisson(
         ------
         >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
         */
-        if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
+        if (link_code==1) {
             // Exponential link and identity gain
             for (unsigned int i=0; i<N; i++) {
                 lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
             }
             lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
             lambda = arma::exp(lambda);
-        } else if (TransferCode==1){ // Koyama
+        } else if (trans_code==1){ // Koyama
             Fy.zeros();
             tmpi = std::min(t,p);
             if (t>0) {
@@ -613,7 +594,7 @@ Rcpp::List mcs_poisson(
             }
 
             Ft = Fphi % Fy; // L(p) x 1
-            hpsi = psi2hpsi(theta,GainCode,ctanh); // hpsi: p x N
+            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
             for (unsigned int i=0; i<N; i++) {
                 lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
             }
@@ -627,7 +608,7 @@ Rcpp::List mcs_poisson(
         }
 
         for (unsigned int i=0; i<N; i++) {
-            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obstype,delta_nb,false);
+            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obs_code,delta_nb,false);
         } // End for loop of i, index of the particles
 
 
@@ -703,7 +684,7 @@ Rcpp::List mcs_poisson(
 void mcs_poisson(
     arma::vec& R, // (n+1) x 1
     const arma::vec& Y, // n x 1, the observed response
-    const unsigned int ModelCode,
+    const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,
     const double rho = 0.9,
     const double alpha = 1.,
@@ -713,12 +694,8 @@ void mcs_poisson(
 	const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
-    const double delta_nb = 1.,
-    const unsigned int obstype = 1){ // 0: negative binomial DLM; 1: poisson DLM
-    
-    const double UPBND = 700.;
-    const double EPS = arma::datum::eps;
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5),
+    const double delta_nb = 1.){ // 0: negative binomial DLM; 1: poisson DLM
 
     unsigned int tmpi; // store temporary integer value
     const unsigned int n = Y.n_elem; // number of observations
@@ -728,58 +705,22 @@ void mcs_poisson(
     /* 
     Dimension of state space depends on type of transfer functions 
     - p: diemsnion of DLM state space
+    - Ft: vector for the state-to-observation function
+    - Gt: matrix for the state-to-state function
     */
-    const unsigned int GainCode = get_gaincode(ModelCode);
-    unsigned int TransferCode; // integer indicator for the type of transfer function
-	unsigned int p; // dimension of DLM state space
-	unsigned int L_;
-	get_transcode(TransferCode,p,L_,ModelCode,L);
-    /* Dimension of state space depends on type of transfer functions */
+    const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
+	unsigned int p, L_;
+	arma::vec Ft, Fphi;
+    arma::mat Gt;
+    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
 
-    
-    /*
-    Ft: vector for the state-to-observation function
-    Gt: matrix for the state-to-state function
-    */
-    arma::vec Ft(p,arma::fill::zeros);
-    arma::vec Fphi(p);
+    Fphi = arma::pow(Fphi,alpha);
     arma::vec Fy(p,arma::fill::zeros);
-    arma::mat Gt(p,p,arma::fill::zeros);
-    switch (TransferCode) {
-        case 0: // Koyck
-        {
-            Ft.at(1) = 1.; // Ft = (0,1)'
-        }
-        break;
-        case 1: // Koyama
-        {
-            double mu = 2.2204e-16;
-		    double m = 4.7;
-		    double s = 2.9;
-		    Fphi = get_Fphi(p,mu,m,s);
-            Fphi = arma::pow(Fphi,alpha);
-
-            Gt.at(0,0) = 1.;
-            Gt.diag(-1).ones();
-
-            // Check Fphi and G - CORRECT
-        }
-        break;
-        case 2: // Solow
-        {
-            Ft.at(1) = 1.; // Ft = (0,1,0)
-        }
-        break;
-        case 3: // Vanilla
-        {
-            Ft.at(0) = 1.;
-        }
-        break;
-        default:
-        {
-            ::Rf_error("Not supported transfer function.");
-        }
-    } // End switch Transfercode
+    /* Dimension of state space depends on type of transfer functions */
 
 
     // theta: DLM state vector
@@ -846,7 +787,7 @@ void mcs_poisson(
     arma::mat theta(p,N);
     arma::cube theta_stored(p,N,B);
     arma::mat hpsi;
-    if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
+    if (link_code==1) {
         // Exponential Link
         arma::vec m0(p,arma::fill::zeros);
         arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
@@ -870,9 +811,9 @@ void mcs_poisson(
     /*
     ------ Step 1. Initialization at time t = 0 ------
     */
-    const double c1 = std::pow((1.-rho)*(1.-rho),alpha);
-    const double c2 = 2.*rho;
-    const double c3 = -rho*rho;
+    const double c1 = std::pow(1.-rho,static_cast<double>(L_)*alpha);
+    double c2 = -rho;
+    // const double c3 = -rho*rho;
 
     for (unsigned int t=0; t<n; t++) {
         R_CheckUserInterrupt();
@@ -886,11 +827,11 @@ void mcs_poisson(
         >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
         */
         omega = arma::randn(N) * Wsqrt;
-        if (TransferCode != 1) {
-            hpsi = psi2hpsi(theta_stored.slice(B-1).row(0),GainCode,ctanh); // hpsi: 1 x N
+        if (trans_code != 1) { // Not Koyama
+            hpsi = psi2hpsi(theta_stored.slice(B-1).row(0),gain_code,ctanh); // hpsi: 1 x N
         }
         
-        switch (TransferCode) {
+        switch (trans_code) {
             case 0: // Koyck
             {
                 theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
@@ -907,9 +848,16 @@ void mcs_poisson(
             break;
             case 2: // Solow
             {
+                // theta.row(2) = theta_stored.slice(B-1).row(1);
+                // theta.row(1) = c1*Y.at(t)*hpsi.row(0) + c2*theta_stored.slice(B-1).row(1) + c3*theta_stored.slice(B-1).row(2);
                 theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
-                theta.row(2) = theta_stored.slice(B-1).row(1);
-                theta.row(1) = c1*Y.at(t)*hpsi.row(0) + c2*theta_stored.slice(B-1).row(1) + c3*theta_stored.slice(B-1).row(2);
+                c2 = -rho;
+                theta.row(1) = c1*Y.at(t)*hpsi.row(0) - binom(L_,1)*c2*theta_stored.slice(B-1).row(1);
+                for (unsigned int k=2; k<p; k++) {
+                    c2 *= -rho;
+                    theta.row(1) -= binom(L_,k)*c2*theta_stored.slice(B-1).row(k);
+                    theta.row(k) = theta_stored.slice(B-1).row(k-1);
+                }
             }
             break;
             case 3: // Vanilla
@@ -939,14 +887,14 @@ void mcs_poisson(
         ------
         >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
         */
-        if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
+        if (link_code == 1) {
             // Exponential link and identity gain
             for (unsigned int i=0; i<N; i++) {
                 lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
             }
             lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
             lambda = arma::exp(lambda);
-        } else if (TransferCode==1){ // Koyama
+        } else if (trans_code==1){ // Koyama
             Fy.zeros();
             tmpi = std::min(t,p);
             if (t>0) {
@@ -955,7 +903,7 @@ void mcs_poisson(
             }
 
             Ft = Fphi % Fy; // L(p) x 1
-            hpsi = psi2hpsi(theta,GainCode,ctanh); // hpsi: p x N
+            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
             for (unsigned int i=0; i<N; i++) {
                 lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
             }
@@ -966,7 +914,7 @@ void mcs_poisson(
 
 
         for (unsigned int i=0; i<N; i++) {
-            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obstype,delta_nb,false);
+            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obs_code,delta_nb,false);
         } // End for loop of i, index of the particles
 
 
@@ -980,7 +928,6 @@ void mcs_poisson(
         if (arma::accu(w)>EPS) { // normalize the particle weights
             w /= arma::accu(w);
             try{
-                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
                 idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
                 idx = Rcpp::as<arma::uvec>(idx_) - 1;
                 for (unsigned int b=0; b<B; b++) {
@@ -1118,9 +1065,9 @@ Rcpp::List apf_pois_solow_eye_exp(
         theta_new.row(2) = theta.row(2) + w.t();
 
         b.at(0) = 0;
-        arma::uvec tmpp = arma::find(theta_new.row(0)<arma::datum::eps);
+        arma::uvec tmpp = arma::find(theta_new.row(0)<EPS);
         theta_new(b,tmpp).zeros();
-        theta_new(b,tmpp) += arma::datum::eps;
+        theta_new(b,tmpp) += EPS;
 
 
     }
@@ -1263,7 +1210,7 @@ Rcpp::List sf_pois_solow_eye_max(
                 Q.at(i) = R::rgamma(0.5*aw.at(i),2./bw.at(i));
             }
 
-            Q.elem(arma::find(Q<arma::datum::eps)).fill(arma::datum::eps);
+            Q.elem(arma::find(Q<EPS)).fill(EPS);
             Q = 1./Q;
 
             if (Q.has_inf() || Q.has_nan()) {
@@ -1293,9 +1240,9 @@ Rcpp::List sf_pois_solow_eye_max(
         theta_new.row(2) = theta.row(2) + w.t();
         b.at(0) = 2;
         {
-            arma::uvec tmpp = arma::find(theta_new.row(2)<arma::datum::eps);
+            arma::uvec tmpp = arma::find(theta_new.row(2)<EPS);
             theta_new(b,tmpp).zeros();
-            theta_new(b,tmpp) += arma::datum::eps;
+            theta_new(b,tmpp) += EPS;
         }
 
         theta_new.row(0) = 2.*rho*theta.row(0) - rho2*theta.row(1) + coef*X.at(t)*theta.row(2);
@@ -1319,9 +1266,9 @@ Rcpp::List sf_pois_solow_eye_max(
         }
         b.at(0) = 0;
         {
-            arma::uvec tmpp = arma::find(theta_new.row(0)<arma::datum::eps);
+            arma::uvec tmpp = arma::find(theta_new.row(0)<EPS);
             theta_new(b,tmpp).zeros();
-            theta_new(b,tmpp) += arma::datum::eps;
+            theta_new(b,tmpp) += EPS;
         }
     }
 

@@ -6,11 +6,16 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <boost/math/special_functions/beta.hpp>
 #include <RcppArmadillo.h>
 #include <nlopt.h>
 #include "nloptrAPI.h"
 
 
+inline constexpr double EPS = 2.220446e-16;
+inline constexpr double UPBND = 700.;
+inline constexpr double covid_m = 4.7;
+inline constexpr double covid_s = 2.9;
 /*
 ------------------------
 ------ Model Code ------
@@ -65,39 +70,27 @@
 
 */
 
-
-/*
-Gain Code
-
-0 - Ramp
-1 - Exponential
-2 - Identity
-3 - Softplus
-4 - Hyperbolic Tangent
-5 - Logistic
-*/
-unsigned int get_gaincode(
-	const unsigned int ModelCode);
-
-
-
-/*
-Transfer Code
-
-0 - Koyck
-1 - Koyama
-2 - Solow
-3 - Vanilla
-*/
-void get_transcode(
-	unsigned int& TransferCode, // integer indicator for the type of transfer function
+void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
 	unsigned int& L_,
-	const unsigned int ModelCode,
+	const unsigned int trans_code,
 	const unsigned int L);
 
-unsigned int get_transcode(
-	const unsigned int ModelCode);
+
+
+void init_by_trans(
+	unsigned int& p, // dimension of DLM state space
+	unsigned int& L_,
+	arma::vec& Ft,
+    arma::vec& Fphi,
+    arma::mat& Gt,
+	const unsigned int trans_code,
+	const unsigned int L);
+
+
+
+double binom(int n, int k);
+
 
 /*
 CDF of the log-normal distribution.
@@ -134,13 +127,6 @@ const double s = 2.9
 const unsigned int ModelCode = 0
 
 */
-arma::vec get_Fphi(
-    const unsigned int L, // number of Lags to be considered
-    const double mu,
-    const double m,
-    const double s);
-
-
 arma::vec get_Fphi(const unsigned int L);
 
 
@@ -153,7 +139,7 @@ const unsigned int ModelCode = 0
 Checked. OK.
 */
 arma::mat update_Fx(
-	const unsigned int TransferCode,
+	const unsigned int trans_code,
 	const unsigned int n, // number of observations
 	const arma::vec& Y, // n x 1, (y[1],...,y[n]), observtions
 	const arma::vec& hph,// (n+1) x 1, derivative of the gain function at h[t]
@@ -164,7 +150,7 @@ arma::mat update_Fx(
 
 
 arma::vec update_theta0(
-	const unsigned int ModelCode,
+	const unsigned int trans_code,
 	const unsigned int n, // number of observations
 	const arma::vec& Y, // n x 1, observations, (Y[1],...,Y[n])
 	const arma::vec& hhat, // (n+1) x 1, 1st Taylor expansion of h(psi[t]) at h[t]
@@ -188,25 +174,7 @@ since it barely drops below 0.
 arma::vec update_theta(
 	const unsigned int n,
 	const arma::mat& Fx, // n x n
-	const arma::vec& w,
-    const unsigned int ModelCode);
-
-
-/*
------- update_lambda ------
-Update the intensity function
-
------- Formula ------
-ModelCode = 0 and ApproxModel = true: 
-    lambda[t] = max(lambda[0] + theta[t], 0)
-    >>>>>> This is using an alternate model which holds in most cases for the reproduction number,
-since it barely drops below 0.
-*/
-arma::vec update_lambda(
-    const arma::vec& theta, // n x 1
-    const arma::vec& lambda0, // n x 1
-    const unsigned int ModelCode,
-    const bool ApproxModel);
+	const arma::vec& w);
 
 
 
@@ -237,6 +205,12 @@ double postW_gamma_obj(
 double optimize_postW_gamma(coef_W& coef);
 
 
+double postW_deriv2(
+	const double Wtilde,
+	const double a2,
+	const double a3);
+
+
 /*
 Testing example:
 ------ IMPLEMENTATION IN R
@@ -256,46 +230,23 @@ double test_postW_gamma(){
 [1] -2.995733
 ------
 */
-double test_postW_gamma();
-
-double calc_power_sum(
-	const double rho, // rho for the negative-binomial distribution
-	const double M, // upper bound of the gain function h(.)
-	const unsigned int TransferCode,
-	const double alpha_min, // lower bound of the power
-	const double alpha_max, // upper bound of the power
-	const double prec, // precision
-	const unsigned int ntrunc);
-
-
-Rcpp::List calc_power_sum2(
-	const double rho, // rho for the negative-binomial distribution
-	const double M, // upper bound of the gain function h(.)
-	const unsigned int TransferCode,
-	const double alpha_min, // lower bound of the power
-	const double alpha_max, // upper bound of the power
-	const double prec, // precision
-	unsigned int ntrunc);
-
-
-
-Rcpp::List calc_power_sum3(
-	const double rho, // rho for the negative-binomial distribution
-	const double M, // upper bound of the gain function h(.)
-	unsigned int ntrunc);
+double test_postW_gamma(
+	const double a1,
+	const double a2,
+	const double a3);
 
 
 
 arma::mat psi2hpsi(
 	const arma::mat& psi,
-	const unsigned int GainCode,
+	const unsigned int gain_code,
 	const Rcpp::NumericVector& coef);
 
 
 
 double psi2hpsi(
 	const double psi,
-	const unsigned int GainCode,
+	const unsigned int gain_code,
 	const Rcpp::NumericVector& coef);
 
 
@@ -303,26 +254,26 @@ double psi2hpsi(
 void hpsi_deriv(
 	arma::mat& hpsi,
 	const arma::mat& psi,
-	const unsigned int GainCode,
+	const unsigned int gain_code,
 	const Rcpp::NumericVector& coef);
 
 
 double hpsi_deriv(
 	const double psi,
-	const unsigned int GainCode,
+	const unsigned int gain_code,
 	const Rcpp::NumericVector& coef);
 
 
 arma::mat hpsi_deriv(
 	const arma::mat& psi,
-	const unsigned int GainCode,
+	const unsigned int gain_code,
 	const Rcpp::NumericVector& coef);
 
 
 arma::mat hpsi2theta(
 	const arma::mat& hpsi, // (n+1) x k
 	const arma::vec& y, // n x 1
-	const unsigned int TransferCode,
+	const unsigned int trans_code,
 	const double theta0,
 	const double alpha,
 	const unsigned int L,
@@ -333,7 +284,7 @@ arma::mat hpsi2theta(
 double loglike_obs(
 	const double y, 
 	const double lambda,
-	const unsigned int obs_type,
+	const unsigned int obs_code,
 	const double delta_nb,
 	const bool return_log);
 

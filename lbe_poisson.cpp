@@ -1,24 +1,7 @@
 #include "lbe_poisson.h"
 using namespace Rcpp;
-// [[Rcpp::plugins(cpp11)]]
+// [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]
-
-
-/*
-------------------------
------- Model Code ------
-------------------------
-
-0 - (KoyamaMax) Identity link    + log-normal transmission delay kernel        + ramp function (aka max(x,0)) on gain factor (psi)
-1 - (KoyamaExp) Identity link    + log-normal transmission delay kernel        + exponential function on gain factor
-2 - (SolowMax)  Identity link    + negative-binomial transmission delay kernel + ramp function on gain factor
-3 - (SolowExp)  Identity link    + negative-binomial transmission delay kernel + exponential function on gain factor
-4 - (KoyckMax)  Identity link    + exponential transmission delay kernel       + ramp function on gain factor
-5 - (KoyckExp)  Identity link    + exponential transmission delay kernel       + exponential function on gain factor
-6 - (KoyamaEye) Exponential link + log-normal transmission delay kernel        + identity function on gain factor
-7 - (SolowEye)  Exponential link + negative-binomial transmission delay kernel + identity function on gain factor
-8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
-*/
 
 
 /*
@@ -38,19 +21,20 @@ a[t] = gt(m[t-1])
 */
 arma::vec update_at(
 	const unsigned int p,
-	const unsigned int GainCode,
-	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const unsigned int gain_code,
+	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
 	const arma::mat& Gt, // p x p
-	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const double y = NA_REAL,  // n x 1
 	const double rho = NA_REAL) {
 	
 	arma::vec at(p,arma::fill::zeros);
-	double hpsi = psi2hpsi(mt.at(0),GainCode,ctanh);
+	double hpsi = psi2hpsi(mt.at(0),gain_code,ctanh);
+	unsigned int r = p - 1;
 
-	switch (TransferCode) {
+	switch (trans_code) {
 		case 0: // Koyck
 		{
             at.at(0) = mt.at(0); // psi[t]
@@ -63,13 +47,23 @@ arma::vec update_at(
 			at = Gt * mt;
 		}
 		break;
-		case 2: // Solow
+		case 2: // Solow - Checked. Correct.
 		{
-			double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
+			double coef1 = std::pow(1.-rho,r*alpha);
+			double coef2 = -rho;
             at.at(0) = mt.at(0); // psi[t]
-			at.at(1) = coef1*y*hpsi;
-			at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
-            at.at(2) = mt.at(1); // theta[t-1]
+			at.at(1) = coef1*y*hpsi - binom(r,1)*coef2*mt.at(1);
+			for (unsigned int k=2; k<p; k++) {
+				coef2 *= -rho;
+				at.at(1) -= binom(r,k)*coef2*mt.at(k);
+				at.at(k) = mt.at(k-1);
+			}
+
+			// double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
+            // at.at(0) = mt.at(0); // psi[t]
+			// at.at(1) = coef1*y*hpsi;
+			// at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
+            // at.at(2) = mt.at(1); // theta[t-1]
 		}
 		break;
 		case 3: // Vanilla
@@ -93,20 +87,21 @@ matrix Gt is the derivative of gt(.)
 */
 void update_Gt(
 	arma::mat& Gt, // p x p
-	const unsigned int GainCode, 
-	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const unsigned int gain_code, 
+	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1
-	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const double y = NA_REAL, // obs
 	const double rho = NA_REAL) {
 
-    if (TransferCode == 2) { // Solow
-		Gt.at(1,0) = hpsi_deriv(mt.at(0),GainCode,ctanh);
-		Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
+    if (trans_code == 2) { // Solow - Checked. Correct.
+		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code,ctanh);
+		Gt.at(1,0) *= std::pow(1.-rho,(Gt.n_rows-1.)*alpha)*y;
+		// Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 
-	} else if (TransferCode == 0) { // Koyck
-		Gt.at(1,0) = hpsi_deriv(mt.at(0),GainCode,ctanh);
+	} else if (trans_code == 0) { // Koyck
+		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code,ctanh);
 		Gt.at(1,0) *= y;
 	}
 }
@@ -139,14 +134,14 @@ void update_Rt(
 void update_Ft(
 	arma::vec& Ft, // L x 1
 	arma::vec& Fy, // L x 1
-	const unsigned int TransferCode, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const unsigned int t, // current time point
 	const unsigned int L, // lag
 	const arma::vec& Y,  // (n+1) x 1, obs
 	const arma::vec& Fphi, // L x 1
 	const double alpha = 1.) { 
 		
-	if (TransferCode == 1) { // Koyama
+	if (trans_code == 1) { // Koyama
 		double L_ = static_cast<double>(L);
 
 		if (t <= L) {
@@ -154,7 +149,7 @@ void update_Ft(
 		} else {
 			Fy = arma::reverse(Y.subvec(t-L,t-1));
 		}
-		Fy.elem(arma::find(Fy<=arma::datum::eps)).fill(0.01/L_);
+		Fy.elem(arma::find(Fy<=EPS)).fill(0.01/L_);
 		Ft = Fphi % Fy;
 	}
 }
@@ -169,12 +164,14 @@ void forwardFilter(
 	arma::cube& Gt, // p x p x (n+1)
 	arma::vec& alphat, // (n+1) x 1
 	arma::vec& betat, // (n+1) x 1
-	const unsigned int ModelCode,
-	const unsigned int TransferCode,
+	const unsigned int obs_code,
+	const unsigned int link_code,
+	const unsigned int trans_code,
+	const unsigned int gain_code,
 	const unsigned int n, // number of observations
 	const unsigned int p, // dimension of the state space
 	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
-	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1), // 3 x 1, coefficients for the hyperbolic tangent gain function
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const unsigned int L = 0,
 	const double rho = 0.9,
@@ -182,32 +179,22 @@ void forwardFilter(
 	const double W = NA_REAL,
 	const double delta = NA_REAL,
 	const double delta_nb = 1.,
-	const unsigned int obs_type = 1, // 0: negative binomial DLM; 1: poisson DLM 
 	const bool debug = false) { 
-
-	const double UPBND = 700.;
 	
 	/*
 	------ Initialization ------
 	*/
-    const unsigned int GainCode = get_gaincode(ModelCode);
-	unsigned int LinkCode = 1; // 0 - exponential; 1 - identity
-	if (ModelCode==6 || ModelCode==7 || ModelCode==8 || ModelCode==9) {LinkCode = 0;}
 	const bool use_discount = !R_IsNA(delta) && R_IsNA(W); // Not prioritize discount factor if it is given.
-
 
 	arma::vec Ft(p,arma::fill::zeros);
     arma::vec Fphi;
 	arma::vec Fy;
-	if (TransferCode==0 || TransferCode==2) { // Koyck or Solow
+	if (trans_code==0 || trans_code==2) { // Koyck or Solow
 		Ft.at(1) = 1.;
-	} else if (TransferCode==3) { // Vanilla
+	} else if (trans_code==3) { // Vanilla
 		Ft.at(0) = 1.;
-	} else if (TransferCode==1 && L>0) { // Koyama
-        const double mu = 2.2204e-16;
-		const double m = 4.7;
-		const double s = 2.9;
-		Fphi = get_Fphi(L,mu,m,s);
+	} else if (trans_code==1 && L>0) { // Koyama
+		Fphi = get_Fphi(L);
 		Fphi = arma::pow(Fphi,alpha);
 		Fy.zeros(L);
     }
@@ -225,12 +212,12 @@ void forwardFilter(
 	/*
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
-	if (TransferCode == 1 && L>0) { // Koyama
-        at.col(1) = update_at(p,GainCode,TransferCode,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho);
+	if (trans_code == 1 && L>0) { // Koyama
+        at.col(1) = update_at(p,gain_code,trans_code,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho);
 		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
-		update_Ft(Ft, Fy, TransferCode, 0, L, Y, Fphi);
-        hpsi = psi2hpsi(at.col(1),GainCode,ctanh);
-		hph = hpsi_deriv(at.col(1),GainCode,ctanh);
+		update_Ft(Ft, Fy, trans_code, 0, L, Y, Fphi);
+        hpsi = psi2hpsi(at.col(1),gain_code,ctanh);
+		hph = hpsi_deriv(at.col(1),gain_code,ctanh);
 		ft = arma::accu(Ft % hpsi);
 		Ft = Ft % hph;
 		Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
@@ -240,7 +227,7 @@ void forwardFilter(
 		Depends on specific link function
 		*/
 		phi = mu0 + ft; // regression on link function
-		if (LinkCode == 1 && obs_type == 1) {
+		if (link_code == 0 && obs_code == 1) {
 			// Poisson DLM with Identity Link
 			if (debug) {
 				Rcout << "f[" << 1 << "]=" << ft << ", q["<< 1 << "]=" << Qt << std::endl;
@@ -256,7 +243,7 @@ void forwardFilter(
 				Rcout << "f_ast[" << 1 << "]=" << ft_ast << ", q_ast["<< 1 << "]=" << Qt_ast << std::endl;
 			}
 
-		} else if (LinkCode == 1 && obs_type == 0) {
+		} else if (link_code == 0 && obs_code == 0) {
 			// Negative-binomial DLM with Identity Link
 			if (debug) {
 				Rcout << "f[" << 1 << "]=" << ft << ", q["<< 1 << "]=" << Qt << std::endl;
@@ -273,7 +260,7 @@ void forwardFilter(
 				Rcout << "alpha[" << 1 << "]=" << alphat.at(1) << ", beta["<< 1 << "]=" << betat.at(1) << std::endl;
 				Rcout << "f_ast[" << 1 << "]=" << ft_ast << ", q_ast["<< 1 << "]=" << Qt_ast << std::endl;
 			}
-		} else if (LinkCode == 0 && obs_type == 1) {
+		} else if (link_code == 1 && obs_code == 1) {
 			// Poisson DLM with Exponential Link
 			alphat.at(1) = optimize_trigamma(Qt);
 			betat.at(1) = std::exp(R::digamma(alphat.at(1)) - mu0 - ft);
@@ -315,8 +302,8 @@ void forwardFilter(
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		update_Gt(Gt.slice(t),GainCode, TransferCode, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
-        at.col(t) = update_at(p,GainCode,TransferCode,mt.col(t-1),Gt.slice(t),ctanh,alpha,Y.at(t-1),rho);
+		update_Gt(Gt.slice(t),gain_code, trans_code, mt.col(t-1), ctanh, alpha, Y.at(t-1), rho);
+        at.col(t) = update_at(p,gain_code,trans_code,mt.col(t-1),Gt.slice(t),ctanh,alpha,Y.at(t-1),rho);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 
 		if (t<10 && debug) {
@@ -327,10 +314,10 @@ void forwardFilter(
 		}
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-        if (TransferCode == 1) { // Koyama
-			update_Ft(Ft, Fy, TransferCode, t, L, Y, Fphi);
-			hpsi = psi2hpsi(at.col(t),GainCode,ctanh);
-			hph = hpsi_deriv(at.col(t),GainCode,ctanh);
+        if (trans_code == 1) { // Koyama
+			update_Ft(Ft, Fy, trans_code, t, L, Y, Fphi);
+			hpsi = psi2hpsi(at.col(t),gain_code,ctanh);
+			hph = hpsi_deriv(at.col(t),gain_code,ctanh);
 			ft = arma::accu(Ft % hpsi);
 			Ft = Ft % hph;
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
@@ -344,7 +331,7 @@ void forwardFilter(
 		Depends on specific link function
 		*/
 		phi = mu0 + ft; // regression on link function
-		if (LinkCode == 1 && obs_type == 1) {
+		if (link_code == 0 && obs_code == 1) {
 			// Poisson DLM with Identity Link
 			if (debug) {
 				Rcout << "f[" << t << "]=" << ft << ", q["<< t << "]=" << Qt << std::endl;
@@ -361,7 +348,7 @@ void forwardFilter(
 				Rcout << "f_ast[" << t << "]=" << ft_ast << ", q_ast["<< t << "]=" << Qt_ast << std::endl;
 			}
 			
-		} else if (LinkCode == 1 && obs_type == 0) {
+		} else if (link_code == 0 && obs_code == 0) {
 			// Negative-binomial DLM with Identity Link
 			if (debug) {
 				Rcout << "f[" << t << "]=" << ft << ", q["<< t << "]=" << Qt << std::endl;
@@ -380,7 +367,7 @@ void forwardFilter(
 				Rcout << "f_ast[" << t << "]=" << ft_ast << ", q_ast["<< t << "]=" << Qt_ast << std::endl;
 			}
 
-		} else if (LinkCode == 0 && obs_type == 1) {
+		} else if (link_code == 1 && obs_code == 1) {
 			// Poisson DLM with Exponential Link
 			alphat.at(t) = optimize_trigamma(Qt);
 			betat.at(t) = std::exp(R::digamma(alphat.at(t)) - phi);
@@ -611,18 +598,17 @@ void backwardSampler(
 // [[Rcpp::export]]
 Rcpp::List lbe_poisson(
 	const arma::vec& Y, // n x 1, the observed response
-	const unsigned int ModelCode,
+	const arma::uvec& model_code,
 	const double rho = 0.9,
-    const unsigned int L = 0,
+    const unsigned int L = 2, // Number of lags for Koyama or number of trials for Solow
 	const double mu0 = 0.,
-    const double delta = 0.9, 
+    const double delta = 0.9,
 	const double W = NA_REAL,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
 	const double alpha = 1.,
 	const double delta_nb = 10.,
-	const unsigned int obs_type = 0, // 0: negative binomial DLM; 1: poisson DLM
     const bool summarize_return = false,
 	const bool debug = false) { 
 
@@ -633,10 +619,15 @@ Rcpp::List lbe_poisson(
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
-	unsigned int TransferCode; // integer indicator for the type of transfer function
-	unsigned int p; // dimension of DLM state space
-	unsigned int L_;
-	get_transcode(TransferCode,p,L_,ModelCode,L);
+
+	const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
+
+	unsigned int p, L_;
+    init_by_trans(p,L_,trans_code,L);
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y;
@@ -644,7 +635,7 @@ Rcpp::List lbe_poisson(
 	arma::mat at(p,npad,arma::fill::zeros);
 	arma::cube Ct(p,p,npad); 
 	arma::mat Ip(p,p,arma::fill::eye);
-	Ip *= 10.;
+	Ip *= 1.;
 	Ct.each_slice() = Ip;
 	arma::cube Rt(p,p,npad);
 	arma::vec alphat(npad,arma::fill::zeros);
@@ -655,21 +646,47 @@ Rcpp::List lbe_poisson(
 	arma::cube Gt(p,p,npad);
 	arma::mat Gt0(p,p,arma::fill::zeros);
 	Gt0.at(0,0) = 1.;
-	if (TransferCode == 0) { // Koyck
-		Gt0.at(1,1) = rho;
-	} else if (TransferCode == 1) { // Koyama
-		Gt0.diag(-1).ones();
-	} else if (TransferCode == 2) { // Solow
-		Gt0.at(1,1) = 2.*rho;
-		Gt0.at(1,2) = -rho*rho;
-		Gt0.at(2,1) = 1.;
-	} else if (TransferCode == 3) { // Vanilla
-		Gt0.at(0,0) = rho;
+	switch (trans_code) {
+		case 0: // Koyck
+		{
+			Gt0.at(1,1) = rho;
+		}
+		break;
+		case 1: // Koyama
+		{
+			Gt0.diag(-1).ones();	
+		}
+		break;
+		case 2: // Solow - Checked. Correct.
+		{
+			double coef2 = -rho;
+			Gt0.at(1,1) = -binom(L,1)*coef2;
+			for (unsigned int k=2; k<p; k++) {
+				coef2 *= -rho;
+				Gt0.at(1,k) = -binom(L,k)*coef2;
+				Gt0.at(k,k-1) = 1.;
+			}
+
+			// Gt0.at(1,1) = 2.*rho;
+			// Gt0.at(1,2) = -rho*rho;
+			// Gt0.at(2,1) = 1.;
+			// // Rcout << Gt0 << std::endl;
+		}
+		break;
+		case 3: // Vanilla
+		{
+			Gt0.at(0,0) = rho;	
+		}
+		break;
+		default:
+		{
+			::Rf_error("Not supported transfer function.\n");
+		}
 	}
+
 	for (unsigned int t=0; t<npad; t++) {
 		Gt.slice(t) = Gt0;
 	}
-
 	if (!m0_prior.isNull()) {
 		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
 	}
@@ -678,16 +695,17 @@ Rcpp::List lbe_poisson(
 	}
 
     
-	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,ModelCode,TransferCode,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,delta,delta_nb,obs_type,debug);
+	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,delta,delta_nb,debug);
+	arma::vec Wt = (1.-delta) * arma::vectorise(Rt.tube(0,0));
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
 
 	Rcpp::List output;
 	if (summarize_return) {
 		arma::mat psi(npad,3);
-		psi.col(0) = ht - 2.*arma::sqrt(arma::abs(Ht));
+		psi.col(0) = ht - 1.6*arma::sqrt(arma::abs(Ht));
 		psi.col(1) = ht;
-		psi.col(2) = ht + 2.*arma::sqrt(arma::abs(Ht));
+		psi.col(2) = ht + 1.6*arma::sqrt(arma::abs(Ht));
 		output["psi"] = Rcpp::wrap(psi);
 	} else {
 		output["mt"] = Rcpp::wrap(mt); // p x npad
@@ -697,6 +715,8 @@ Rcpp::List lbe_poisson(
 		output["alphat"] = Rcpp::wrap(alphat); // npad x 1
 		output["betat"] = Rcpp::wrap(betat); // npad x 1
 	}
+
+	output["Wt"] = Rcpp::wrap(Wt); // npad x 1
 
 	return output;
 }
@@ -708,33 +728,30 @@ Rcpp::List get_eta_koyama(
 	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
 	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
 	const arma::cube& Ct, // p x p x (n+1)
-	const unsigned int ModelCode,
+	const unsigned int gain_code,
 	const double alpha = 1.,
 	const double mu0 = 0.) {
 	
 	const unsigned int n = Y.n_elem;
 	const unsigned int p = mt.n_rows;
-	const unsigned int TransferCode = 1; // Koyama
+	const unsigned int trans_code = 1; // Koyama
 
 	arma::vec ft(n+1);
 	arma::vec Qt(n+1,arma::fill::zeros);
 
 	arma::vec Ft(p,arma::fill::zeros);
 	arma::vec Fy(p,arma::fill::zeros);
-	const double mu = 2.2204e-16;
-	const double m = 4.7;
-	const double s = 2.9;
-	arma::vec Fphi = get_Fphi(p,mu,m,s);
+	arma::vec Fphi = get_Fphi(p);
 
 	arma::mat mt_ramp;
-	if (ModelCode == 0) {
+	if (gain_code == 0) {
 		mt_ramp = mt;
-		mt_ramp.elem(arma::find(mt_ramp<arma::datum::eps)).zeros(); // Ramp function
+		mt_ramp.elem(arma::find(mt_ramp<EPS)).zeros(); // Ramp function
 	}
 
 	for (unsigned int t=0; t<=n; t++) {
-		update_Ft(Ft, Fy, TransferCode, t, p, Y, Fphi, alpha);
-		switch (ModelCode) {
+		update_Ft(Ft, Fy, trans_code, t, p, Y, Fphi, alpha);
+		switch (gain_code) {
 			case 0: // KoyamaMax
 			{
 				ft.at(t) = mu0 + arma::accu(Ft % mt_ramp.col(t));
@@ -747,7 +764,7 @@ Rcpp::List get_eta_koyama(
 				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
 			}
 			break;
-			case 6: // KoyamaEye
+			case 2: // KoyamaEye
 			{
 				ft.at(t) = mu0 + arma::accu(Ft % mt.col(t));
 				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
@@ -772,22 +789,23 @@ Rcpp::List get_eta_koyama(
 // [[Rcpp::export]]
 Rcpp::List get_optimal_delta(
 	const arma::vec& Y, // n x 1
-	const unsigned int ModelCode,
+	const arma::uvec& model_code,
 	const arma::vec& delta_grid, // m x 1
 	const double rho = 0.9,
     const unsigned int L = 0,
 	const double mu0 = 0.,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
+	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5),
 	const double alpha = 1.,
-	const double delta_nb = 1.,
-	const unsigned int obs_type = 1) { // 0: negative binomial DLM; 1: poisson DLM
+	const double delta_nb = 1.) {
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int m = delta_grid.n_elem;
 	const double W = NA_REAL;
 	const double n_ = static_cast<double>(n);
+
+	const unsigned int obs_code = model_code.at(0);
 
 	arma::vec logpred(m,arma::fill::zeros);
 	arma::vec mse(m,arma::fill::zeros);
@@ -796,12 +814,12 @@ Rcpp::List get_optimal_delta(
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,ModelCode,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,obs_type,false,false);
+		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,false,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=1; j<=n; j++) {
 			// Marginal log predictive likelihood
-			if (obs_type == 1) {
+			if (obs_code == 1) {
 				// Poisson DLM
 				prob_success = betat.at(j)/(1.+betat.at(j));
 				logpred.at(i) += R::dnbinom(Y.at(j-1),alphat.at(j),prob_success,true);
@@ -813,7 +831,7 @@ Rcpp::List get_optimal_delta(
 				// MAE
 				mae.at(i) = std::abs(Y.at(j-1) - ymean);
 
-			} else if (obs_type == 0) {
+			} else if (obs_code == 0) {
 				// Negative binomial DLM
 				logpred.at(i) += R::lgammafn(Y.at(j-1)+delta_nb)-R::lgammafn(delta_nb)-R::lgammafn(Y.at(j-1)+1.);
 				logpred.at(i) += R::lgammafn(alphat.at(j)+betat.at(j))-R::lgammafn(alphat.at(j))-R::lgammafn(betat.at(j));

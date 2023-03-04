@@ -54,7 +54,7 @@ dnb3 <- function(x,lambda,rho,log=FALSE) {
 
 # Bootstrap Particle Filtering
 hawke_ss2 = function(
-  cases,N=5000,
+  cases,N=1e4,
   L=30,
   rho=34.08792,
   W=0.01,

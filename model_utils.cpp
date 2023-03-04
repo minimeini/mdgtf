@@ -1,8 +1,8 @@
 #include "model_utils.h"
 
 using namespace Rcpp;
-// [[Rcpp::plugins(cpp11)]]
-// [[Rcpp::depends(RcppArmadillo,nloptr)]]
+// [[Rcpp::plugins(cpp17)]]
+// [[Rcpp::depends(RcppArmadillo,nloptr,BH)]]
 
 
 /*
@@ -71,90 +71,116 @@ using namespace Rcpp;
 */
 
 
-//' @export
-// [[Rcpp::export]]
-unsigned int get_gaincode(
-	const unsigned int ModelCode
-) {
-	unsigned int GainCode = -1; 
-	if (ModelCode==0 || ModelCode==2 || ModelCode==4) {
-		GainCode = 0; // 0 - Ramp
-	} else if (ModelCode==1 || ModelCode==3 || ModelCode==5) {
-		GainCode = 1; // 1 - Exponential
-	} else if (ModelCode==6 || ModelCode==7 || ModelCode==8) {
-		GainCode = 2; // 2 - Identity
-	} else if (ModelCode==10 || ModelCode==11 || ModelCode==12) {
-		GainCode = 3; // 3 - Softplus
-	} else if (ModelCode==13 || ModelCode==14 || ModelCode==15) {
-		GainCode = 4; // 4 - Hyperbolic Tangent with coefficients (a,b,c)
-	} else if (ModelCode==16 || ModelCode==17 || ModelCode==18) {
-		GainCode = 5; // 5 - Logistic with coefficients (a,b,c)
-	} else {
-		::Rf_error("Unsupported model.");
-	}
-	return GainCode;
-}
 
-
-void get_transcode(
-	unsigned int& TransferCode, // integer indicator for the type of transfer function
+void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
 	unsigned int& L_,
-	const unsigned int ModelCode,
-	const unsigned int L = 30
-) {
-	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
-	const bool is_vanilla = ModelCode == 9;
+	const unsigned int trans_code,
+	const unsigned int L = 2) {
 
-	if (is_koyck) { 
-		TransferCode = 0; 
-		p = 2;
-		L_ = 0;
-	} else if (is_koyama) { 
-		TransferCode = 1; 
-		p = L;
-		L_ = L;
-	} else if (is_solow) { 
-		TransferCode = 2; 
-		p = 3;
-		L_ = 0;
-	} else if (is_vanilla) {
-		TransferCode = 3;
-		p = 1;
-		L_ = 0;
-	} else {
-		::Rf_error("Unknown type of model.");
+	switch (trans_code) {
+		case 0: // Koyck
+		{
+			p = 2;
+			L_ = 0;
+		}
+		break;
+		case 1: // Koyama
+		{
+			p = L;
+			L_ = L;
+		}
+		break;
+		case 2: // Solow
+		{
+			p = L + 1;
+			L_ = L;
+		}
+		break;
+		case 3: // Vanilla
+		{
+			p = 1;
+			L_ = 0;
+		}
+		break;
+		default:
+		{
+			::Rf_error("Not supported transfer function.");
+		}
 	}
 }
 
 
+
+void init_by_trans(
+	unsigned int& p, // dimension of DLM state space
+	unsigned int& L_,
+	arma::vec& Ft,
+    arma::vec& Fphi,
+    arma::mat& Gt,
+	const unsigned int trans_code,
+	const unsigned int L = 2) {
+
+	switch (trans_code) {
+		case 0: // Koyck
+		{
+			p = 2;
+			L_ = 0;
+
+			Ft.set_size(p); Ft.zeros();
+			Ft.at(1) = 1.;
+			Fphi.set_size(p); Fphi.zeros();
+			Gt.set_size(p,p); Gt.zeros();
+		}
+		break;
+		case 1: // Koyama
+		{
+			p = L;
+			L_ = L;
+
+			Ft.set_size(p); Ft.zeros();
+			Fphi = get_Fphi(p);
+			Gt.set_size(p,p); Gt.zeros();
+			Gt.at(0,0) = 1.;
+			Gt.diag(-1).ones();
+		}
+		break;
+		case 2: // Solow
+		{
+			p = L + 1;
+			L_ = L;
+
+			Ft.set_size(p); Ft.zeros();
+			Ft.at(1) = 1.;
+			Fphi.set_size(p); Fphi.zeros();
+			Gt.set_size(p,p); Gt.zeros();
+		}
+		break;
+		case 3: // Vanilla
+		{
+			p = 1;
+			L_ = 0;
+			
+			Ft.set_size(p); Ft.at(0) = 1.;
+			Fphi.set_size(p); Fphi.zeros();
+			Gt.set_size(p,p); Gt.zeros();
+		}
+		break;
+		default:
+		{
+			::Rf_error("Not supported transfer function.");
+		}
+	}
+}
+
+
+
+/*
+Binomial coefficients, i.e., n-choose-k
+*/
 //' @export
 // [[Rcpp::export]]
-unsigned int get_transcode(
-	const unsigned int ModelCode
-) {
-	const bool is_solow = ModelCode == 2 || ModelCode == 3 || ModelCode == 7 || ModelCode == 12 || ModelCode == 15;
-	const bool is_koyck = ModelCode == 4 || ModelCode == 5 || ModelCode == 8 || ModelCode == 10 || ModelCode == 13;
-	const bool is_koyama = ModelCode == 0 || ModelCode == 1 || ModelCode == 6 || ModelCode == 11 || ModelCode == 14;
-	const bool is_vanilla = ModelCode == 9;
-
-	unsigned int TransferCode;
-
-	if (is_koyck) { 
-		TransferCode = 0; 
-	} else if (is_koyama) { 
-		TransferCode = 1; 
-	} else if (is_solow) { 
-		TransferCode = 2; 
-	} else if (is_vanilla) {
-		TransferCode = 3;
-	} else {
-		::Rf_error("Unknown type of model.");
-	}
-	return TransferCode;
-}
+double binom(int n, int k) { return 1/((n+1)*boost::math::beta(n-k+1,k+1)); }
 
 
 
@@ -216,36 +242,11 @@ arma::vec knl(
 
 //' @export
 // [[Rcpp::export]]
-arma::vec get_Fphi(
-    const unsigned int L, // number of Lags to be considered
-    const double mu = 2.2204e-16,
-    const double m = 4.7,
-    const double s = 2.9){
+arma::vec get_Fphi(const unsigned int L=30){ // number of Lags to be considered
 
     double tmpd;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
-
-    arma::vec Fphi(L,arma::fill::zeros);
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
-    return Fphi;
-}
-
-
-
-arma::vec get_Fphi(const unsigned int L){ // number of Lags to be considered
-
-    const double m = 4.7;
-    const double s = 2.9;
-
-    double tmpd;
-    const double sm2 = std::pow(s/m,2);
-    const double pk_mu = std::log(m/std::sqrt(1.+sm2));
+    const double sm2 = std::pow(covid_s/covid_m,2);
+    const double pk_mu = std::log(covid_m/std::sqrt(1.+sm2));
     const double pk_sg2 = std::log(1.+sm2);
 
     arma::vec Fphi(L,arma::fill::zeros);
@@ -262,17 +263,19 @@ arma::vec get_Fphi(const unsigned int L){ // number of Lags to be considered
 
 
 /*
-update_Fx - Checked. OK.
+update_Fx
+
+TODO: check it.
 */
 //' @export
 // [[Rcpp::export]]
 arma::mat update_Fx(
-	const unsigned int TransferCode,
+	const unsigned int trans_code,
 	const unsigned int n, // number of observations
 	const arma::vec& Y, // n x 1, (y[1],...,y[n]), observtions
 	const arma::vec& hph, // (n+1) x 1, derivative of the gain function at h[t]
 	const double rho = 0.99, // memory of previous state, for exponential and negative binomial transmission delay kernel
-	const unsigned int L = 1., // length of nonzero transmission delay for log-normal
+	const unsigned int L = 2, // length of nonzero transmission delay for Koyama's log-normal or number of trials for Solow's negative-binomial
 	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_ = R_NilValue) { // L x 1, (phi[1],...,phi[L]), for log-normal transmission delay kernel only
 
 	arma::mat Fx(n,n,arma::fill::zeros);
@@ -282,7 +285,7 @@ arma::mat update_Fx(
 	arma::vec Ypad(n+1,arma::fill::zeros);
 	Ypad.tail(n) = Y; // Ypad = (Y[0]=0,Y[1],...,Y[n])
 
-	switch (TransferCode) {
+	switch (trans_code) {
 		case 0: // Koyck
 		{
 			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
@@ -327,19 +330,19 @@ arma::mat update_Fx(
 		break;
 		case 2: // Solow
 		{
-			double coef = 0.;
+			// double coef = 0.;
 			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
 				tmpd = 1.;
-				coef = static_cast<double>(t-t+1);
-				Fx.at(t-1,t-1) = coef*tmpd*Ypad.at(t-1)*hph.at(t);
+				// coef = static_cast<double>(t-t+1);
+				Fx.at(t-1,t-1) = tmpd*Ypad.at(t-1)*hph.at(t);
 				for (unsigned int i=(t-1); i>=1; i--) { 
 					// i-1 is the column index in cpp, w[i]
 					tmpd *= rho;
-					coef = static_cast<double>(t-i+1);
-					Fx.at(t-1,i-1) = Fx.at(t-1,i) + coef*tmpd*Ypad.at(i-1)*hph.at(i);
+					// coef = static_cast<double>(t-i+1);
+					Fx.at(t-1,i-1) = Fx.at(t-1,i) + binom(t-1-i+L,t-i)*tmpd*Ypad.at(i-1)*hph.at(i);
 				}
 			}
-			double coef2 = (1.-rho) * (1.-rho);
+			double coef2 = std::pow(1.-rho,static_cast<double>(L));
 			Fx.for_each( [&coef2](arma::mat::elem_type& val) {val *= coef2;});
 		}
 		break;
@@ -365,11 +368,13 @@ arma::mat update_Fx(
 }
 
 
-
+/*
+TODO: check it.
+*/
 //' @export
 // [[Rcpp::export]]
 arma::vec update_theta0(
-	const unsigned int ModelCode,
+	const unsigned int trans_code,
 	const unsigned int n, // number of observations
 	const arma::vec& Y, // n x 1, observations, (Y[1],...,Y[n])
 	const arma::vec& hhat, // (n+1) x 1, 1st Taylor expansion of h(psi[t]) at h[t]
@@ -378,7 +383,6 @@ arma::vec update_theta0(
 	const unsigned int L = 1., // length of nonzero transmission delay for log-normal
 	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_ = R_NilValue) { // L x 1
 	
-	const unsigned int TransferCode = get_transcode(ModelCode);
 	arma::vec theta0(n,arma::fill::zeros);
 	unsigned int tmpi;
 	double tmpd;
@@ -386,90 +390,83 @@ arma::vec update_theta0(
 	arma::vec Ypad(n+1,arma::fill::zeros);
 	Ypad.tail(n) = Y; // Ypad = (Y[0]=0,Y[1],...,Y[n])
 
-	if (ModelCode==0) {
-		// KoyamaMax
-		theta0.zeros();
-	} else {
-		switch (TransferCode) {
-			case 0:
-			{
-				// Koyck
-				::Rf_error("Koyck not supported yet.");
-			}
-			break;
-			case 1: // Koyama
-			{
-				arma::vec Fphi(L,arma::fill::ones);
-				if (!Fphi_.isNull()) {
-					Fphi = Rcpp::as<arma::vec>(Fphi_);
-				}
+	// if (ModelCode==0) {
+	// 	// KoyamaMax
+	// 	theta0.zeros();
 
-				// Fill out the first two columns, starting from the second row of Fx
-				arma::vec Fy(L,arma::fill::zeros);
-				arma::vec Fh(L,arma::fill::zeros);
-        		for (unsigned int r=1; r<n; r++) { 
-            		// loop through row, r from 1 to n-1, aka time from 2 to n.
-            		tmpi = std::min(L,r); // number of nonzero terms
-            		Fy.zeros();
-					Fh.zeros();
-					Fy.head(tmpi) = arma::reverse(Y.subvec(r-tmpi,r-1));
-					// Fh.head(tmpi) = arma::reverse(ht.subvec(r-tmpi+2,r+1));
-					// First-order Taylor expansion of h(h[t])
-					Fh.head(tmpi) = arma::reverse(hhat.subvec(r-tmpi+2,r+1));
-            		// if (r>1) {
-                	// 	Fy.head(tmpi) = arma::reverse(Y.subvec(r-tmpi,r-1));
-					// 	// Fh.head(tmpi) = arma::reverse(ht.subvec(r-tmpi+2,r+1));
-					// 	Fh.head(tmpi) = arma::reverse(hh.subvec(r-tmpi+2,r+1)) + arma::reverse(hph.subvec(r-tmpi+2,r+1))%(psi0-ht.subvec(r-tmpi+2,r+1)); // First-order Taylor expansion of h(h[t])
-                	// 	// if r = 2, the third row, it would be (y[1],y[0]) in C, aka (y[2],y[1]) in R; 2 total elements
-                	// 	// if r = (L-1), the L row, it would be (y[L-2],...,y[0]) in C, aka (y[L-1],...,y[1]) in R; (L-1) total elements
-                	// 	// if r = L, the (L+1) row, it would be (y[L-1],...,y[0]) in C, aka (y[L],...,y[1]) in R; L total elements
-                	// 	// if r = n-1, the n row, it would be (y[n-2],...,y[n-L-1]) in C, aka (y[n-1],...,y[n-L])
-            		// } else {
-                	// 	Fy.at(0) = Y.at(0);
-					// 	Fh.at(0) = ht.at(2);
-                	// 	// if r = 1 (t=2), second row, it would be (y[0]) in C, aka (y[1]) in R
-            		// }
+	switch (trans_code) {
+		case 0:
+		{
+			// Koyck
+			::Rf_error("Koyck not supported yet.");
+		}
+		break;
+		case 1: // Koyama
+		{
+			arma::vec Fphi(L,arma::fill::ones);
+			if (!Fphi_.isNull()) {
+				Fphi = Rcpp::as<arma::vec>(Fphi_);
+			}
 
-            		theta0.at(r) = arma::accu(Fphi % Fy % Fh);
-        		}
-			}
-			break;
-			case 2: // Solow
-			{
-				double coef = 0.;
-				double coef2 = (1.-rho)*(1.-rho);
-				double tmpd2 = 0.;
-				for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
-					tmpd = 1.;
-					coef = static_cast<double>(t-t+1.);
-					tmpd2 = hhat.at(t);
-					theta0.at(t-1) = coef*tmpd*Ypad.at(t-1)*tmpd2;
-					for (unsigned int i=(t-1); i>=1; i--) { // i-1 is the column index in cpp, w[i]
-						tmpd *= rho;
-						coef = static_cast<double>(t-i+1);
-						tmpd2 = hhat.at(i);
-						theta0.at(t-1) += coef*tmpd*Ypad.at(i-1)*tmpd2;
-					}
-					theta0.at(t-1) *= coef2;
+			// Fill out the first two columns, starting from the second row of Fx
+			arma::vec Fy(L,arma::fill::zeros);
+			arma::vec Fh(L,arma::fill::zeros);
+        	for (unsigned int r=1; r<n; r++) { 
+            	// loop through row, r from 1 to n-1, aka time from 2 to n.
+            	tmpi = std::min(L,r); // number of nonzero terms
+            	Fy.zeros();
+				Fh.zeros();
+				Fy.head(tmpi) = arma::reverse(Y.subvec(r-tmpi,r-1));
+
+				Fh.head(tmpi) = arma::reverse(hhat.subvec(r-tmpi+2,r+1));
+                // 	// if r = 2, the third row, it would be (y[1],y[0]) in C, aka (y[2],y[1]) in R; 2 total elements
+                // 	// if r = (L-1), the L row, it would be (y[L-2],...,y[0]) in C, aka (y[L-1],...,y[1]) in R; (L-1) total elements
+                // 	// if r = L, the (L+1) row, it would be (y[L-1],...,y[0]) in C, aka (y[L],...,y[1]) in R; L total elements
+                // 	// if r = n-1, the n row, it would be (y[n-2],...,y[n-L-1]) in C, aka (y[n-1],...,y[n-L])
+                // 	// if r = 1 (t=2), second row, it would be (y[0]) in C, aka (y[1]) in R
+
+            	theta0.at(r) = arma::accu(Fphi % Fy % Fh);
+        	}
+		}
+		break;
+		case 2: // Solow
+		{
+			// double coef = 0.;
+			double coef2 = std::pow(1.-rho,static_cast<double>(L)); 
+			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
+				// tmpd = 1.;
+				// coef = static_cast<double>(t-t+1.);
+				// theta0.at(t-1) = coef*tmpd*Ypad.at(t-1)*hhat.at(t);
+				tmpd = 1.;
+				theta0.at(t-1) = 0.;
+				for (unsigned int l=0; l<=(t-1); l++) { 
+					// i-1 is the column index in cpp, w[i]
+					// tmpd *= rho;
+					// coef = static_cast<double>(t-i+1);
+					// theta0.at(t-1) += coef*tmpd*Ypad.at(i-1)*hhat.at(i);
+					theta0.at(t-1) += binom(L+l-1,l)*tmpd*Ypad.at(t-l-1)*hhat.at(t-l-1);
+					tmpd *= rho;
 				}
-			}
-			break;
-			case 3:
-			{
-				// Vanilla
-				double tmpd2 = 1.;
-				for (unsigned int t=1; t<=n; t++) { // t-1 in cpp == theta[t]
-					tmpd2 *= rho;
-					theta0.at(t-1) = tmpd2*theta00;
-				}
-			}
-			break;
-			default:
-			{
-				::Rf_error("Undefined model.");
+				theta0.at(t-1) *= coef2;
 			}
 		}
+		break;
+		case 3:
+		{
+			// Vanilla
+			double tmpd2 = 1.;
+			for (unsigned int t=1; t<=n; t++) { // t-1 in cpp == theta[t]
+				tmpd2 *= rho;
+				theta0.at(t-1) = tmpd2*theta00;
+			}
+		}
+		break;
+		default:
+		{
+			::Rf_error("Undefined model.");
+		}
 	}
+
 
 	return theta0;
 }
@@ -490,39 +487,11 @@ since it barely drops below 0.
 arma::vec update_theta(
 	const unsigned int n,
 	const arma::mat& Fx, // n x n
-	const arma::vec& w,
-    const unsigned int ModelCode = 0) { // n x 1
+	const arma::vec& w) { // n x 1
 	
 	arma::vec theta = Fx * w; // n x 1
 	return theta; 
 }
-
-
-arma::vec update_lambda(
-    const arma::vec& theta, // n x 1
-    const arma::vec& lambda0, // n x 1
-    const unsigned int ModelCode = 0,
-    const bool ApproxModel = true) {
-    
-    arma::vec lambda;
-
-    switch(ModelCode) {
-        case 0:
-            if (ApproxModel) {
-                lambda = lambda0 + theta;
-                lambda.elem(arma::find(lambda<arma::datum::eps)).fill(arma::datum::eps);
-            } else {
-                ::Rf_error("Undefined for ModelCode=0 and ApproxModel=false.");
-            }
-            break;
-        default:
-            ::Rf_error("Undefined ModelCode!=0.");
-            break;
-    }
-
-    return lambda;
-}
-
 
 
 
@@ -640,6 +609,15 @@ double optimize_postW_gamma(coef_W& coef) {
 }
 
 
+double postW_deriv2(
+	const double Wtilde,
+	const double a2,
+	const double a3) {
+	
+	double deriv2 = - a2*std::exp(Wtilde) - a3*std::exp(-Wtilde);
+	return deriv2;
+}
+
 /*
 Testing example:
 ------ IMPLEMENTATION IN R
@@ -659,164 +637,13 @@ double test_postW_gamma(){
 [1] -2.995733
 ------
 */
-double test_postW_gamma(){
-	coef_W coef[1] = {{-5.,1.e2,0.5}};
+double test_postW_gamma(
+	const double a1 = -0.5,
+	const double a2 = 1.e2,
+	const double a3 = 0.5){
+	coef_W coef[1] = {{a1,a2,a3}};
 	double What = optimize_postW_gamma(coef[0]);
 	return What;
-}
-
-
-/*
-Return the minimum value of alpha such that
-	sum_{l=1}^{ntrunc} \phi_{l}^{alpha} = 1/M.
-
-We search alpha in a linearly spaced grid {alpha_min:prec:alpha_max}
-*/
-
-//' @export
-// [[Rcpp::export]]
-double calc_power_sum(
-	const double rho, // rho for the negative-binomial distribution
-	const double M, // upper bound of the gain function h(.)
-	const unsigned int TransferCode, // 0 - Koyck; 1 - Koyama; 2 - Solow; 3 - Vanilla
-	const double alpha_min = 1., // lower bound of the power
-	const double alpha_max = 2., // upper bound of the power
-	const double prec = 1.e-4, // precision
-	const unsigned int ntrunc=30) {
-
-	const double mu = 2.2204e-16;
-    const double m = 4.7;
-    const double s = 2.9;
-
-	arma::vec alpha_grid = arma::regspace(alpha_min,prec,alpha_max);
-	const unsigned int nalpha = alpha_grid.n_elem;
-	arma::vec pfunc(nalpha,arma::fill::zeros);
-
-	arma::vec phi(ntrunc,arma::fill::zeros);
-	switch (TransferCode) {
-		case 0: // Koyck
-		{
-			for (unsigned int i=0; i<ntrunc; i++) {
-				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.);
-			}
-		}
-		break;
-		case 1: // Koyama
-		{
-			phi = get_Fphi(ntrunc,mu,m,s);
-		}
-		break;
-		case 2: // Solow
-		{
-			for (unsigned int i=0; i<ntrunc; i++) {
-				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.)*(static_cast<double>(i)+1.);
-			}
-			phi *= (1.-rho) * (1.-rho);
-		}
-		break;
-		default:
-		{
-			::Rf_error("Unsupported distributed lag kernel.");
-		}
-	}
-
-	for (unsigned int i=0; i<nalpha; i++) {
-		pfunc.at(i) = arma::accu(arma::pow(phi,alpha_grid.at(i)));
-	}
-
-	pfunc = arma::abs(pfunc - 1./M);
-
-	return alpha_grid.at(pfunc.index_min());
-}
-
-
-
-//' @export
-// [[Rcpp::export]]
-Rcpp::List calc_power_sum2(
-	const double rho, // rho for the negative-binomial distribution
-	const double M, // upper bound of the gain function h(.)
-	const unsigned int TransferCode, // 0 - Koyck; 1 - Koyama; 2 - Solow; 3 - Vanilla
-	const double alpha_min = 1., // lower bound of the power
-	const double alpha_max = 2., // upper bound of the power
-	const double prec = 1.e-4, // precision
-	unsigned int ntrunc=30) {
-
-	const double mu = 2.2204e-16;
-    const double m = 4.7;
-    const double s = 2.9;
-
-	arma::vec alpha_grid = arma::regspace(alpha_min,prec,alpha_max);
-	const unsigned int nalpha = alpha_grid.n_elem;
-	arma::vec pfunc(nalpha,arma::fill::zeros);
-
-	arma::vec phi(ntrunc,arma::fill::zeros);
-	switch (TransferCode) {
-		case 0: // Koyck
-		{
-			for (unsigned int i=0; i<ntrunc; i++) {
-				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.);
-			}
-		}
-		break;
-		case 1: // Koyama
-		{
-			phi = get_Fphi(ntrunc,mu,m,s);
-		}
-		break;
-		case 2: // Solow
-		{
-			for (unsigned int i=0; i<ntrunc; i++) {
-				phi.at(i) = std::pow(rho,static_cast<double>(i)+1.)*(static_cast<double>(i)+1.);
-			}
-			phi *= (1.-rho) * (1.-rho);
-		}
-		break;
-		default:
-		{
-			::Rf_error("Unsupported distributed lag kernel.");
-		}
-	}
-	
-
-	for (unsigned int i=0; i<nalpha; i++) {
-		pfunc.at(i) = arma::accu(arma::pow(phi,alpha_grid.at(i)));
-	}
-
-	Rcpp::List output;
-	output["alpha"] = Rcpp::wrap(alpha_grid);
-	output["psum"] = Rcpp::wrap(pfunc);
-
-	pfunc = arma::abs(pfunc - 1./M);
-	double alpha_equal = alpha_grid.at(pfunc.index_min());
-	output["alpha_equal"] = alpha_equal;
-	output["phi"] = Rcpp::wrap(arma::pow(phi,alpha_equal));
-
-	return output;
-}
-
-
-
-//' @export
-// [[Rcpp::export]]
-Rcpp::List calc_power_sum3(
-	const double rho, // rho for the negative-binomial distribution
-	const double M, // upper bound of the gain function h(.)
-	unsigned int ntrunc=30) {
-
-	double alpha_equal = 1. - 0.5*std::log(M)/std::log(1.-rho);
-
-	arma::vec phi(ntrunc,arma::fill::zeros);
-	for (unsigned int i=0; i<ntrunc; i++) {
-		phi.at(i) = std::pow(rho,static_cast<double>(i)+1.)*(static_cast<double>(i)+1.);
-	}
-	phi *= std::pow(1.-rho, alpha_equal);
-	
-	Rcpp::List output;
-	output["alpha_equal"] = alpha_equal;
-	output["phi"] = Rcpp::wrap(phi);
-
-	return output;
 }
 
 
@@ -825,21 +652,17 @@ Rcpp::List calc_power_sum3(
 // [[Rcpp::export]]
 arma::mat psi2hpsi(
 	const arma::mat& psi,
-	const unsigned int GainCode,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.3,0,1)) {
+	const unsigned int gain_code,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
 	
-	const double EPS = arma::datum::eps;
-	const double UPBND = 700.;
-
-
 	arma::mat hpsi;
 	hpsi.copy_size(psi);
 
-	switch (GainCode) {
+	switch (gain_code) {
 		case 0: // Ramp
 		{
 			hpsi = psi;
-			hpsi.elem(arma::find(psi<EPS)).fill(0.);
+			hpsi.elem(arma::find(psi<EPS)).fill(EPS);
 		}
 		break;
 		case 1: // Exponential
@@ -887,14 +710,12 @@ arma::mat psi2hpsi(
 
 double psi2hpsi(
 	const double psi,
-	const unsigned int GainCode,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.3,0,1)) {
+	const unsigned int gain_code,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
 	
-	const double EPS = arma::datum::eps;
-	const double UPBND = 700.;
 	double hpsi;
 
-	switch (GainCode) {
+	switch (gain_code) {
 		case 0: // Ramp
 		{
 			hpsi = std::max(psi,EPS);
@@ -941,14 +762,12 @@ double psi2hpsi(
 void hpsi_deriv(
 	arma::mat & hpsi,
 	const arma::mat& psi,
-	const unsigned int GainCode,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.3,0,1)) {
+	const unsigned int gain_code,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
 	
-	const double UPBND = 700.;
-
 	hpsi.copy_size(psi);
 
-	switch (GainCode) {
+	switch (gain_code) {
 		case 0: // Ramp
 		{
 			::Rf_error("Ramp function is non-differentiable.");
@@ -1001,13 +820,12 @@ void hpsi_deriv(
 
 double hpsi_deriv(
 	const double psi,
-	const unsigned int GainCode,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.3,0,1)) {
+	const unsigned int gain_code,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
 	
-	const double UPBND = 700.;
 	double hpsi;
 
-	switch (GainCode) {
+	switch (gain_code) {
 		case 0: // Ramp
 		{
 			::Rf_error("Ramp function is non-differentiable.");
@@ -1055,14 +873,13 @@ double hpsi_deriv(
 // [[Rcpp::export]]
 arma::mat hpsi_deriv(
 	const arma::mat& psi,
-	const unsigned int GainCode,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.3,0,1)) {
+	const unsigned int gain_code,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
 	
-	const double UPBND = 700.;
 	arma::mat hpsi;
 	hpsi.copy_size(psi);
 
-	switch (GainCode) {
+	switch (gain_code) {
 		case 0: // Ramp
 		{
 			::Rf_error("Ramp function is non-differentiable.");
@@ -1121,17 +938,17 @@ arma::mat hpsi_deriv(
 arma::mat hpsi2theta(
 	const arma::mat& hpsi, // (n+1) x k, each row is a different time point
 	const arma::vec& y, // n x 1
-	const unsigned int TransferCode,
+	const unsigned int trans_code,
 	const double theta0 = 0.,
 	const double alpha = 1.,
-	const unsigned int L = 0,
+	const unsigned int L = 2,
 	const double rho = 0.9) {
 	
 	const unsigned int n = y.n_elem;
 	const unsigned int k = hpsi.n_cols;
 	arma::mat theta(n,k,arma::fill::zeros);
 
-	switch(TransferCode) {
+	switch(trans_code) {
 		case 0: // Koyck
 		{
 			theta.row(0).fill(rho*theta0);
@@ -1145,10 +962,7 @@ arma::mat hpsi2theta(
 		break;
 		case 1: // Koyama
 		{
-			double mu = 2.2204e-16;
-			double m = 4.7;
-			double s = 2.9;
-			arma::vec Fphi = get_Fphi(L,mu,m,s);
+			arma::vec Fphi = get_Fphi(L);
         	Fphi = arma::pow(Fphi,alpha);
 			arma::vec Fy(L,arma::fill::zeros);
 			arma::mat Fhpsi(L,k);
@@ -1168,14 +982,25 @@ arma::mat hpsi2theta(
 		break;
 		case 2: // Solow
 		{
-			double c1 = 2.*rho;
-			double c2 = rho*rho;
-			double c3 = std::pow((1.-rho)*(1.-rho),alpha);
-			theta.row(0).fill(2.*rho*theta0);
-			theta.row(1) = c1*theta.row(0) - c2*theta0 + c3*hpsi.row(1)*y.at(0);
-			for (unsigned int t=2; t<n; t++) {
-				theta.row(t) = c1*theta.row(t-1) - c2*theta.row(t-2) + c3*hpsi.row(t)*y.at(t-1);
+			// double c1 = 2.*rho;
+			// double c2 = rho*rho;
+			arma::mat theta_ext(n+1,k,arma::fill::zeros);
+			theta_ext.row(0).fill(theta0);
+
+			double c1 = std::pow(1.-rho,static_cast<double>(L)*alpha);
+			double c2 = -rho;
+			theta_ext.row(1) = -binom(L,1)*c2*theta_ext.row(0);
+			// theta.row(1) = c1*theta.row(0) - c2*theta0 + c3*hpsi.row(1)*y.at(0);
+			for (unsigned int t=2; t<(n+1); t++) {
+				theta_ext.row(t) = c1*hpsi.row(t-1)*y.at(t-2);
+				c2 = -rho;
+				for (unsigned int k=1; k<=std::min(t,L); k++) {
+					theta_ext.row(t) -= binom(L,k)*c2*theta_ext.row(t-k);
+					c2 *= -rho;
+				}
+				// theta.row(t) = c1*theta.row(t-1) - c2*theta.row(t-2) + c3*hpsi.row(t)*y.at(t-1);
 			}
+			theta = theta_ext.tail_rows(n);
 		}
 		break;
 		default: // Otherwise
@@ -1191,33 +1016,43 @@ arma::mat hpsi2theta(
 double loglike_obs(
 	const double y, 
 	const double lambda,
-	const unsigned int obs_type = 1,
+	const unsigned int obs_code = 1,
 	const double delta_nb = 1.,
 	const bool return_log = false) {
 	
-	double loglike;
-	if (obs_type == 0) {
-        /*
-        Negative-binomial likelihood
-        - mean: lambda.at(i)
-        - delta_nb: degree of over-dispersion
+	double loglike = -9999.;
+	switch (obs_code) {
+		case 0: // negative-binomial
+		{
+			/*
+        	Negative-binomial likelihood
+        	- mean: lambda.at(i)
+        	- delta_nb: degree of over-dispersion
 
-        sample variance exceeds the sample mean
-        */
-        loglike = R::lgammafn(y+delta_nb) - R::lgammafn(y+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda)) + y*(std::log(lambda)-std::log(delta_nb+lambda));
-		if (!return_log) {
-			loglike = std::exp(loglike);
+        	sample variance exceeds the sample mean
+        	*/
+        	loglike = R::lgammafn(y+delta_nb) - R::lgammafn(y+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda)) + y*(std::log(lambda)-std::log(delta_nb+lambda));
+			if (!return_log) {
+				loglike = std::exp(loglike);
+			}
 		}
-                
-    } else if (obs_type == 1) {
-        /*
-        Poisson likelihood
-        - mean: lambda.at(i)
-        - var: lambda.at(i)
+		break;
+		case 1: // poisson
+		{
+			/*
+        	Poisson likelihood
+        	- mean: lambda.at(i)
+        	- var: lambda.at(i)
 
-        sample variance == sample mean
-        */
-        loglike = R::dpois(y,lambda,return_log);
-    }
+        	sample variance == sample mean
+        	*/
+        	loglike = R::dpois(y,lambda,return_log);
+		}
+		break;
+		default:
+		{
+			::Rf_error("Not supported observational distribution.\n");
+		}
+	}
 	return loglike;
 }

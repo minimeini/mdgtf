@@ -1,6 +1,6 @@
 #include "lbe_poisson.h"
 using namespace Rcpp;
-// [[Rcpp::plugins(cpp11)]]
+// [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
 /*
@@ -14,7 +14,7 @@ Rcpp::List predict_poisson(
     const arma::vec& Y, // n x 1
     const unsigned int m, // maximum step of forecasting
     const unsigned int nsample,
-    const unsigned int ModelCode,
+    const arma::uvec model_code,
     const arma::vec& W_sample, // nsample x 1 for LBE or HVB, or 1 x 1 for MCS
     const arma::mat& theta_last, // p x nsample for MCS or HVB, or p x 1 for LBE
     const Rcpp::Nullable<Rcpp::NumericMatrix>& Ct_last = R_NilValue, // p x p for LBE
@@ -22,13 +22,9 @@ Rcpp::List predict_poisson(
     const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
     const double alpha = 1.,
     const double rho = 0.9,
-    const unsigned int L = 0,
+    const unsigned int L = 2,
     const double mu0 = 0.,
-    const double delta_nb = 1.,
-    const unsigned int obs_type = 1.) {
-
-    const double UPBND = 700.;
-    const double EPS = arma::datum::eps;
+    const double delta_nb = 1.) {
 
     const unsigned int n = Y.n_elem; // number of observed counts
     const unsigned int npred = n+m;
@@ -41,49 +37,16 @@ Rcpp::List predict_poisson(
     }
 
 
-    const unsigned int GainCode = get_gaincode(ModelCode);
-	unsigned int TransferCode; // integer indicator for the type of transfer function
-	unsigned int p; // dimension of DLM state space
-	unsigned int L_;
-    get_transcode(TransferCode,p,L_,ModelCode,L);
+    const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
+	unsigned int p, L_;
+    arma::vec Ft, Fphi;
     arma::mat Gt;
-    arma::vec Ft(p,arma::fill::zeros);
-    arma::vec Fphi;
-	arma::vec Fy;
-    switch (TransferCode) {
-        case 0: // Koyck
-        {
-            Ft.at(1) = 1.;
-        }
-        break;
-        case 1: // Koyama
-        {
-            Gt.set_size(p,p);
-            Gt.zeros();
-            Gt.at(0,0) = 1.;
-            Gt.diag(-1).ones();
-            const double mu = 2.2204e-16;
-		    const double m = 4.7;
-		    const double s = 2.9;
-		    Fphi = get_Fphi(L,mu,m,s);
-		    Fy.zeros(L);
-        }
-        break;
-        case 2: // Solow
-        {
-            Ft.at(1) = 1.;
-        }
-        break;
-        case 3: // Vanilla
-        {
-            Ft.at(0) = 1.;
-        }
-        break;
-        default:
-        {
-            ::Rf_error("Unknown transfer function.");
-        }
-    }
+    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+	arma::vec Fy(L,arma::fill::zeros);
 
 
     arma::vec ypred(npred,arma::fill::zeros);
@@ -124,34 +87,34 @@ Rcpp::List predict_poisson(
 
         for (unsigned int t=n; t<npred; t++) {
             // state - theta, especially psi
-            theta_pred.col(t) = update_at(p,GainCode,TransferCode,theta_pred.col(t-1),Gt,ctanh,alpha,ypred.at(t-1),rho);
+            theta_pred.col(t) = update_at(p,gain_code,trans_code,theta_pred.col(t-1),Gt,ctanh,alpha,ypred.at(t-1),rho);
             theta_pred.at(0,t) += wt.at(t);
 
             // Link - phi
             psi_stored.at(t-n,i) = theta_pred.at(0,t);
 
-            if (TransferCode == 1 && L>0) { // Koyama
-                update_Ft(Ft, Fy, TransferCode, t, L_, ypred, Fphi, alpha);
-			    switch (ModelCode) {
-				    case 0: // KoyamaMax
+            if (trans_code == 1 && L>0) { // Koyama
+                update_Ft(Ft, Fy, trans_code, t, L_, ypred, Fphi, alpha);
+			    switch (gain_code) {
+				    case 0: // Ramp
 				    {
 					    theta_pred.elem(arma::find(theta_pred<EPS)).fill(EPS);
                         phi = arma::accu(Ft % theta_pred.col(t));
 				    }
 				    break;
-				    case 1: // KoyamaExp
+				    case 1: // Exponential
 				    {
 					    theta_pred.elem(arma::find(theta_pred>UPBND)).fill(UPBND);
 					    Ft = Ft % arma::exp(theta_pred.col(t));
 					    phi = arma::accu(Ft);
 				    }
 				    break;
-				    case 6: // KoyamaEye
+				    case 2: // Identity
 				    {
 					    phi = arma::accu(Ft % theta_pred.col(t));
 				    }
 				    break;
-				    case 11: // KoyamaSoftplus
+				    case 3: // Softplus
 				    {
 					    theta_pred.elem(arma::find(theta_pred>UPBND)).fill(UPBND);
 					    arma::vec theta_exp = arma::exp(theta_pred.col(t));
@@ -170,7 +133,7 @@ Rcpp::List predict_poisson(
             phi += mu0;
 
             // Mean - lambda
-            if (ModelCode==6||ModelCode==7||ModelCode==8||ModelCode==9) {
+            if (link_code==1) {
                 // Exponential link
                 lambda = std::exp(phi);
             } else {
@@ -181,7 +144,7 @@ Rcpp::List predict_poisson(
             lambda_stored.at(t-n,i) = lambda;
 
             // Observation - y
-            if (obs_type == 0) {
+            if (obs_code==0) {
                 // negative-binomial
                 ypred.at(t) = R::rnbinom(delta_nb,std::exp(std::log(delta_nb)-std::log(lambda+delta_nb)));
             } else {

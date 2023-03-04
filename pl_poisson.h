@@ -102,7 +102,7 @@ Kwg: Identity link, exp(psi) state space
 */
 Rcpp::List mcs_poisson(
     const arma::vec& Y, // n x 1, the observed response
-    const unsigned int ModelCode,
+    const arma::uvec& model_code,
 	const double W,
     const double rho,
     const double alpha,
@@ -115,7 +115,6 @@ Rcpp::List mcs_poisson(
     const Rcpp::NumericVector& qProb,
     const Rcpp::NumericVector& ctanh,
     const double delta_nb,
-    const unsigned int obstype, // 0: negative binomial DLM; 1: poisson DLM
     const bool verbose,
     const bool debug);
 
@@ -124,7 +123,7 @@ Rcpp::List mcs_poisson(
 void mcs_poisson(
     arma::vec& R, // (n+1) x 1
     const arma::vec& Y, // n x 1, the observed response
-    const unsigned int ModelCode,
+    const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,
     const double rho,
     const double alpha,
@@ -135,8 +134,7 @@ void mcs_poisson(
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
     const Rcpp::NumericVector& ctanh,
-    const double delta_nb,
-    const unsigned int obstype);
+    const double delta_nb);
 
 
 
