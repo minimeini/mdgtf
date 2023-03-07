@@ -121,7 +121,24 @@ Rcpp::List mcs_poisson(
 
 
 void mcs_poisson(
-    arma::vec& R, // (n+1) x 1
+    arma::mat& R, // (n+1) x 2, (psi,theta)
+    const arma::vec& Y, // n x 1, the observed response
+    const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
+	const double W,
+    const double rho,
+    const double alpha,
+    const unsigned int L, // number of lags
+    const double mu0,
+    const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+	const unsigned int N, // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const Rcpp::NumericVector& ctanh,
+    const double delta_nb);
+
+
+
+arma::mat mcs_poisson2(
     const arma::vec& Y, // n x 1, the observed response
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,

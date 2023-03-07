@@ -351,7 +351,7 @@ Rcpp::List mcs_poisson(
     const double rho = 0.9,
     const double alpha = 1.,
     const unsigned int L = 12, // number of lags
-    const double mu0 = 0.,
+    const double mu0 = 2.220446e-16,
     const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
@@ -506,58 +506,8 @@ Rcpp::List mcs_poisson(
         >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
         */
         omega = arma::randn(N) * Wsqrt;
-        if (trans_code != 1) {
-            hpsi = psi2hpsi(theta_stored.slice(B-1).row(0),gain_code,ctanh); // hpsi: 1 x N
-        }
-        
-        switch (trans_code) {
-            case 0: // Koyck
-            {
-                theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
-                theta.row(1) = Y.at(t)*hpsi.row(0) + rho*theta_stored.slice(B-1).row(1);
-            }
-            break;
-            case 1: // Koyama
-            {
-                for (unsigned int i=0; i<N; i++) {
-                    theta.col(i) = Gt * theta_stored.slice(B-1).col(i);
-                }
-                theta.row(0) += omega.t();
-            }
-            break;
-            case 2: // Solow - Checked. Correct.
-            {
-                // DLM Form
-                theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
-                c2 = -rho;
-                theta.row(1) = c1*Y.at(t)*hpsi.row(0) - binom(L_,1)*c2*theta_stored.slice(B-1).row(1);
-                for (unsigned int k=2; k<p; k++) {
-                    c2 *= -rho;
-                    theta.row(1) -= binom(L_,k)*c2*theta_stored.slice(B-1).row(k);
-                    theta.row(k) = theta_stored.slice(B-1).row(k-1);
-                }
-
-                // arma::rowvec theta_r1 = c1_*Y.at(t)*hpsi.row(0) + c2_*theta_stored.slice(B-1).row(1) + c3_*theta_stored.slice(B-1).row(2);
-
-
-                // if (t<5) {
-                //     Rcout << "theta.row(1) = " << theta.submat(1,0,1,5);
-                //     Rcout << " vs " << theta_r1.head(5) << std::endl;
-                // }
-                
-            }
-            break;
-            case 3: // Vanilla
-            {
-                ::Rf_error("VanillaPois undefined.");
-            }
-            break;
-            default:
-            {
-                ::Rf_error("Unknown type of model.");
-            }
-        }
-
+        theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,Y.at(t),rho);
+        theta.row(0) += omega.t();
 
         if (debug) {
             Rcout << "quantiles for hpsi[" << t+1 << "]" << arma::quantile(theta.row(1),Rcpp::as<arma::vec>(qProb));
@@ -682,14 +632,14 @@ Rcpp::List mcs_poisson(
 
 
 void mcs_poisson(
-    arma::vec& R, // (n+1) x 1
+    arma::mat& R, // (n+1) x 2, (psi,theta)
     const arma::vec& Y, // n x 1, the observed response
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,
     const double rho = 0.9,
     const double alpha = 1.,
     const unsigned int L = 12, // number of lags
-    const double mu0 = 0.,
+    const double mu0 = 2.220446e-16,
     const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
@@ -827,50 +777,8 @@ void mcs_poisson(
         >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
         */
         omega = arma::randn(N) * Wsqrt;
-        if (trans_code != 1) { // Not Koyama
-            hpsi = psi2hpsi(theta_stored.slice(B-1).row(0),gain_code,ctanh); // hpsi: 1 x N
-        }
-        
-        switch (trans_code) {
-            case 0: // Koyck
-            {
-                theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
-                theta.row(1) = Y.at(t)*hpsi.row(0) + rho*theta_stored.slice(B-1).row(1);
-            }
-            break;
-            case 1: // Koyama
-            {
-                for (unsigned int i=0; i<N; i++) {
-                    theta.col(i) = Gt * theta_stored.slice(B-1).col(i);
-                }
-                theta.row(0) += omega.t();
-            }
-            break;
-            case 2: // Solow
-            {
-                // theta.row(2) = theta_stored.slice(B-1).row(1);
-                // theta.row(1) = c1*Y.at(t)*hpsi.row(0) + c2*theta_stored.slice(B-1).row(1) + c3*theta_stored.slice(B-1).row(2);
-                theta.row(0) = theta_stored.slice(B-1).row(0) + omega.t();
-                c2 = -rho;
-                theta.row(1) = c1*Y.at(t)*hpsi.row(0) - binom(L_,1)*c2*theta_stored.slice(B-1).row(1);
-                for (unsigned int k=2; k<p; k++) {
-                    c2 *= -rho;
-                    theta.row(1) -= binom(L_,k)*c2*theta_stored.slice(B-1).row(k);
-                    theta.row(k) = theta_stored.slice(B-1).row(k-1);
-                }
-            }
-            break;
-            case 3: // Vanilla
-            {
-                ::Rf_error("VanillaPois undefined.");
-            }
-            break;
-            default:
-            {
-                ::Rf_error("Unknown type of model.");
-            }
-        }
-
+        theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,Y.at(t),rho);
+        theta.row(0) += omega.t();
         
         theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
         theta_stored.slice(B-1) = theta;
@@ -943,7 +851,19 @@ void mcs_poisson(
         /*
         ------ Step  Resampling with Replacement ------
         */
-       R.at(t) = arma::median(theta_stored.slice(0).row(0));
+        R.at(t,0) = arma::median(theta_stored.slice(0).row(0)); // psi
+
+        if (trans_code == 1) { // TODO: CHECK THE KOYAMA CASE
+            // Koyama
+            hpsi = psi2hpsi(theta_stored.slice(0),gain_code,ctanh); // hpsi: p x N
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = arma::as_scalar(Ft.t()*hpsi.col(i));
+            }
+            R.at(t,1) = arma::median(lambda);
+        } else {
+            // Koyck or Solow
+            R.at(t,1) = arma::median(theta_stored.slice(0).row(1)); // theta
+        }
     }
 
     /*
@@ -952,13 +872,365 @@ void mcs_poisson(
         - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
         - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
     */
-    R.subvec(0,n-B+1) = R.subvec(B-2,n-1);
+    // R.subvec(0,n-B+1) = R.subvec(B-2,n-1);
+    // R.submat(0,0,n-B+1,0) = R.submat(B-2,0,n-1,0);
+    R.rows(0,n-B+1) = R.rows(B-2,n-1);
     for (unsigned int b=0; b<(B-1); b++) {
-        R.at(n-B+2+b) = arma::median(theta_stored.slice(b+1).row(0));
+        R.at(n-B+2+b,0) = arma::median(theta_stored.slice(b+1).row(0));
+
+        if (trans_code == 1) { // TODO: CHECK THE KOYAMA CASE
+            // Koyama
+            Fy.zeros();
+            tmpi = std::min(n-B+2+b,p);
+            Fy.head(tmpi) = arma::reverse(Y.subvec(n-B+2+b-tmpi,n-B+2+b-1));
+            Ft = Fphi % Fy; // L(p) x 1
+
+            hpsi = psi2hpsi(theta_stored.slice(b+1),gain_code,ctanh); // hpsi: p x N
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = arma::as_scalar(Ft.t()*hpsi.col(i));
+            }
+            R.at(n-B+2+b,1) = arma::median(lambda);
+        } else {
+            R.at(n-B+2+b,1) = arma::median(theta_stored.slice(b+1).row(1));
+        }
     }
 
     return;
 }
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List apf_poisson(
+    const arma::vec& Y, // n x 1, the observed response
+    const arma::uvec& model_code,
+	const double W,
+    const double rho = 0.9,
+    const double alpha = 1.,
+    const unsigned int L = 12, // number of lags
+    const double mu0 = 2.220446e-16,
+	const unsigned int N = 5000, // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
+    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
+    const double delta_nb = 1.,
+    const bool verbose = false,
+    const bool debug = false){ 
+    
+    unsigned int tmpi; // store temporary integer value
+    const unsigned int n = Y.n_elem; // number of observations
+    const double Wsqrt = std::sqrt(W);
+
+    if (debug) {
+        Rcout << "Evolution variance W=" << W << std::endl;
+    }
+
+
+    /* 
+    Dimension of state space depends on type of transfer functions 
+    - p: diemsnion of DLM state space
+    - Ft: vector for the state-to-observation function
+    - Gt: matrix for the state-to-state function
+    */
+    const unsigned int obs_code = model_code.at(0);
+    const unsigned int link_code = model_code.at(1);
+    const unsigned int trans_code = model_code.at(2);
+    const unsigned int gain_code = model_code.at(3);
+    const unsigned int err_code = model_code.at(4);
+	unsigned int p, L_;
+	arma::vec Ft, Fphi;
+    arma::mat Gt;
+    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+
+    Fphi = arma::pow(Fphi,alpha);
+    arma::vec Fy(p,arma::fill::zeros);
+    /* Dimension of state space depends on type of transfer functions */
+
+
+
+
+    // theta: DLM state vector
+    // p - dimension of state space
+    // N - number of particles
+    arma::vec lambda(N); // instantaneous intensity
+    arma::vec omega(N); // evolution variance
+    arma::vec w(N); // importance weight of each particle
+    Rcpp::IntegerVector idx_(N);
+    arma::uvec idx(N);
+
+    /*
+    ------ Step 1. Initialization at time t = -1 ------
+        - Sample theta[-1] from the prior of theta[-1]
+    
+    ------
+    The first B-2 rows (indices from 0 to B-2) of R are all zeros, as illustrated as follows:
+
+    At the beginning of t = 0
+        - propagate to theta[0]
+        - theta_stored.slice(B-2) = theta[-1], theta_stored.slice(B-1) = theta[0]
+        - resample theta_stored
+        - save theta_stored.slice(0)==ZERO to R.row(0)
+
+    At the beginning of t = 1
+        - propagate to theta[1]
+        - theta_stored.slice(B-3) = theta[-1], ..., theta_stored.slice(B-1) = theta[1]
+        - resample theta_stored
+        - save theta_stored.slice(0)==ZERO to R.row(1)
+
+    ...
+
+    At the beginning of t = B-2
+        - propagate to theta[B-2]
+        - theta_stored.slice(0) = theta[-1], ..., theta_stored.slice(B-1) = theta[B-2]
+        - resample theta_stored
+        - save theta_stored.slice(0)==theta[-1] to R.row(B-2); *** theta[-1] has been resampled B-1 times
+
+    At the beginning of t = B-1
+        - propagate to theta[B-1]
+        - theta_stored.slice(0) = theta[0], ..., theta_stored.slice(B-1) = theta[B-1]
+        - resample theta_stored
+        - save theta_stored.slice(0)==theta[0] to R.row(B-1); *** theta[0] has been resampled B times
+
+    At the beginning of t = n-1, theta_stored.slice(B-1) = theta[n-2]; resample; save theta_stored.slice(0)=theta[n-B-1] to R.row(n-1); propagate to theta[n-1]
+        - propagate to theta[n-1]
+        - theta_stored.slice(0) = theta[n-B], ..., theta_stored.slice(B-1) = theta[n-1]
+        - resample theta_stored
+        - save theta_stored.slice(0)==theta[n-B] to R.row(n-1); *** theta[n-B] has been resampled B times
+            - theta[n-B+1] has been resample B-1 times
+            .....
+            - theta[n-2] is resampled 2 times
+            - theta[n-1] is resample once
+    ------
+    >>>>>> Outside of the for loop,
+        - The first B-2 rows (indices from 0 to B-1) of R are all zeros
+        - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
+        - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
+
+
+    In order to save the theta resampled B-1 times to R, we just need to save the first slice of theta_stored.
+    */
+        
+    arma::mat theta(p,N);
+    arma::mat theta_next(p,N);
+    arma::mat hpsi;
+    if (link_code==1) {
+        // Exponential Link
+        arma::vec m0(p,arma::fill::zeros);
+        arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
+        if (!m0_prior.isNull()) {
+		    m0 = Rcpp::as<arma::vec>(m0_prior);
+	    }
+	    if (!C0_prior.isNull()) {
+		    C0 = Rcpp::as<arma::mat>(C0_prior);
+            C0 = arma::chol(C0);
+	    }
+
+        for (unsigned int i=0; i<N; i++) {
+            theta.col(i) = m0 + C0.t() * arma::randn(p);
+        }
+
+    } else {
+        // Identity Link
+        theta = arma::randu(p,N,arma::distr_param(0.,10.)); // Consider it as a flat prior
+    }
+    /*
+    ------ Step 1. Initialization at time t = 0 ------
+    */
+    const double c1 = std::pow(1.-rho,static_cast<double>(L_)*alpha);
+    double c2 = -rho;
+
+    // const double c1_ = std::pow((1.-rho)*(1.-rho),alpha);
+    // const double c2_ = 2.*rho;
+    // const double c3_ = -rho*rho;
+
+    
+    arma::mat R(n+1,3); // quantiles
+    R.row(0) = arma::quantile(theta.row(0),Rcpp::as<arma::vec>(qProb));
+    arma::vec Meff(n,arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(n,arma::fill::zeros);
+
+    for (unsigned int t=0; t<n; t++) {
+        R_CheckUserInterrupt();
+        // theta_next: p x N, with B is the lag of the B-lag fixed-lag smoother
+        // theta: p x N
+        /*
+        ------ Step 2.0 Resample ------
+        Resampling theta[t,i] using the predictive likelihood P(y[t+1] | theta[t,i]).
+        It doesn't have analytical form so we use P(y[t+1] | theta[t+1,i]_hat = gt(theta[t,i]))
+        */
+        theta_next = update_at(p,gain_code,trans_code,theta,Gt,ctanh,alpha,Y.at(t),rho);
+        /*
+        ------ Step 2.1 Propagate ------
+        Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N
+        using state evolution distribution P(theta[t+1,i]|theta[t,i]).
+        ------
+        >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
+        */
+        omega = arma::randn(N) * Wsqrt;
+        if (trans_code != 1) {
+            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: 1 x N
+        }
+
+        
+        
+        switch (trans_code) {
+            case 0: // Koyck
+            {
+                theta.row(0) = theta.row(0) + omega.t();
+                theta.row(1) = Y.at(t)*hpsi.row(0) + rho*theta.row(1);
+            }
+            break;
+            case 1: // Koyama
+            {
+                for (unsigned int i=0; i<N; i++) {
+                    theta.col(i) = Gt * theta.col(i);
+                }
+                theta.row(0) += omega.t();
+            }
+            break;
+            case 2: // Solow - Checked. Correct.
+            {
+                // DLM Form
+                theta.row(0) = theta.row(0) + omega.t();
+                c2 = -rho;
+                theta.row(1) = c1*Y.at(t)*hpsi.row(0) - binom(L_,1)*c2*theta.row(1);
+                for (unsigned int k=2; k<p; k++) {
+                    c2 *= -rho;
+                    theta.row(1) -= binom(L_,k)*c2*theta.row(k);
+                    theta.row(k) = theta.row(k-1);
+                }
+
+                // arma::rowvec theta_r1 = c1_*Y.at(t)*hpsi.row(0) + c2_*theta_stored.slice(B-1).row(1) + c3_*theta_stored.slice(B-1).row(2);
+
+
+                // if (t<5) {
+                //     Rcout << "theta.row(1) = " << theta.submat(1,0,1,5);
+                //     Rcout << " vs " << theta_r1.head(5) << std::endl;
+                // }
+                
+            }
+            break;
+            case 3: // Vanilla
+            {
+                ::Rf_error("VanillaPois undefined.");
+            }
+            break;
+            default:
+            {
+                ::Rf_error("Unknown type of model.");
+            }
+        }
+
+
+        if (debug) {
+            Rcout << "quantiles for hpsi[" << t+1 << "]" << arma::quantile(theta.row(1),Rcpp::as<arma::vec>(qProb));
+        }
+        /*
+        ------ Step 2.1 Propagate ------
+        */
+        
+        
+
+        /*
+        ------ Step 2.2 Importance weights ------
+        Calculate the importance weight of lambda[t-L:t,i] for i=0,1,...,N, where i is the index of particles
+        using likelihood P(y[t]|lambda[t,i]).
+        ------
+        >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
+        */
+        if (link_code==1) {
+            // Exponential link and identity gain
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+            }
+            lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
+            lambda = arma::exp(lambda);
+        } else if (trans_code==1){ // Koyama
+            Fy.zeros();
+            tmpi = std::min(t,p);
+            if (t>0) {
+                // Checked Fy - CORRECT
+                Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
+            }
+
+            Ft = Fphi % Fy; // L(p) x 1
+            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
+            for (unsigned int i=0; i<N; i++) {
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
+            }
+        } else {
+            // Koyck or Solow with identity link and different gain functions
+            lambda = mu0 + theta.row(1).t();
+        }
+
+        if (debug) {
+            Rcout << "Quantiles of lambda[" << t+1 << "]: " << arma::quantile(lambda.t(),Rcpp::as<arma::vec>(qProb));
+        }
+
+        for (unsigned int i=0; i<N; i++) {
+            w.at(i) = loglike_obs(Y.at(t),lambda.at(i),obs_code,delta_nb,false);
+        } // End for loop of i, index of the particles
+
+
+        if (debug) {
+            Rcout << "Quantiles of importance weight w[" << t+1 << "]: " << arma::quantile(w.t(),Rcpp::as<arma::vec>(qProb));
+        }
+        /*
+        ------ Step 2.2 Importance weights ------
+        */
+
+        /*
+        ------ Step 3 Resampling with Replacement ------
+        */
+        if (arma::accu(w)>EPS) { // normalize the particle weights
+            w /= arma::accu(w);
+            Meff.at(t) = 1./arma::dot(w,w);
+            try{
+                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+                idx = Rcpp::as<arma::uvec>(idx_) - 1;
+                theta = theta.cols(idx);
+                resample_status.at(t) = 1;
+            } catch(...) {
+                // If resampling doesn't work, then just don't resample
+                resample_status.at(t) = 0;
+            }
+        } else {
+            resample_status.at(t) = 0;
+            Meff.at(t) = 0.;
+        }
+
+        if (debug && resample_status.at(t) == 0) {
+            Rcout << "Resampling skipped at time t=" << t << std::endl;
+            // ::Rf_error("Probabilities must be finite and non-negative!");
+        }
+        
+        
+        /*
+        ------ Step  Resampling with Replacement ------
+        */
+        R.row(t+1) = arma::quantile(theta.row(0),Rcpp::as<arma::vec>(qProb));
+    }
+
+    /*
+    ------ R: an n x 3 matrix ------
+        - The first B-2 rows (indices from 0 to B-1) of R are all zeros
+        - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
+        - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
+    */
+    Rcpp::List output;
+    output["psi"] = Rcpp::wrap(R); // (n+1) x 3
+
+    if (debug) {
+        output["Meff"] = Rcpp::wrap(Meff);
+        output["resample_status"] = Rcpp::wrap(resample_status);
+    }
+    
+
+    return output;
+}
+
 
 
 

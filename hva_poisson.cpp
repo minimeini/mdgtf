@@ -16,7 +16,7 @@ void eta2tilde(
     
     for (unsigned int i=0; i<m; i++) {
         switch(idx_select.at(i)) {
-            case 0: // W - Wtilde = -log(W)
+            case 0: // W   - Wtilde = -log(W)
             {
                 eta_tilde.at(i) = -std::log(eta.at(idx_select.at(i)));
             }
@@ -26,9 +26,9 @@ void eta2tilde(
                 eta_tilde.at(i) = std::log(eta.at(idx_select.at(i)));
             }
             break;
-            case 2: // rho - undefined
+            case 2: // rho - rho_tilde = log(rho/(1.-rho))
             {
-                eta_tilde.at(i) = eta.at(idx_select.at(i));
+                eta_tilde.at(i) = std::log(eta.at(idx_select.at(i))) - std::log(1.-eta.at(idx_select.at(i)));
             }
             break;
             case 3: // M - undefined
@@ -64,9 +64,9 @@ void tilde2eta(
                 eta.at(idx_select.at(i)) = std::exp(eta_tilde.at(i));
             }
             break;
-            case 2: // rho - undefined
+            case 2: // rho = exp(rho_tilde) / (1 + exp(rho_tilde))
             {
-                eta.at(idx_select.at(i)) = eta_tilde.at(i);
+                eta.at(idx_select.at(i)) = std::exp(eta_tilde.at(i)) / (1. + std::exp(eta_tilde.at(i)));
             }
             break;
             case 3: // M - undefined
@@ -93,7 +93,7 @@ is the evolution variance that affects
 Therefore, this function remains unchanged as long as we using the same evolution equation for psi.
 */
 double dlogJoint_dWtilde(
-    const arma::vec& theta, // (n+1) x 1, (theta[0],theta[1],...,theta[n])
+    const arma::vec& psi, // (n+1) x 1, (psi[0],psi[1],...,psi[n])
     const double G, // evolution transition matrix
     const double W, // evolution variance conditional on V
     const double aw,
@@ -103,11 +103,11 @@ double dlogJoint_dWtilde(
     Wtilde = -log(W)
     */
     
-    const double n = static_cast<double>(theta.n_elem) - 1;
-    const unsigned int ni = theta.n_elem - 1;
+    const double n = static_cast<double>(psi.n_elem) - 1;
+    const unsigned int ni = psi.n_elem - 1;
     double res = 0.;
     for (unsigned int t=0; t<ni; t++) {
-        res += (theta.at(t+1)-G*theta.at(t)) * (theta.at(t+1)-G*theta.at(t));
+        res += (psi.at(t+1)-G*psi.at(t)) * (psi.at(t+1)-G*psi.at(t));
     }
 
     double deriv;
@@ -148,7 +148,7 @@ mu0 > 0 has a Gamma prior:
     mu[0] ~ Gamma(amu,bmu)
 */
 double dlogJoint_dlogmu0(
-    const arma::vec& Y, // n x 1
+    const arma::vec& ypad, // (n+1) x 1
     const arma::vec& theta, // (n+1) x 1, (theta[0],theta[1],...,theta[n])
     const double mu0, // a realization of mu[0]
     const double amu, // shape parameter of the Gamma prior for mu[0]
@@ -159,14 +159,14 @@ double dlogJoint_dlogmu0(
     Wtilde = -log(W)
     */
     
-    const unsigned int n = Y.n_elem;
+    const unsigned int n = ypad.n_elem - 1;
     double res = 0.;
     double lambda;
-    for (unsigned int t=0; t<n; t++) {
-        lambda = mu0 + theta.at(t+1);
-        res += Y.at(t) / lambda;
+    for (unsigned int t=1; t<=n; t++) {
+        lambda = mu0 + theta.at(t);
+        res += ypad.at(t) / lambda;
         if (obs_code == 0) { // negative binomial
-            res -= (Y.at(t)+delta_nb)/(lambda+delta_nb);
+            res -= (ypad.at(t)+delta_nb)/(lambda+delta_nb);
         } else if (obs_code == 1) {
             res -= 1.;
         } else {
@@ -181,33 +181,79 @@ double dlogJoint_dlogmu0(
 
 
 
+double dlogJoint_drho(
+    const arma::vec& ypad, // (n+1) x 1
+    const arma::mat& R, // (n+1) x 2, (psi,theta)
+    const unsigned int L,
+    const double mu0,
+    const double rho,
+    const double delta_nb,
+    const unsigned int gain_code,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+
+    const unsigned int n = ypad.n_elem - 1;
+    const double L_ = static_cast<double>(L);
+
+    arma::vec hpsi = psi2hpsi(R.col(0),gain_code,coef); // (n+1) x 1
+    arma::vec lambda = mu0 + R.col(1); // (n+1) x 1
+
+    unsigned int r;
+    double c1 = 0.;
+    double c2 = 0.;
+    double c20 = 0.;
+    double c21 = 0.;
+    double c10 = 0.;
+
+    for (unsigned int t=1; t<=n; t++) {
+        c10 = ypad.at(t)/lambda.at(t) - (ypad.at(t)+delta_nb)/(lambda.at(t)+delta_nb);
+        c1 += c10*hpsi.at(t-1)*ypad.at(t-1);
+
+        r = std::min(t,L);
+        c20 = 0.;
+        c21 = -rho;
+        for (unsigned int k=1; k<=r; k++) {
+            c20 += static_cast<double>(k)*binom(L,k)*c21*R.at(t-k,1);
+            c21 *= -rho;
+        }
+        c2 += c10*c20;
+    }
+
+    double deriv = -L_*std::pow(1.-rho,L_)*rho*c1 - (1.-rho)*c2 + 1.-2*rho;
+    return deriv;
+}
+
+
+
 // eta_tilde = (Wtilde,logmu0)
 arma::vec dlogJoint_deta(
-    const arma::vec& y, // n x 1
-    const arma::vec& psi, // (n+1) x 1
+    const arma::vec& ypad, // (n+1) x 1
+    const arma::mat& R, // (n+1) x 2, // (psi,theta)
     const arma::vec& eta, // 4 x 1
     const arma::uvec& idx_select, // m x 1
     const arma::uvec& eta_prior_type, // 4 x 1
     const arma::mat& eta_prior_val, // 2 x 4
     const unsigned int m,
+    const unsigned int L,
     const double delta_nb = 1.,
-    const unsigned int obs_code = 0) { // 0 - NegBinom; 1 - Poisson
+    const unsigned int obs_code = 0, // 0 - NegBinom; 1 - Poisson
+    const unsigned int gain_code = 0,
+    const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
     arma::vec deriv(m);
     for (unsigned int i=0; i<m; i++) {
         switch(idx_select.at(i)) {
             case 0: // Wtilde = -log(W)
             {
-                deriv.at(i) = dlogJoint_dWtilde(psi,1.,eta.at(0),eta_prior_val.at(0,0),eta_prior_val.at(1,0),eta_prior_type.at(0));
+                deriv.at(i) = dlogJoint_dWtilde(R.col(0),1.,eta.at(0),eta_prior_val.at(0,0),eta_prior_val.at(1,0),eta_prior_type.at(0));
             }
             break;
             case 1: // logmu0 = log(mu0)
             {
-                deriv.at(i) = dlogJoint_dlogmu0(y,psi,eta.at(1),eta_prior_val.at(0,1),eta_prior_val.at(1,1),delta_nb,obs_code);
+                deriv.at(i) = dlogJoint_dlogmu0(ypad,R.col(1),eta.at(1),eta_prior_val.at(0,1),eta_prior_val.at(1,1),delta_nb,obs_code);
             }
             break;
-            case 2: // rho - undefined
+            case 2: // rho_tilde = log(rho/(1-rho))
             {
-                ::Rf_error("dlogJoint_deta - Derivative wrt rho undefined.");
+                deriv.at(i) = dlogJoint_drho(ypad,R,L,eta.at(1),eta.at(2),delta_nb,gain_code,coef);
             }
             break;
             case 3: // M - undefined
@@ -347,7 +393,7 @@ Rcpp::List hva_poisson(
 
 
     /* ------ Define Local Parameters ------ */
-    arma::vec psi(n+1,arma::fill::zeros);
+    arma::mat R(n+1,2,arma::fill::zeros); // (psi,theta)
     /* ------ Define Local Parameters ------ */
     
     /* ------ Define Global Parameters ------ */
@@ -458,6 +504,7 @@ Rcpp::List hva_poisson(
     arma::mat psi_stored(n+1,nsample);
     arma::vec W_stored(nsample);
     arma::vec mu0_stored(nsample);
+    arma::vec rho_stored(nsample);
 
     arma::mat Meff(n,nsample);
     arma::mat resample_status(n,nsample);
@@ -477,12 +524,16 @@ Rcpp::List hva_poisson(
             - eta = (W,mu0,rho,M)
         */
         ctanh_[2] = eta.at(3);
-        if (s==0 && !psi_init.isNull()) {
-            psi = Rcpp::as<arma::vec>(psi_init);
+        if (s==0 && !psi_init.isNull()) { // Initialization
+            R.col(0) = Rcpp::as<arma::vec>(psi_init); // psi
+            R.col(1) = psi2hpsi(R.col(0),gain_code,ctanh_); // hpsi
+            R.submat(1,1,n,1) = hpsi2theta(R.col(1),Y,trans_code,0.,alpha,L_,eta.at(2)); // theta
+            R.at(0,1) = 0.;
+
         // } else if (sampler_type==0) {
         //     psi = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,eta.at(0),ctanh_,alpha,L,eta.at(2),delta,eta.at(1),scale_sd,rtheta_type,delta_nb,obs_type);
         } else {
-            mcs_poisson(psi,Y,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
+            mcs_poisson(R,Y,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
             // Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type,verbose,debug);
             // arma::mat psi_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
             // psi = psi_mat.col(1);
@@ -500,7 +551,7 @@ Rcpp::List hva_poisson(
         // if (is_vanilla) {
         //     delta_logJoint = dlogJoint_deta(Y,psi,eta.at(2),eta.at(0),aw,bw,prior_type); // 1 x 1
         // } else {
-        delta_logJoint = dlogJoint_deta(Y,psi,eta,idx_select,eta_prior_type,eta_prior_val,m,delta_nb,obs_code); // m x 1
+        delta_logJoint = dlogJoint_deta(ypad,R,eta,idx_select,eta_prior_type,eta_prior_val,m,L,delta_nb,obs_code,gain_code,ctanh_); // m x 1
         // }
 
         if (!std::isfinite(delta_logJoint.at(0))) {
@@ -616,9 +667,10 @@ Rcpp::List hva_poisson(
 			// mu_stored.col(s) = mu;
             // d_stored.col(s) = d;
             // gamma_stored.col(s) = gamma;
-            psi_stored.col(idx_run) = psi;
+            psi_stored.col(idx_run) = R.col(0);
             W_stored.at(idx_run) = eta.at(0);
             mu0_stored.at(idx_run) = eta.at(1);
+            rho_stored.at(idx_run) = eta.at(2);
             // theta_last.col(idx_run) = theta;
 		}
 
@@ -641,8 +693,19 @@ Rcpp::List hva_poisson(
     } else {
         output["psi"] = Rcpp::wrap(psi_stored); // (n+1) x niter
     }
-    output["W"] = Rcpp::wrap(W_stored); // niter
-    output["mu0"] = Rcpp::wrap(mu0_stored); // niter
+
+    if (eta_select.at(0)==1) {
+        output["W"] = Rcpp::wrap(W_stored); // niter
+    }
+    if (eta_select.at(1)==1) {
+        output["mu0"] = Rcpp::wrap(mu0_stored); // niter
+    }
+    if (eta_select.at(2)==1) {
+        output["rho"] = Rcpp::wrap(rho_stored); // niter
+    }
+    
+    
+    
     // output["theta_last"] = Rcpp::wrap(theta_last); // p x niter
 
     // if (debug) {

@@ -19,27 +19,31 @@ using namespace Rcpp;
 /*
 a[t] = gt(m[t-1])
 */
-arma::vec update_at(
+arma::mat update_at(
 	const unsigned int p,
 	const unsigned int gain_code,
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
+	const arma::mat& mt, // p x N, mt = (psi[t], theta[t], theta[t-1])
 	const arma::mat& Gt, // p x p
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
 	const double y = NA_REAL,  // n x 1
 	const double rho = NA_REAL) {
 	
-	arma::vec at(p,arma::fill::zeros);
-	double hpsi = psi2hpsi(mt.at(0),gain_code,ctanh);
+	const unsigned int N = mt.n_cols;
+	arma::mat at(p,N,arma::fill::zeros);
+	arma::rowvec hpsi;
+	if (trans_code != 1) {
+		hpsi = psi2hpsi(mt.row(0),gain_code,ctanh);
+	}
 	unsigned int r = p - 1;
 
 	switch (trans_code) {
 		case 0: // Koyck
 		{
-            at.at(0) = mt.at(0); // psi[t]
-			at.at(1) = y * hpsi;
-			at.at(1) += rho*mt.at(1);
+            at.row(0) = mt.row(0); // psi[t]
+			at.row(1) = y * hpsi;
+			at.row(1) += rho*mt.row(1);
 		}
 		break;
 		case 1: // Koyama
@@ -51,12 +55,12 @@ arma::vec update_at(
 		{
 			double coef1 = std::pow(1.-rho,r*alpha);
 			double coef2 = -rho;
-            at.at(0) = mt.at(0); // psi[t]
-			at.at(1) = coef1*y*hpsi - binom(r,1)*coef2*mt.at(1);
+            at.row(0) = mt.row(0); // psi[t]
+			at.row(1) = coef1*y*hpsi - binom(r,1)*coef2*mt.row(1);
 			for (unsigned int k=2; k<p; k++) {
 				coef2 *= -rho;
-				at.at(1) -= binom(r,k)*coef2*mt.at(k);
-				at.at(k) = mt.at(k-1);
+				at.row(1) -= binom(r,k)*coef2*mt.row(k);
+				at.row(k) = mt.row(k-1);
 			}
 
 			// double coef1 = std::pow((1.-rho)*(1.-rho),alpha);

@@ -31,11 +31,11 @@
 
 
 
-arma::vec update_at(
+arma::mat update_at(
 	const unsigned int p,
 	const unsigned int gain_code,
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-	const arma::vec& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
+	const arma::mat& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
 	const arma::mat& Gt, // p x p
 	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
