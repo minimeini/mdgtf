@@ -320,10 +320,10 @@ Rcpp::List mcmc_disturbance_pois(
 
 		// [OK] Update state/evolution error variance
 		if (eta_select.at(0)==1) {
+			double res = arma::accu(arma::pow(wt.tail(n-1),2.));
 			switch (eta_prior_type.at(0)) {
 				case 0: // Gamma(aw=shape, bw=rate)
 				{
-					double res = arma::accu(arma::pow(wt.tail(n-1),2.));
 					logp_old = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W) - eta_prior_val.at(1,0)*W - 0.5*res/W;
 
 					W_new = std::exp(std::min(R::rnorm(std::log(W),MH_sd[1]),UPBND));
@@ -344,7 +344,7 @@ Rcpp::List mcmc_disturbance_pois(
 				break;
 				case 2: // Inverse-Gamma(nw=shape, nSw=rate)
 				{
-					nSw_new = nSw + arma::accu(arma::pow(wt.tail(n-1),2.));
+					nSw_new = nSw + res;
 					W = 1./R::rgamma(0.5*nw_new,2./nSw_new);
 				}
 				break;

@@ -122,7 +122,8 @@ sim_pois_dglm2 = function(
     # theta[2] = (2*rho)^alpha2*theta0
     theta[2] = -binom(L,1)*(-rho)^1*theta[1]
   } else {
-    theta[2] = e_sim$EPS
+    # theta[2] = e_sim$EPS
+    theta[2] = theta0
   }
   # ------ Transfer ------ #
   

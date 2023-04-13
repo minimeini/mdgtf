@@ -533,15 +533,8 @@ Rcpp::List hva_poisson(
         // } else if (sampler_type==0) {
         //     psi = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,eta.at(0),ctanh_,alpha,L,eta.at(2),delta,eta.at(1),scale_sd,rtheta_type,delta_nb,obs_type);
         } else {
-            mcs_poisson(R,Y,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
-            // Rcpp::List mcs_output = mcs_poisson(Y,ModelCode,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,R_NilValue,ctanh_,delta_nb,obs_type,verbose,debug);
-            // arma::mat psi_mat = Rcpp::as<arma::mat>(mcs_output["quantiles"]);
-            // psi = psi_mat.col(1);
-            // theta = arma::median(Rcpp::as<arma::mat>(mcs_output["theta_last"]),1);
-            // if (debug) {
-            //     Meff.col(s) = Rcpp::as<arma::vec>(mcs_output["Meff"]);
-            //     resample_status.col(s) = Rcpp::as<arma::vec>(mcs_output["resample_status"]);
-            // }
+            // mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
+            mcs_poisson(R,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,0.95);
         }
 
 

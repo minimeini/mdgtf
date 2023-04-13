@@ -204,7 +204,7 @@ test_model_real = function(y,opts,
                            delta_nb=opts$delta_nb,
                            m0_prior=opts$m0,C0_prior=opts$C0,N=mcsN)
     psi_list = c(psi_list,list(mcs_out1$psi))
-    psi_name = c(psi_name,"MCS")
+    psi_name = c(psi_name,"SMC")
   }
   
   

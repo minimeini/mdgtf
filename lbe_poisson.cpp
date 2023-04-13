@@ -63,6 +63,8 @@ arma::mat update_at(
 				at.row(k) = mt.row(k-1);
 			}
 
+			// at.elem(arma::find(at<EPS)).fill(EPS);
+
 			// double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
             // at.at(0) = mt.at(0); // psi[t]
 			// at.at(1) = coef1*y*hpsi;
@@ -120,9 +122,11 @@ void update_Rt(
 	const double W = NA_REAL, // known evolution error of psi
 	const double delta = NA_REAL) { // discount factor
 
+	const unsigned int p = Rt.n_cols;
 	Rt = Gt * Ct * Gt.t();
 	if (use_discount) {
-		Rt.for_each( [&delta](arma::mat::elem_type& val) { val /= delta; } );
+		// We should not use component discounting because Gt is not block-diagonal.
+		Rt /= delta; // single discount factor
 	} else {
 		Rt.at(0,0) += W;
 	}

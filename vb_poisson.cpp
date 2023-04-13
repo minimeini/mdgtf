@@ -154,15 +154,6 @@ Rcpp::List vb_poisson(
 
         // TODO: check this part
         if (eta_select.at(0)==1) {
-            // Exx = arma::accu(Ht.tail(n) + ht.tail(n)%ht.tail(n));
-            // Eyy = arma::accu(Ht.head(n) + ht.head(n)%ht.head(n));
-            // Exy1 = arma::accu(Ht.head(n) + ht.tail(n)%ht.head(n));
-            // Exy2 = arma::accu(Ht.tail(n) + ht.tail(n)%ht.head(n));
-            // Exx = arma::accu(ht.tail(n)%ht.tail(n));
-            // Eyy = arma::accu(ht.head(n)%ht.head(n));
-            // Exy1 = arma::accu(ht.tail(n)%ht.head(n));
-            // Exy2 = arma::accu(ht.tail(n)%ht.head(n));
-            // tmp = Exx - Exy1 - Exy2 + Eyy;
             switch (eta_prior_type.at(0)) {
                 case 0: // Gamma
                 {
@@ -173,6 +164,8 @@ Rcpp::List vb_poisson(
                         ::Rf_error("Infinite a3.");
                     }
                     coef_W wcoef[1] = {{a1,a2,a3}};
+
+                    // aw, bw are sufficient statistics
                     aw = optimize_postW_gamma(wcoef[0]); // optimal Wtilde=log(W)
                     bw = postW_deriv2(aw,a2,a3);
                     W = std::exp(std::min(aw,UPBND));

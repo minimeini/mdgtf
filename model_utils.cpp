@@ -519,6 +519,8 @@ double optimize_trigamma(double q) {
 	double lb[1] = {0}; // lower bound
 	nlopt_set_lower_bounds(opt,lb);
 	nlopt_set_xtol_rel(opt,1e-4);
+	nlopt_set_maxeval(opt, 50);
+	nlopt_set_maxtime(opt, 5.);
 	nlopt_set_min_objective(opt,trigamma_obj,(void *) &q);
 
 	double x[1] = {1e-6};
@@ -595,6 +597,8 @@ double optimize_postW_gamma(coef_W& coef) {
 	nlopt_set_lower_bounds(opt,lb);
 	nlopt_set_upper_bounds(opt,ub);
 	nlopt_set_xtol_rel(opt,1e-4);
+	nlopt_set_maxeval(opt, 50);
+	nlopt_set_maxtime(opt, 5.);
 	nlopt_set_min_objective(opt,postW_gamma_obj,(void *) &coef);
 
 	double x[1] = {1e-6};

@@ -23,53 +23,6 @@
 
 
 /*
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: W, theta[0:n], beta[0:n]
-*/
-Rcpp::List pl_pois_solow_eye_exp(
-    const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-    const double rho,
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior, // (aw, Rw), W ~ IG(aw/2, Rw/2), prior for v[1], the first state/evolution/state error/disturbance.
-	const double Q_init,
-	const double Q_true, // true value of state/evolution error variance
-	const unsigned int N);
-
-/*
----- Method ----
-- Particle learning with rho known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: theta[0:n], beta[0:n]
-Kwg: Identity link, exponential state space
-*/
-Rcpp::List pl_pois_solow_eye_exp2(
-    const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-    const double rho,
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior, // (aw, Rw), W ~ IG(aw/2, Rw/2), prior for v[1], the first state/evolution/state error/disturbance.
-	const double Q_init,
-    const double Q_true,
-	const unsigned int N, // number of particles
-    const unsigned int B,
-    const bool resample);
-
-
-
-/*
 ---- Method ----
 - Monte Carlo Smoothing with static parameter W known
 - B-lag fixed-lag smoother (Anderson and Moore 1979)
@@ -115,6 +68,52 @@ Rcpp::List mcs_poisson(
     const Rcpp::NumericVector& qProb,
     const Rcpp::NumericVector& ctanh,
     const double delta_nb,
+    const double delta_discount,
+    const bool resample,
+    const bool verbose,
+    const bool debug);
+
+
+
+
+void bf_poisson(
+    arma::cube& theta_stored, // p x N x (n+1)
+    arma::vec& w_stored, // (n+1) x 1
+    arma::mat& Gt,
+    const arma::vec& ypad, // (n+1) x 1, the observed response
+    const arma::uvec& model_code,
+	const double W,
+    const double mu0,
+    const double rho,
+    const double alpha,
+    const unsigned int p, // dimension of DLM state space
+    const unsigned int L, // number of lags
+	const unsigned int N, // number of particles
+    const arma::vec& Ft0,
+    const arma::vec& Fphi,
+    const Rcpp::NumericVector& ctanh,
+    const double delta_nb);
+
+
+
+Rcpp::List pmmh_poisson(
+    const arma::vec& Y, // n x 1, the observed response
+    const arma::uvec& model_code,
+	const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
+    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
+    const arma::uvec& eta_prior_type, // 4 x 1
+    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
+    const double alpha,
+    const unsigned int L, // number of lags
+	const unsigned int N, // number of particles
+    const unsigned int nsample,
+    const unsigned int nburnin,
+    const unsigned int nthin,
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const Rcpp::NumericVector& qProb,
+    const double MH_sd,
+    const double delta_nb,
     const bool verbose,
     const bool debug);
 
@@ -122,7 +121,7 @@ Rcpp::List mcs_poisson(
 
 void mcs_poisson(
     arma::mat& R, // (n+1) x 2, (psi,theta)
-    const arma::vec& Y, // n x 1, the observed response
+    const arma::vec& ypad, // (n+1) x 1, the observed response
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,
     const double rho,
@@ -134,77 +133,34 @@ void mcs_poisson(
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
     const Rcpp::NumericVector& ctanh,
-    const double delta_nb);
+    const double delta_nb,
+    const double delta_discount);
 
 
 
-arma::mat mcs_poisson2(
+
+/*
+Particle Learning
+- Reference: Carvalho et al., 2010.
+
+- eta = (W, mu[0], rho, M)
+*/
+Rcpp::List pl_poisson(
     const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
-	const double W,
-    const double rho,
+    const arma::uvec& model_code,
+    const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
+    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
+    const arma::uvec& eta_prior_type, // 4 x 1
+    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
     const double alpha,
     const unsigned int L, // number of lags
-    const double mu0,
-    const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-    const Rcpp::NumericVector& ctanh,
-    const double delta_nb);
+    const Rcpp::NumericVector& qProb,
+    const double delta_nb,
+    const bool verbose,
+    const bool debug);
 
 
-
-/*
----- Method ----
-- Auxiliary Particle filtering with all static parameters (rho,W) known
-- Using the DLM formulation
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*exp(beta[t-1])
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: theta[0:n], beta[0:n]
-Kwg: Identity link, exponential state space
-*/
-Rcpp::List apf_pois_solow_eye_exp(
-    const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-    const double rho,
-	const double Q,
-	const unsigned int N, // number of particles
-    const unsigned int B);
-
-
-/*
----- Method ----
-- Storvik's Filtering with rho known
-- Using the DLM formulation
-- Storvik's Filter can be viewed as an extension of 
-  bootstrap filter with inference of static parameter W
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = theta[t]
-<state> theta[t] = 2*rho*theta[t-1] - rho^2*theta[t-2] + (1-rho)^2*x[t-1]*max(beta[t-1],0)
-        beta[t] = beta[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: theta[0:n], beta[0:n], W
-Kwg: Identity link, max(beta,0) state space
-*/
-Rcpp::List sf_pois_solow_eye_max(
-    const arma::vec& Y, // n x 1, the observed response
-	const arma::vec& X, // n x 1, the exogeneous variable in the transfer function
-    const double rho,
-	const Rcpp::Nullable<Rcpp::NumericVector>& QPrior, // (aw, Rw), W ~ IG(aw/2, Rw/2), prior for v[1], the first state/evolution/state error/disturbance.
-	const double Q_init,
-    const double Q_true,
-	const unsigned int N, // number of particles
-    const unsigned int B);
-
-
-#endif
+    #endif

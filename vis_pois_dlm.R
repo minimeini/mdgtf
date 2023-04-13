@@ -30,8 +30,14 @@ plot_psi = function(sim_dat=NULL,
                     ytrue=NULL,
                     plot_hpsi=FALSE, # if FALSE, plot psi by default
                     plot_lambda=FALSE) {
-  mlist = c("EpiEstim","WT","Koyama2021","MCS","LBE","HVB","MCMC","True","VB")
-  clist = c("seagreen","orange","burlywood4","royalblue","maroon","purple","cyan","black","salmon")
+  mlist = c("EpiEstim","WT","Koyama2021",
+            "SMC","LBE","HVB","MCMC",
+            "True","VB","PL",
+            "MCS","PS","APF","BF")
+  clist = c("seagreen","orange","burlywood4",
+            "royalblue","maroon","purple","darkturquoise",
+            "black","salmon","mediumspringgreen",
+            "cornflowerblue","khaki","mediumaquamarine","sandybrown")
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
     y = sim_dat$y
@@ -58,7 +64,7 @@ plot_psi = function(sim_dat=NULL,
   nl = length(psi_list)
   n = max(c(unlist(lapply(psi_list,function(psi){dim(psi)[1]})),length(y)))
   
-  nl2 = sum(names(psi_list)%in%c("LBE","MCS","HVB","MCMC"))
+  nl2 = sum(names(psi_list)%in%c("LBE","SMC","HVB","MCMC","MCS","PS","APF","BF"))
   if (!is.null(sim_dat) & "lambda" %in% names(sim_dat)) {nl2 = nl2 + 1}
   lambda_list = vector(mode="list",length=nl2)
   
@@ -71,13 +77,13 @@ plot_psi = function(sim_dat=NULL,
   cnt = 1
 
   for (i in 1:nl) {
-    if (plot_hpsi & names(psi_list)[i]%in%c("LBE","MCS","HVB","MCMC","VB","True")) {
+    if (plot_hpsi & names(psi_list)[i]%in%c("LBE","SMC","HVB","MCMC","VB","True","PL","MCS","PS","APF","BF")) {
       psi_list[[i]] = psi2hpsi(psi_list[[i]],
                                GainCode,
                                coef=opts$ctanh)
     }
     
-    if (plot_lambda & names(psi_list)[i]%in%c("LBE","MCS","HVB","MCMC","VB")) {
+    if (plot_lambda & names(psi_list)[i]%in%c("LBE","SMC","HVB","MCMC","VB","PL","MCS","PS","APF","BF")) {
       lambda_list[[cnt]] = hpsi2theta(psi_list[[i]],y,
                                       TransferCode,
                                       opts$theta0,
@@ -91,7 +97,7 @@ plot_psi = function(sim_dat=NULL,
     PsiMethod = c(PsiMethod,rep(names(psi_list)[i],dim(psi_list[[i]])[1]))
     colnames(psi_list[[i]]) = c("lobnd","est","hibnd","time")
     
-    if (plot_lambda & names(psi_list)[i]%in%c("LBE","MCS","HVB","MCMC","VB")) {
+    if (plot_lambda & names(psi_list)[i]%in%c("LBE","SMC","HVB","MCMC","VB","PL","MCS","PS","APF","BF")) {
       lambda_list[[cnt]] = cbind(lambda_list[[cnt]],
                                  (n-dim(lambda_list[[cnt]])[1]+1) : n)
       lambdaMethod = c(lambdaMethod,rep(names(psi_list)[cnt],dim(lambda_list[[cnt]])[1]))
@@ -165,7 +171,7 @@ plot_psi = function(sim_dat=NULL,
 
 
 plot_eta = function(vname,eta_list,opts=NULL) {
-  mlist = c("EpiEstim","WT","Koyama2021","MCS","LBE","HVB","MCMC","True","VB")
+  mlist = c("EpiEstim","WT","Koyama2021","SMC","LBE","HVB","MCMC","True","VB")
   clist = c("seagreen","orange","burlywood4","royalblue","maroon","purple","cyan","black","salmon")
   
   if (vname == "W") {
