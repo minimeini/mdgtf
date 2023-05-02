@@ -372,6 +372,7 @@ Rcpp::List hva_poisson(
     const double scale_sd = 1.e-16,
     const double learn_rate = 0.95,
     const double eps_step = 1.e-6,
+    const unsigned int k = 1, // k <= sum(eta_select)
     const unsigned int nsample = 100,
     const unsigned int nburnin = 100,
     const unsigned int nthin = 2,
@@ -399,6 +400,10 @@ Rcpp::List hva_poisson(
     /* ------ Define Global Parameters ------ */
     arma::vec eta = eta_init; // eta = (W>0,mu0>0,rho in (0,1),M>0)
     const unsigned int m = arma::accu(eta_select);
+    if (k > m) {
+        ::Rf_error("k cannot be greater than m, total number of unknowns.");
+    }
+
     arma::uvec idx_select = arma::find(eta_select == 1); // m x 1
     arma::vec eta_tilde(m,arma::fill::zeros); // unknown part of eta which is also transformed to the real line
     eta2tilde(eta_tilde,eta,idx_select,m);
@@ -463,18 +468,20 @@ Rcpp::List hva_poisson(
     /*  ------ Define HVB ------ */
     arma::vec tau = gamma2tau(gamma);
     arma::vec mu(m,arma::fill::zeros);
-    arma::mat B(m,m,arma::fill::zeros); // Lower triangular
+    arma::mat B(m,k,arma::fill::zeros); // Lower triangular part is nonzero
     arma::vec d(m,arma::fill::ones);
     
     arma::vec delta_logJoint(m);
     arma::vec delta_logq(m);
     arma::vec delta_diff(m);
+    arma::mat dtheta_dB(m,m*k,arma::fill::zeros);
 
-    arma::vec xi(m);
+    arma::vec xi(k);
     arma::vec eps(m);
 
     arma::vec L_mu(m);
-    arma::mat L_B(m,m);
+    arma::mat L_B(m,k,arma::fill::zeros);
+    arma::vec vecL_B(m*k,arma::fill::zeros);
     arma::vec L_d(m);
     arma::vec L_tau(m);
 
@@ -483,6 +490,12 @@ Rcpp::List hva_poisson(
     arma::vec oldEdelta2_mu(m,arma::fill::zeros);
     arma::vec curEdelta2_mu(m,arma::fill::zeros);
     arma::vec Change_delta_mu(m,arma::fill::zeros);
+
+    arma::vec oldEg2_B(m*k,arma::fill::zeros);
+    arma::vec curEg2_B(m*k,arma::fill::zeros);
+    arma::vec oldEdelta2_B(m*k,arma::fill::zeros);
+    arma::vec curEdelta2_B(m*k,arma::fill::zeros);
+    arma::vec Change_delta_B(m*k,arma::fill::zeros);
 
     arma::vec oldEg2_d(m,arma::fill::zeros);
     arma::vec curEg2_d(m,arma::fill::zeros);
@@ -508,6 +521,7 @@ Rcpp::List hva_poisson(
 
     arma::mat Meff(n,nsample);
     arma::mat resample_status(n,nsample);
+    arma::mat delta_diff_stored(m,nsample);
     // arma::mat theta_last(p,nsample);
     // arma::vec theta(p);
 
@@ -530,10 +544,10 @@ Rcpp::List hva_poisson(
             R.submat(1,1,n,1) = hpsi2theta(R.col(1),Y,trans_code,0.,alpha,L_,eta.at(2)); // theta
             R.at(0,1) = 0.;
 
-        // } else if (sampler_type==0) {
-        //     psi = rtheta_ffbs(mt,at,Ct,Rt,Gt,alphat,betat,Ht,ModelCode,TransferCode,n,p,ypad,eta.at(0),ctanh_,alpha,L,eta.at(2),delta,eta.at(1),scale_sd,rtheta_type,delta_nb,obs_type);
-        } else {
+        } else if (eta_select.at(0)==1){
             // mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
+            mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,0.95);
+        } else {
             mcs_poisson(R,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,0.95);
         }
 
@@ -574,8 +588,13 @@ Rcpp::List hva_poisson(
             ::Rf_error("L_mu is NA.");
         }
 
-        // L_B = arma::reshape(arma::inplace_trans(dYJinv_dB(nu,gamma,xi))*delta_diff,2,2);
-        // L_B.elem(arma::trimatu_ind(arma::size(L_B),1)).zeros();
+        if (m>1) {
+            dtheta_dB = dYJinv_dB(nu,gamma,xi); // m x mk
+            L_B = arma::reshape(dtheta_dB.t()*delta_diff,m,k); // m x k
+            L_B.elem(arma::trimatu_ind(arma::size(L_B),1)).zeros();
+            vecL_B = arma::vectorise(L_B);
+        }
+
         L_d = dYJinv_dD(nu,gamma,eps)*delta_diff;
         if (!std::isfinite(L_d.at(0))) {
             Rcout << "iter=" << s+1 << std::endl;
@@ -603,6 +622,19 @@ Rcpp::List hva_poisson(
         Change_delta_mu = arma::sqrt(oldEdelta2_mu + eps_step)/arma::sqrt(curEg2_mu + eps_step) % L_mu;
         mu = mu + Change_delta_mu;
         curEdelta2_mu = learn_rate*oldEdelta2_mu + (1.-learn_rate)*arma::pow(Change_delta_mu,2.);
+
+
+        // B
+        if (m>1) {
+            oldEg2_B = curEg2_B; // mk x 1
+            oldEdelta2_B = curEdelta2_B; // mk x 1
+
+            curEg2_B = learn_rate*oldEg2_B + (1.-learn_rate)*arma::pow(vecL_B,2.);
+            Change_delta_B = arma::sqrt(oldEdelta2_B + eps_step) / arma::sqrt(curEg2_B + eps_step) % vecL_B; // mk x 1
+
+            B = B + arma::reshape(Change_delta_B,m,k);
+            curEdelta2_B = learn_rate*oldEdelta2_B + (1.-learn_rate)*arma::pow(Change_delta_B,2.);
+        }
 
 
         // d
@@ -664,6 +696,7 @@ Rcpp::List hva_poisson(
             W_stored.at(idx_run) = eta.at(0);
             mu0_stored.at(idx_run) = eta.at(1);
             rho_stored.at(idx_run) = eta.at(2);
+            delta_diff_stored.col(idx_run) = delta_diff;
             // theta_last.col(idx_run) = theta;
 		}
 
@@ -696,6 +729,8 @@ Rcpp::List hva_poisson(
     if (eta_select.at(2)==1) {
         output["rho"] = Rcpp::wrap(rho_stored); // niter
     }
+
+    output["delta_diff"] = Rcpp::wrap(delta_diff_stored);
     
     
     

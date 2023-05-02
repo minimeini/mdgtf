@@ -4,6 +4,34 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppArmadillo)]]
 
 
+/*
+This script is adapted from Loaiza-Maya's Matlab code.
+Below is a reference regarding notations in this script versus notations in Loaiza-Maya's Matlab code and manuscript.
+
+Core VB function is Loaiza-Maya's code: `VB_step.m` and `gradient_compute.m`
+
+theta
+    - vector includes all unknown parameters to be learned by HVB.
+    - These parameters are already mapped to the real line.
+    - In our code, theta = YJinv(nu) and sometimes refer to as YJinv
+nu or phi
+    - Yeo-Johnson transfrom: theta -> nu, i.e., nu = tYJ(theta)
+    - `nu` is used in Loaiza-Maya's manuscript.
+    - Refer to as `phi` in Loaiza-Maya's Matlab code.
+vech
+    - vectorization of non-zero elements.
+m or q
+    - number of unknown parameters to be learned by HVB.
+    - defined as `m` in Loaiza-Maya's manuscript.
+    - defined as `q` in Loaiza-Maya's Matlab code.
+k or p
+    - reduced dimension of unknown parameters via latent factor structure.
+    - defined as `k` in Loaiza-Maya's manuscript.
+    - defined as `p` in Loaiza-Maya's Matlab code
+
+*/
+
+
 //' @export
 // [[Rcpp::export]]
 arma::vec mat2vech(const arma::mat& lotri) { // m x k
@@ -330,6 +358,9 @@ double dYJinv_dBD(const double nu, const double gamma, const double eps) {
 
 
 
+/*
+Appendix B.2 equation (ii)
+*/
 //' @export
 // [[Rcpp::export]]
 arma::mat dYJinv_dB(
@@ -347,6 +378,9 @@ arma::mat dYJinv_dB(
 } // Status: Checked. OK.
 
 
+/*
+Appendiex B.2 equation (iii)
+*/
 //' @export
 // [[Rcpp::export]]
 arma::mat dYJinv_dD(
@@ -399,7 +433,7 @@ arma::vec dlogq_dtheta(
     arma::mat Dm2 = arma::diagmat(1./arma::pow(d,2.)); // m x m, D^{-2}
     arma::mat Ik(k,k,arma::fill::eye);
     arma::mat tmp = Ik+B.t()*Dm2*B;
-    arma::mat Sigma_inv = Dm2 - Dm2*B*tmp.i()*B.t()*Dm2;
+    arma::mat Sigma_inv = Dm2 - Dm2*B*tmp.i()*B.t()*Dm2; // Woodbury formula
     
     arma::vec deriv = - dnu_dtheta.t()*Sigma_inv*(nu-mu); // m x 1
     arma::vec deriv2 = dlogdYJ_dtheta(theta,gamma); // m x 1
