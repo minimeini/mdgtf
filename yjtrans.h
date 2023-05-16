@@ -80,7 +80,10 @@ given the value of theta and gamma
 
 Ref: `./Derivatives/dtYJ_dtheta.m`
 */
-double dtYJ_dtheta(const double theta, const double gamma);
+double dtYJ_dtheta(
+    const double theta, 
+    const double gamma, 
+    const bool log);
 
 arma::mat dtYJ_dtheta(
     const arma::vec& theta, // m x 1
@@ -159,13 +162,18 @@ arma::vec dYJinv(
 
 
 
+arma::mat get_sigma_inv(
+    const arma::mat& B, // m x k
+    const arma::vec& d,
+    const unsigned int k);
+
+
 arma::vec dlogq_dtheta(
+    const arma::mat& SigInv, // m x m
     const arma::vec& nu, // m x 1
     const arma::vec& theta, // m x 1
     const arma::vec& gamma, // m x 1
-    const arma::vec& mu, // m x 1 
-    const arma::mat& B, // m x k
-    const arma::vec& d);
+    const arma::vec& mu);
 
 
 
@@ -176,6 +184,15 @@ arma::vec rtheta(
     const arma::vec& mu, // m x 1
     const arma::mat& B, // m x k
     const arma::vec& d);
+
+
+double logq0(
+    const arma::vec& nu, // m x 1
+    const arma::vec& eta_tilde, // m x 1
+    const arma::vec& gamma, // m x 1
+    const arma::vec& mu, // m x 1
+    const arma::mat& SigInv, // m x m 
+    const unsigned int m);
 
 
 #endif

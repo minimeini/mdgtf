@@ -44,6 +44,7 @@
 
 1. Follow [R COMPILER TOOLS FOR RCPP ON MACOS](https://thecoatlessprofessor.com/programming/cpp/r-compiler-tools-for-rcpp-on-macos/)
 2. Regarding the `gfortran` part, do NOT follow the first link. Instead, check out [Tools - R for Mac OS X](https://mac.r-project.org/tools/)
+    - Most importantly, please install the mandatory libraries via the [recipes system](https://mac.r-project.org/tools/) so that R can compile source codes.
 
 ## Sanity Check
 

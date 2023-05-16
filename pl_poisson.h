@@ -121,6 +121,7 @@ Rcpp::List pmmh_poisson(
 
 void mcs_poisson(
     arma::mat& R, // (n+1) x 2, (psi,theta)
+    arma::vec& pmarg_y, // n x 1, marginal likelihood of y
     const arma::vec& ypad, // (n+1) x 1, the observed response
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,

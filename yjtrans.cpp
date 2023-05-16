@@ -5,7 +5,7 @@ using namespace Rcpp;
 
 
 /*
-This script is adapted from Loaiza-Maya's Matlab code.
+This script is adapted from Loaiza-Maya's Matlalog_det_sympd code.
 Below is a reference regarding notations in this script versus notations in Loaiza-Maya's Matlab code and manuscript.
 
 Core VB function is Loaiza-Maya's code: `VB_step.m` and `gradient_compute.m`
@@ -13,7 +13,8 @@ Core VB function is Loaiza-Maya's code: `VB_step.m` and `gradient_compute.m`
 theta
     - vector includes all unknown parameters to be learned by HVB.
     - These parameters are already mapped to the real line.
-    - In our code, theta = YJinv(nu) and sometimes refer to as YJinv
+    - In our code, theta = YJinv(nu) and sometimes refer to as `YJinv`
+    - In our code, it is also refer to as `eta_tilde`
 nu or phi
     - Yeo-Johnson transfrom: theta -> nu, i.e., nu = tYJ(theta)
     - `nu` is used in Loaiza-Maya's manuscript.
@@ -192,15 +193,26 @@ given the value of theta and gamma
 
 Ref: `./Derivatives/dtYJ_dtheta.m`
 */
-double dtYJ_dtheta(const double theta, const double gamma) {
+double dtYJ_dtheta(
+    const double theta, 
+    const double gamma, 
+    const bool log = false) {
     double gamma_ = gamma;
     if (std::abs(gamma_)<0.0000001) {
         gamma_ = 0.0000001;
     }
     if (theta<arma::datum::eps) {
-        return std::pow(-theta+1.,1.-gamma_);
+        if (log) {
+            return (1.-gamma_)*std::log(-theta+1.);
+        }  else {
+            return std::pow(-theta+1.,1.-gamma_);
+        }
     } else {
-        return std::pow(theta+1.,gamma_-1.);
+        if (log) {
+            return (gamma_-1.)*std::log(theta+1.);
+        } else {
+            return std::pow(theta+1.,gamma_-1.);
+        }
     }
 } // Status: Checked. OK.
 
@@ -215,7 +227,7 @@ arma::mat dtYJ_dtheta(
     const unsigned int m = theta.n_elem;
     arma::mat grad(m,m,arma::fill::zeros);
     for (unsigned int i=0; i<m; i++) {
-        grad.at(i,i) = dtYJ_dtheta(theta.at(i),gamma.at(i));
+        grad.at(i,i) = dtYJ_dtheta(theta.at(i),gamma.at(i),false);
     }
     return grad;
 } // Status: Checked. OK.
@@ -415,27 +427,32 @@ arma::vec dYJinv(
 
 
 
+arma::mat get_sigma_inv(
+    const arma::mat& B, // m x k
+    const arma::vec& d,
+    const unsigned int k) {
+
+    arma::mat Dm2 = arma::diagmat(1./arma::pow(d,2.)); // m x m, D^{-2}
+    arma::mat Ik(k,k,arma::fill::eye);
+    arma::mat tmp = Ik + B.t()*Dm2*B; // k x k
+    arma::mat SigInv = Dm2 - Dm2*B*tmp.i()*B.t()*Dm2; // Woodbury formula
+    SigInv = arma::symmatu(SigInv); // m x m
+
+    return SigInv;
+}
+
 // Ref: `grad_theta_logq.m`
 //' @export
 // [[Rcpp::export]]
 arma::vec dlogq_dtheta(
+    const arma::mat& SigInv, // m x m
     const arma::vec& nu, // m x 1
     const arma::vec& theta, // m x 1
     const arma::vec& gamma, // m x 1
-    const arma::vec& mu, // m x 1 
-    const arma::mat& B, // m x k
-    const arma::vec& d) { // m x 1
+    const arma::vec& mu) { // m x 1
 
-    const unsigned int k = B.n_cols;
-
-    arma::mat dnu_dtheta = dtYJ_dtheta(theta,gamma); // m x m
-
-    arma::mat Dm2 = arma::diagmat(1./arma::pow(d,2.)); // m x m, D^{-2}
-    arma::mat Ik(k,k,arma::fill::eye);
-    arma::mat tmp = Ik+B.t()*Dm2*B;
-    arma::mat Sigma_inv = Dm2 - Dm2*B*tmp.i()*B.t()*Dm2; // Woodbury formula
-    
-    arma::vec deriv = - dnu_dtheta.t()*Sigma_inv*(nu-mu); // m x 1
+    arma::mat dnu_dtheta = dtYJ_dtheta(theta,gamma); // m x m    
+    arma::vec deriv = - dnu_dtheta.t()*SigInv*(nu-mu); // m x 1
     arma::vec deriv2 = dlogdYJ_dtheta(theta,gamma); // m x 1
     return deriv + deriv2; // m x 1
 } // Status: Checked. OK.
@@ -461,3 +478,24 @@ arma::vec rtheta(
 }
 
 
+/*
+Logarithm of the proposal density
+*/
+double logq0(
+    const arma::vec& nu, // m x 1
+    const arma::vec& eta_tilde, // m x 1
+    const arma::vec& gamma, // m x 1
+    const arma::vec& mu, // m x 1
+    const arma::mat& SigInv, // m x m 
+    const unsigned int m
+) {
+    const double m_ = static_cast<double>(m);
+    double logq = -0.5*m_*std::log(2*arma::datum::pi);
+    logq += 0.5*arma::log_det_sympd(arma::symmatu(SigInv));
+    logq -= 0.5*arma::as_scalar((nu.t()-mu.t())*SigInv*(nu-mu));
+
+    for (unsigned int i=0; i<m; i++) {
+        logq += dtYJ_dtheta(eta_tilde.at(i),gamma.at(i),true);
+    }
+    return logq;
+}

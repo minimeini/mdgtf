@@ -218,42 +218,42 @@ Rcpp::List mcs_poisson(
         ------ Step 1.0 Resample ------
         Auxiliary Particle Filter
         */
-        if (resample) {
-            mt = arma::median(theta_stored.slice(B-1),1);
-            update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-            theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
-            if (link_code==1) {
-                // Exponential link and identity gain
-                for (unsigned int i=0; i<N; i++) {
-                    lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
-                }
-                lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-                lambda = arma::exp(lambda);
-            } else if (trans_code==1){ // Koyama
-                hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-                for (unsigned int i=0; i<N; i++) {
-                    lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-                }
-            } else {
-                // Koyck or Solow with identity link and different gain functions
-                lambda = mu0 + theta.row(1).t();
-            }
+        // if (resample) {
+        //     mt = arma::median(theta_stored.slice(B-1),1);
+        //     update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
+        //     theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
+        //     if (link_code==1) {
+        //         // Exponential link and identity gain
+        //         for (unsigned int i=0; i<N; i++) {
+        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+        //         }
+        //         lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
+        //         lambda = arma::exp(lambda);
+        //     } else if (trans_code==1){ // Koyama
+        //         hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
+        //         for (unsigned int i=0; i<N; i++) {
+        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
+        //         }
+        //     } else {
+        //         // Koyck or Solow with identity link and different gain functions
+        //         lambda = mu0 + theta.row(1).t();
+        //     }
 
-            for (unsigned int i=0; i<N; i++) {
-                w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-            } // End for loop of i, index of the particles
+        //     for (unsigned int i=0; i<N; i++) {
+        //         w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
+        //     } // End for loop of i, index of the particles
 
-            if (arma::accu(w)>EPS) { // normalize the particle weights
-                w /= arma::accu(w);
-                if (1./arma::dot(w,w) > min_eff) {
-                    idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-                    idx = Rcpp::as<arma::uvec>(idx_) - 1;
-                    for (unsigned int b=0; b<B; b++) {
-                        theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-                    }
-                }
-            }
-        }
+        //     if (arma::accu(w)>EPS) { // normalize the particle weights
+        //         w /= arma::accu(w);
+        //         if (1./arma::dot(w,w) > min_eff) {
+        //             idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+        //             idx = Rcpp::as<arma::uvec>(idx_) - 1;
+        //             for (unsigned int b=0; b<B; b++) {
+        //                 theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
+        //             }
+        //         }
+        //     }
+        // }
         
 
         /*
@@ -897,6 +897,7 @@ void bf_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
+        w_stored.at(t+1) = arma::accu(w)/N_; // summation of the unormalized weight
         if (arma::accu(w)>EPS) { 
             w /= arma::accu(w); // normalize the particle weights
             Meff = 1./arma::dot(w,w);
@@ -913,7 +914,7 @@ void bf_poisson(
             w.fill(1./N_);
         }
 
-        w_stored.at(t+1) = arma::accu(w)/N_;
+        
   
         /*
         ------ Step 3 Resampling with Replacement ------
@@ -1521,6 +1522,7 @@ Rcpp::List pmmh_poisson(
 
 void mcs_poisson(
     arma::mat& R, // (n+1) x 2, (psi,theta)
+    arma::vec& pmarg_y, // n x 1, marginal likelihood of y
     const arma::vec& ypad, // (n+1) x 1, the observed response
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W = NA_REAL,
@@ -1538,7 +1540,8 @@ void mcs_poisson(
 
     unsigned int tmpi; // store temporary integer value
     const unsigned int n = ypad.n_elem - 1; // number of observations
-    const double min_eff = 0.8*static_cast<double>(N);
+    const double N_ = static_cast<double>(N);
+    const double min_eff = 0.8*N_;
 
     double Wsqrt;
     if (!R_IsNA(W)) {
@@ -1680,42 +1683,42 @@ void mcs_poisson(
         ------ Step 1.0 Resample ------
         Auxiliary Particle Filter
         */
-        if (resample && t>B) {
-            mt = arma::median(theta_stored.slice(B-1),1);
-            update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-            theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
-            if (link_code==1) {
-                // Exponential link and identity gain
-                for (unsigned int i=0; i<N; i++) {
-                    lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
-                }
-                lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-                lambda = arma::exp(lambda);
-            } else if (trans_code==1){ // Koyama
-                hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-                for (unsigned int i=0; i<N; i++) {
-                    lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-                }
-            } else {
-                // Koyck or Solow with identity link and different gain functions
-                lambda = mu0 + theta.row(1).t();
-            }
+        // if (resample && t>B) {
+        //     mt = arma::median(theta_stored.slice(B-1),1);
+        //     update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
+        //     theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
+        //     if (link_code==1) {
+        //         // Exponential link and identity gain
+        //         for (unsigned int i=0; i<N; i++) {
+        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+        //         }
+        //         lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
+        //         lambda = arma::exp(lambda);
+        //     } else if (trans_code==1){ // Koyama
+        //         hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
+        //         for (unsigned int i=0; i<N; i++) {
+        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
+        //         }
+        //     } else {
+        //         // Koyck or Solow with identity link and different gain functions
+        //         lambda = mu0 + theta.row(1).t();
+        //     }
 
-            for (unsigned int i=0; i<N; i++) {
-                w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-            } // End for loop of i, index of the particles
+        //     for (unsigned int i=0; i<N; i++) {
+        //         w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
+        //     } // End for loop of i, index of the particles
 
-            if (arma::accu(w)>EPS) { // normalize the particle weights
-                w /= arma::accu(w);
-                if (1./arma::dot(w,w) > min_eff) {
-                    idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-                    idx = Rcpp::as<arma::uvec>(idx_) - 1;
-                    for (unsigned int b=0; b<B; b++) {
-                        theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-                    }
-                }
-            }
-        }
+        //     if (arma::accu(w)>EPS) { // normalize the particle weights
+        //         w /= arma::accu(w);
+        //         if (1./arma::dot(w,w) > min_eff) {
+        //             idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+        //             idx = Rcpp::as<arma::uvec>(idx_) - 1;
+        //             for (unsigned int b=0; b<B; b++) {
+        //                 theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
+        //             }
+        //         }
+        //     }
+        // }
         
         /*
         ------ Step 2.1 Propagate ------
@@ -1737,15 +1740,8 @@ void mcs_poisson(
                 Wsqrt *= std::sqrt(1./0.99-1.);
             }
         }
+
         omega = arma::randn(N) * Wsqrt;
-        
-        // Wt.at(t) = arma::stddev(theta_stored.slice(B-1).row(0));
-        // omega = arma::randn(N) * Wt.at(t);
-        // if (t>B) {
-        //     omega *= std::sqrt(1./delta_discount-1.);
-        // } else {
-        //     omega *= std::sqrt(1./0.99-1.);
-        // }
         theta.row(0) += omega.t();
         
         theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
@@ -1784,8 +1780,8 @@ void mcs_poisson(
         for (unsigned int i=0; i<N; i++) {
             w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
         } // End for loop of i, index of the particles
-
-
+        
+        
         /*
         ------ Step 2.2 Importance weights ------
         */
@@ -1793,18 +1789,20 @@ void mcs_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
-        if (arma::accu(w)>EPS) { // normalize the particle weights
-            w /= arma::accu(w);
-            try{
-                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-                idx = Rcpp::as<arma::uvec>(idx_) - 1;
-                for (unsigned int b=0; b<B; b++) {
-                    theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-                }
-            } catch(...) {
-                // If resampling doesn't work, then just don't resample
+        if (arma::accu(w)>EPS) {
+            pmarg_y.at(t) = std::log(arma::accu(w)) - std::log(N_);
+            w /= arma::accu(w); // normalize the particle weights
+            idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
+            idx = Rcpp::as<arma::uvec>(idx_) - 1;
+            for (unsigned int b=0; b<B; b++) {
+                theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
             }
-        } 
+        } else {
+            if (w.has_nan()) {
+                w.elem(arma::find_nan(w)).fill(1.e-32);
+            }
+            pmarg_y.at(t) = std::log(arma::accu(w)) - std::log(N_);
+        }
 
         
         

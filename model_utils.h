@@ -13,6 +13,7 @@
 
 
 inline constexpr double EPS = 2.220446e-16;
+inline constexpr double EPS8 = 1.e-10;
 inline constexpr double UPBND = 700.;
 inline constexpr double covid_m = 4.7;
 inline constexpr double covid_s = 2.9;

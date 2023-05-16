@@ -16,9 +16,9 @@ void eta2tilde(
     
     for (unsigned int i=0; i<m; i++) {
         switch(idx_select.at(i)) {
-            case 0: // W   - Wtilde = -log(W)
+            case 0: // W   - Wtilde = log(W)
             {
-                eta_tilde.at(i) = -std::log(eta.at(idx_select.at(i)));
+                eta_tilde.at(i) = std::log(eta.at(idx_select.at(i)));
             }
             break;
             case 1: // mu0 - mu0_tilde = log(mu[0])
@@ -54,9 +54,9 @@ void tilde2eta(
     
     for (unsigned int i=0; i<m; i++) {
         switch(idx_select.at(i)) {
-            case 0: // W = exp(-Wtilde)
+            case 0: // W = exp(Wtilde)
             {
-                eta.at(idx_select.at(i)) = std::exp(-eta_tilde.at(i));
+                eta.at(idx_select.at(i)) = std::exp(eta_tilde.at(i));
             }
             break;
             case 1: // mu0 = exp(mu0_tilde)
@@ -99,9 +99,6 @@ double dlogJoint_dWtilde(
     const double aw,
     const double bw,
     const unsigned int prior_type = 0) { // 0 - Gamma(aw=shape,bw=rate); 1 - Half-Cauchy(aw=location=0, bw=scale); 2 - Inverse-Gamma(aw=shape,bw=rate)
-    /*
-    Wtilde = -log(W)
-    */
     
     const double n = static_cast<double>(psi.n_elem) - 1;
     const unsigned int ni = psi.n_elem - 1;
@@ -114,8 +111,10 @@ double dlogJoint_dWtilde(
     if (prior_type==0) {
         /*
         W ~ Gamma(aw=shape, bw=rate)
+        Wtilde = log(W)
         */
-        deriv = 0.5*n-0.5/W*res - aw + bw*W;
+        // deriv = 0.5*n-0.5/W*res - aw + bw*W;
+        deriv = aw - 0.5*n - bw*W + 0.5/W*res;
     } else if (prior_type==1) {
         /*
         sqrt(W) ~ Half-Cauchy(aw=location==0, bw=scale)
@@ -124,6 +123,7 @@ double dlogJoint_dWtilde(
     } else if (prior_type==2) {
         /*
         W ~ Inverse-Gamma(aw=shape, bw=rate)
+        Wtilde = -log(W)
         (deprecated)
         */
         deriv = res;
@@ -135,6 +135,38 @@ double dlogJoint_dWtilde(
         ::Rf_error("Unsupported prior for evolution variance W.");
     }
     return deriv;
+}
+
+
+
+double logprior_Wtilde(
+    const double Wtilde, // evolution variance conditional on V
+    const double aw,
+    const double bw,
+    const unsigned int prior_type = 0) {
+    
+    double logp = -16.;
+    if (prior_type==0) {
+        /*
+        W ~ Gamma(aw=shape, bw=rate)
+        Wtilde = log(W)
+        */
+        logp = aw*std::log(bw) - std::lgamma(aw) + aw*Wtilde - bw*std::exp(Wtilde);
+    } else if (prior_type==1) {
+        /*
+        sqrt(W) ~ Half-Cauchy(aw=location==0, bw=scale)
+        */
+        ::Rf_error("logprior_Wtilde for Half-Cauchy is not implemented yet.");
+    } else if (prior_type==2) {
+        /*
+        W ~ Inverse-Gamma(aw=shape, bw=rate)
+        Wtilde = -log(W)
+        */
+        logp = aw*std::log(bw) - std::lgamma(aw) + aw*Wtilde - bw*std::exp(Wtilde);
+    } else {
+        ::Rf_error("Unsupported prior for evolution variance W.");
+    }
+    return logp;
 }
 
 
@@ -174,11 +206,24 @@ double dlogJoint_dlogmu0(
         }
     }
 
-    double deriv = mu0*res + amu - 1. - bmu*mu0;
+    double deriv = mu0*res + amu - bmu*mu0;
     return deriv;
 }
 
 
+double logprior_logmu0(
+    const double logmu0, // evolution variance conditional on V
+    const double amu,
+    const double bmu) {
+
+    /*
+    mu0 ~ Gamma(aw=shape, bw=rate)
+    logmu0 = log(mu0)
+    */
+    double logp = amu*std::log(bmu) - std::lgamma(amu) + amu*logmu0 - bmu*std::exp(logmu0);
+
+    return logp;
+}
 
 
 double dlogJoint_drho(
@@ -189,6 +234,8 @@ double dlogJoint_drho(
     const double rho,
     const double delta_nb,
     const unsigned int gain_code,
+    const double arho = 1.,
+    const double brho = 1.,
 	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
 
     const unsigned int n = ypad.n_elem - 1;
@@ -218,10 +265,120 @@ double dlogJoint_drho(
         c2 += c10*c20;
     }
 
-    double deriv = -L_*std::pow(1.-rho,L_)*rho*c1 - (1.-rho)*c2 + 1.-2*rho;
+    double deriv = -L_*std::pow(1.-rho,L_)*rho*c1 - (1.-rho)*c2;
+    deriv += arho - (arho+brho) * rho;
     return deriv;
 }
 
+
+
+double dlogJoint_drho2(
+    const arma::vec& ypad, // (n+1) x 1
+    const arma::mat& R, // (n+1) x 2, (psi,theta)
+    const unsigned int L,
+    const double mu0,
+    const double rho,
+    const double delta_nb,
+    const unsigned int gain_code,
+    const arma::vec& rcomb, // n x 1
+    const double arho = 1.,
+    const double brho = 1.,
+	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+
+    const unsigned int n = ypad.n_elem - 1;
+    const double L_ = static_cast<double>(L);
+
+    arma::vec hpsi = psi2hpsi(R.col(0),gain_code,coef); // (n+1) x 1
+    arma::vec hy = hpsi % ypad; // (n+1) x 1, (h(psi[0])*y[0], h(psi[1])*y[1], ...,h(psi[n])*y[n])
+    arma::vec lambda = mu0 + R.col(1); // (n+1) x 1
+
+    unsigned int r;
+    double c10 = 0.; // d(Loglike) / d(theta[t])
+    double c20 = 0.; // first part of d(theta[t]) / d(logit(rho)), l=0,...,t-1
+    double c30 = 0.; // second part of d(theta[t]) / d(logit(rho)), l=1,...,t-1
+    double c2 = 0.; // first part of d(Loglike) / d(logit(rho))
+    double c3 = 0.; // second part of d(Loglike) / d(logit(rho))
+    double crho = 1.;
+
+    for (unsigned int t=1; t<=n; t++) {
+        crho = 1.;
+        c10 = ypad.at(t)/lambda.at(t) - (ypad.at(t)+delta_nb)/(lambda.at(t)+delta_nb); // d(Loglike) / d(theta[t])
+        c20 = rcomb.at(0)*crho*hy.at(t-1);
+        c30 = 0.;
+
+        for (unsigned int l=1; l<t; l++) {
+            crho *= rho;
+            c20 += rcomb.at(l) * crho * hy.at(t-1-l);
+            c30 += static_cast<double>(l) * rcomb.at(l) * crho * hy.at(t-1-l);
+        }
+
+        c2 += c10 * c20;
+        c3 += c10 * c30;
+    }
+
+    double deriv = -L_*std::pow(1.-rho,L_)*rho*c2 + std::pow(1.-rho,L_+1.)*c3;
+    deriv += arho - (arho+brho) * rho;
+    return deriv;
+}
+
+
+double logprior_logitrho(
+    double logitrho,
+    double arho = 1.,
+    double brho = 1.) {
+    
+    double logp = std::lgamma(arho+brho) - std::lgamma(arho) - std::lgamma(brho) + arho*logitrho - (arho+brho)*std::log(1.+std::exp(logitrho));
+    return logp;
+}
+
+
+/*
+logprior_eta_tilde
+------------------------
+`eta_prior_val`
+    aw  amu   arho    DK 
+    bw  bmu   brho    DK
+*/
+arma::vec logprior_eta_tilde(
+    const arma::vec& eta_tilde, // m x 1
+    const arma::uvec& idx_select, // m x 1
+    const arma::uvec& eta_prior_type, // 4 x 1
+    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
+    const unsigned int m) {
+    
+    arma::vec logp(m);
+
+    for (unsigned int i=0; i<m; i++) {
+        switch(idx_select.at(i)) {
+            case 0: // W   - Wtilde = -log(W)
+            {
+                logp.at(i) = logprior_Wtilde(eta_tilde.at(i),eta_prior_val.at(0,0),eta_prior_val.at(1,0),eta_prior_type.at(0));
+            }
+            break;
+            case 1: // mu0 - mu0_tilde = log(mu[0])
+            {
+                logp.at(i) = logprior_logmu0(eta_tilde.at(i),eta_prior_val.at(0,1),eta_prior_val.at(1,1));
+            }
+            break;
+            case 2: // rho - rho_tilde = log(rho/(1.-rho))
+            {
+                logp.at(i) = logprior_logitrho(eta_tilde.at(i),eta_prior_val.at(0,2),eta_prior_val.at(1,2));
+            }
+            break;
+            case 3: // M - undefined
+            {
+                ::Rf_error("logprior_eta_tilde - M not implemented yet.");
+            }
+            break;
+            default:
+            {
+                ::Rf_error("logprior_eta_tilde - idx_select out of bound.");
+            }
+        }
+    }
+
+    return logp;
+}
 
 
 // eta_tilde = (Wtilde,logmu0)
@@ -234,6 +391,7 @@ arma::vec dlogJoint_deta(
     const arma::mat& eta_prior_val, // 2 x 4
     const unsigned int m,
     const unsigned int L,
+    const arma::vec& rcomb,
     const double delta_nb = 1.,
     const unsigned int obs_code = 0, // 0 - NegBinom; 1 - Poisson
     const unsigned int gain_code = 0,
@@ -253,7 +411,7 @@ arma::vec dlogJoint_deta(
             break;
             case 2: // rho_tilde = log(rho/(1-rho))
             {
-                deriv.at(i) = dlogJoint_drho(ypad,R,L,eta.at(1),eta.at(2),delta_nb,gain_code,coef);
+                deriv.at(i) = dlogJoint_drho2(ypad,R,L,eta.at(1),eta.at(2),delta_nb,gain_code,rcomb,eta_prior_val.at(0,2),eta_prior_val.at(1,2),coef);
             }
             break;
             case 3: // M - undefined
@@ -346,8 +504,8 @@ eta = (W,mu[0],rho,M)
     - rho: 
     - M
 `eta_prio_val`
-    aw  amu   DK    DK 
-    bw  bmu   DK    DK
+    aw  amu   arho    DK 
+    bw  bmu   brho    DK
 */
 //' @export
 // [[Rcpp::export]]
@@ -373,10 +531,13 @@ Rcpp::List hva_poisson(
     const double learn_rate = 0.95,
     const double eps_step = 1.e-6,
     const unsigned int k = 1, // k <= sum(eta_select)
+    const double Mtheta = 2.,
+    const unsigned int max_iter = 10,
     const unsigned int nsample = 100,
     const unsigned int nburnin = 100,
     const unsigned int nthin = 2,
     const double delta_nb = 1.,
+    const double delta_discount = 0.95,
     const bool summarize_return = false,
     const bool verbose = false,
     const bool debug = false) {
@@ -385,6 +546,7 @@ Rcpp::List hva_poisson(
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
     arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
+    const double logMtheta = std::log(Mtheta);
 
     const unsigned int obs_code = model_code.at(0);
     const unsigned int link_code = model_code.at(1);
@@ -399,6 +561,7 @@ Rcpp::List hva_poisson(
     
     /* ------ Define Global Parameters ------ */
     arma::vec eta = eta_init; // eta = (W>0,mu0>0,rho in (0,1),M>0)
+    arma::vec eta_old = eta;
     const unsigned int m = arma::accu(eta_select);
     if (k > m) {
         ::Rf_error("k cannot be greater than m, total number of unknowns.");
@@ -406,6 +569,7 @@ Rcpp::List hva_poisson(
 
     arma::uvec idx_select = arma::find(eta_select == 1); // m x 1
     arma::vec eta_tilde(m,arma::fill::zeros); // unknown part of eta which is also transformed to the real line
+    arma::vec eta_tilde0(m,arma::fill::zeros);
     eta2tilde(eta_tilde,eta,idx_select,m);
     arma::vec gamma(m,arma::fill::ones);
     arma::vec nu = tYJ(eta_tilde,gamma); // m x 1, Yeo-Johnson transform of eta_tilde
@@ -422,6 +586,10 @@ Rcpp::List hva_poisson(
     Rcpp::NumericVector ctanh_ = ctanh;
 	unsigned int p, L_;
     init_by_trans(p,L_,trans_code,L);
+    arma::vec rcomb(n,arma::fill::zeros);
+    for (unsigned int l=0; l<n; l++) {
+        rcomb.at(l) = binom(L_-1+l,l);
+    }
     /* ------ Define Model ------ */
 
 
@@ -470,14 +638,18 @@ Rcpp::List hva_poisson(
     arma::vec mu(m,arma::fill::zeros);
     arma::mat B(m,k,arma::fill::zeros); // Lower triangular part is nonzero
     arma::vec d(m,arma::fill::ones);
+    arma::mat SigInv(m,m,arma::fill::zeros);
+    double logq;
     
     arma::vec delta_logJoint(m);
     arma::vec delta_logq(m);
     arma::vec delta_diff(m);
     arma::mat dtheta_dB(m,m*k,arma::fill::zeros);
 
-    arma::vec xi(k);
-    arma::vec eps(m);
+    arma::vec xi(k,arma::fill::zeros);
+    arma::vec xi_old = xi;
+    arma::vec eps(m,arma::fill::zeros);
+    arma::vec eps_old = eps;
 
     arma::vec L_mu(m);
     arma::mat L_B(m,k,arma::fill::zeros);
@@ -511,6 +683,14 @@ Rcpp::List hva_poisson(
     /*  ------ Define HVB ------ */
 
 
+    /* ------ Define Rejection Sampling ------ */
+    arma::vec pmarg_y(n,arma::fill::zeros);
+    double logp_y = 0.;
+    arma::vec logprior(m,arma::fill::zeros);
+    double logp_new, logp_old, logratio;
+    /* ------ Define Rejection Sampling ------ */
+
+
     // arma::mat mu_stored(m,niter);
     // arma::mat d_stored(m,niter);
     // arma::mat gamma_stored(m,niter);
@@ -521,11 +701,17 @@ Rcpp::List hva_poisson(
 
     arma::mat Meff(n,nsample);
     arma::mat resample_status(n,nsample);
-    arma::mat delta_diff_stored(m,nsample);
+    arma::mat logp_stored(max_iter,nsample);
+    arma::vec logp_iter(max_iter,arma::fill::zeros);
+
+    arma::vec logp_y_stored(nsample);
+    arma::vec logq_stored(nsample);
+    arma::mat logprior_stored(m,nsample);
+    double mh_accept = 0.;
+    arma::vec cnt_stored(nsample);
     // arma::mat theta_last(p,nsample);
     // arma::vec theta(p);
 
-    const unsigned int max_iter = 10;
     unsigned int cnt = 0;
     bool saveiter;
     for (unsigned int s=0; s<ntotal; s++) {
@@ -546,10 +732,15 @@ Rcpp::List hva_poisson(
 
         } else if (eta_select.at(0)==1){
             // mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
-            mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,0.95);
+            mcs_poisson(R,pmarg_y,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,delta_discount);
         } else {
-            mcs_poisson(R,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,0.95);
+            mcs_poisson(R,pmarg_y,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,delta_discount);
         }
+
+        // Logarithm marginal likelihood of y
+        // Dynamic/latent states are integrated out
+        // only conditional on static parameters, eta.
+        logp_y = arma::accu(pmarg_y);
 
 
         /*
@@ -558,7 +749,7 @@ Rcpp::List hva_poisson(
         // if (is_vanilla) {
         //     delta_logJoint = dlogJoint_deta(Y,psi,eta.at(2),eta.at(0),aw,bw,prior_type); // 1 x 1
         // } else {
-        delta_logJoint = dlogJoint_deta(ypad,R,eta,idx_select,eta_prior_type,eta_prior_val,m,L,delta_nb,obs_code,gain_code,ctanh_); // m x 1
+        delta_logJoint = dlogJoint_deta(ypad,R,eta,idx_select,eta_prior_type,eta_prior_val,m,L,rcomb,delta_nb,obs_code,gain_code,ctanh_); // m x 1
         // }
 
         if (!std::isfinite(delta_logJoint.at(0))) {
@@ -569,7 +760,8 @@ Rcpp::List hva_poisson(
         }
         
         
-        delta_logq = dlogq_dtheta(nu,eta_tilde,gamma,mu,B,d); // m x 1
+        SigInv = get_sigma_inv(B, d, k); // m x m
+        delta_logq = dlogq_dtheta(SigInv,nu,eta_tilde,gamma,mu); // m x 1
         delta_diff = delta_logJoint - delta_logq; // m x 1
         if (!std::isfinite(delta_logq.at(0))) {
             Rcout << "iter=" << s+1 << std::endl;
@@ -580,7 +772,7 @@ Rcpp::List hva_poisson(
 
 
         // TODO: transpose or no transpose
-        L_mu = dYJinv_dnu(nu,gamma) * delta_diff;
+        L_mu = dYJinv_dnu(nu,gamma) * delta_diff; // m x 1
         if (!std::isfinite(L_mu.at(0))) {
             Rcout << "iter=" << s+1 << std::endl;
             Rcout << "W=" << eta.at(0) << std::endl;
@@ -595,7 +787,7 @@ Rcpp::List hva_poisson(
             vecL_B = arma::vectorise(L_B);
         }
 
-        L_d = dYJinv_dD(nu,gamma,eps)*delta_diff;
+        L_d = dYJinv_dD(nu,gamma,eps)*delta_diff; // m x 1
         if (!std::isfinite(L_d.at(0))) {
             Rcout << "iter=" << s+1 << std::endl;
             Rcout << "W=" << eta.at(0) << std::endl;
@@ -614,6 +806,8 @@ Rcpp::List hva_poisson(
         /*
         Step 4. Update Variational Parameters
         */
+        eta_old = eta;
+
         // mu
         oldEg2_mu = curEg2_mu;
         oldEdelta2_mu = curEdelta2_mu;
@@ -646,6 +840,8 @@ Rcpp::List hva_poisson(
         d = d + Change_delta_d;
         curEdelta2_d = learn_rate*oldEdelta2_d + (1.-learn_rate)*arma::pow(Change_delta_d,2.);
 
+        SigInv = get_sigma_inv(B,d,k);
+
 
         // tau
         oldEg2_tau = curEg2_tau;
@@ -663,14 +859,108 @@ Rcpp::List hva_poisson(
         Step 1. Sample static parameters from the variational distribution
         using reparameterisation.
         */
-        cnt = 0;
-        while(cnt<max_iter) {
-            eta_tilde = rtheta(xi,eps,gamma,mu,B,d); // already inverse YJ transformed
-            nu = tYJ(eta_tilde,gamma); // recover nu
-            tilde2eta(eta,eta_tilde,idx_select,m);
-            cnt++;
-            if (std::isfinite(eta.at(0))) {break;}
+        // cnt = 0;
+        // xi_old = xi;
+        // eps_old = eps;
+        // while(cnt<max_iter) {
+        //     eta_tilde = rtheta(xi,eps,gamma,mu,B,d); // already inverse YJ transformed
+        //     logprior = logprior_eta_tilde(eta_tilde,idx_select,eta_prior_type,eta_prior_val,m);
+
+        //     nu = tYJ(eta_tilde,gamma); // recover nu
+        //     tilde2eta(eta,eta_tilde,idx_select,m);
+        //     logq = logq0(nu,eta_tilde,gamma,mu,SigInv,m);
+
+        //     if (s==0) {
+        //         logp_new = arma::accu(logprior) + logp_y - logq - logMtheta;
+        //         // logratio = 1.;
+        //     } else {
+        //         // logp_old = logp_new;
+        //         logp_new = arma::accu(logprior) + logp_y - logq - logMtheta;
+        //         // logratio = logp_new - logp_old;
+        //     }
+
+        //     logp_iter.at(cnt) = logp_new;
+            
+
+        //     cnt++;
+        //     if (std::isfinite(eta.at(0)) && std::log(R::runif(0.,1.)) < logp_new) {
+        //         break;
+        //     }
+        //     // if (std::isfinite(eta.at(0))) {
+        //     //     break;
+        //     // }
+        // }
+
+        eta_tilde = rtheta(xi,eps,gamma,mu,B,d);
+        xi_old = xi;
+        eps_old = eps;
+        logprior = logprior_eta_tilde(eta_tilde,idx_select,eta_prior_type,eta_prior_val,m);
+        nu = tYJ(eta_tilde,gamma); // recover nu
+        tilde2eta(eta,eta_tilde,idx_select,m);
+        logq = logq0(nu,eta_tilde,gamma,mu,SigInv,m);
+        logp_new = arma::accu(logprior) + logp_y - logq;
+        logp_iter.at(0) = logp_new;
+        for (unsigned int s=1; s<max_iter; s++) {
+            eta_tilde0 = rtheta(xi,eps,gamma,mu,B,d);
+            logprior = logprior_eta_tilde(eta_tilde0,idx_select,eta_prior_type,eta_prior_val,m);
+            nu = tYJ(eta_tilde0,gamma); // recover nu
+            tilde2eta(eta,eta_tilde0,idx_select,m);
+            logq = logq0(nu,eta_tilde0,gamma,mu,SigInv,m);
+            logp_new = arma::accu(logprior) + logp_y - logq;
+            logp_iter.at(s) = logp_new;
+
+            if (std::log(R::runif(0.,1.)) < std::min(0.,logp_iter.at(s)-logp_iter.at(s-1))) {
+                // accept
+                eta_tilde = eta_tilde0;
+                xi_old = xi;
+                eps_old = eps;
+            }
         }
+
+        xi = xi_old;
+        eps = eps_old;
+        nu = tYJ(eta_tilde,gamma); // recover nu
+        tilde2eta(eta,eta_tilde,idx_select,m);
+
+        // if (s==0) {
+        //     logp_new = arma::accu(logprior) + logp_y - logq;
+        // } else {
+        //     logp_old = logp_new;
+        //     logp_new = arma::accu(logprior) + logp_y - logq;
+        //     logratio = logp_new - logp_old;
+        //     if (std::log(R::runif(0.,1.)) >= logratio) { // reject the eta_tilde
+        //         logp_new = logp_old;
+
+        //         xi = xi_old;
+        //         eps = eps_old;
+
+		// 		curEg2_mu = oldEg2_mu;
+        //         curEdelta2_mu = oldEdelta2_mu;
+        //         mu = mu - Change_delta_mu;
+
+        //         if (m>1) {
+        //             curEg2_B = oldEg2_B; // mk x 1
+        //             curEdelta2_B = oldEdelta2_B; // mk x 1
+        //             B = B - arma::reshape(Change_delta_B,m,k);
+        //         }
+
+        //         curEg2_d = oldEg2_d;
+        //         curEdelta2_d = oldEdelta2_d;
+        //         d = d - Change_delta_d;
+
+        //         curEg2_tau = oldEg2_tau;
+        //         curEdelta2_tau = oldEdelta2_tau;
+        //         tau = tau - Change_delta_tau;
+        //         gamma = tau2gamma(tau);
+        //         eta = eta_old;
+        //         eta2tilde(eta_tilde,eta,idx_select,m);
+        //         nu = tYJ(eta_tilde,gamma); // recover nu
+
+		// 	} else {
+		// 		mh_accept += 1.;
+		// 	}
+
+        // }
         
 
         if (!std::isfinite(eta.at(0))) {
@@ -696,8 +986,12 @@ Rcpp::List hva_poisson(
             W_stored.at(idx_run) = eta.at(0);
             mu0_stored.at(idx_run) = eta.at(1);
             rho_stored.at(idx_run) = eta.at(2);
-            delta_diff_stored.col(idx_run) = delta_diff;
+            logp_stored.col(idx_run) = logp_iter;
+            logp_y_stored.at(idx_run) = logp_y;
+            logq_stored.at(idx_run) = logq;
+            logprior_stored.col(idx_run) = logprior;
             // theta_last.col(idx_run) = theta;
+            cnt_stored.at(idx_run) = cnt;
 		}
 
         if (verbose) {
@@ -730,11 +1024,16 @@ Rcpp::List hva_poisson(
         output["rho"] = Rcpp::wrap(rho_stored); // niter
     }
 
-    output["delta_diff"] = Rcpp::wrap(delta_diff_stored);
+    output["logp_y"] = Rcpp::wrap(logp_y_stored);
+    output["logq"] = Rcpp::wrap(logq_stored);
+    output["logprior"] = Rcpp::wrap(logprior_stored);
+    output["logp_diff"] = Rcpp::wrap(logp_stored);
+    output["cnt"] = Rcpp::wrap(cnt_stored);
     
     
     
-    // output["theta_last"] = Rcpp::wrap(theta_last); // p x niter
+    // output["theta_last"] = Rcpp::wrap(theta_last); dtYJ_dtheta
+    // p x niter
 
     // if (debug) {
     //     output["Meff"] = Rcpp::wrap(Meff);
