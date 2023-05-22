@@ -1122,6 +1122,7 @@ Rcpp::List ffbs_poisson(
             } else {
                 Wsqrt *= std::sqrt(1./0.99-1.);
             }
+            Wt.at(t) = Wsqrt;
         } else {
             Wt.at(t) = Wsqrt;
         }
@@ -1203,44 +1204,53 @@ Rcpp::List ffbs_poisson(
     arma::mat psi_smooth(N,n+1);
     arma::mat psi_filter(N,n+1);
     psi_filter.col(n) = theta_stored.slice(n).row(0).t();
-    psi_smooth.col(n) = theta_stored.slice(n).row(0).t();
     for (unsigned int t=n; t>0; t--) {
         psi_filter.col(t-1) = theta_stored.slice(t-1).row(0).t();
-        for (unsigned int i=0; i<N; i++) {
-            w = -0.5*arma::pow((psi_smooth.at(i,t)-psi_filter.col(t-1))/Wsqrt,2);
-            if (w.has_nan() || w.has_inf()) {
-                w.brief_print();
-                ::Rf_error("step 1");
+    }
+
+    psi_smooth.col(n) = theta_stored.slice(n).row(0).t();
+    if (smoothing) {
+        for (unsigned int t=n; t>0; t--) {   
+            for (unsigned int i=0; i<N; i++) {
+                w = -0.5*arma::pow((psi_smooth.at(i,t)-psi_filter.col(t-1))/Wt.at(t-1),2);
+                if (w.has_nan() || w.has_inf()) {
+                    w.brief_print();
+                    ::Rf_error("step 1");
+                }
+                w.elem(arma::find(w>UPBND)).fill(UPBND);
+                w = arma::exp(w);
+                if (w.has_nan() || w.has_inf()) {
+                    w.brief_print();
+                    ::Rf_error("step 2");
+                }
+                if (arma::accu(w)<EPS) {
+                    w.ones();
+                }
+                w /= arma::accu(w);
+                try{
+                    tmpir = Rcpp::sample(N,1,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w))) - 1;
+                } catch(...) {
+                    Rcout << "Resample for smoothing: ";
+                    w.brief_print();
+                    ::Rf_error("sampling error.");
+                }
+                // tmpir = Rcpp::sample(N,1,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w))) - 1;
+                psi_smooth.at(i,t-1) = psi_filter.at(tmpir[0],t-1);
             }
-            w.elem(arma::find(w>UPBND)).fill(UPBND);
-            w = arma::exp(w);
-            if (w.has_nan() || w.has_inf()) {
-                w.brief_print();
-                ::Rf_error("step 2");
-            }
-            if (arma::accu(w)<EPS) {
-                w.ones();
-            }
-            w /= arma::accu(w);
-            try{
-                tmpir = Rcpp::sample(N,1,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w))) - 1;
-            } catch(...) {
-                Rcout << "Resample for smoothing: ";
-                w.brief_print();
-                ::Rf_error("sampling error.");
-            }
-            // tmpir = Rcpp::sample(N,1,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w))) - 1;
-            psi_smooth.at(i,t-1) = psi_filter.at(tmpir[0],t-1);
         }
     }
+    
+    
 
 
     Rcpp::List output;
-    R = arma::quantile(psi_filter,Rcpp::as<arma::vec>(qProb),0);
-    output["psi_filter"] = Rcpp::wrap(R.t());
+    
 
     if (smoothing) {
         R = arma::quantile(psi_smooth,Rcpp::as<arma::vec>(qProb),0);
+        output["psi"] = Rcpp::wrap(R.t());
+    } else {
+        R = arma::quantile(psi_filter,Rcpp::as<arma::vec>(qProb),0);
         output["psi"] = Rcpp::wrap(R.t());
     }
 

@@ -29,7 +29,8 @@ sim_pois_dglm2 = function(
     coef = c(0.2,0,5), # coefficients for the hyperbolic tangent gain function
     alpha = 1, # power on the transmission delay
     solow_alpha = 0, # 0 - raise AR coef to alpha; 1 - raise MA & AR coef to alpha
-    delta_nb = 10., # rho_nb = 34.08792
+    delta_nb = 30., # rho_nb = 34.08792
+    ci_coverage = 0.95,
     rng.seed = NULL,
     delta_grid = seq(from=0.8,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
@@ -188,10 +189,16 @@ sim_pois_dglm2 = function(
     delta = e_sim$get_optimal_delta(y[1:n],model_code,delta_grid,
                                     rho=rho,L=L,mu0=mu0,
                                     delta_nb=delta_nb,
+                                    ci_coverage=ci_coverage,
                                     ctanh=coef,alpha=alpha)$delta_optim[1]
   },error=function(e){delta=NA})
   
-  
+  # model_code = e_sim$get_model_code(
+  #   obs_dist="nbinom",
+  #   link_func=link_func,
+  #   trans_func=trans_func,
+  #   gain_func=gain_func,
+  #   err_dist=err_dist)
   
   params = list(model_code=model_code,
                 mu0=mu0,theta0=theta0,psi0=psi0,

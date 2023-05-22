@@ -617,6 +617,7 @@ Rcpp::List lbe_poisson(
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
 	const double alpha = 1.,
 	const double delta_nb = 10.,
+	const double ci_coverage = 0.95,
     const bool summarize_return = false,
 	const bool debug = false) { 
 
@@ -624,6 +625,8 @@ Rcpp::List lbe_poisson(
 	if (R_IsNA(delta) && R_IsNA(W)) {
 		::Rf_error("Either evolution error W or discount factor delta must be provided.");
 	}
+
+	const double critval = R::qnorm(1.-0.5*(1.-ci_coverage),0.,1.,true,false);
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
@@ -711,17 +714,25 @@ Rcpp::List lbe_poisson(
 	Rcpp::List output;
 	if (summarize_return) {
 		arma::mat psi(npad,3);
-		psi.col(0) = ht - 1.6*arma::sqrt(arma::abs(Ht));
+		psi.col(0) = ht - critval*arma::sqrt(arma::abs(Ht));
 		psi.col(1) = ht;
-		psi.col(2) = ht + 1.6*arma::sqrt(arma::abs(Ht));
-		output["psi"] = Rcpp::wrap(psi);
+		psi.col(2) = ht + critval*arma::sqrt(arma::abs(Ht));
+		output["psi"] = Rcpp::wrap(psi); // smoothing outcome
+
+		arma::mat psi0(npad,3);
+		psi0.col(0) = mt.row(0).t() - critval*arma::vectorise(arma::sqrt(arma::abs(Ct.tube(0,0))));
+		psi0.col(1) = mt.row(0).t();
+		psi0.col(2) = mt.row(0).t() + critval*arma::vectorise(arma::sqrt(arma::abs(Ct.tube(0,0))));
+		output["psi0"] = Rcpp::wrap(psi0);
+
 	} else {
-		output["mt"] = Rcpp::wrap(mt); // p x npad
-		output["Ct"] = Rcpp::wrap(Ct); // p x p x npad
-		output["ht"] = Rcpp::wrap(ht); // npad x 1
-		output["Ht"] = Rcpp::wrap(Ht); // npad x 1
+		output["mt"] = Rcpp::wrap(mt.row(0).t()); // mt: p x npad, filtering mean (1st order moment)
+		output["Ct"] = Rcpp::wrap(Ct.tube(0,0)); // Ct: p x p x npad, filtering variance (2nd order moment)
+		output["ht"] = Rcpp::wrap(ht); // npad x 1, smoothing mean (2nd order moment)
+		output["Ht"] = Rcpp::wrap(Ht); // npad x 1, smoothing variance (2nd order moment)
 		output["alphat"] = Rcpp::wrap(alphat); // npad x 1
 		output["betat"] = Rcpp::wrap(betat); // npad x 1
+		output["critval"] = critval;
 	}
 
 	output["Wt"] = Rcpp::wrap(Wt); // npad x 1
@@ -806,7 +817,8 @@ Rcpp::List get_optimal_delta(
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5),
 	const double alpha = 1.,
-	const double delta_nb = 1.) {
+	const double delta_nb = 1.,
+	const double ci_coverage = 0.95) {
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int m = delta_grid.n_elem;
@@ -822,7 +834,7 @@ Rcpp::List get_optimal_delta(
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,false,false);
+		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,ci_coverage,false,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=1; j<=n; j++) {
