@@ -28,17 +28,21 @@ plot_psi = function(sim_dat=NULL,
                     psi_list = NULL,
                     opts=NULL,# number of observations
                     ytrue=NULL,
+                    yadjust=NULL,
                     plot_hpsi=FALSE, # if FALSE, plot psi by default
                     plot_lambda=FALSE,
-                    npara=0) {
+                    npara=0,
+                    max_Rt=2.5,
+                    max_y=NULL,
+                    time_label=NULL) {
   mlist = c("EpiEstim","WT","Koyama2021",
-            "SMC","LBE","HVB","MCMC",
+            "LBA","HVB","MCMC",
             "True","VB","PL",
-            "MCS","PS","APF","BF","FFBS")
+            "SMCS-FL","APF","SMCF-BF","SMCS-BS")
   clist = c("seagreen","orange","burlywood4",
-            "royalblue","maroon","purple","darkturquoise",
+            "maroon","purple","darkturquoise",
             "black","salmon","mediumspringgreen",
-            "cornflowerblue","khaki","mediumaquamarine","sandybrown","mediumseagreen")
+            "mediumaquamarine","cornflowerblue","sandybrown","royalblue")
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
     y = sim_dat$y
@@ -47,7 +51,10 @@ plot_psi = function(sim_dat=NULL,
   } else {
     y = NULL
   }
-  
+  if (is.null(yadjust)) {
+    yadjust = y
+  }
+
   if (plot_lambda) {plot_hpsi=TRUE}
   ####
   ####
@@ -55,7 +62,7 @@ plot_psi = function(sim_dat=NULL,
   if (!is.null(sim_dat)) {
     opts = sim_dat$params
     if (is.null(opts$ctanh)) {
-      opts$ctanh = c(0.3,0,1)
+      opts$ctanh = c(0.2,0,5)
     }
     psi_list$True = cbind(c(opts$psi0,sim_dat$psi),
                           c(opts$psi0,sim_dat$psi),
@@ -65,7 +72,18 @@ plot_psi = function(sim_dat=NULL,
   nl = length(psi_list)
   n = max(c(unlist(lapply(psi_list,function(psi){dim(psi)[1]})),length(y)))
   
-  nl2 = sum(names(psi_list)%in%c("LBE","SMC","HVB","MCMC","MCS","PS","APF","BF"))
+  nl2 = sum(names(psi_list)%in%c("LBA","HVB","MCMC",
+                                 "SMCS-FL","SMCS-BS","APF","SMCF-BF",
+                                 "Koyama2021"))
+  
+  if (is.null(time_label)) {
+    time_label = c(1:length(y))
+    use_date = FALSE
+  } else {
+    time_label = time_label[1:length(y)]
+    use_date = TRUE
+  }
+
   if (!is.null(sim_dat) & "lambda" %in% names(sim_dat)) {nl2 = nl2 + 1}
   lambda_list = vector(mode="list",length=nl2)
   
@@ -78,47 +96,92 @@ plot_psi = function(sim_dat=NULL,
   cnt = 1
 
   for (i in 1:nl) {
-    if (plot_hpsi & names(psi_list)[i]%in%c("LBE","SMC","HVB","MCMC","VB","True","PL","MCS","PS","APF","BF","FFBS")) {
-      psi_list[[i]] = psi2hpsi(psi_list[[i]],
-                               GainCode,
-                               coef=opts$ctanh)
+    if (names(psi_list)[i] == "Koyama2021") {
+      lambda_tmp = psi_list[[i]][,4:6]
+      psi_list[[i]] = psi_list[[i]][-1,1:3]
     }
     
-    if (plot_lambda & names(psi_list)[i]%in%c("LBE","SMC","HVB","MCMC","VB","PL","MCS","PS","APF","BF","FFBS")) {
-      lambda_list[[cnt]] = hpsi2theta(psi_list[[i]],y,
-                                      TransferCode,
-                                      opts$theta0,
-                                      opts$alpha,
-                                      opts$L,opts$rho)
-      lambda_list[[cnt]] = lambda_list[[cnt]] + opts$mu0
+    if (plot_hpsi & 
+        names(psi_list)[i]%in%c(
+          "LBA","HVB","MCMC",
+          "VB","True","PL","SMCS-FL",
+          "SMCS-BS","APF","SMCF-BF")) {
+      psi_list[[i]] = psi2hpsi(
+        psi_list[[i]],GainCode,coef=opts$ctanh)
     }
+
     
-    psi_list[[i]] = cbind(psi_list[[i]],
-                          (n-dim(psi_list[[i]])[1]+1) : n)
-    PsiMethod = c(PsiMethod,rep(names(psi_list)[i],dim(psi_list[[i]])[1]))
-    colnames(psi_list[[i]]) = c("lobnd","est","hibnd","time")
-    psi_list[[i]][c(1:(1+npara)),c(1,3)] = NA # remove CI for the first npara time points
-    
-    if (plot_lambda & names(psi_list)[i]%in%c("LBE","SMC","HVB","MCMC","VB","PL","MCS","PS","APF","BF","FFBS")) {
-      lambda_list[[cnt]] = cbind(lambda_list[[cnt]],
-                                 (n-dim(lambda_list[[cnt]])[1]+1) : n)
+    if (plot_lambda & names(psi_list)[i]%in%c(
+      "LBA","HVB","MCMC",
+      "VB","PL","SMCS-FL",
+      "SMCS-BS","APF","SMCF-BF","Koyama2021")) {
+      if (names(psi_list)[i] == "Koyama2021") {
+        lambda_list[[cnt]] = lambda_tmp
+      } else {
+        lambda_list[[cnt]] = hpsi2theta(psi_list[[i]][,1:3],
+                                        yadjust,
+                                        TransferCode,
+                                        opts$theta0,
+                                        opts$alpha,
+                                        opts$L,opts$rho)
+        lambda_list[[cnt]] = lambda_list[[cnt]] + opts$mu0
+      }
+      
+      # lambda_list[[cnt]] = cbind(
+      #   lambda_list[[cnt]], # lambda
+      #   time_label[c((n-dim(lambda_list[[cnt]])[1]+1) : n)]
+      #   ) # time
+      # colnames(lambda_list[[cnt]]) = c("lobnd","est","hibnd","time")
+      
+      lambda_list[[cnt]] = data.frame(
+        lobnd = lambda_list[[cnt]][,1],
+        est = lambda_list[[cnt]][,2],
+        hibnd = lambda_list[[cnt]][,3],
+        time = time_label[c((n-dim(lambda_list[[cnt]])[1]+1) : n)]
+      )
       lambdaMethod = c(lambdaMethod,rep(names(psi_list)[cnt],dim(lambda_list[[cnt]])[1]))
-      colnames(lambda_list[[cnt]]) = c("lobnd","est","hibnd","time")
-      lambda_list[[i]][c(1:(1+npara)),c(1,3)] = NA # remove CI for the first npara time points
+      lambda_list[[cnt]][c(1:(1+npara)),c(1,3)] = NA # remove CI for the first npara time points
+      
       cnt = cnt + 1
     }
+    
+    # psi_list[[i]] = cbind(psi_list[[i]], # psi
+    #                       time_label[(n-dim(psi_list[[i]])[1]+1) : n]) # time
+    # colnames(psi_list[[i]]) = c("lobnd","est","hibnd","time")
+    
+    psi_list[[i]] = data.frame(
+      lobnd=psi_list[[i]][,1],
+      est=psi_list[[i]][,2],
+      hibnd=psi_list[[i]][,3],
+      time=time_label[(n-dim(psi_list[[i]])[1]+1) : n]
+    )
+    PsiMethod = c(PsiMethod,rep(names(psi_list)[i],dim(psi_list[[i]])[1]))
+    psi_list[[i]][c(1:(1+npara)),c(1,3)] = NA # remove CI for the first npara time points
   }
+  
+  
 
   # true values
   if (plot_lambda & !is.null(sim_dat) & "lambda" %in% names(sim_dat)) {
-    lambda_list[[cnt]] = cbind(sim_dat$lambda,
-                               sim_dat$lambda,
-                               sim_dat$lambda)
+    lambda_list[[cnt]] = cbind(
+      sim_dat$lambda,
+      sim_dat$lambda,
+      sim_dat$lambda)
     
-    lambda_list[[cnt]] = cbind(lambda_list[[cnt]],
-                               (n-dim(lambda_list[[cnt]])[1]+1) : n)
-    lambdaMethod = c(lambdaMethod,rep(names(psi_list)[cnt],dim(lambda_list[[cnt]])[1]))
-    colnames(lambda_list[[cnt]]) = c("lobnd","est","hibnd","time")
+    # lambda_list[[cnt]] = cbind(lambda_list[[cnt]],
+    #                            time_label[(n-dim(lambda_list[[cnt]])[1]+1) : n])
+    # colnames(lambda_list[[cnt]]) = c("lobnd","est","hibnd","time")
+    
+    lambda_list[[cnt]] = data.frame(
+      lobnd=lambda_list[[cnt]][,1],
+      est=lambda_list[[cnt]][,2],
+      hibnd=lambda_list[[cnt]][,3],
+      time=time_label[(n-dim(lambda_list[[cnt]])[1]+1) : n]
+    )
+    
+    lambdaMethod = c(lambdaMethod,
+                     rep(names(psi_list)[cnt],
+                         dim(lambda_list[[cnt]])[1]))
   }
 
   
@@ -140,17 +203,22 @@ plot_psi = function(sim_dat=NULL,
                 alpha=0.2,na.rm=TRUE) +
     scale_color_manual(name="Method",breaks=methods,values=cols) +
     scale_fill_manual(name="Method",breaks=methods,values=cols) +
-    theme_light() + xlab("Time")
+    theme_light() + xlab("Time") +
+    theme(text=element_text(size=20),
+          legend.position="bottom") +
+    guides(colour = guide_legend(nrow = 2))
   
   if (plot_hpsi) {
     p = p + ylab(expression(R[t])) +
-      geom_hline(yintercept=1,col="black",linetype=2)
+      geom_hline(yintercept=1,col="black",linetype=2) +
+      scale_y_continuous(limits=c(0,max_Rt))
     # if (!is.null(opts$ctanh)) {
     #   p = p + scale_y_continuous(limits=c(0,opts$ctanh[3]))
     # }
   } else {
     p = p + ylab(expression(psi[t]))
   }
+  
   
   if (plot_lambda) {
     methods = unique(lambda_list$method)
@@ -163,9 +231,19 @@ plot_psi = function(sim_dat=NULL,
       scale_color_manual(name="Method",breaks=methods,values=cols) +
       scale_fill_manual(name="Method",breaks=methods,values=cols) +
       theme_light() + xlab("Time") + ylab(expression(lambda[t])) +
-      geom_point(aes(y=y),data=data.frame(time=1:length(y),y=y,
-                                          method=rep("True",length(y))),
+      theme(text=element_text(size=20),
+            legend.position = "bottom") +
+      geom_point(aes(x=time,y=y),
+                 data=data.frame(
+                   time=time_label,y=y,
+                   method=rep("True",length(y))),
                  size=1,alpha=0.8)
+    
+    if (!is.null(max_y)) {
+      p2 = p2 + scale_y_continuous(limits=c(0,max_y))
+    } else {
+      p2 = p2 + scale_y_continuous(limits=c(0,max(y))) 
+    }
     
     return(list(p,p2))
   } else {

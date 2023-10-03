@@ -324,11 +324,33 @@ void forwardFilter(
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
         if (trans_code == 1) { // Koyama
 			update_Ft(Ft, Fy, trans_code, t, L, Y, Fphi);
+			if (Ft.has_nonfinite()) {
+				Rcout << "t = " << t; 
+				Ft.brief_print();
+				::Rf_error("Nonfinite value in Ft.");
+			}
 			hpsi = psi2hpsi(at.col(t),gain_code,ctanh);
+			if (hpsi.has_nonfinite()) {
+				Rcout << "t = " << t << std::endl; 
+				Rcout << "at = " << at.col(t) << std::endl;
+				hpsi.brief_print();
+				::Rf_error("Nonfinite value in hpsi.");
+			}
 			hph = hpsi_deriv(at.col(t),gain_code,ctanh);
+			if (hph.has_nonfinite()) {
+				Rcout << "t = " << t; 
+				hph.brief_print();
+				::Rf_error("Nonfinite value in hph.");
+			}
 			ft = arma::accu(Ft % hpsi);
 			Ft = Ft % hph;
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+			if (Qt<1.e-32) {
+				Rcout << "t = " << t << std::endl; 
+				Rcout << "at = " << at.col(t) << std::endl;
+				Rcout << "Qt = " << Qt << std::endl;
+				::Rf_error("Near zero value in Qt.");
+			}
 		} else { // Vanilla, Koyck, Solow
 			ft = arma::as_scalar(Ft.t() * at.col(t));
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
@@ -618,6 +640,7 @@ Rcpp::List lbe_poisson(
 	const double alpha = 1.,
 	const double delta_nb = 10.,
 	const double ci_coverage = 0.95,
+	const unsigned int npara = 20,
     const bool summarize_return = false,
 	const bool debug = false) { 
 
@@ -631,11 +654,11 @@ Rcpp::List lbe_poisson(
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
 
-	const unsigned int obs_code = model_code.at(0);
-    const unsigned int link_code = model_code.at(1);
-    const unsigned int trans_code = model_code.at(2);
-    const unsigned int gain_code = model_code.at(3);
-    const unsigned int err_code = model_code.at(4);
+	const unsigned int obs_code = model_code.at(0); // Poisson or negative binomial
+    const unsigned int link_code = model_code.at(1); // identity or exponential
+    const unsigned int trans_code = model_code.at(2); // Koyck, Koyama, or Solow
+    const unsigned int gain_code = model_code.at(3); // Exponential, Softplus, logistic, ...
+    const unsigned int err_code = model_code.at(4); // normal, laplace, ...
 
 	unsigned int p, L_;
     init_by_trans(p,L_,trans_code,L);
@@ -715,7 +738,7 @@ Rcpp::List lbe_poisson(
 	if (summarize_return) {
 		arma::mat psi(npad,3);
 		psi.col(0) = ht - critval*arma::sqrt(arma::abs(Ht));
-		psi.col(1) = ht;
+		psi.col(1) = ht; // (n+1) x 1
 		psi.col(2) = ht + critval*arma::sqrt(arma::abs(Ht));
 		output["psi"] = Rcpp::wrap(psi); // smoothing outcome
 
@@ -730,12 +753,37 @@ Rcpp::List lbe_poisson(
 		output["Ct"] = Rcpp::wrap(Ct.tube(0,0)); // Ct: p x p x npad, filtering variance (2nd order moment)
 		output["ht"] = Rcpp::wrap(ht); // npad x 1, smoothing mean (2nd order moment)
 		output["Ht"] = Rcpp::wrap(Ht); // npad x 1, smoothing variance (2nd order moment)
+		output["at"] = Rcpp::wrap(at.row(0).t());
+		output["Rt"] = Rcpp::wrap(Rt.tube(0,0));
 		output["alphat"] = Rcpp::wrap(alphat); // npad x 1
 		output["betat"] = Rcpp::wrap(betat); // npad x 1
 		output["critval"] = critval;
 	}
 
 	output["Wt"] = Rcpp::wrap(Wt); // npad x 1
+	arma::vec hpsiR = psi2hpsi(ht,model_code.at(3),ctanh); // hpsi: p x N
+	double theta0 = 0;
+    arma::vec lambdaR = hpsi2theta(hpsiR, Y, trans_code, theta0, alpha, L, rho); // n x 1
+    output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(lambdaR.tail(n-npara) - Y.tail(n-npara),2.0))));
+    output["mae"] = arma::as_scalar(arma::mean(arma::abs(lambdaR.tail(n-npara) - Y.tail(n-npara))));
+
+	double logpred = 0.;
+	double prob_success;
+	for (unsigned int j=npara; j<=n; j++) {
+		// Marginal log predictive likelihood
+		if (obs_code == 1) {
+			// Poisson DLM
+			prob_success = std::max(betat.at(j)/(1.+betat.at(j)),EPS);
+			logpred += R::dnbinom(Y.at(j-1),std::max(alphat.at(j),EPS),prob_success,true);
+
+		} else if (obs_code == 0 && alphat.at(j)>1.e-32 && betat.at(j)>1.e-32) {
+			// Negative binomial DLM
+			logpred += R::lgammafn(Y.at(j-1)+delta_nb)-R::lgammafn(delta_nb)-R::lgammafn(Y.at(j-1)+1.);
+			logpred += R::lgammafn(std::max(alphat.at(j)+betat.at(j),EPS))-R::lgammafn(std::max(alphat.at(j),EPS))-R::lgammafn(std::max(betat.at(j),EPS));
+			logpred += R::lgammafn(alphat.at(j)+Y.at(j-1))+R::lgammafn(std::max(betat.at(j)+delta_nb,EPS))-R::lgammafn(alphat.at(j)+Y.at(j-1)+betat.at(j)+delta_nb);
+		}
+	}
+	output["logpred"] = logpred;
 
 	return output;
 }
@@ -818,12 +866,13 @@ Rcpp::List get_optimal_delta(
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5),
 	const double alpha = 1.,
 	const double delta_nb = 1.,
+	const unsigned int npara = 1,
 	const double ci_coverage = 0.95) {
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int m = delta_grid.n_elem;
 	const double W = NA_REAL;
-	const double n_ = static_cast<double>(n);
+	const double n_ = static_cast<double>(n-npara+1);
 
 	const unsigned int obs_code = model_code.at(0);
 
@@ -837,7 +886,7 @@ Rcpp::List get_optimal_delta(
 		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,ci_coverage,false,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
-		for (unsigned int j=1; j<=n; j++) {
+		for (unsigned int j=npara; j<=n; j++) {
 			// Marginal log predictive likelihood
 			if (obs_code == 1) {
 				// Poisson DLM
@@ -851,7 +900,7 @@ Rcpp::List get_optimal_delta(
 				// MAE
 				mae.at(i) = std::abs(Y.at(j-1) - ymean);
 
-			} else if (obs_code == 0) {
+			} else if (obs_code == 0 && alphat.at(j)>1.e-32 && betat.at(j)>1.e-32) {
 				// Negative binomial DLM
 				logpred.at(i) += R::lgammafn(Y.at(j-1)+delta_nb)-R::lgammafn(delta_nb)-R::lgammafn(Y.at(j-1)+1.);
 				logpred.at(i) += R::lgammafn(alphat.at(j)+betat.at(j))-R::lgammafn(alphat.at(j))-R::lgammafn(betat.at(j));

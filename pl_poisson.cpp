@@ -48,8 +48,9 @@ Rcpp::List mcs_poisson(
     const double mu0 = 2.220446e-16,
     const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N = 5000, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue, // mean of normal prior for theta0
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue, // variance of normal prior for theta0
+    const double theta0_upbnd = 2., // Upper bound of uniform prior for theta0
     const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
     const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
     const double delta_nb = 1.,
@@ -159,26 +160,25 @@ Rcpp::List mcs_poisson(
     arma::mat theta(p,N);
     arma::cube theta_stored(p,N,B);
     arma::mat hpsi;
-    if (link_code==1) {
+    // if (link_code==1) {
         // Exponential Link
         arma::vec m0(p,arma::fill::zeros);
-        arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
+        arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
         if (!m0_prior.isNull()) {
 		    m0 = Rcpp::as<arma::vec>(m0_prior);
 	    }
-	    if (!C0_prior.isNull()) {
-		    C0 = Rcpp::as<arma::mat>(C0_prior);
-            C0 = arma::chol(C0);
-	    }
-
+	    // if (!C0_prior.isNull()) {
+		//     C0 = Rcpp::as<arma::mat>(C0_prior);  
+	    // }
+        C0 = arma::chol(C0);
         for (unsigned int i=0; i<N; i++) {
             theta.col(i) = m0 + C0.t() * arma::randn(p);
         }
 
-    } else {
-        // Identity Link
-        theta = arma::randu(p,N,arma::distr_param(0.,10.)); // Consider it as a flat prior
-    }
+    // } else {
+    //     // Identity Link
+    //     theta = arma::randu(p,N,arma::distr_param(0.,theta0_upbnd)); // Consider it as a flat prior
+    // }
     theta_stored.slice(B-1) = theta;
     /*
     ------ Step 1. Initialization theta[0,] at time t = 0 ------
@@ -940,10 +940,12 @@ Rcpp::List ffbs_poisson(
 	const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const double theta0_upbnd = 2.,
     const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
     const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
     const double delta_nb = 1.,
     const double delta_discount = 0.95,
+    const unsigned int npara = 20,
     const bool resample = false, // true = auxiliary particle filtering; false = bootstrap filtering
     const bool smoothing = true, // true = particle smoothing; false = no smoothing
     const bool verbose = false,
@@ -998,29 +1000,33 @@ Rcpp::List ffbs_poisson(
     arma::uvec idx(N);
 
         
-    arma::mat theta(p,N);
+    arma::mat theta(p,N,arma::fill::zeros);
     arma::cube theta_stored(p,N,n+1);
     arma::mat hpsi;
-    if (link_code==1) {
-        // Exponential Link
+    // if (link_code==1) {
+    //     // Exponential Link
         arma::vec m0(p,arma::fill::zeros);
-        arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
+        arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
         if (!m0_prior.isNull()) {
 		    m0 = Rcpp::as<arma::vec>(m0_prior);
 	    }
-	    if (!C0_prior.isNull()) {
-		    C0 = Rcpp::as<arma::mat>(C0_prior);
-            C0 = arma::chol(C0);
-	    }
+	    // if (!C0_prior.isNull()) {
+		//     C0 = Rcpp::as<arma::mat>(C0_prior);
+            
+	    // }
+        C0 = arma::chol(C0);
+
+        // theta.row(0) = m0.at(0) + arma::randn(1,N)*C0.at(0,0);
+        // theta.row(1) = m0.at(1) + arma::randn(1,N)*C0.at(1,1);
 
         for (unsigned int i=0; i<N; i++) {
             theta.col(i) = m0 + C0.t() * arma::randn(p);
         }
 
-    } else {
-        // Identity Link
-        theta = arma::randu(p,N,arma::distr_param(0.,10.)); // Consider it as a flat prior
-    }
+    // } else {
+    //     // Identity Link
+    //     theta = arma::randu(p,N,arma::distr_param(0.,theta0_upbnd)); // Consider it as a flat prior
+    // }
     theta_stored.slice(0) = theta;
     /*
     ------ Step 1. Initialization theta[0,] at time t = 0 ------
@@ -1032,11 +1038,10 @@ Rcpp::List ffbs_poisson(
     // const double c2_ = 2.*rho;
     // const double c3_ = -rho*rho;
 
-    
-    arma::mat R(n+1,3); // quantiles
     arma::vec mt(p);
     arma::mat Ct(p,p);
     arma::vec Wt(n);
+    arma::vec w_stored(n+1,arma::fill::zeros);
 
     
     for (unsigned int t=0; t<n; t++) {
@@ -1122,7 +1127,7 @@ Rcpp::List ffbs_poisson(
             } else {
                 Wsqrt *= std::sqrt(1./0.99-1.);
             }
-            Wt.at(t) = Wsqrt;
+            Wt.at(t) =std::max(Wsqrt,EPS);
         } else {
             Wt.at(t) = Wsqrt;
         }
@@ -1161,6 +1166,7 @@ Rcpp::List ffbs_poisson(
             lambda = mu0 + theta.row(1).t();
         }
 
+
         for (unsigned int i=0; i<N; i++) {
             w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),model_code.at(0),delta_nb,false);
         } // End for loop of i, index of the particles
@@ -1172,6 +1178,7 @@ Rcpp::List ffbs_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
+        w_stored.at(t+1) = arma::accu(w)/N_; // summation of the unormalized weight, marginal likelihood
         if (arma::accu(w)>EPS) { 
             w /= arma::accu(w); // normalize the particle weights
             try{
@@ -1246,13 +1253,28 @@ Rcpp::List ffbs_poisson(
     Rcpp::List output;
     
 
+    arma::mat R(n+1,3); // quantiles
     if (smoothing) {
-        R = arma::quantile(psi_smooth,Rcpp::as<arma::vec>(qProb),0);
+        R = arma::quantile(psi_smooth,Rcpp::as<arma::vec>(qProb),0); // 3 columns, smoothed psi
         output["psi"] = Rcpp::wrap(R.t());
     } else {
         R = arma::quantile(psi_filter,Rcpp::as<arma::vec>(qProb),0);
         output["psi"] = Rcpp::wrap(R.t());
     }
+
+    double log_marg_lik = 0.;
+    for (unsigned int t=npara; t<(n+1); t++) {
+        log_marg_lik += std::log(std::max(w_stored.at(t),1.e-32));
+    }
+    output["log_marg_lik"] = log_marg_lik;
+    output["marg_lik"] = Rcpp::wrap(w_stored);
+
+    // add RMSE and MAE between lambda[t] and y[t]
+    arma::vec hpsiR = psi2hpsi(arma::vectorise(R.row(1)),model_code.at(3),ctanh); // hpsi: p x N
+    double theta0 = 0;
+    arma::vec lambdaR = hpsi2theta(hpsiR, Y, trans_code, theta0, alpha, L, rho); // n x 1
+    output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(lambdaR.tail(n-npara) - Y.tail(n-npara),2.0))));
+    output["mae"] = arma::as_scalar(arma::mean(arma::abs(lambdaR.tail(n-npara) - Y.tail(n-npara))));
 
     return output;
 }
@@ -1544,6 +1566,7 @@ void mcs_poisson(
 	const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const double theta0_upbnd = 2.,
     const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5),
     const double delta_nb = 1., // 0: negative binomial DLM; 1: poisson DLM
     const double delta_discount = 0.95){ 
@@ -1643,26 +1666,26 @@ void mcs_poisson(
     arma::mat theta(p,N);
     arma::cube theta_stored(p,N,B);
     arma::mat hpsi;
-    if (link_code==1) {
+    // if (link_code==1) {
         // Exponential Link
         arma::vec m0(p,arma::fill::zeros);
-        arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
+        arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
         if (!m0_prior.isNull()) {
 		    m0 = Rcpp::as<arma::vec>(m0_prior);
 	    }
-	    if (!C0_prior.isNull()) {
-		    C0 = Rcpp::as<arma::mat>(C0_prior);
-            C0 = arma::chol(C0);
-	    }
+	    // if (!C0_prior.isNull()) {
+		//     C0 = Rcpp::as<arma::mat>(C0_prior);
+	    // }
+        C0 = arma::chol(C0);
 
         for (unsigned int i=0; i<N; i++) {
             theta.col(i) = m0 + C0.t() * arma::randn(p);
         }
 
-    } else {
-        // Identity Link
-        theta = arma::randu(p,N,arma::distr_param(0.,10.)); // Consider it as a flat prior
-    }
+    // } else {
+    //     // Identity Link
+    //     theta = arma::randu(p,N,arma::distr_param(0.,theta0_upbnd)); // Consider it as a flat prior
+    // }
     theta_stored.slice(B-1) = theta;
     /*
     ------ Step 1. Initialization at time t = 0 ------

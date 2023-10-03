@@ -9,3 +9,6 @@
 *.png
 .DS_Store
 *.pdf
+test_*
+tmp_*
+sim_*

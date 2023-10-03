@@ -56,7 +56,7 @@ if (length(args)>=1) {
 if (length(args)>=2) {
   gain_func = as.character(args[2])
 } else {
-  gain_func = "exponential"
+  gain_func = "softplus"
 }
 
 if (length(args)>=3) {
@@ -117,7 +117,7 @@ opts = default_opts(length(y),
 opts$W_prior = setNames(c(aw,bw),c("aw","bw"))
 opts$mu0_prior = setNames(c(amu,bmu),c("amu","bmu"))
 opts$ctanh[3] = ctanhM
-
+opts$delta_nb = 100
 
 delta = get_optimal_delta(y,opts$model_code,delta_grid,
                           L=opts$L,rho=opts$rho,

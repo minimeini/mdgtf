@@ -520,7 +520,8 @@ Rcpp::List hva_poisson(
     const double alpha = 1.,
     const double delta = NA_REAL, // discount factor
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const double theta0_upbnd = 2.,
     const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, the last one is M will be updated by eta[3] at each step
     const Rcpp::Nullable<Rcpp::NumericVector>& psi_init = R_NilValue, // previously `ht_`
     const unsigned int rtheta_type = 0, // 0 - marginal smoothing; 1 - conditional sampling. Only used for FFBS (sampler_type=0)
@@ -732,9 +733,9 @@ Rcpp::List hva_poisson(
 
         } else if (eta_select.at(0)==1){
             // mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
-            mcs_poisson(R,pmarg_y,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,delta_discount);
+            mcs_poisson(R,pmarg_y,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,theta0_upbnd,ctanh_,delta_nb,delta_discount);
         } else {
-            mcs_poisson(R,pmarg_y,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb,delta_discount);
+            mcs_poisson(R,pmarg_y,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,theta0_upbnd,ctanh_,delta_nb,delta_discount);
         }
 
         // Logarithm marginal likelihood of y

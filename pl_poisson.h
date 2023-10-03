@@ -65,6 +65,7 @@ Rcpp::List mcs_poisson(
 	const unsigned int N, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const double theta0_upbnd,
     const Rcpp::NumericVector& qProb,
     const Rcpp::NumericVector& ctanh,
     const double delta_nb,
@@ -94,6 +95,29 @@ void bf_poisson(
     const Rcpp::NumericVector& ctanh,
     const double delta_nb);
 
+
+
+Rcpp::List ffbs_poisson(
+    const arma::vec& Y, // n x 1, the observed response
+    const arma::uvec& model_code,
+	const double W,
+    const double rho,
+    const double alpha,
+    const unsigned int L, // number of lags
+    const double mu0,
+	const unsigned int N, // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
+	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const double theta0_upbnd,
+    const Rcpp::NumericVector& qProb,
+    const Rcpp::NumericVector& ctanh,
+    const double delta_nb,
+    const double delta_discount,
+    const unsigned int npara,
+    const bool resample, // true = auxiliary particle filtering; false = bootstrap filtering
+    const bool smoothing, // true = particle smoothing; false = no smoothing
+    const bool verbose,
+    const bool debug);
 
 
 Rcpp::List pmmh_poisson(
@@ -133,6 +157,7 @@ void mcs_poisson(
 	const unsigned int N, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const double theta0_upbnd,
     const Rcpp::NumericVector& ctanh,
     const double delta_nb,
     const double delta_discount);

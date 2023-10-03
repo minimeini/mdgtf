@@ -144,6 +144,7 @@ Rcpp::List lbe_poisson(
 	const double alpha,
 	const double delta_nb,
 	const double ci_coverage,
+	const unsigned int npara,
 	const bool summarize_return,
 	const bool debug);
 
@@ -171,6 +172,7 @@ Rcpp::List get_optimal_delta(
 	const Rcpp::NumericVector& ctanh,
 	const double alpha,
 	const double delta_nb,
+	const unsigned int npara,
 	const double ci_coverage);
 
 

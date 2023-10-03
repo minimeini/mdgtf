@@ -180,7 +180,7 @@ Binomial coefficients, i.e., n-choose-k
 */
 //' @export
 // [[Rcpp::export]]
-double binom(int n, int k) { return 1/((n+1)*boost::math::beta(n-k+1,k+1)); }
+double binom(int n, int k) { return 1./((static_cast<double>(n)+1.)*boost::math::beta(std::max(static_cast<double>(n-k+1),EPS),std::max(static_cast<double>(k+1),EPS))); }
 
 
 
@@ -1025,6 +1025,9 @@ double loglike_obs(
 	const bool return_log = false) {
 	
 	double loglike = -9999.;
+	double yabs = std::abs(y);
+	double labs = std::max(lambda,EPS);
+
 	switch (obs_code) {
 		case 0: // negative-binomial
 		{
@@ -1035,9 +1038,9 @@ double loglike_obs(
 
         	sample variance exceeds the sample mean
         	*/
-        	loglike = R::lgammafn(y+delta_nb) - R::lgammafn(y+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+lambda)) + y*(std::log(lambda)-std::log(delta_nb+lambda));
+        	loglike = R::lgammafn(yabs+delta_nb) - R::lgammafn(yabs+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+labs)) + yabs*(std::log(labs)-std::log(delta_nb+labs));
 			if (!return_log) {
-				loglike = std::exp(loglike);
+				loglike = std::exp(std::min(loglike,UPBND));
 			}
 		}
 		break;
@@ -1050,7 +1053,7 @@ double loglike_obs(
 
         	sample variance == sample mean
         	*/
-        	loglike = R::dpois(y,lambda,return_log);
+        	loglike = R::dpois(yabs,labs,return_log);
 		}
 		break;
 		default:
@@ -1058,5 +1061,6 @@ double loglike_obs(
 			::Rf_error("Not supported observational distribution.\n");
 		}
 	}
+
 	return loglike;
 }
