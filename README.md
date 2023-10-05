@@ -50,19 +50,19 @@
 
 Output of `xcode-select -v`:
 
-```
+```bash
 xcode-select version 2396.
 ```
 
 Output of `xcode-select -p`:
 
-```
+```bash
 /Library/Developer/CommandLineTools
 ```
 
 Output of `gcc --version`:
 
-```
+```bash
 Apple clang version 14.0.0 (clang-1400.0.29.202)
 Target: arm64-apple-darwin22.2.0
 Thread model: posix
@@ -71,14 +71,14 @@ InstalledDir: /Library/Developer/CommandLineTools/usr/bin
 
 Output of `R.version.string` in `R`:
 
-```
+```r
 > R.version.string
 [1] "R version 4.2.2 (2022-10-31)"
 ```
 
 My `macOS` version:
 
-```
+```bash
 System Version: macOS 13.1 (22C65)
 Kernel Version: Darwin 22.2.0
 Processor: Apple M1 Pro
@@ -86,9 +86,16 @@ Processor: Apple M1 Pro
 
 Locations of R-related headers:
 
-```
+```r
 > R.home()
 [1] "/Library/Frameworks/R.framework/Resources"
 > RcppArmadillo:::CxxFlags()
 -I"/Library/Frameworks/R.framework/Versions/4.2-arm64/Resources/library/RcppArmadillo/include"
+```
+
+Location of R packages
+
+```r
+> .libPaths()
+"/Library/Frameworks/R.framework/Versions/4.3-arm64/Resources/library"
 ```
