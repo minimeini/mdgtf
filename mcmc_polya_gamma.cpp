@@ -76,6 +76,7 @@ Unknown Parameters
 Rcpp::List mcmc_polya_gamma(
 	const arma::mat& Y, // S x T, the observed response
     const arma::vec& npop, // S x 1, number of population for each location
+    const arma::mat& V, // S x S, neighboring structure matrix with 0 or 1 entries
 	const unsigned int L = 12, // temporal lags for transfer effect
 	const unsigned int nburnin = 0,
 	const unsigned int nthin = 1,
@@ -153,7 +154,14 @@ Rcpp::List mcmc_polya_gamma(
 
     const arma::vec Js(ns,arma::fill::zeros);
     const arma::vec Jl(L,arma::fill::ones);
+    const arma::vec Jt(nt,arma::fill::ones);
     const arma::mat Ypad = arma::join_rows(Js,Y); // ns x (nt+1)
+
+    const arma::mat Is(ns,ns,arma::fill::eye);
+
+    const arma::vec vrow = arma::sum(V,1);
+    const arma::mat Tv = arma::diagmat(vrow);
+    const arma::mat Tvi = arma::diagmat(1./vrow);
     /* ----------------- */
 
 
@@ -183,7 +191,7 @@ Rcpp::List mcmc_polya_gamma(
     arma::vec Fphi = get_Fphi(L);
     arma::vec Fy(L,arma::fill::zeros);
     arma::vec Fts(L,arma::fill::zeros);
-    arma::mat Ft(L,ns,arma::fill::zeros);
+    arma::cube Ft(L,ns,nt+1);
 
     arma::mat at(L,nt+1,arma::fill::zeros);
     arma::cube Rt(L,L,nt+1);
@@ -212,29 +220,52 @@ Rcpp::List mcmc_polya_gamma(
     Temporal parameters for MCMC
     -----------------
     */
-    arma::vec atmp(ns,arma::fill::zeros);
+    arma::vec a(ns,arma::fill::zeros);
     if (!a_fixed.isNull()) {
-        atmp = arma::vec(Rcpp::as<Rcpp::NumericVector>(a_fixed).begin(),ns);
+        a = arma::vec(Rcpp::as<Rcpp::NumericVector>(a_fixed).begin(),ns);
     }
-    arma::vec btmp(ns,arma::fill::zeros); 
-    if (!b_fixed.isNull()) {
-        btmp = arma::vec(Rcpp::as<Rcpp::NumericVector>(b_fixed).begin(),ns);
-    }
-    arma::mat Btmp = arma::diagmat(btmp);
-    arma::vec Ztmp(ns,arma::fill::zeros);
+    arma::vec mu_a(ns,arma::fill::zeros);
+    arma::mat Sig_a(ns,ns,arma::fill::eye);
 
-    double Wtmp = eta_init.at(0,0);
+    arma::vec b(ns,arma::fill::zeros); 
+    if (!b_fixed.isNull()) {
+        b = arma::vec(Rcpp::as<Rcpp::NumericVector>(b_fixed).begin(),ns);
+    }
+    arma::mat B = arma::diagmat(b);
+    arma::vec mu_b(ns,arma::fill::zeros);
+    arma::mat Sig_b(ns,ns,arma::fill::eye);
+    
+
+    double W = eta_init.at(0,0);
     double aw = eta_init.at(1,0) + 0.5*nt_ ;
     double bw;
     arma::mat Wmat(L,L,arma::fill::zeros);
-    Wmat.at(0,0) = Wtmp;
+    Wmat.at(0,0) = W;
 
     double sig2_a = eta_init.at(0,1);
+    double a_sig2a = 0.5*static_cast<double>(ns) +  eta_init.at(3,1) - 1.;
+    double b_sig2a = 0.;
+    
     double delta_a = eta_init.at(0,2);
+
     double sig2_b = eta_init.at(0,3);
+    double a_sig2b = 0.5*static_cast<double>(ns) + eta_init.at(3,3) - 1.;
+    double b_sig2b = 0.;
+
     double delta_b = eta_init.at(0,4);
 
-    
+    arma::vec Ztmp(ns,arma::fill::zeros);
+    arma::mat Ztmp2(ns,nt+1,arma::fill::zeros);
+    arma::cube Kt(ns,ns,nt+1);
+    arma::mat Ktb(ns,nt+1,arma::fill::zeros);
+    arma::mat rt(ns,nt+1,arma::fill::zeros);
+
+    arma::cube Theta_stored(L,nt+1,nsample);
+    arma::vec W_stored(nsample);
+    arma::mat a_stored(ns,nsample);
+    arma::mat a_param(2,nsample); // (a_sig2a,b_sig2a)
+    arma::mat b_stored(ns,nsample);
+    arma::mat b_param(2,nsample); // (a_sig2b,b_sig2b)
 
     bool saveiter;
     /*
@@ -249,9 +280,9 @@ Rcpp::List mcmc_polya_gamma(
 
 
 
-	for (unsigned int b=0; b<ntotal; b++) {
+	for (unsigned int nn=0; nn<ntotal; nn++) {
 		R_CheckUserInterrupt();
-		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
+		saveiter = nn > nburnin && ((nn-nburnin-1)%nthin==0);
 
         /*
         (1) Sample auxliary Polya-Gamma variables: Omega, Lambda, Zmat.
@@ -278,25 +309,28 @@ Rcpp::List mcmc_polya_gamma(
                 Rt.slice(t) = Rt.slice(1);
                 mt.col(t) = mt.col(1);
                 Ct.slice(t) = Ct.slice(1);
+
+                Ft.slice(t) = Ft.slice(1);
+
             } else {
                 for (unsigned int s=0; s<ns; s++) {
                     update_Ft_koyama(Fts,Fy,t,L,Ypad.row(s),Fphi,1.);
-                    Ft.col(s) = Fts; // Ft: L x ns
+                    Ft.slice(t).col(s) = Fts; // Ft: L x ns
                 }
 
-                Ztmp = Z.col(t) - atmp - Btmp * Ft.t() * Jl;
+                Ztmp = Z.col(t) - a - B * Ft.slice(t).t() * Jl;
 
                 at.col(t) = G * mt.col(t-1); // L x 1
                 Rt.slice(t) = G * Ct.slice(t-1) * G.t() + Wmat; // L x L
-                ft = Ft.t() * at.col(t); // ns x 1 = (ns x L) * (L x 1)
+                ft = Ft.slice(t).t() * at.col(t); // ns x 1 = (ns x L) * (L x 1)
 
-                Qt = Ft.t() * Rt.slice(t) * Ft + Ot_inv; // ns x ns
+                Qt = Ft.slice(t).t() * Rt.slice(t) * Ft.slice(t) + Ot_inv; // ns x ns
                 Qt = arma::chol(arma::symmatu(Qt)); // Q = R'R, R: upper triangular part of Cholesky decomposition
                 Qt = arma::inv(arma::trimatu(Qt)); // R^{-1}: inverse of upper-triangular cholesky component
                 Qt = Qt * Qt.t(); // inverse Qt^{-1} = R^{-1} (R^{-1})'
 
-                mt.col(t) = at.col(t) + Rt.slice(t) * Ft * Qt * (Ztmp - ft);
-                Ct.slice(t) = Rt.slice(t) - Rt.slice(t) * Ft * Qt * Ft.t() * Rt.slice(t);
+                mt.col(t) = at.col(t) + Rt.slice(t) * Ft.slice(t) * Qt * (Ztmp - ft);
+                Ct.slice(t) = Rt.slice(t) - Rt.slice(t) * Ft.slice(t) * Qt * Ft.slice(t).t() * Rt.slice(t);
             }            
         }
 
@@ -331,60 +365,101 @@ Rcpp::List mcmc_polya_gamma(
                 bw += 0.5 * (Theta.at(0,ti)-Theta.at(0,ti-1)) * (Theta.at(0,ti)-Theta.at(0,ti-1));
             }
 
-            Wtmp = 1./R::rgamma(aw,1./bw);
-            Wmat.at(0,0) = Wtmp;
+            W = 1./R::rgamma(aw,1./bw);
+            Wmat.at(0,0) = W;
         }
 
 
-        // (4) Sample spatial baseline a=(a[1],...,a[ns])
-        if (eta_type.at(1) == 1) {
+        if (eta_type.at(4)==1 || eta_type.at(1)==1) {
+            for (unsigned int t=1; t<=nt; t++) {
+                Kt.slice(t) = arma::diagmat(arma::vectorise(Jl.as_row()*Ft.slice(t))); // ns x ns
+                rt.col(t) = Ft.slice(t).t()*Theta.col(t);
+            }
+            // (7) Sample spatial covariates b=(b[1],...,b[ns])
+            if (eta_type.at(4) == 1) {
+                Ztmp2 = Z - arma::kron(a,Jt.t()) - rt; // ns x nt
+                Sig_b = Tv * (Is - delta_b*Tvi*V) / sig2_b;
+                mu_b.zeros();
+                for (unsigned int t=1; t<=nt; t++) {
+                    Sig_b = Sig_b + Kt.slice(t).t()*arma::diagmat(Omega.col(t))*Kt.slice(t);
+                    mu_b = mu_b + Kt.slice(t).t() * arma::diagmat(Omega.col(t)) * Ztmp2.col(t);
+                }
+            }
 
+            Sig_b = arma::inv_sympd(arma::symmatu(Sig_b)); // [TODO] check this part
+            mu_b = Sig_b * mu_b;
+            Sig_b = arma::chol(Sig_b);
+            b = mu_b + Sig_b.t()*arma::randn(ns,1);
+
+            // (8) Sample sig2_b
+            if (eta_type.at(5) == 1) {
+                b_sig2b = 0.5 * arma::as_scalar((b.t()-mu_b.t())*Tv*(Is-delta_b*Tvi*V)*(b-mu_b));
+                sig2_b = 1./R::rgamma(a_sig2b,1./b_sig2b); // [TODO] check this part
+            }
+
+
+            // (9) Sample delta_b
+            if (eta_type.at(6) == 1) {
+                
+            }
+
+
+            // (4) Sample spatial baseline a=(a[1],...,a[ns])
+            if (eta_type.at(1) == 1) {
+                for (unsigned int t=1; t<=nt; t++) {
+                    Ktb.col(t) = Kt.slice(t) * b;
+                }
+
+                Ztmp2 = Z - Ktb - rt; // ns x nt
+                Sig_a = Tv*(Is - delta_a*Tvi*V)/sig2_a;
+                mu_a.zeros();
+                for(unsigned int t=1; t<=nt; t++) {
+                    Sig_a = Sig_a + arma::diagmat(Omega.col(t));
+                    mu_a = mu_a + arma::diagmat(Omega.col(t)) * Ztmp2.col(t);
+                }
+
+                Sig_a = arma::inv_sympd(arma::symmatu(Sig_a)); // [TODO] check this part
+                mu_a = Sig_a * mu_a;
+                Sig_a = arma::chol(Sig_a);
+                a = mu_a + Sig_a.t()*arma::randn(ns,1);
+            }
+
+
+            // (5) Sample sig2_a
+            if (eta_type.at(2) == 1) {
+                b_sig2a = 0.5 * arma::as_scalar((a.t()-mu_a.t())*Tv*(Is-delta_a*Tvi*V)*(a-mu_a));
+                sig2_a = 1./R::rgamma(a_sig2a,1./b_sig2a); // [TODO] check this part
+            }
+
+            // (6) Sample delta_a
+            if (eta_type.at(3) == 1) {
+                // Metropolis or grid search?
+            }
         }
-
-
-        // (5) Sample sig2_a
-        if (eta_type.at(2) == 1) {
-
-        }
-
-
-        // (6) Sample delta_a
-        if (eta_type.at(3) == 1) {
-
-        }
-
-
-        // (7) Sample spatial covariates b=(b[1],...,b[ns])
-        if (eta_type.at(4) == 1) {
-
-        }
-
-        // (8) Sample sig2_b
-        if (eta_type.at(5) == 1) {
-
-        }
-
-
-        // (9) Sample delta_b
-        if (eta_type.at(6) == 1) {
-
-        }
-
-		
+        
 		
 		// store samples after burnin and thinning
-		if (saveiter || b==(ntotal-1)) {
+		if (saveiter || nn==(ntotal-1)) {
 			unsigned int idx_run;
 			if (saveiter) {
-				idx_run = (b-nburnin-1)/nthin;
+				idx_run = (nn-nburnin-1)/nthin;
 			} else {
 				idx_run = nsample - 1;
 			}
 
+            Theta_stored.slice(idx_run) = Theta;
+            W_stored.at(idx_run) = W;
+            a_stored.col(idx_run) = a;
+            a_param.at(0,idx_run) = sig2_a;
+            a_param.at(1,idx_run) = delta_a;
+
+            b_stored.col(idx_run) = b;
+            b_param.at(0,idx_run) = sig2_b;
+            b_param.at(1,idx_run) = delta_b;
 		}
 
 		if (verbose) {
-			Rcout << "\rProgress: " << b << "/" << ntotal-1;
+			Rcout << "\rProgress: " << nn << "/" << ntotal-1;
 		}
 		
 	}
@@ -394,6 +469,27 @@ Rcpp::List mcmc_polya_gamma(
 	}
 
 	Rcpp::List output;
+    output["Theta"] = Rcpp::wrap(Theta_stored);
+    
+    if (eta_type.at(0) == 1) {
+        // (3) Sample evolution variance W
+        output["W"] = Rcpp::wrap(W_stored);
+    }
+
+    if (eta_type.at(1)==1) {
+        // sample a and/or sig2_a,delta_a
+        output["a"] = Rcpp::wrap(a_stored);
+        output["a_s2_del"] = Rcpp::wrap(a_param);
+    }
+
+    if (eta_type.at(4)==1) {
+        // sample b and/or sig2_b,delta_b
+        output["b"] = Rcpp::wrap(b_stored);
+        output["b_s2_del"] = Rcpp::wrap(b_param);
+    }
+
+
+
 	
 	return output;
 }
