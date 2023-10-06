@@ -139,27 +139,25 @@ void update_Rt(
 - only contain the phi[l]*y[t-l] part.
 - doesn't include the gain function.
 */
-void update_Ft(
+void update_Ft_koyama(
 	arma::vec& Ft, // L x 1
 	arma::vec& Fy, // L x 1
-	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const unsigned int t, // current time point
 	const unsigned int L, // lag
 	const arma::vec& Y,  // (n+1) x 1, obs
 	const arma::vec& Fphi, // L x 1
 	const double alpha = 1.) { 
 		
-	if (trans_code == 1) { // Koyama
-		double L_ = static_cast<double>(L);
+	double L_ = static_cast<double>(L);
 
-		if (t <= L) {
-			arma::vec Fy = arma::reverse(Y.subvec(0,L-1));
-		} else {
-			Fy = arma::reverse(Y.subvec(t-L,t-1));
-		}
-		Fy.elem(arma::find(Fy<=EPS)).fill(0.01/L_);
-		Ft = Fphi % Fy;
+	if (t <= L) {
+		arma::vec Fy = arma::reverse(Y.subvec(0,L-1));
+	} else {
+		Fy = arma::reverse(Y.subvec(t-L,t-1));
+		// (y[t-1],y[t-2],...,y[t-L])
 	}
+	Fy.elem(arma::find(Fy<=EPS)).fill(0.01/L_);
+	Ft = Fphi % Fy;
 }
 
 
@@ -176,7 +174,7 @@ void forwardFilter(
 	const unsigned int link_code,
 	const unsigned int trans_code,
 	const unsigned int gain_code,
-	const unsigned int n, // number of observations
+	const unsigned int nt, // number of observations
 	const unsigned int p, // dimension of the state space
 	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, coefficients for the hyperbolic tangent gain function
@@ -223,7 +221,7 @@ void forwardFilter(
 	if (trans_code == 1 && L>0) { // Koyama
         at.col(1) = update_at(p,gain_code,trans_code,mt.col(0),Gt.slice(0),ctanh,alpha,Y.at(0),rho);
 		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
-		update_Ft(Ft, Fy, trans_code, 0, L, Y, Fphi);
+		update_Ft_koyama(Ft, Fy, 1, L, Y, Fphi);
         hpsi = psi2hpsi(at.col(1),gain_code,ctanh);
 		hph = hpsi_deriv(at.col(1),gain_code,ctanh);
 		ft = arma::accu(Ft % hpsi);
@@ -305,7 +303,7 @@ void forwardFilter(
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 
-	for (unsigned int t=(L+1); t<=n; t++) {
+	for (unsigned int t=(L+1); t<=nt; t++) {
 		R_CheckUserInterrupt();
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
@@ -323,7 +321,7 @@ void forwardFilter(
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
         if (trans_code == 1) { // Koyama
-			update_Ft(Ft, Fy, trans_code, t, L, Y, Fphi);
+			update_Ft_koyama(Ft, Fy, t, L, Y, Fphi);
 			if (Ft.has_nonfinite()) {
 				Rcout << "t = " << t; 
 				Ft.brief_print();
@@ -817,7 +815,7 @@ Rcpp::List get_eta_koyama(
 	}
 
 	for (unsigned int t=0; t<=n; t++) {
-		update_Ft(Ft, Fy, trans_code, t, p, Y, Fphi, alpha);
+		update_Ft_koyama(Ft, Fy, t, p, Y, Fphi, alpha);
 		switch (gain_code) {
 			case 0: // KoyamaMax
 			{

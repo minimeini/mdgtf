@@ -39,7 +39,7 @@ arma::mat update_at(
 	const arma::mat& Gt, // p x p
 	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
-	const double y,  // n x 1
+	const double y,  // nt x 1
 	const double rho);
 
 
@@ -65,33 +65,34 @@ void update_Rt(
 	const double delta);
 
 
-void update_Ft(
+void update_Ft_koyama(
 	arma::vec& Ft, // L x 1
 	arma::vec& Fy, // L x 1
-	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const unsigned int t, // current time point
 	const unsigned int L, // lag
-	const arma::vec& Y,  // (n+1) x 1, obs
+	const arma::vec& Y,  // (nt+1) x 1, obs
 	const arma::vec& Fphi,
 	const double alpha);
 
-
+/**
+* Forward filter for univariate and multivariate input, Y.
+*/
 /* Forward Filtering */
 void forwardFilter(
-	arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat& at, // p x (n+1)
-	arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube& Rt, // p x p x (n+1)
-	arma::cube& Gt, // p x p x (n+1)
-	arma::vec& alphat, // (n+1) x 1
-	arma::vec& betat, // (n+1) x 1
+	arma::mat& mt, // p x (nt+1), t=0 is the mean for initial value theta[0]
+	arma::mat& at, // p x (nt+1)
+	arma::cube& Ct, // p x p x (nt+1), t=0 is the var for initial value theta[0]
+	arma::cube& Rt, // p x p x (nt+1)
+	arma::cube& Gt, // p x p x (nt+1)
+	arma::vec& alphat, // (nt+1) x 1
+	arma::vec& betat, // (nt+1) x 1
 	const unsigned int obs_code,
 	const unsigned int link_code,
 	const unsigned int trans_code,
 	const unsigned int gain_code,
 	const unsigned int n, // number of observations
 	const unsigned int p, // dimension of the state space
-	const arma::vec& Y, // (n+1) x 1, the observation (scalar), n: num of obs
+	const arma::vec& Y, // (nt+1) x 1, the observation (scalar), n: num of obs
 	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
 	const unsigned int L,
@@ -104,13 +105,13 @@ void forwardFilter(
 
 
 void backwardSmoother(
-	arma::vec& ht, // (n+1) x 1
-	arma::vec& Ht, // (n+1) x 1
+	arma::vec& ht, // (nt+1) x 1
+	arma::vec& Ht, // (nt+1) x 1
 	const unsigned int n,
 	const unsigned int p,
-	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::mat& at, // p x (n+1)
-	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
+	const arma::mat& mt, // p x (nt+1), t=0 is the mean for initial value theta[0]
+	const arma::mat& at, // p x (nt+1)
+	const arma::cube& Ct, // p x p x (nt+1), t=0 is the var for initial value theta[0]
 	const arma::cube& Rt,
 	const arma::cube& Gt,
 	const double W,
@@ -118,20 +119,20 @@ void backwardSmoother(
 
 
 void backwardSampler(
-	arma::vec& theta, // (n+1) x 1
+	arma::vec& theta, // (nt+1) x 1
 	const unsigned int n,
 	const unsigned int p,
-	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::mat& at, // p x (n+1)
-	const arma::cube& Ct, // p x p x (n+1), t=0 is the var for initial value theta[0]
-	const arma::cube& Rt, // p x p x (n+1)
+	const arma::mat& mt, // p x (nt+1), t=0 is the mean for initial value theta[0]
+	const arma::mat& at, // p x (nt+1)
+	const arma::cube& Ct, // p x p x (nt+1), t=0 is the var for initial value theta[0]
+	const arma::cube& Rt, // p x p x (nt+1)
 	const arma::cube& Gt,
 	const double W,
 	const double scale_sd);
 
 
 Rcpp::List lbe_poisson(
-	const arma::vec& Y, // n x 1, the observed response
+	const arma::vec& Y, // nt x 1, the observed response
 	const arma::uvec& model_code,
 	const double rho,
     const unsigned int L,
@@ -151,9 +152,9 @@ Rcpp::List lbe_poisson(
 
 
 Rcpp::List get_eta_koyama(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::cube& Ct, // p x p x (n+1)
+	const arma::vec& Y, // nt x 1, the observation (scalar), n: num of obs
+	const arma::mat& mt, // p x (nt+1), t=0 is the mean for initial value theta[0]
+	const arma::cube& Ct, // p x p x (nt+1)
 	const unsigned int gain_code,
 	const double alpha,
 	const double mu0);
@@ -161,7 +162,7 @@ Rcpp::List get_eta_koyama(
 
 
 Rcpp::List get_optimal_delta(
-	const arma::vec& Y, // n x 1
+	const arma::vec& Y, // nt x 1
 	const arma::uvec& model_code,
 	const arma::vec& delta_grid, // m x 1
 	const double rho,
@@ -178,7 +179,7 @@ Rcpp::List get_optimal_delta(
 
 
 double lbe_What(
-    const arma::vec& ht, // (n+1) x 1
+    const arma::vec& ht, // (nt+1) x 1
     const unsigned int nsample,
     const double aw,
     const double bw);
