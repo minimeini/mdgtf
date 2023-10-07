@@ -14,62 +14,131 @@ using namespace Rcpp;
 
 
 
+/**
+ * Calculate the logarithmic integrated likelihood of <delta>, conditional on the spatial effect.
+ * 
+ * @param delta double, the delta we are calculating the likelihood for.
+ * @param z ns x 1 vector of spatial effects.
+ * @param V ns x ns unnormalize neighboring structure matrix, with 0 and 1.
+ * @param Tv ns x ns diagonal matrix. Entries are inverse of row sums of V.
+ * @param mu ns x 1 vector, mean of the spatial effect.
+ * @param Is ns x ns identity matrix.
+ * @param ns double, number of locations.
+ * @param a_delta (default = 1) a of the beta prior for delta.
+ * @param b_delta (default = 1) b of the beta prior for delta.
+ * @param a_sig2 (default = 1) a of the uninformative prior for sigma2.
+*/
+double delta_integrated_loglik(
+    double delta,
+    const arma::vec z, // ns x 1, spatial effects.
+    const arma::mat V, // ns x ns, neighboring structure matrix
+    const arma::mat Tvi, // ns x ns diagonal, entries are row sums of V
+    const arma::vec mu, // ns x 1 mean of spatial effect
+    const arma::mat Is, // ns x ns identity matrix
+    const double ns, 
+    const double a_delta = 1., // a of the beta prior for delta
+    const double b_delta = 1., // b of the beta prior for delta
+    const double a_sig2 = 1.){ // a of the uninformative prior for sigma2
+
+    arma::mat Q = Is - delta*Tvi*V;
+    double loglik = 0.5*arma::det(Q);
+    loglik -= (0.5*ns+a_sig2-1.)*std::log(arma::as_scalar((z.t()-mu.t())*Q*(z-mu)));
+    loglik += (a_delta-1.)*std::log(delta) + (b_delta-1.)*std::log(1.-delta);
+    return loglik;
+}
+
+
 
 /**
-* Gibbs sampler with Metropolis-Hasting steps and Polya-Gamma augmentation.
-* The model is:
-* @f{align*}
-* y_{s,t}       &\sim\  \text{NB}(n_s,p_{s,t}) \\
-* p_{s,t}       &=      \frac{\exp(\lambda_{s,t})}{1 + \exp(\lambda_{s,t})} \\
-* \lambda_{s,t} &=      a_s + \sum_{l=1}^L R_{s,t-l} g_{l} \frac{y_{s,t-l}}{n_s} \\
-* R_{s,t}       &=      b_s + R_t \\
-* R_{t}         &=      R_{t-1} + w_{t},\ w_{t} \sim\mathcal{N}(0,W_{t})
-* @f}
-*
-*
-*
-* Random variables: 
-* (1) @f$\{\bm{\theta}\}_{0}^{T}@f$: latent state.
-* (2) @f$\{z_{s,t}\}@f$ and @f$\{\omega_{s,t}\}@f$: auxiliary variable for Polya-Gamma.
-* (3) @f$\{W_t\}@f$: evolution variance(s).
-*     - 0: known.
-*     - 1: static evolution variance with IG(a_w,b_w) prior.
-*     - 2: time-varying evolution variance using discount factor.
-* (4) @f$\{a_s\}_{s=1}^{S}@f$: baseline with CAR prior.
-*     - 0: known.
-*     - 1: CAR prior.
-* (5) @f$\{b_s\}_{s=1}^{S}@f$: spatial effect with CAR prior.
-*     - 0: known.
-*     - 1: CAR prior.
-* (6) @f$\{\sigma^{2}_{a},\delta_{a}\}@f$: CAR prior parameters for a, with IG(0,0,a)-beta(a_{a\delta}, b_{a\delta}) prior.
-* (7) @f$\{\sigma^{2}_{b},\delta_{b}\}@f$: CAR prior parameters for b, with IG(0,0,a)-beta(a_{b\delta}, b_{b\delta}) prior.
-*
-*
-*
-* @param Y S x T matrix, where S is the number of locations and T is the number of temporal observations.
-* @param npop S x 1 vector, number of population normalizer for each location.
-* @param L integer as double value, length of temporal lags for transfer effect.
-* @param nburnin
-* @param nthin
-* @param nsample
-* @param eta_type 7 x 1 integer vector, specific which entry of eta is fixed or random with specific prior.
-* @f$\eta = \{
-*   W_t
-*   a_s，\sigma^{2}_{a}, \delta_{a}, 
-*   b_s, \sigma^{2}_{b}, \delta_{b}
-* \}@f$.
-* @param eta_prior_val 4 x 5 numeric matrix
-*               (W)         (sig2_a)     (delta_a)     (sig2_b)      (delta_b)
-* [fixed/init]  0.01          0.1           1             0.1           1
-* [param - 1]   0.01           0            1             0             1
-* [param - 2]   0.01           0            1             0             1
-* [param - 3]   0(x)           1            0(x)          1             0(x)
-* @param summarize_return
-* @param verbose
-* 
-Unknown Parameters
-	- local parameters: psi[1:n]
-	- global parameters `eta`: W, mu0, rho, M,th0, psi0
+ * Calculate the logarithmic integrated likelihood of <logit of delta>, conditional on the spatial effect.
+ * 
+ * @param delta double, the delta before logit transform.
+ * @param z ns x 1 vector of spatial effects.
+ * @param V ns x ns unnormalize neighboring structure matrix, with 0 and 1.
+ * @param Tv ns x ns diagonal matrix. Entries are inverse of row sums of V.
+ * @param mu ns x 1 vector, mean of the spatial effect.
+ * @param Is ns x ns identity matrix.
+ * @param ns double, number of locations.
+ * @param a_delta (default = 1) a of the beta prior for delta.
+ * @param b_delta (default = 1) b of the beta prior for delta.
+ * @param a_sig2 (default = 1) a of the uninformative prior for sigma2.
+*/
+double logit_delta_integrated_loglik(
+    double delta, // delta before logit transform.
+    const arma::vec z, // ns x 1, spatial effects.
+    const arma::mat V, // ns x ns, neighboring structure matrix
+    const arma::mat Tvi, // ns x ns diagonal, entries are row sums of V
+    const arma::vec mu, // ns x 1 mean of spatial effect
+    const arma::mat Is, // ns x ns identity matrix
+    const double ns, 
+    const double a_delta = 1., // a of the beta prior for delta
+    const double b_delta = 1., // b of the beta prior for delta
+    const double a_sig2 = 1.){ // a of the uninformative prior for sigma2
+
+    arma::mat Q = Is - delta*Tvi*V;
+    double loglik = 0.5*arma::det(Q);
+    loglik -= (0.5*ns+a_sig2-1.)*std::log(arma::as_scalar((z.t()-mu.t())*Q*(z-mu)));
+    loglik += a_delta*std::log(delta) + b_delta*std::log(1.-delta);
+    return loglik;
+}
+
+
+/**
+ * Gibbs sampler with Metropolis-Hasting steps and Polya-Gamma augmentation.
+ * 
+ * 
+ * Model
+ * @f{align*}
+ * y_{s,t}       &\sim\  \text{NB}(n_s,p_{s,t}) \\
+ * p_{s,t}       &=      \frac{\exp(\lambda_{s,t})}{1 + \exp(\lambda_{s,t})} \\
+ * \lambda_{s,t} &=      a_s + \sum_{l=1}^L R_{s,t-l} g_{l} \frac{y_{s,t-l}}{n_s} \\
+ * R_{s,t}       &=      b_s + R_t \\
+ * R_{t}         &=      R_{t-1} + w_{t},\ w_{t} \sim\mathcal{N}(0,W_{t})
+ * @f}
+ * 
+ * 
+ * Random variables
+ * (1) @f$\{\bm{\theta}\}_{0}^{T}@f$: latent state.
+ * (1) @f$\{\bm{\theta}\}_{0}^{T}@f$: latent state.
+ * (3) @f$\{W_t\}@f$: evolution variance(s).
+ *      - 0: known.
+ *      - 1: static evolution variance with IG(a_w,b_w) prior.
+ *      - 2: time-varying evolution variance using discount factor.
+ * (4) @f$\{a_s\}_{s=1}^{S}@f$: baseline with CAR prior.
+ *      - 0: known.
+ *      - 1: CAR prior.
+ * (5) @f$\{b_s\}_{s=1}^{S}@f$: spatial effect with CAR prior.
+ *      - 0: known.
+ *      - 1: CAR prior.
+ * (6) @f$\{\sigma^{2}_{a},\delta_{a}\}@f$: CAR prior parameters for a, with IG(0,0,a)-beta(a_{a\delta}, b_{a\delta}) prior.
+ * (7) @f$\{\sigma^{2}_{b},\delta_{b}\}@f$: CAR prior parameters for b, with IG(0,0,a)-beta(a_{b\delta}, b_{b\delta}) prior.
+ *      
+ * 
+ * 
+ * @param Y S x T matrix, where S is the number of locations and T is the number of temporal observations.
+ * @param npop S x 1 vector, number of population normalizer for each location.
+ * @param V S x S unnormalize neighboring structure matrix with 0 and 1 as entries.
+ * @param L integer as double value, length of temporal lags for transfer effect.
+ * @param nburnin
+ * @param nthin
+ * @param nsample
+ * @param eta_type 7 x 1 integer vector, specific which entry of eta is fixed or random with specific prior.
+ * @f$\eta = \{
+ *      W_t
+ *      a_s，\sigma^{2}_{a}, \delta_{a}, 
+ *      b_s, \sigma^{2}_{b}, \delta_{b}
+ * \}@f$.
+ * @param eta_prior_val 4 x 5 numeric matrix
+ *               (W)         (sig2_a)     (delta_a)     (sig2_b)      (delta_b)
+ * [fixed/init]  0.01          0.1           1             0.1           1
+ * [param - 1]   0.01           0            1             0             1
+ * [param - 2]   0.01           0            1             0             1
+ * [param - 3]   0(x)           1            0(x)          1             0(x)
+ * @param sig_mh standard deviaitons, step size for (delta_a, delta_b)
+ * @param summarize_return
+ * @param verbose
+ * 
+ * 
 */
 //' @export
 // [[Rcpp::export]]
@@ -87,6 +156,7 @@ Rcpp::List mcmc_polya_gamma(
     const Rcpp::Nullable<Rcpp::NumericVector>& b_fixed = R_NilValue, // specify values of b if assuming known.
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+    const Rcpp::NumericVector sig_mh = Rcpp::NumericVector::create(1.,1.),
 	const bool summarize_return = false,
 	const bool verbose = true) { // n x 1
 
@@ -267,16 +337,24 @@ Rcpp::List mcmc_polya_gamma(
     arma::mat b_stored(ns,nsample);
     arma::mat b_param(2,nsample); // (a_sig2b,b_sig2b)
 
+    double blogitdel_new, bdel_new, blogp_new;
+    double bdel_old = delta_b;
+    double blogitdel_old = std::log(bdel_old) - std::log(1.-bdel_old);
+    double blogp_old = logit_delta_integrated_loglik(bdel_old,b,V,Tvi,mu_b,Is,ns);
+
+    double alogitdel_new, adel_new, alogp_new;
+    double adel_old = delta_a;
+    double alogitdel_old = std::log(adel_old) - std::log(1.-adel_old);
+    double alogp_old = logit_delta_integrated_loglik(adel_old,a,V,Tvi,mu_a,Is,ns);
+
+    double logratio;
+    arma::mat mh_accept(ntotal,2,arma::fill::zeros); // (col 1 = a, col 2 = b)
     bool saveiter;
     /*
     -----------------
     Temporal parameters for MCMC
     -----------------
     */
-    
-
-    /**/
-
 
 
 
@@ -400,7 +478,19 @@ Rcpp::List mcmc_polya_gamma(
 
             // (9) Sample delta_b
             if (eta_type.at(6) == 1) {
-                
+                blogitdel_new = std::exp(R::rnorm(blogitdel_old,sig_mh[1]));
+                bdel_new = blogitdel_new / (1.+blogitdel_new);
+                blogp_new = logit_delta_integrated_loglik(bdel_new,b,V,Tvi,mu_b,Is,ns);
+
+                logratio = std::min(0.,blogp_new - blogp_old);
+                if (std::log(R::runif(0.,1.)) < logratio) {
+                    // accept
+                    mh_accept.at(nn,1) = 1.;
+
+                    delta_b = bdel_new;
+                    blogitdel_old = std::log(bdel_new) - std::log(1.-bdel_new);
+                    blogp_old = blogp_new;
+                }
             }
 
 
@@ -433,9 +523,22 @@ Rcpp::List mcmc_polya_gamma(
 
             // (6) Sample delta_a
             if (eta_type.at(3) == 1) {
-                // Metropolis or grid search?
+                alogitdel_new = std::exp(R::rnorm(alogitdel_old,sig_mh[0]));
+                adel_new = alogitdel_new / (1.+alogitdel_new);
+                alogp_new = logit_delta_integrated_loglik(adel_new,a,V,Tvi,mu_a,Is,ns);
+
+                logratio = std::min(0.,alogp_new - alogp_old);
+                if (std::log(R::runif(0.,1.)) < logratio) {
+                    // accept
+                    mh_accept.at(nn,0) = 1.;
+                    
+                    delta_a = adel_new;
+                    alogitdel_old = std::log(adel_new) - std::log(1.-adel_new);
+                    alogp_old = alogp_new;
+                }
             }
         }
+        
         
 		
 		// store samples after burnin and thinning
@@ -488,10 +591,11 @@ Rcpp::List mcmc_polya_gamma(
         output["b_s2_del"] = Rcpp::wrap(b_param);
     }
 
+    if (eta_type.at(3)==1 || eta_type.at(6)==1) {
+        output["mh_accept"] = Rcpp::wrap(mh_accept);
+    }
 
 
 	
 	return output;
 }
-
-
