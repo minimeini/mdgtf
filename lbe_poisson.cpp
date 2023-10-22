@@ -479,10 +479,10 @@ void backwardSmoother(
 				// Rcout << "W=" << W << std::endl;
 				// Rcout << "R[t+1]=" << Rt.slice(t+1) << std::endl;
 				if (!R_IsNA(delta)) {
-					ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
+					ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1); 
 					Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
 				} else {
-					Bt = Ct.slice(t) * Gt.slice(t+1).t() * arma::pinv(Rt.slice(t+1),1.e-6);
+					Bt = Ct.slice(t) * Gt.slice(t+1).t() * arma::pinv(Rt.slice(t+1),1.e-6); // Pseudo inverse
 					ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
 					Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
 

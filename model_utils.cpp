@@ -243,7 +243,6 @@ arma::vec knl(
 //' @export
 // [[Rcpp::export]]
 arma::vec get_Fphi(const unsigned int L=30){ // number of Lags to be considered
-
     double tmpd;
     const double sm2 = std::pow(covid_s/covid_m,2);
     const double pk_mu = std::log(covid_m/std::sqrt(1.+sm2));
