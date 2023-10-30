@@ -838,7 +838,9 @@ Rcpp::List get_eta_koyama(
 }
 
 
-
+/**
+ * Doesn't work for poisson + solow + softplus + gaussian
+*/
 //' @export
 // [[Rcpp::export]]
 Rcpp::List get_optimal_delta(
@@ -870,7 +872,7 @@ Rcpp::List get_optimal_delta(
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,ci_coverage,false,false);
+		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,ctanh,alpha,delta_nb,ci_coverage,20,false,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=npara; j<=n; j++) {

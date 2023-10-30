@@ -1,15 +1,7 @@
-e_sim = new.env(parent=.GlobalEnv)
-assign("cdir",getwd(),envir=e_sim)
-assign("repo","/Users/meinitang/Dropbox/Repository/poisson-dlm",envir=e_sim)
-
-assign("UPBND",700,envir=e_sim)
-assign("EPS",.Machine$double.eps,envir=e_sim)
-
-Rcpp::sourceCpp(file.path(e_sim$repo,"model_utils.cpp"),env=e_sim)
-Rcpp::sourceCpp(file.path(e_sim$repo,"lbe_poisson.cpp"),env=e_sim)
-source(file.path(e_sim$repo,"model_info.R"),local=e_sim)
-
-
+cdir = getwd()
+repo = "/Users/meinitang/Dropbox/Repository/poisson-dlm"
+UPBND = 700
+EPS = .Machine$double.eps
 
 # TODO: compare it to the older version
 sim_pois_dglm2 = function(
@@ -32,12 +24,13 @@ sim_pois_dglm2 = function(
     delta_nb = 30., # rho_nb = 34.08792
     ci_coverage = 0.95,
     rng.seed = NULL,
+    get_discount = TRUE,
     delta_grid = seq(from=0.8,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
   
   # ------ Initialization ------ #
   ntotal = m + n
-  model_code = e_sim$get_model_code(
+  model_code = get_model_code(
     obs_dist=obs_dist,
     link_func=link_func,
     trans_func=trans_func,
@@ -84,20 +77,20 @@ sim_pois_dglm2 = function(
   gain_func = tolower(gain_func)
   if (gain_func=="ramp") {
     # Ramp
-    hpsi[hpsi<e_sim$EPS] = e_sim$EPS # Reproduction number after maximum thresholding
+    hpsi[hpsi<EPS] = EPS # Reproduction number after maximum thresholding
   } else if (gain_func=="exponential") {
     # Exponential
-    hpsi[hpsi>e_sim$UPBND] = e_sim$UPBND
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = exp(hpsi)
   } else if (gain_func=="identity") {
   } else if (gain_func=="softplus") {
-    hpsi[hpsi>e_sim$UPBND] = e_sim$UPBND
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = log(1. + exp(hpsi))
   } else if (gain_func=="tanh") {
     hpsi = 0.5*coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1.)
   } else if (gain_func=="logistic") {
     hpsi = -coef[1]*hpsi + coef[1]*coef[2]
-    hpsi[hpsi>e_sim$UPBND] = e_sim$UPBND
+    hpsi[hpsi>UPBND] = UPBND
     hpsi = coef[3] / (exp(hpsi) + 1)
   } else {
     stop("Not supported gain function.")
@@ -114,7 +107,7 @@ sim_pois_dglm2 = function(
   lambda = rep(0,ntotal)
   y = rep(0,ntotal)
   
-  Fphi = e_sim$get_Fphi(L)^alpha
+  Fphi = get_Fphi(L)^alpha
   trans_func = tolower(trans_func)
   link_func = tolower(link_func)
   obs_dist = tolower(obs_dist)
@@ -124,7 +117,7 @@ sim_pois_dglm2 = function(
     # theta[2] = (2*rho)^alpha2*theta0
     theta[2] = -binom(L,1)*(-rho)^1*theta[1]
   } else {
-    # theta[2] = e_sim$EPS
+    # theta[2] = EPS
     theta[2] = theta0
   }
   # ------ Transfer ------ #
@@ -132,7 +125,7 @@ sim_pois_dglm2 = function(
   # ------ Link ------ #
   lambda[1] = mu0 + theta[2]
   if (link_func == "exponential") {
-    lambda[1] = exp(min(c(lambda[1],e_sim$UPBND)))
+    lambda[1] = exp(min(c(lambda[1],UPBND)))
   }
   # ------ Link ------ #
   
@@ -164,7 +157,7 @@ sim_pois_dglm2 = function(
     # ------ Link ------ #
     lambda[t] = mu0 + theta[t+1]
     if (link_func == "exponential") {
-      lambda[t] = exp(min(c(lambda[t], e_sim$UPBND)))
+      lambda[t] = exp(min(c(lambda[t], UPBND)))
     }
     # ------ Link ------ #
     
@@ -181,15 +174,14 @@ sim_pois_dglm2 = function(
   stopifnot(all(is.finite(lambda)))
   stopifnot(all(is.finite(y)))
   
-  # delta = NULL
-  # tryCatch({
+  if (get_discount) {
     delta = get_optimal_delta(y[1:n],model_code,delta_grid,
                               rho=rho,L=L,mu0=mu0,
                               delta_nb=delta_nb,
                               ctanh=coef)$delta_optim[1]
-  # },error=function(e){delta=NA})
-
-  
+  } else {
+    delta = 0.95
+  }
 
   
   params = list(model_code=model_code,

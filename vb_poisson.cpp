@@ -1,39 +1,41 @@
 #include "lbe_poisson.h"
+#include "pl_poisson.h"
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::depends(RcppArmadillo,nloptr)]]
 
-
-
-
-
-
+/**
+ * Mean-field variation: W is working; the latent state part is problem matic
+*/
 //' @export
 // [[Rcpp::export]]
 Rcpp::List vb_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-    const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0), global parameters: W, mu0, rho, M
-    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
+    const arma::vec &Y, // n x 1, the observed response
+    const arma::uvec &model_code,
+    const arma::uvec &eta_select,     // 4 x 1, indicator for unknown (=1) or known (=0), global parameters: W, mu0, rho, M
+    const arma::vec &eta_init,        // 4 x 1, if true/initial values should be provided here
+    const arma::uvec &eta_prior_type, // 4 x 1
+    const arma::mat &eta_prior_val,   // 2 x 4, priors for each element of eta
     const unsigned int L = 0,
     const double delta = NA_REAL,
     const double alpha = 1.,
     const unsigned int nburnin = 1000,
     const unsigned int nthin = 2,
     const unsigned int nsample = 5000, // number of iterations for variational inference
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
+    const Rcpp::NumericVector &ctanh = Rcpp::NumericVector::create(0.2, 0, 5.),
     const double aw_prior = 0.01, // aw: shape of inverse gamma
     const double bw_prior = 0.01, // bw: rate of inverse gamma
     const double delta_nb = 1.,
+    const double theta0_upbnd = 2.,
+    const double Blag_pct = 0.15,
+    const double delta_discount = 0.95,
     const bool use_smoothing = true,
     const bool summarize_return = true,
-    const bool verbose = true) { 
+    const bool verbose = true)
+{
 
-    const unsigned int ntotal = nburnin + nthin*nsample + 1;
 
     const unsigned int n = Y.n_elem;
     const double n_ = static_cast<double>(n);
@@ -41,7 +43,11 @@ Rcpp::List vb_poisson(
     arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y;
 
-	const unsigned int obs_code = model_code.at(0);
+    const unsigned int ntotal = nburnin + nthin * nsample + 1;
+    const unsigned int Blag = static_cast<unsigned int>(Blag_pct * n); // B-fixed-lags Monte Carlo smoother
+    const unsigned int N = 100;                                        // number of particles for SMC
+
+    const unsigned int obs_code = model_code.at(0);
     const unsigned int link_code = model_code.at(1);
     const unsigned int trans_code = model_code.at(2);
     const unsigned int gain_code = model_code.at(3);
@@ -84,11 +90,9 @@ Rcpp::List vb_poisson(
     double rho = eta_init.at(2);
     
 
-	arma::mat mt(p,npad,arma::fill::zeros);
 	arma::mat at(p,npad,arma::fill::zeros);
-	arma::cube Ct(p,p,npad); 
 	const arma::mat Ip(p,p,arma::fill::eye);
-	Ct.each_slice() = Ip;
+	
 	arma::cube Rt(p,p,npad);
 	arma::vec alphat(npad,arma::fill::zeros);
 	arma::vec betat(npad,arma::fill::zeros);
@@ -117,14 +121,30 @@ Rcpp::List vb_poisson(
 		Gt.slice(t) = Gt0;
 	}
 
-	if (!m0_prior.isNull()) {
-		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
-	}
-	if (!C0_prior.isNull()) {
-		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
-	}
-    
-	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,NA_REAL,delta_nb,false);
+
+
+    arma::mat mt(p, n + 1, arma::fill::zeros);
+    arma::cube Ct(p, p, n + 1, arma::fill::zeros);
+    Ct.each_slice() = Ip;
+    arma::vec m0(p, arma::fill::zeros);
+    arma::mat C0(p, p, arma::fill::eye);
+
+    if (!m0_prior.isNull())
+    {
+        m0 = Rcpp::as<arma::vec>(m0_prior);
+        mt.col(0) = m0;
+    }
+    if (!C0_prior.isNull())
+    {
+        C0 = Rcpp::as<arma::mat>(C0_prior);
+        Ct.slice(0) = C0;
+    }
+    else
+    {
+        C0 *= std::pow(theta0_upbnd * 0.5, 2.);
+    }
+
+    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,NA_REAL,delta_nb,false);
     
 	if (use_smoothing) {
 		backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
@@ -147,6 +167,8 @@ Rcpp::List vb_poisson(
     /* ----- Storage ----- */
 
     bool saveiter = false;
+    arma::mat R(n + 1, 2, arma::fill::zeros); // (psi,theta)
+    arma::vec pmarg_y(n, arma::fill::zeros);
 
     for (unsigned int i=0; i<ntotal; i++) {
         R_CheckUserInterrupt();
@@ -199,6 +221,30 @@ Rcpp::List vb_poisson(
             
         }
 
+        // if (eta_select.at(0) == 0 || i == 0)
+        // {
+        //     mcs_poisson(
+        //         R, pmarg_y, Ypad, model_code,
+        //         NA_REAL, rho, L, mu0,
+        //         Blag, 5000,
+        //         m0, C0,
+        //         theta0_upbnd,
+        //         delta_nb,
+        //         delta_discount);
+        // }
+        // else
+        // {
+        //     mcs_poisson(
+        //         R, pmarg_y, Ypad, model_code,
+        //         W, rho, L, mu0,
+        //         Blag, N,
+        //         m0, C0,
+        //         theta0_upbnd,
+        //         delta_nb,
+        //         delta_discount);
+        // }
+
+        // ht = R.col(0);
 
         forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,delta,delta_nb,false);
         
@@ -219,6 +265,7 @@ Rcpp::List vb_poisson(
 			}
 
 			ht_stored.col(idx_run) = ht;
+            // psi_stored.col(idx_run) = ht;
             Ht_stored.col(idx_run) = Ht;
             for (unsigned int j=0; j<npad; j++) {
                 psi_stored.at(j,idx_run) = R::rnorm(ht.at(j),std::sqrt(std::abs(Ht.at(j))));
@@ -275,8 +322,8 @@ Rcpp::List vb_poisson(
     } else {
         output["psi"] = Rcpp::wrap(psi_stored);
     }
-    output["ht"] = Rcpp::wrap(ht_stored);
-    output["Ht"] = Rcpp::wrap(Ht_stored);
+    // output["ht"] = Rcpp::wrap(ht_stored);
+    // output["Ht"] = Rcpp::wrap(Ht_stored);
     output["W"] = Rcpp::wrap(W_stored);
     return output;
 }

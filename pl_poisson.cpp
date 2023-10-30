@@ -1210,7 +1210,7 @@ Rcpp::List pmmh_poisson(
     const bool debug = false){ 
     
     unsigned int tmpi; // store temporary integer value
-    const unsigned int n = Y.n_elem; // number of observations
+    const unsigned int n = Y.n_elem; // number of observations  
     const double n_ = static_cast<double>(n);
     const double N_ = static_cast<double>(N);
     const unsigned int ntotal = nburnin + nthin*nsample + 1;
@@ -1462,68 +1462,57 @@ void mcs_poisson(
     arma::vec& pmarg_y, // n x 1, marginal likelihood of y
     const arma::vec& ypad, // (n+1) x 1, the observed response
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
-	const double W = NA_REAL,
-    const double rho = 0.9,
-    const double alpha = 1.,
-    const unsigned int L = 12, // number of lags
-    const double mu0 = 2.220446e-16,
-    const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
-	const unsigned int N = 5000, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
+	const double W,
+    const double rho,
+    const unsigned int L, // number of lags
+    const double mu0,
+    const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+	const unsigned int N, // number of particles
+    const arma::vec& m0,
+	const arma::mat& C0,
     const double theta0_upbnd = 2.,
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5),
     const double delta_nb = 1., // 0: negative binomial DLM; 1: poisson DLM
-    const double delta_discount = 0.95){ 
+    const double delta_discount = 0.95){
 
-    const unsigned int n = ypad.n_elem - 1; // number of observations
+    const double alpha = 1.;
+    const Rcpp::NumericVector ctanh = {1., 0., 1.}; // (1./M, 0, M)
+
+    const unsigned int nt = ypad.n_elem - 1; // number of observations
     const double N_ = static_cast<double>(N);
-
 
     const unsigned int obs_code = model_code.at(0);
     const unsigned int link_code = model_code.at(1);
     const unsigned int trans_code = model_code.at(2);
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
-	unsigned int p, L_;
-	arma::vec Ft, Fphi;
+    unsigned int p, L_;
+    arma::vec Ft, Fphi;
     arma::mat Gt;
-    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+    init_by_trans(p, L_, Ft, Fphi, Gt, trans_code, L);
 
-        
-    arma::mat theta(p,N);
-    arma::vec m0(p,arma::fill::zeros);
-    arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
-    if (!m0_prior.isNull()) {
-		m0 = Rcpp::as<arma::vec>(m0_prior);
-	}
-
-    C0 = arma::chol(C0);
-    for (unsigned int i=0; i<N; i++) {
+    arma::mat C0_chol = arma::chol(C0);
+    arma::mat theta(p, N, arma::fill::zeros);
+    for (unsigned int i = 0; i < N; i++)
+    {
         theta.col(i) = m0 + C0.t() * arma::randn(p);
     }
 
-    arma::cube theta_stored(p, N, n + B);
+    arma::cube theta_stored(p, N, nt + B);
     for (unsigned int b = 0; b < B; b++)
     {
         theta_stored.slice(b).zeros();
     }
-    theta_stored.slice(B-1) = theta;
+    theta_stored.slice(B - 1) = theta;
 
+    arma::vec Wt(nt);
+    if (!R_IsNA(W))
+    {
+        Wt.fill(W);
+    }
 
-    arma::vec Wt(n);
-
-
-    for (unsigned int t=0; t<n; t++) {
+    for (unsigned int t=0; t<nt; t++) {
         R_CheckUserInterrupt();
         arma::mat Theta_old = theta_stored.slice(t + B - 1);
-
-        
-        if (trans_code != 1)
-        {
-            arma::vec mt = arma::median(Theta_old, 1);
-            update_Gt(Gt, gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        }
 
 
         if (R_IsNA(W))
@@ -1545,16 +1534,15 @@ void mcs_poisson(
         for (unsigned int i=0; i<N; i++) {
             arma::vec theta_old = Theta_old.col(i);
             arma::vec theta_new = update_at(
-                p, gain_code, trans_code, theta_old, Gt, ctanh, alpha, ypad.at(t), rho
+                p, gain_code, trans_code, theta_old, Gt, ctanh, 1., ypad.at(t), rho
             );
 
             double omega_new = R::rnorm(0., Wsqrt);
             theta_new.at(0) += omega_new;
-
-            theta.col(i) = theta_new;
+            theta_stored.slice(t + B).col(i) = theta_new;
         }
         
-        theta_stored.slice(t+B) = theta;
+
         /*
         ------ Step 2.1 Propagate ------
         */
@@ -1582,7 +1570,7 @@ void mcs_poisson(
         arma::vec lambda(N);
         for (unsigned int i=0; i<N; i++) 
         {
-            arma::vec psi = theta.col(i); // p x 1
+            arma::vec psi = theta_stored.slice(t + B).col(i); // p x 1
 
             // theta: p x N
             if (link_code == 1) 
@@ -1602,7 +1590,9 @@ void mcs_poisson(
                 lambda.at(i) = mu0 + psi.at(1);
             }
 
-            w.at(i) = loglike_obs(ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false);
+            w.at(i) = loglike_obs(
+                ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false
+            );
         }
         
         
@@ -1622,7 +1612,7 @@ void mcs_poisson(
             arma::vec wtmp = w;
             w = wtmp / wsum;
             double Meff = 1. / arma::dot(w, w);
-            if (Meff > 0.2 * N_)
+            if (Meff > 0.1 * N_)
             {
                 resample = true;
             }
@@ -1654,7 +1644,7 @@ void mcs_poisson(
         } else {
             if (w.has_nan())
             {
-                w.elem(arma::find_nan(w)).fill(1.e-32);
+                w.elem(arma::find_nan(w)).fill(EPS);
             }
             pmarg_y.at(t) = std::log(arma::accu(w)) - std::log(N_);
         }
@@ -1662,48 +1652,52 @@ void mcs_poisson(
     }
 
 
-    R.zeros();
-    {
-        arma::mat psi_all = theta_stored.row(0);        // N x (nt+B)
-        arma::mat psi = psi_all.cols(B - 1, n + B - 1); // N x (nt+1)
-        arma::vec RR = arma::median(psi, 0);            // (nt+1)
 
-        R.col(0) = RR; // (nt+1) x 2
+    // R.zeros(); // (n+1) x 2
+    {
+        // theta_stored: p x N x (nt+B)
+        arma::mat psi_all = theta_stored.row_as_mat(0);        // N x (nt+B)
+        arma::inplace_trans(psi_all);
+        arma::vec RR = arma::vectorise(arma::median(psi_all, 0));            // (nt+1)
+        R.col(0) = RR.tail(R.n_rows); // (nt+1) x 2
     }
 
-    if (trans_code == 1)
-    {
-        // Koyama
-        for (unsigned int t = 0; t < n; t++)
-        {
-            arma::vec Fy(p, arma::fill::zeros);
-            unsigned int tmpi = std::min(t, p);
-            if (t > 0)
-            {
-                // Checked Fy - CORRECT
-                Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
-            }
 
-            Ft = Fphi % Fy; // L(p) x 1
-            // theta_stored: p x N x (nt+B)
-            arma::mat hpsi = psi2hpsi(theta_stored.slice(B + t), gain_code, ctanh);
-            // hpsi: p x N
-            arma::vec lambda(N);
-            for (unsigned int i = 0; i < N; i++)
-            {
-                lambda.at(i) = arma::as_scalar(Ft.t() * hpsi.col(i));
-            }
+    // R.at(0,1) = 0.;
+    // if (trans_code == 1)
+    // {
+    //     // Koyama
+    //     for (unsigned int t = 0; t < nt; t++)
+    //     {
+    //         arma::vec Fy(p, arma::fill::zeros);
+    //         unsigned int tmpi = std::min(t, p);
+    //         if (t > 0)
+    //         {
+    //             // Checked Fy - CORRECT
+    //             Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
+    //         }
 
-            R.at(t + 1, 1) = arma::median(lambda);
-        } // end loop over t
-    }
-    else
-    {
-        arma::mat ft_all = theta_stored.row(1);       // N x (nt+B)
-        arma::mat ft = ft_all.cols(B - 1, n + B - 1); // N x (nt+1)
-        arma::vec RR = arma::median(ft, 0);           // (nt+1)
-        R.col(1) = RR;
-    }
+    //         Ft = Fphi % Fy; // L(p) x 1
+    //         // theta_stored: p x N x (nt+B)
+    //         arma::mat hpsi = psi2hpsi(theta_stored.slice(B + t), gain_code, ctanh);
+    //         // hpsi: p x N
+    //         arma::vec lambda(N);
+    //         for (unsigned int i = 0; i < N; i++)
+    //         {
+    //             lambda.at(i) = arma::as_scalar(Ft.t() * hpsi.col(i));
+    //         }
+
+    //         R.at(t + 1, 1) = arma::median(lambda);
+    //     } // end loop over t
+    // }
+    // else
+    // {
+    //     arma::mat ft_all = theta_stored.row(1);       // N x (nt+B)
+    //     arma::mat ft = ft_all.cols(B - 1, nt + B - 1); // N x (nt+1)
+    //     arma::vec RR = arma::median(ft, 0);           // (nt+1)
+    //     R.col(1) = RR;
+    // }
+
 
 
     return;
@@ -1727,7 +1721,8 @@ Rcpp::List pl_poisson(
     const double mu0 = 0.,
     const double rho = 0.9,
     const double delta_nb = 1.,
-    const double theta0_upbnd = 2.)
+    const double theta0_upbnd = 2.,
+    const bool smoothing = false)
 {
     const double alpha = 1.;
     const Rcpp::NumericVector ctanh = {1., 0., 1.}; // (1./M, 0, M)
@@ -1764,7 +1759,7 @@ Rcpp::List pl_poisson(
     arma::mat theta(p, N);
     arma::vec m0(p, arma::fill::zeros);
     arma::mat C0(p, p, arma::fill::eye);
-    C0 *= std::pow(theta0_upbnd * 0.5, 2.);
+    C0.diag() *= std::pow(theta0_upbnd * 0.5, 2.);
     if (!m0_prior.isNull())
     {
         m0 = Rcpp::as<arma::vec>(m0_prior);
@@ -1936,15 +1931,98 @@ Rcpp::List pl_poisson(
         resample_status.at(t) = resample;
     }
 
+    /*
+    ------ Particle Smoothing ------
+    */
+    double cnst = -0.5*std::log(2*arma::datum::pi);
+    unsigned int N_smooth = std::min(1000., 0.1 * N_);
+    Rcpp::IntegerVector idx0_ = Rcpp::sample(N, N_smooth, false);
+    arma::uvec idx0 = Rcpp::as<arma::uvec>(idx0_) - 1;
+
+    arma::mat psi_smooth(N_smooth, nt + 1);
+    arma::vec ptmp = arma::vectorise(theta_stored.slice(nt).row(0));
+    psi_smooth.col(nt) = ptmp.elem(idx0);
+
+    // arma::mat aw_smooth(N_smooth, nt + 1);
+    // arma::vec atmp = aw.col(nt);
+    // aw_smooth.col(nt) = atmp.elem(idx0);
+
+    // arma::mat bw_smooth(N_smooth, nt + 1);
+    // arma::vec btmp = bw.col(nt);
+    // bw_smooth.col(nt) = btmp.elem(idx0);
+
+    arma::mat Wt_smooth(N_smooth, nt + 1);
+    arma::vec wtmp = Wt.col(nt);
+    Wt_smooth.col(nt) = wtmp.elem(idx0);
+
+    if (smoothing)
+    {
+        
+        
+
+        for (unsigned int t = nt; t > 1; t--)
+        {
+            arma::vec psi_filter0 = arma::vectorise(theta_stored.slice(t-1).row(0)); // N x 1
+            arma::vec psi_filter = psi_filter0.elem(idx0);
+
+            arma::vec Wt_filter0 = Wt.col(t-1);
+            arma::vec Wt_filter = Wt_filter0.elem(idx0);
+
+            for (unsigned int i=0; i<N_smooth; i++) {
+                arma::vec psi_diff = arma::vectorise(psi_smooth.at(i, t) - psi_filter); // N x 1
+                arma::vec Winv = 1. / Wt_filter;
+
+                arma::vec tmp1 = 0.5 * arma::log(Winv);
+                arma::vec tmp2 = arma::pow(psi_diff, 2.);
+                arma::vec tmp3 = -0.5 * Winv % tmp2;
+                arma::vec logweight = cnst + tmp1 + tmp3;
+
+                logweight.elem(arma::find(logweight > UPBND)).fill(UPBND);
+                arma::vec weight = arma::exp(logweight);
+
+                double wsum = arma::accu(weight);
+                unsigned int idx;
+                if (wsum > EPS)
+                {
+                    arma::vec wtmp = weight;
+                    weight = wtmp / wsum;
+                    Rcpp::NumericVector w_ = Rcpp::wrap(weight);
+                    Rcpp::IntegerVector idx_ = Rcpp::sample(N_smooth, 1, true, w_);
+                    idx = idx_[0] - 1;
+                }
+                else
+                {
+                    Rcpp::IntegerVector idx_ = Rcpp::sample(N_smooth, 1, true, R_NilValue);
+                    idx = idx_[0] - 1;
+                }
+
+                psi_smooth.at(i,t-1) = psi_filter.at(i);
+                // aw_smooth.at(i, t - 1) = aw.at(idx,t-1);
+                // bw_smooth.at(i, t - 1) = bw.at(idx,t-1);
+                Wt_smooth.at(i, t - 1) = Wt_filter.at(idx, t - 1);
+
+                Rcout << "\rSmoothing Progress: " << nt - t + 1 << "/" << nt;
+
+            }
+        }
+    }
+
+    Rcout << std::endl;
+
     Rcpp::List output;
     arma::mat psi = theta_stored.row(0); // N x (nt+1)
     arma::mat RR = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 0);
     output["psi"] = Rcpp::wrap(RR.t());         // (n+1) x 3
     output["theta"] = Rcpp::wrap(theta_stored); // p, N, nt + 1
 
+    arma::mat RR2 = arma::quantile(psi_smooth, Rcpp::as<arma::vec>(qProb), 0);
+    output["psi_smooth"] = Rcpp::wrap(RR2.t());        // (n+1) x 3
+    output["theta_smooth"] = Rcpp::wrap(psi_smooth); // N, nt + 1
+
     output["aw"] = Rcpp::wrap(aw.col(nt));
     output["bw"] = Rcpp::wrap(bw.col(nt));
     output["Wt"] = Rcpp::wrap(Wt);
+    output["Wt_smooth"] = Rcpp::wrap(Wt_smooth);
 
     // if (debug) {
     output["Meff"] = Rcpp::wrap(Meff);
@@ -1953,8 +2031,7 @@ Rcpp::List pl_poisson(
 
     return output;
 }
-
-
+    
 
 // Y[t] ~ Normal(Fmat/theta[t],sigma2)
 // theta[t] ~ Normal(Gmat*theta[t-1],tau2)

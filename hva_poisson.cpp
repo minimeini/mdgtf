@@ -543,11 +543,14 @@ Rcpp::List hva_poisson(
     const bool verbose = false,
     const bool debug = false) {
 
+
     const unsigned int ntotal = nburnin + nthin*nsample + 1;
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
     arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
     const double logMtheta = std::log(Mtheta);
+
+    bool update_static = arma::accu(eta_select) > 0;
 
     const unsigned int obs_code = model_code.at(0);
     const unsigned int link_code = model_code.at(1);
@@ -563,17 +566,15 @@ Rcpp::List hva_poisson(
     /* ------ Define Global Parameters ------ */
     arma::vec eta = eta_init; // eta = (W>0,mu0>0,rho in (0,1),M>0)
     arma::vec eta_old = eta;
-    const unsigned int m = arma::accu(eta_select);
+    double W = eta.at(0);
+    double mu0 = eta.at(1);
+    double rho = eta.at(2);
+
+    const unsigned int m = std::max(arma::as_scalar<double>(arma::accu(eta_select)), 1.);
+
     if (k > m) {
         ::Rf_error("k cannot be greater than m, total number of unknowns.");
     }
-
-    arma::uvec idx_select = arma::find(eta_select == 1); // m x 1
-    arma::vec eta_tilde(m,arma::fill::zeros); // unknown part of eta which is also transformed to the real line
-    arma::vec eta_tilde0(m,arma::fill::zeros);
-    eta2tilde(eta_tilde,eta,idx_select,m);
-    arma::vec gamma(m,arma::fill::ones);
-    arma::vec nu = tYJ(eta_tilde,gamma); // m x 1, Yeo-Johnson transform of eta_tilde
     /* ------ Define Global Parameters ------ */
 
 
@@ -597,12 +598,19 @@ Rcpp::List hva_poisson(
     /*  ------ Define LBE ------ */
     arma::mat mt(p,n+1,arma::fill::zeros);
     arma::cube Ct(p,p,n+1,arma::fill::zeros);
+    arma::vec m0(p,arma::fill::zeros);
+    arma::mat C0(p,p,arma::fill::eye);
+
     if (!m0_prior.isNull()) {
-		mt.col(0) = Rcpp::as<arma::vec>(m0_prior);
-	}
+        m0 = Rcpp::as<arma::vec>(m0_prior);
+        mt.col(0) = m0;
+    }
 	if (!C0_prior.isNull()) {
-		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
-	}
+		C0 = Rcpp::as<arma::mat>(C0_prior);
+        Ct.slice(0) = C0;
+    } else {
+        C0 *= std::pow(theta0_upbnd * 0.5, 2.);
+    }
 
     arma::mat at(p,n+1,arma::fill::zeros);
     arma::cube Rt(p,p,n+1,arma::fill::zeros);
@@ -633,54 +641,71 @@ Rcpp::List hva_poisson(
 	}
     /*  ------ Define LBE ------ */
 
-
     /*  ------ Define HVB ------ */
+    arma::uvec idx_select; // m x 1
+    if (update_static)
+    {
+        idx_select = arma::find(eta_select == 1);
+    }
+    else
+    {
+        idx_select.set_size(m);
+        idx_select.fill(1)
+;
+    }
+    arma::vec eta_tilde(m, arma::fill::zeros);           // unknown part of eta which is also transformed to the real line
+    arma::vec eta_tilde0(m, arma::fill::zeros);
+    eta2tilde(eta_tilde, eta, idx_select, m);
+    arma::vec gamma(m, arma::fill::ones);
+    arma::vec nu = tYJ(eta_tilde, gamma); // m x 1, Yeo-Johnson transform of eta_tilde
+
     arma::vec tau = gamma2tau(gamma);
-    arma::vec mu(m,arma::fill::zeros);
-    arma::mat B(m,k,arma::fill::zeros); // Lower triangular part is nonzero
-    arma::vec d(m,arma::fill::ones);
-    arma::mat SigInv(m,m,arma::fill::zeros);
+    arma::vec mu(m, arma::fill::zeros);
+    arma::mat B(m, k, arma::fill::zeros); // Lower triangular part is nonzero
+    arma::vec d(m, arma::fill::ones);
+    arma::mat SigInv(m, m, arma::fill::zeros);
     double logq;
-    
+
     arma::vec delta_logJoint(m);
     arma::vec delta_logq(m);
     arma::vec delta_diff(m);
-    arma::mat dtheta_dB(m,m*k,arma::fill::zeros);
+    arma::mat dtheta_dB(m, m * k, arma::fill::zeros);
 
-    arma::vec xi(k,arma::fill::zeros);
+    arma::vec xi(k, arma::fill::zeros);
     arma::vec xi_old = xi;
-    arma::vec eps(m,arma::fill::zeros);
+    arma::vec eps(m, arma::fill::zeros);
     arma::vec eps_old = eps;
 
     arma::vec L_mu(m);
-    arma::mat L_B(m,k,arma::fill::zeros);
-    arma::vec vecL_B(m*k,arma::fill::zeros);
+    arma::mat L_B(m, k, arma::fill::zeros);
+    arma::vec vecL_B(m * k, arma::fill::zeros);
     arma::vec L_d(m);
     arma::vec L_tau(m);
 
-    arma::vec oldEg2_mu(m,arma::fill::zeros);
-    arma::vec curEg2_mu(m,arma::fill::zeros);
-    arma::vec oldEdelta2_mu(m,arma::fill::zeros);
-    arma::vec curEdelta2_mu(m,arma::fill::zeros);
-    arma::vec Change_delta_mu(m,arma::fill::zeros);
+    arma::vec oldEg2_mu(m, arma::fill::zeros);
+    arma::vec curEg2_mu(m, arma::fill::zeros);
+    arma::vec oldEdelta2_mu(m, arma::fill::zeros);
+    arma::vec curEdelta2_mu(m, arma::fill::zeros);
+    arma::vec Change_delta_mu(m, arma::fill::zeros);
 
-    arma::vec oldEg2_B(m*k,arma::fill::zeros);
-    arma::vec curEg2_B(m*k,arma::fill::zeros);
-    arma::vec oldEdelta2_B(m*k,arma::fill::zeros);
-    arma::vec curEdelta2_B(m*k,arma::fill::zeros);
-    arma::vec Change_delta_B(m*k,arma::fill::zeros);
+    arma::vec oldEg2_B(m * k, arma::fill::zeros);
+    arma::vec curEg2_B(m * k, arma::fill::zeros);
+    arma::vec oldEdelta2_B(m * k, arma::fill::zeros);
+    arma::vec curEdelta2_B(m * k, arma::fill::zeros);
+    arma::vec Change_delta_B(m * k, arma::fill::zeros);
 
-    arma::vec oldEg2_d(m,arma::fill::zeros);
-    arma::vec curEg2_d(m,arma::fill::zeros);
-    arma::vec oldEdelta2_d(m,arma::fill::zeros);
-    arma::vec curEdelta2_d(m,arma::fill::zeros);
-    arma::vec Change_delta_d(m,arma::fill::zeros);
+    arma::vec oldEg2_d(m, arma::fill::zeros);
+    arma::vec curEg2_d(m, arma::fill::zeros);
+    arma::vec oldEdelta2_d(m, arma::fill::zeros);
+    arma::vec curEdelta2_d(m, arma::fill::zeros);
+    arma::vec Change_delta_d(m, arma::fill::zeros);
 
-    arma::vec oldEg2_tau(m,arma::fill::zeros);
-    arma::vec curEg2_tau(m,arma::fill::zeros);
-    arma::vec oldEdelta2_tau(m,arma::fill::zeros);
-    arma::vec curEdelta2_tau(m,arma::fill::zeros);
-    arma::vec Change_delta_tau(m,arma::fill::zeros);
+    arma::vec oldEg2_tau(m, arma::fill::zeros);
+    arma::vec curEg2_tau(m, arma::fill::zeros);
+    arma::vec oldEdelta2_tau(m, arma::fill::zeros);
+    arma::vec curEdelta2_tau(m, arma::fill::zeros);
+    arma::vec Change_delta_tau(m, arma::fill::zeros);
+
     /*  ------ Define HVB ------ */
 
 
@@ -715,6 +740,8 @@ Rcpp::List hva_poisson(
 
     unsigned int cnt = 0;
     bool saveiter;
+    
+
     for (unsigned int s=0; s<ntotal; s++) {
         R_CheckUserInterrupt();
 		saveiter = s > nburnin && ((s-nburnin-1)%nthin==0);
@@ -724,204 +751,232 @@ Rcpp::List hva_poisson(
             - psi: (n+1) x 1 gain factor
             - eta = (W,mu0,rho,M)
         */
+        if (eta_select.at(0) == 1) {
+            W = eta.at(0);
+        }
+        if (eta_select.at(1) == 1) {
+            mu0 = eta.at(1);
+        }
+        if (eta_select.at(2) == 1) {
+            rho = eta.at(2);
+        }
+        
+        
         ctanh_[2] = eta.at(3);
-        if (s==0 && !psi_init.isNull()) { // Initialization
-            R.col(0) = Rcpp::as<arma::vec>(psi_init); // psi
-            R.col(1) = psi2hpsi(R.col(0),gain_code,ctanh_); // hpsi
-            R.submat(1,1,n,1) = hpsi2theta(R.col(1),Y,trans_code,0.,alpha,L_,eta.at(2)); // theta
-            R.at(0,1) = 0.;
+        if (eta_select.at(0)==0 || s==0)
+        {
+            mcs_poisson(
+                R,pmarg_y,ypad,model_code,
+                NA_REAL,rho,L,mu0,
+                Blag,5000,
+                m0,C0,
+                theta0_upbnd,
+                delta_nb,
+                delta_discount);
+        }
+        else 
+        {
+            mcs_poisson(
+                R,pmarg_y,ypad,model_code,
+                W, rho,L,mu0,
+                Blag,N,
+                m0,C0,
+                theta0_upbnd,
+                delta_nb,
+                delta_discount);
 
-        } else if (eta_select.at(0)==1){
-            // mcs_poisson(R,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,ctanh_,delta_nb);
-            mcs_poisson(R,pmarg_y,ypad,model_code,eta.at(0),eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,theta0_upbnd,ctanh_,delta_nb,delta_discount);
-        } else {
-            mcs_poisson(R,pmarg_y,ypad,model_code,NA_REAL,eta.at(2),alpha,L,eta.at(1),Blag,N,R_NilValue,R_NilValue,theta0_upbnd,ctanh_,delta_nb,delta_discount);
         }
 
-        // Logarithm marginal likelihood of y
-        // Dynamic/latent states are integrated out
-        // only conditional on static parameters, eta.
-        logp_y = arma::accu(pmarg_y);
+        R.col(1) = psi2hpsi(R.col(0), gain_code, ctanh_);                               // hpsi
+        R.submat(1, 1, n, 1) = hpsi2theta(R.col(1), Y, trans_code, 0., alpha, L_, rho); // theta
+        R.at(0, 1) = 0.;
 
+        if (update_static) {
+            // Logarithm marginal likelihood of y
+            // Dynamic/latent states are integrated out
+            // only conditional on static parameters, eta.
+            logp_y = arma::accu(pmarg_y);
 
-        /*
-        Step 3. Compute gradient of the log variational distribution (Model Dependent)
-        */
-        // if (is_vanilla) {
-        //     delta_logJoint = dlogJoint_deta(Y,psi,eta.at(2),eta.at(0),aw,bw,prior_type); // 1 x 1
-        // } else {
-        delta_logJoint = dlogJoint_deta(ypad,R,eta,idx_select,eta_prior_type,eta_prior_val,m,L,rcomb,delta_nb,obs_code,gain_code,ctanh_); // m x 1
-        // }
+            /*
+            Step 3. Compute gradient of the log variational distribution (Model Dependent)
+            */
+            // if (is_vanilla) {
+            //     delta_logJoint = dlogJoint_deta(Y,psi,eta.at(2),eta.at(0),aw,bw,prior_type); // 1 x 1
+            // } else {
+            delta_logJoint = dlogJoint_deta(ypad, R, eta, idx_select, eta_prior_type, eta_prior_val, m, L, rcomb, delta_nb, obs_code, gain_code, ctanh_); // m x 1
+            // }
 
-        if (!std::isfinite(delta_logJoint.at(0))) {
-            Rcout << "iter=" << s+1 << std::endl;
-            Rcout << "delta_logJoint=" << delta_logJoint.at(0) << std::endl;
-            Rcout << "W=" << eta.at(0) << std::endl;
-            ::Rf_error("delta_logJoint is NA.");
-        }
-        
-        
-        SigInv = get_sigma_inv(B, d, k); // m x m
-        delta_logq = dlogq_dtheta(SigInv,nu,eta_tilde,gamma,mu); // m x 1
-        delta_diff = delta_logJoint - delta_logq; // m x 1
-        if (!std::isfinite(delta_logq.at(0))) {
-            Rcout << "iter=" << s+1 << std::endl;
-            Rcout << "W=" << eta.at(0) << std::endl;
-            Rcout << "delta_logq=" << delta_logq.at(0) << std::endl;
-            ::Rf_error("delta_logq is NA.");
-        }
-
-
-        // TODO: transpose or no transpose
-        L_mu = dYJinv_dnu(nu,gamma) * delta_diff; // m x 1
-        if (!std::isfinite(L_mu.at(0))) {
-            Rcout << "iter=" << s+1 << std::endl;
-            Rcout << "W=" << eta.at(0) << std::endl;
-            Rcout << "L_mu=" << L_mu.at(0) << std::endl;
-            ::Rf_error("L_mu is NA.");
-        }
-
-        if (m>1) {
-            dtheta_dB = dYJinv_dB(nu,gamma,xi); // m x mk
-            L_B = arma::reshape(dtheta_dB.t()*delta_diff,m,k); // m x k
-            L_B.elem(arma::trimatu_ind(arma::size(L_B),1)).zeros();
-            vecL_B = arma::vectorise(L_B);
-        }
-
-        L_d = dYJinv_dD(nu,gamma,eps)*delta_diff; // m x 1
-        if (!std::isfinite(L_d.at(0))) {
-            Rcout << "iter=" << s+1 << std::endl;
-            Rcout << "W=" << eta.at(0) << std::endl;
-            Rcout << "L_d=" << L_d.at(0) << std::endl;
-            ::Rf_error("L_d is NA.");
-        }
-
-        L_tau = dYJinv_dtau(nu,gamma)*delta_diff;
-        if (!std::isfinite(L_tau.at(0))) {
-            Rcout << "iter=" << s+1 << std::endl;
-            Rcout << "W=" << eta.at(0) << std::endl;
-            Rcout << "L_tau=" << L_tau.at(0) << std::endl;
-            ::Rf_error("L_tau is NA.");
-        }
-
-        /*
-        Step 4. Update Variational Parameters
-        */
-        eta_old = eta;
-
-        // mu
-        oldEg2_mu = curEg2_mu;
-        oldEdelta2_mu = curEdelta2_mu;
-
-        curEg2_mu = learn_rate*oldEg2_mu + (1.-learn_rate)*arma::pow(L_mu,2.); // m x 1
-        Change_delta_mu = arma::sqrt(oldEdelta2_mu + eps_step)/arma::sqrt(curEg2_mu + eps_step) % L_mu;
-        mu = mu + Change_delta_mu;
-        curEdelta2_mu = learn_rate*oldEdelta2_mu + (1.-learn_rate)*arma::pow(Change_delta_mu,2.);
-
-
-        // B
-        if (m>1) {
-            oldEg2_B = curEg2_B; // mk x 1
-            oldEdelta2_B = curEdelta2_B; // mk x 1
-
-            curEg2_B = learn_rate*oldEg2_B + (1.-learn_rate)*arma::pow(vecL_B,2.);
-            Change_delta_B = arma::sqrt(oldEdelta2_B + eps_step) / arma::sqrt(curEg2_B + eps_step) % vecL_B; // mk x 1
-
-            B = B + arma::reshape(Change_delta_B,m,k);
-            curEdelta2_B = learn_rate*oldEdelta2_B + (1.-learn_rate)*arma::pow(Change_delta_B,2.);
-        }
-
-
-        // d
-        oldEg2_d = curEg2_d;
-        oldEdelta2_d = curEdelta2_d;
-
-        curEg2_d = learn_rate*oldEg2_d + (1.-learn_rate)*arma::pow(L_d,2.); // m x 1
-        Change_delta_d = arma::sqrt(oldEdelta2_d + eps_step)/arma::sqrt(curEg2_d + eps_step) % L_d;
-        d = d + Change_delta_d;
-        curEdelta2_d = learn_rate*oldEdelta2_d + (1.-learn_rate)*arma::pow(Change_delta_d,2.);
-
-        SigInv = get_sigma_inv(B,d,k);
-
-
-        // tau
-        oldEg2_tau = curEg2_tau;
-        oldEdelta2_tau = curEdelta2_tau;
-
-        curEg2_tau = learn_rate*oldEg2_tau + (1.-learn_rate)*arma::pow(L_tau,2.); // m x 1
-        Change_delta_tau = arma::sqrt(oldEdelta2_tau + eps_step)/arma::sqrt(curEg2_tau + eps_step) % L_tau;
-        tau = tau + Change_delta_tau;
-        curEdelta2_tau = learn_rate*oldEdelta2_tau + (1.-learn_rate)*arma::pow(Change_delta_tau,2.);
-        gamma = tau2gamma(tau);
-
-
-
-        /*
-        Step 1. Sample static parameters from the variational distribution
-        using reparameterisation.
-        */
-        // cnt = 0;
-        // xi_old = xi;
-        // eps_old = eps;
-        // while(cnt<max_iter) {
-        //     eta_tilde = rtheta(xi,eps,gamma,mu,B,d); // already inverse YJ transformed
-        //     logprior = logprior_eta_tilde(eta_tilde,idx_select,eta_prior_type,eta_prior_val,m);
-
-        //     nu = tYJ(eta_tilde,gamma); // recover nu
-        //     tilde2eta(eta,eta_tilde,idx_select,m);
-        //     logq = logq0(nu,eta_tilde,gamma,mu,SigInv,m);
-
-        //     if (s==0) {
-        //         logp_new = arma::accu(logprior) + logp_y - logq - logMtheta;
-        //         // logratio = 1.;
-        //     } else {
-        //         // logp_old = logp_new;
-        //         logp_new = arma::accu(logprior) + logp_y - logq - logMtheta;
-        //         // logratio = logp_new - logp_old;
-        //     }
-
-        //     logp_iter.at(cnt) = logp_new;
-            
-
-        //     cnt++;
-        //     if (std::isfinite(eta.at(0)) && std::log(R::runif(0.,1.)) < logp_new) {
-        //         break;
-        //     }
-        //     // if (std::isfinite(eta.at(0))) {
-        //     //     break;
-        //     // }
-        // }
-
-        eta_tilde = rtheta(xi,eps,gamma,mu,B,d);
-        xi_old = xi;
-        eps_old = eps;
-        logprior = logprior_eta_tilde(eta_tilde,idx_select,eta_prior_type,eta_prior_val,m);
-        nu = tYJ(eta_tilde,gamma); // recover nu
-        tilde2eta(eta,eta_tilde,idx_select,m);
-        logq = logq0(nu,eta_tilde,gamma,mu,SigInv,m);
-        logp_new = arma::accu(logprior) + logp_y - logq;
-        logp_iter.at(0) = logp_new;
-        for (unsigned int s=1; s<max_iter; s++) {
-            eta_tilde0 = rtheta(xi,eps,gamma,mu,B,d);
-            logprior = logprior_eta_tilde(eta_tilde0,idx_select,eta_prior_type,eta_prior_val,m);
-            nu = tYJ(eta_tilde0,gamma); // recover nu
-            tilde2eta(eta,eta_tilde0,idx_select,m);
-            logq = logq0(nu,eta_tilde0,gamma,mu,SigInv,m);
-            logp_new = arma::accu(logprior) + logp_y - logq;
-            logp_iter.at(s) = logp_new;
-
-            if (std::log(R::runif(0.,1.)) < std::min(0.,logp_iter.at(s)-logp_iter.at(s-1))) {
-                // accept
-                eta_tilde = eta_tilde0;
-                xi_old = xi;
-                eps_old = eps;
+            if (!std::isfinite(delta_logJoint.at(0)))
+            {
+                Rcout << "iter=" << s + 1 << std::endl;
+                Rcout << "delta_logJoint=" << delta_logJoint.at(0) << std::endl;
+                Rcout << "W=" << eta.at(0) << std::endl;
+                ::Rf_error("delta_logJoint is NA.");
             }
-        }
 
-        xi = xi_old;
-        eps = eps_old;
-        nu = tYJ(eta_tilde,gamma); // recover nu
-        tilde2eta(eta,eta_tilde,idx_select,m);
+            SigInv = get_sigma_inv(B, d, k);                             // m x m
+            delta_logq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu); // m x 1
+            delta_diff = delta_logJoint - delta_logq;                    // m x 1
+            if (!std::isfinite(delta_logq.at(0)))
+            {
+                Rcout << "iter=" << s + 1 << std::endl;
+                Rcout << "W=" << eta.at(0) << std::endl;
+                Rcout << "delta_logq=" << delta_logq.at(0) << std::endl;
+                ::Rf_error("delta_logq is NA.");
+            }
+
+            // TODO: transpose or no transpose
+            L_mu = dYJinv_dnu(nu, gamma) * delta_diff; // m x 1
+            if (!std::isfinite(L_mu.at(0)))
+            {
+                Rcout << "iter=" << s + 1 << std::endl;
+                Rcout << "W=" << eta.at(0) << std::endl;
+                Rcout << "L_mu=" << L_mu.at(0) << std::endl;
+                ::Rf_error("L_mu is NA.");
+            }
+
+            if (m > 1)
+            {
+                dtheta_dB = dYJinv_dB(nu, gamma, xi);                  // m x mk
+                L_B = arma::reshape(dtheta_dB.t() * delta_diff, m, k); // m x k
+                L_B.elem(arma::trimatu_ind(arma::size(L_B), 1)).zeros();
+                vecL_B = arma::vectorise(L_B);
+            }
+
+            L_d = dYJinv_dD(nu, gamma, eps) * delta_diff; // m x 1
+            if (!std::isfinite(L_d.at(0)))
+            {
+                Rcout << "iter=" << s + 1 << std::endl;
+                Rcout << "W=" << eta.at(0) << std::endl;
+                Rcout << "L_d=" << L_d.at(0) << std::endl;
+                ::Rf_error("L_d is NA.");
+            }
+
+            L_tau = dYJinv_dtau(nu, gamma) * delta_diff;
+            if (!std::isfinite(L_tau.at(0)))
+            {
+                Rcout << "iter=" << s + 1 << std::endl;
+                Rcout << "W=" << eta.at(0) << std::endl;
+                Rcout << "L_tau=" << L_tau.at(0) << std::endl;
+                ::Rf_error("L_tau is NA.");
+            }
+
+            /*
+            Step 4. Update Variational Parameters
+            */
+            eta_old = eta;
+
+            // mu
+            oldEg2_mu = curEg2_mu;
+            oldEdelta2_mu = curEdelta2_mu;
+
+            curEg2_mu = learn_rate * oldEg2_mu + (1. - learn_rate) * arma::pow(L_mu, 2.); // m x 1
+            Change_delta_mu = arma::sqrt(oldEdelta2_mu + eps_step) / arma::sqrt(curEg2_mu + eps_step) % L_mu;
+            mu = mu + Change_delta_mu;
+            curEdelta2_mu = learn_rate * oldEdelta2_mu + (1. - learn_rate) * arma::pow(Change_delta_mu, 2.);
+
+            // B
+            if (m > 1)
+            {
+                oldEg2_B = curEg2_B;         // mk x 1
+                oldEdelta2_B = curEdelta2_B; // mk x 1
+
+                curEg2_B = learn_rate * oldEg2_B + (1. - learn_rate) * arma::pow(vecL_B, 2.);
+                Change_delta_B = arma::sqrt(oldEdelta2_B + eps_step) / arma::sqrt(curEg2_B + eps_step) % vecL_B; // mk x 1
+
+                B = B + arma::reshape(Change_delta_B, m, k);
+                curEdelta2_B = learn_rate * oldEdelta2_B + (1. - learn_rate) * arma::pow(Change_delta_B, 2.);
+            }
+
+            // d
+            oldEg2_d = curEg2_d;
+            oldEdelta2_d = curEdelta2_d;
+
+            curEg2_d = learn_rate * oldEg2_d + (1. - learn_rate) * arma::pow(L_d, 2.); // m x 1
+            Change_delta_d = arma::sqrt(oldEdelta2_d + eps_step) / arma::sqrt(curEg2_d + eps_step) % L_d;
+            d = d + Change_delta_d;
+            curEdelta2_d = learn_rate * oldEdelta2_d + (1. - learn_rate) * arma::pow(Change_delta_d, 2.);
+
+            SigInv = get_sigma_inv(B, d, k);
+
+            // tau
+            oldEg2_tau = curEg2_tau;
+            oldEdelta2_tau = curEdelta2_tau;
+
+            curEg2_tau = learn_rate * oldEg2_tau + (1. - learn_rate) * arma::pow(L_tau, 2.); // m x 1
+            Change_delta_tau = arma::sqrt(oldEdelta2_tau + eps_step) / arma::sqrt(curEg2_tau + eps_step) % L_tau;
+            tau = tau + Change_delta_tau;
+            curEdelta2_tau = learn_rate * oldEdelta2_tau + (1. - learn_rate) * arma::pow(Change_delta_tau, 2.);
+            gamma = tau2gamma(tau);
+
+            /*
+            Step 1. Sample static parameters from the variational distribution
+            using reparameterisation.
+            */
+            // cnt = 0;
+            // xi_old = xi;
+            // eps_old = eps;
+            // while(cnt<max_iter) {
+            //     eta_tilde = rtheta(xi,eps,gamma,mu,B,d); // already inverse YJ transformed
+            //     logprior = logprior_eta_tilde(eta_tilde,idx_select,eta_prior_type,eta_prior_val,m);
+
+            //     nu = tYJ(eta_tilde,gamma); // recover nu
+            //     tilde2eta(eta,eta_tilde,idx_select,m);
+            //     logq = logq0(nu,eta_tilde,gamma,mu,SigInv,m);
+
+            //     if (s==0) {
+            //         logp_new = arma::accu(logprior) + logp_y - logq - logMtheta;
+            //         // logratio = 1.;
+            //     } else {
+            //         // logp_old = logp_new;
+            //         logp_new = arma::accu(logprior) + logp_y - logq - logMtheta;
+            //         // logratio = logp_new - logp_old;
+            //     }
+
+            //     logp_iter.at(cnt) = logp_new;
+
+            //     cnt++;
+            //     if (std::isfinite(eta.at(0)) && std::log(R::runif(0.,1.)) < logp_new) {
+            //         break;
+            //     }
+            //     // if (std::isfinite(eta.at(0))) {
+            //     //     break;
+            //     // }
+            // }
+
+            eta_tilde = rtheta(xi, eps, gamma, mu, B, d);
+            xi_old = xi;
+            eps_old = eps;
+            logprior = logprior_eta_tilde(eta_tilde, idx_select, eta_prior_type, eta_prior_val, m);
+            nu = tYJ(eta_tilde, gamma); // recover nu
+            tilde2eta(eta, eta_tilde, idx_select, m);
+            logq = logq0(nu, eta_tilde, gamma, mu, SigInv, m);
+            logp_new = arma::accu(logprior) + logp_y - logq;
+            logp_iter.at(0) = logp_new;
+            for (unsigned int s = 1; s < max_iter; s++)
+            {
+                eta_tilde0 = rtheta(xi, eps, gamma, mu, B, d);
+                logprior = logprior_eta_tilde(eta_tilde0, idx_select, eta_prior_type, eta_prior_val, m);
+                nu = tYJ(eta_tilde0, gamma); // recover nu
+                tilde2eta(eta, eta_tilde0, idx_select, m);
+                logq = logq0(nu, eta_tilde0, gamma, mu, SigInv, m);
+                logp_new = arma::accu(logprior) + logp_y - logq;
+                logp_iter.at(s) = logp_new;
+
+                if (std::log(R::runif(0., 1.)) < std::min(0., logp_iter.at(s) - logp_iter.at(s - 1)))
+                {
+                    // accept
+                    eta_tilde = eta_tilde0;
+                    xi_old = xi;
+                    eps_old = eps;
+                }
+            }
+
+            xi = xi_old;
+            eps = eps_old;
+            nu = tYJ(eta_tilde, gamma); // recover nu
+            tilde2eta(eta, eta_tilde, idx_select, m);
+        }
 
         // if (s==0) {
         //     logp_new = arma::accu(logprior) + logp_y - logq;
@@ -962,7 +1017,7 @@ Rcpp::List hva_poisson(
 		// 	}
 
         // }
-        
+
 
         if (!std::isfinite(eta.at(0))) {
             Rcout << "iter=" << s+1 << ", ";

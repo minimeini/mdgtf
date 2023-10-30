@@ -37,12 +37,23 @@ plot_psi = function(sim_dat=NULL,
                     time_label=NULL) {
   mlist = c("EpiEstim","WT","Koyama2021",
             "LBA","HVB","MCMC",
-            "True","VB","PL",
-            "SMCS-FL","APF","SMCF-BF","SMCS-BS")
-  clist = c("seagreen","orange","burlywood4",
-            "maroon","purple","darkturquoise",
-            "black","salmon","pink",
-            "mediumaquamarine","cornflowerblue","sandybrown","royalblue")
+            "True","VB",
+            "PL",
+            "SMCS-FL","APF",
+            "SMCF-BF","SMCS-BS")
+  clist = c("seagreen", # Epi
+            "orange",  # WT
+            "burlywood4", # Koyama
+            "maroon", # LBA **
+            "purple", # HVB **
+            "darkturquoise", # MCMC
+            "black",
+            "salmon", # VB
+            "gold", # PL **
+            "mediumaquamarine", # SMCS-FL **
+            "cornflowerblue", # APF
+            "sandybrown", # SMVF-BF
+            "royalblue") # SMCS-BS **
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
     y = sim_dat$y
@@ -72,7 +83,7 @@ plot_psi = function(sim_dat=NULL,
   nl = length(psi_list)
   n = max(c(unlist(lapply(psi_list,function(psi){dim(psi)[1]})),length(y)))
   
-  nl2 = sum(names(psi_list)%in%c("LBA","HVB","MCMC",
+  nl2 = sum(names(psi_list)%in%c("LBA","HVB","MCMC","VB",
                                  "SMCS-FL","SMCS-BS","APF","SMCF-BF",
                                  "Koyama2021",
                                  "PL"))
@@ -197,12 +208,13 @@ plot_psi = function(sim_dat=NULL,
   ####
   methods = unique(psi_list$method)
   # cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
-  cols = NULL
+  col_tmp = NULL
   for (m in methods) {
     ccctmp = which(m == mlist)
-    cols = c(cols,ccctmp)
+    col_tmp = c(col_tmp,ccctmp)
   }
-  cols = clist[cols]
+
+  cols = clist[col_tmp]
 
   p = ggplot(psi_list,aes(x=time,y=est,group=method)) +
     geom_line(aes(color=method),na.rm=TRUE) +
@@ -229,8 +241,13 @@ plot_psi = function(sim_dat=NULL,
   
   if (plot_lambda) {
     methods = unique(lambda_list$method)
-    cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
-    cols = clist[cols]
+    col_tmp = NULL
+    for (m in methods) {
+      ccctmp = which(m == mlist)
+      col_tmp = c(col_tmp,ccctmp)
+    }
+    
+    cols = clist[col_tmp]
     p2 = ggplot(lambda_list,aes(x=time,y=est,group=method)) +
       geom_line(aes(color=method),na.rm=TRUE) +
       geom_ribbon(aes(ymin=lobnd,ymax=hibnd,fill=method),

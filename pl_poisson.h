@@ -145,15 +145,13 @@ void mcs_poisson(
     const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
 	const double W,
     const double rho,
-    const double alpha,
     const unsigned int L, // number of lags
     const double mu0,
     const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
 	const unsigned int N, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
+    const arma::vec& m0_prior,
+	const arma::mat& C0_prior,
     const double theta0_upbnd,
-    const Rcpp::NumericVector& ctanh,
     const double delta_nb,
     const double delta_discount);
 
