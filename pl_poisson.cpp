@@ -39,38 +39,28 @@ Kwg: Identity link, exp(psi) state space
 //' @export
 // [[Rcpp::export]]
 Rcpp::List mcs_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-	const double W = NA_REAL, // Use discount factor if W is not given
+    const arma::vec &Y, // nt x 1, the observed response
+    const arma::uvec &model_code,
+    const double W_true = NA_REAL, // Use discount factor if W is not given
     const double rho = 0.9,
-    const double alpha = 1.,
     const unsigned int L = 12, // number of lags
     const double mu0 = 2.220446e-16,
-    const unsigned int B = 12, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
-	const unsigned int N = 5000, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue, // mean of normal prior for theta0
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue, // variance of normal prior for theta0
-    const double theta0_upbnd = 2., // Upper bound of uniform prior for theta0
-    const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
+    const unsigned int B = 12,                                        // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const unsigned int N = 5000,                                      // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue, // mean of normal prior for theta0
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue, // variance of normal prior for theta0
+    const double theta0_upbnd = 2.,                                   // Upper bound of uniform prior for theta0
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
     const double delta_nb = 1.,
-    const double delta_discount = 0.95,
-    const bool resample = false,
-    const bool verbose = false,
-    const bool debug = false){ 
-    
-    unsigned int tmpi; // store temporary integer value
-    const unsigned int n = Y.n_elem; // number of observations
-    double Wsqrt;
-    if (!R_IsNA(W)) {
-        Wsqrt = std::sqrt(W);
-    }
-    const double min_eff = 0.8*static_cast<double>(N);
-    arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
+    const double delta_discount = 0.95)
+{
+    const double alpha = 1.;
+    const Rcpp::NumericVector ctanh = {1., 0., 1.}; // (1./M, 0, M)
 
-    if (debug) {
-        Rcout << "Evolution variance W=" << W << std::endl;
-    }
+    const unsigned int nt = Y.n_elem; // number of observations
+    const double N_ = static_cast<double>(N);
+    arma::vec ypad(nt + 1, arma::fill::zeros);
+    ypad.tail(nt) = Y;
 
 
     /* 
@@ -89,213 +79,96 @@ Rcpp::List mcs_poisson(
     arma::mat Gt;
     init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
 
-    Fphi = arma::pow(Fphi,alpha);
-    arma::vec Fy(p,arma::fill::zeros);
     /* Dimension of state space depends on type of transfer functions */
 
-
-
-
-    // theta: DLM state vector
-    // p - dimension of state space
-    // N - number of particles
-    arma::vec lambda(N); // instantaneous intensity
-    arma::vec omega(N); // evolution variance
-    arma::vec w(N); // importance weight of each particle
-    Rcpp::IntegerVector idx_(N);
-    arma::uvec idx(N);
-
-    /*
-    ------ Step 1. Initialization at time t = -1 ------
-        - Sample theta[-1] from the prior of theta[-1]
-    
-    ------
-    The first B-2 rows (indices from 0 to B-2) of R are all zeros, as illustrated as follows:
-
-    At the beginning of t = 0
-        - propagate to theta[0]
-        - theta_stored.slice(B-2) = theta[-1], theta_stored.slice(B-1) = theta[0]
-        - resample theta_stored
-        - save theta_stored.slice(0)==ZERO to R.row(0)
-
-    At the beginning of t = 1
-        - propagate to theta[1]
-        - theta_stored.slice(B-3) = theta[-1], ..., theta_stored.slice(B-1) = theta[1]
-        - resample theta_stored
-        - save theta_stored.slice(0)==ZERO to R.row(1)
-
-    ...
-
-    At the beginning of t = B-2
-        - propagate to theta[B-2]
-        - theta_stored.slice(0) = theta[-1], ..., theta_stored.slice(B-1) = theta[B-2]
-        - resample theta_stored
-        - save theta_stored.slice(0)==theta[-1] to R.row(B-2); *** theta[-1] has been resampled B-1 times
-
-    At the beginning of t = B-1
-        - propagate to theta[B-1]
-        - theta_stored.slice(0) = theta[0], ..., theta_stored.slice(B-1) = theta[B-1]
-        - resample theta_stored
-        - save theta_stored.slice(0)==theta[0] to R.row(B-1); *** theta[0] has been resampled B times
-
-    At the beginning of t = n-1, theta_stored.slice(B-1) = theta[n-2]; resample; save theta_stored.slice(0)=theta[n-B-1] to R.row(n-1); propagate to theta[n-1]
-        - propagate to theta[n-1]
-        - theta_stored.slice(0) = theta[n-B], ..., theta_stored.slice(B-1) = theta[n-1]
-        - resample theta_stored
-        - save theta_stored.slice(0)==theta[n-B] to R.row(n-1); *** theta[n-B] has been resampled B times
-            - theta[n-B+1] has been resample B-1 times
-            .....
-            - theta[n-2] is resampled 2 times
-            - theta[n-1] is resample once
-    ------
-    >>>>>> Outside of the for loop,
-        - The first B-2 rows (indices from 0 to B-1) of R are all zeros
-        - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
-        - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
-
-
-    In order to save the theta resampled B-1 times to R, we just need to save the first slice of theta_stored.
-    */
         
-    arma::mat theta(p,N);
-    arma::cube theta_stored(p,N,B);
-    arma::mat hpsi;
-    // if (link_code==1) {
-        // Exponential Link
-        arma::vec m0(p,arma::fill::zeros);
-        arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
-        if (!m0_prior.isNull()) {
-		    m0 = Rcpp::as<arma::vec>(m0_prior);
-	    }
-	    // if (!C0_prior.isNull()) {
-		//     C0 = Rcpp::as<arma::mat>(C0_prior);  
-	    // }
-        C0 = arma::chol(C0);
-        for (unsigned int i=0; i<N; i++) {
-            theta.col(i) = m0 + C0.t() * arma::randn(p);
-        }
-
-    // } else {
-    //     // Identity Link
-    //     theta = arma::randu(p,N,arma::distr_param(0.,theta0_upbnd)); // Consider it as a flat prior
-    // }
-    theta_stored.slice(B-1) = theta;
-    /*
-    ------ Step 1. Initialization theta[0,] at time t = 0 ------
-    */
-    const double c1 = std::pow(1.-rho,static_cast<double>(L_)*alpha);
-    double c2 = -rho;
-
-    // const double c1_ = std::pow((1.-rho)*(1.-rho),alpha);
-    // const double c2_ = 2.*rho;
-    // const double c3_ = -rho*rho;
-
     
-    arma::mat R(n+1,3); // quantiles
-    arma::vec Meff(n,arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
-    arma::uvec resample_status(n,arma::fill::zeros);
-    arma::vec mt(p);
-    arma::mat Ct(p,p);
-    arma::vec Wt(n);
+    arma::vec m0(p,arma::fill::zeros);
+    arma::mat C0(p,p,arma::fill::eye); 
+    C0 *= std::pow(theta0_upbnd*0.5,2.);
+    if (!m0_prior.isNull())
+    {
+		m0 = Rcpp::as<arma::vec>(m0_prior);
+	}
 
-    for (unsigned int t=0; t<n; t++) {
+    C0 = arma::chol(C0);
+    arma::mat theta(p, N, arma::fill::zeros);
+    for (unsigned int i=0; i<N; i++) {
+        theta.col(i) = m0 + C0.t() * arma::randn(p);
+    }
+
+    arma::cube theta_stored(p, N, nt + B);
+    for (unsigned int b=0; b<B; b++) {
+        theta_stored.slice(b).zeros();
+    }
+    theta_stored.slice(B - 1) = theta;
+
+    arma::vec Wt(nt);
+    if (!R_IsNA(W_true))
+    {
+        Wt.fill(W_true);
+    }
+
+
+    arma::vec Meff(nt, arma::fill::zeros); 
+    // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(nt,arma::fill::zeros);
+    arma::mat R(nt+1,3,arma::fill::zeros);
+
+
+    for (unsigned int t=0; t<nt; t++) 
+    {
         R_CheckUserInterrupt();
-        // theta_stored: p x N x B, with B is the lag of the B-lag fixed-lag smoother
-        // theta: p x N
-
-        if (trans_code == 1) { // Koyama
-            Fy.zeros();
-            tmpi = std::min(t,p);
-            if (t>0) {
-                // Checked Fy - CORRECT
-                Fy.head(tmpi) = arma::reverse(ypad.subvec(t+1-tmpi,t));
-            }
-
-            Ft = Fphi % Fy; // L(p) x 1
-        }
-
-        /*
-        ------ Step 1.0 Resample ------
-        Auxiliary Particle Filter
-        */
-        // if (resample) {
-        //     mt = arma::median(theta_stored.slice(B-1),1);
-        //     update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        //     theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
-        //     if (link_code==1) {
-        //         // Exponential link and identity gain
-        //         for (unsigned int i=0; i<N; i++) {
-        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
-        //         }
-        //         lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-        //         lambda = arma::exp(lambda);
-        //     } else if (trans_code==1){ // Koyama
-        //         hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-        //         for (unsigned int i=0; i<N; i++) {
-        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-        //         }
-        //     } else {
-        //         // Koyck or Solow with identity link and different gain functions
-        //         lambda = mu0 + theta.row(1).t();
-        //     }
-
-        //     for (unsigned int i=0; i<N; i++) {
-        //         w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-        //     } // End for loop of i, index of the particles
-
-        //     if (arma::accu(w)>EPS) { // normalize the particle weights
-        //         w /= arma::accu(w);
-        //         if (1./arma::dot(w,w) > min_eff) {
-        //             idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-        //             idx = Rcpp::as<arma::uvec>(idx_) - 1;
-        //             for (unsigned int b=0; b<B; b++) {
-        //                 theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-        //             }
-        //         }
-        //     }
-        // }
-        
 
         /*
         ------ Step 2.1 Propagate ------
-        Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N
-        using state evolution distribution P(theta[t+1,i]|theta[t,i]).
-        ------
-        >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
         */
-        
-        if (t>B) {
-            // Is it necessary?
-            mt = 0.5*arma::mean(theta_stored.slice(B-1),1) + 0.5*arma::median(theta_stored.slice(B-1),1);
-        } else {
-            mt = arma::median(theta_stored.slice(B-1),1);
-        }
-        
-        // for (unsigned int i=0; i<N; i++) {
-        //     update_Gt(Gt,gain_code, trans_code, 0.5*mt + 0.5*theta_stored.slice(B-1).col(i), ctanh, alpha, ypad.at(t), rho);
-        //     theta.col(i) = update_at(p,gain_code,trans_code,theta_stored.slice(B-1).col(i),Gt,ctanh,alpha,ypad.at(t),rho);
+        arma::mat Theta_old = theta_stored.slice(t+B-1);
+
+        // if (trans_code != 1) {
+        //     arma::vec mt;
+        //     if (t > B)
+        //     {
+        //         // Is it necessary?
+        //         mt = 0.5 * arma::mean(Theta_old, 1) + 0.5 * arma::median(Theta_old, 1);
+        //         // mt: p x 1
+        //     }
+        //     else
+        //     {
+        //         mt = arma::median(Theta_old, 1);
+        //     }
+        //     update_Gt(Gt, gain_code, trans_code, mt, ctanh, 1., ypad.at(t), rho);
         // }
-        update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
-  
-        if (R_IsNA(W)) { // Use discount factor if W is not given
-            Wt.at(t) = arma::stddev(theta_stored.slice(B-1).row(0));
-            Wsqrt = Wt.at(t);
-            if (t>B) {
-                Wsqrt *= std::sqrt(1./delta_discount-1.);
-            } else {
-                Wsqrt *= std::sqrt(1./0.99-1.);
+
+        // // theta_stored: p,N,B
+        if (R_IsNA(W_true))
+        { // Use discount factor if W is not given
+            Wt.at(t) = arma::var(Theta_old.row(0));
+            // Wsqrt = std::sqrt(Wt.at(t));
+            if (t > B)
+            {
+                Wt.at(t) *= 1. / delta_discount - 1.;
+            }
+            else
+            {
+                Wt.at(t) *= 1. / 0.99 - 1.;
             }
         }
-        omega = arma::randn(N) * Wsqrt;
-        theta.row(0) += omega.t();
-
-        if (debug) {
-            Rcout << "quantiles for hpsi[" << t+1 << "]" << arma::quantile(theta.row(1),Rcpp::as<arma::vec>(qProb));
-        }
+        double Wsqrt = std::sqrt(Wt.at(t));
         
-        theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
-        theta_stored.slice(B-1) = theta;
+
+        for (unsigned int i = 0; i < N; i++)
+        {
+            arma::vec theta_old = Theta_old.col(i);
+            arma::vec theta_new = update_at(
+                p,gain_code,trans_code,theta_old,Gt,ctanh,1.,ypad.at(t),rho
+            );
+
+            double omega_new = R::rnorm(0.,Wsqrt);
+            theta_new.at(0) += omega_new;
+            theta_stored.slice(t + B).col(i) = theta_new;
+        }
+
         /*
         ------ Step 2.1 Propagate ------
         */
@@ -304,40 +177,55 @@ Rcpp::List mcs_poisson(
 
         /*
         ------ Step 2.2 Importance weights ------
-        Calculate the importance weight of lambda[t-L:t,i] for i=0,1,...,N, where i is the index of particles
-        using likelihood P(y[t]|lambda[t,i]).
-        ------
-        >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
         */
-        if (link_code==1) {
-            // Exponential link and identity gain
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
+        if (trans_code == 1)
+        { // Koyama
+            arma::vec Fy(p, arma::fill::zeros);
+            unsigned int tmpi = std::min(t, p);
+            if (t > 0)
+            {
+                // Checked Fy - CORRECT
+                Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
             }
-            lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-            lambda = arma::exp(lambda);
-        } else if (trans_code==1){ // Koyama
-            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
+
+            Ft = Fphi % Fy; // L(p) x 1
+        }
+
+        arma::vec weight(N);
+        arma::vec lambda(N);
+        for (unsigned int i = 0; i < N; i++)
+        {
+            arma::vec psi = theta_stored.slice(t + B).col(i); // p x 1
+
+            // theta: p x N
+            if (link_code == 1)
+            {
+                // Exponential link and identity gain
+                double tmp = arma::as_scalar(Ft.t() * psi);
+                lambda.at(i) = std::min(mu0 + tmp, UPBND);
+                double tmp2 = std::exp(lambda.at(i));
+                lambda.at(i) = tmp2;
             }
-        } else {
-            // Koyck or Solow with identity link and different gain functions
-            lambda = mu0 + theta.row(1).t();
+            else if (trans_code == 1)
+            {
+                // Koyama
+                arma::vec hpsi = psi2hpsi(psi, gain_code, ctanh);
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t() * hpsi);
+            }
+            else
+            {
+                // Koyck or Solow with identity link and different gain functions
+                lambda.at(i) = mu0 + psi.at(1);
+            }
+
+            weight.at(i) = loglike_obs(
+                ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false
+            );
         }
 
-        if (debug) {
-            Rcout << "Quantiles of lambda[" << t+1 << "]: " << arma::quantile(lambda.t(),Rcpp::as<arma::vec>(qProb));
-        }
-
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-        } // End for loop of i, index of the particles
 
 
-        if (debug) {
-            Rcout << "Quantiles of importance weight w[" << t+1 << "]: " << arma::quantile(w.t(),Rcpp::as<arma::vec>(qProb));
-        }
+
         /*
         ------ Step 2.2 Importance weights ------
         */
@@ -345,62 +233,62 @@ Rcpp::List mcs_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
-        if (arma::accu(w)>EPS) { // normalize the particle weights
-            w /= arma::accu(w);
-            Meff.at(t) = 1./arma::dot(w,w);
-            try{
-                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-                idx = Rcpp::as<arma::uvec>(idx_) - 1;
-                for (unsigned int b=0; b<B; b++) {
-                    theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-                }
-                resample_status.at(t) = 1;
-            } catch(...) {
-                // If resampling doesn't work, then just don't resample
-                resample_status.at(t) = 0;
+        double wsum = arma::accu(weight);
+        bool resample = false;
+        if (wsum > EPS)
+        {
+            // normalize the particle weights
+            arma::vec wtmp = weight;
+            weight = wtmp / wsum;
+            Meff.at(t) = 1. / arma::dot(weight, weight);
+            if (Meff.at(t) > std::max(100., 0.1 * N_))
+            {
+                resample = true;
             }
-        } else {
-            resample_status.at(t) = 0;
+            else
+            {
+                resample = false;
+            }
+        }
+        else
+        {
+            resample = false;
             Meff.at(t) = 0.;
         }
 
-        if (debug && resample_status.at(t) == 0) {
-            Rcout << "Resampling skipped at time t=" << t << std::endl;
-            // ::Rf_error("Probabilities must be finite and non-negative!");
-        }
-        
-        
-        /*
-        ------ Step  Resampling with Replacement ------
-        */
-        R.row(t) = arma::quantile(theta_stored.slice(0).row(0),Rcpp::as<arma::vec>(qProb));
-    }
 
-    /*
-    ------ R: an n x 3 matrix ------
-        - The first B-2 rows (indices from 0 to B-1) of R are all zeros
-        - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
-        - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
-    */
-    R.rows(0,n-B+1) = R.rows(B-2,n-1);
-    for (unsigned int b=0; b<(B-1); b++) {
-        R.row(n-B+2+b) = arma::quantile(theta_stored.slice(b+1).row(0),Rcpp::as<arma::vec>(qProb));
+        if (resample) 
+        {
+
+            Rcpp::NumericVector w_ = Rcpp::wrap(weight);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+
+            // from t+1, to t+B
+            for (unsigned int b = t+1; b < (t+B+1); b++)
+            {
+                arma::mat ttmp = theta_stored.slice(b);
+                theta_stored.slice(b) = ttmp.cols(idx);
+            }
+        }
+        weight.ones();
+        resample_status.at(t) = resample;
     }
 
     Rcpp::List output;
-    output["psi"] = Rcpp::wrap(R); // (n+1) x 3
-    output["theta_last"] = Rcpp::wrap(theta_stored.slice(B-1)); // p x N
+    arma::mat psi_all = theta_stored.row(0); // N x (nt+B)
+    arma::mat psi = psi_all.cols(B-1, nt+B-1);
+    arma::mat RR = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 0);
+    output["psi"] = Rcpp::wrap(RR.t());
+
+    output["theta"] = Rcpp::wrap(theta_stored); // p x N
     output["Wt"] = Rcpp::wrap(Wt);
 
-    if (debug) {
-        output["Meff"] = Rcpp::wrap(Meff);
-        output["resample_status"] = Rcpp::wrap(resample_status);
-    }
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
     
-
     return output;
 }
-
 
 
 /*
@@ -1106,7 +994,10 @@ Rcpp::List ffbs_poisson(
                     }
                 }
             }
+
+            
         }
+
 
         /*
         ------ Step 2.1 Propagate ------
@@ -1201,7 +1092,14 @@ Rcpp::List ffbs_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
+
+        // if (verbose)
+        {
+            Rcout << "\rFiltering Progress: " << t + 1 << "/" << n;
+        }
     }
+
+    Rcout << std::endl;
 
 
     /*
@@ -1244,7 +1142,14 @@ Rcpp::List ffbs_poisson(
                 // tmpir = Rcpp::sample(N,1,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w))) - 1;
                 psi_smooth.at(i,t-1) = psi_filter.at(tmpir[0],t-1);
             }
+
+            // if (verbose)
+            {
+                Rcout << "\rSmoothing Progress: " << n-t+1 << "/" << n;
+            }
         }
+
+        Rcout << std::endl;
     }
     
     
@@ -1571,22 +1476,10 @@ void mcs_poisson(
     const double delta_nb = 1., // 0: negative binomial DLM; 1: poisson DLM
     const double delta_discount = 0.95){ 
 
-    unsigned int tmpi; // store temporary integer value
     const unsigned int n = ypad.n_elem - 1; // number of observations
     const double N_ = static_cast<double>(N);
-    const double min_eff = 0.8*N_;
 
-    double Wsqrt;
-    if (!R_IsNA(W)) {
-        Wsqrt = std::sqrt(W);
-    }
 
-    /* 
-    Dimension of state space depends on type of transfer functions 
-    - p: diemsnion of DLM state space
-    - Ft: vector for the state-to-observation function
-    - Gt: matrix for the state-to-state function
-    */
     const unsigned int obs_code = model_code.at(0);
     const unsigned int link_code = model_code.at(1);
     const unsigned int trans_code = model_code.at(2);
@@ -1597,222 +1490,120 @@ void mcs_poisson(
     arma::mat Gt;
     init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
 
-    Fphi = arma::pow(Fphi,alpha);
-    arma::vec Fy(p,arma::fill::zeros);
-    /* Dimension of state space depends on type of transfer functions */
-
-
-    // theta: DLM state vector
-    // p - dimension of state space
-    // N - number of particles
-    arma::vec lambda(N); // instantaneous intensity
-    arma::vec omega(N); // evolution variance
-    arma::vec w(N); // importance weight of each particle
-    Rcpp::IntegerVector idx_(N);
-    arma::uvec idx(N);
-
-    /*
-    ------ Step 1. Initialization at time t = -1 ------
-        - Sample theta[-1] from the prior of theta[-1]
-    
-    ------
-    The first B-2 rows (indices from 0 to B-2) of R are all zeros, as illustrated as follows:
-
-    At the beginning of t = 0
-        - propagate to theta[0]
-        - theta_stored.slice(B-2) = theta[-1], theta_stored.slice(B-1) = theta[0]
-        - resample theta_stored
-        - save theta_stored.slice(0)==ZERO to R.row(0)
-
-    At the beginning of t = 1
-        - propagate to theta[1]
-        - theta_stored.slice(B-3) = theta[-1], ..., theta_stored.slice(B-1) = theta[1]
-        - resample theta_stored
-        - save theta_stored.slice(0)==ZERO to R.row(1)
-
-    ...
-
-    At the beginning of t = B-2
-        - propagate to theta[B-2]
-        - theta_stored.slice(0) = theta[-1], ..., theta_stored.slice(B-1) = theta[B-2]
-        - resample theta_stored
-        - save theta_stored.slice(0)==theta[-1] to R.row(B-2); *** theta[-1] has been resampled B-1 times
-
-    At the beginning of t = B-1
-        - propagate to theta[B-1]
-        - theta_stored.slice(0) = theta[0], ..., theta_stored.slice(B-1) = theta[B-1]
-        - resample theta_stored
-        - save theta_stored.slice(0)==theta[0] to R.row(B-1); *** theta[0] has been resampled B times
-
-    At the beginning of t = n-1, theta_stored.slice(B-1) = theta[n-2]; resample; save theta_stored.slice(0)=theta[n-B-1] to R.row(n-1); propagate to theta[n-1]
-        - propagate to theta[n-1]
-        - theta_stored.slice(0) = theta[n-B], ..., theta_stored.slice(B-1) = theta[n-1]
-        - resample theta_stored
-        - save theta_stored.slice(0)==theta[n-B] to R.row(n-1); *** theta[n-B] has been resampled B times
-            - theta[n-B+1] has been resample B-1 times
-            .....
-            - theta[n-2] is resampled 2 times
-            - theta[n-1] is resample once
-    ------
-    >>>>>> Outside of the for loop,
-        - The first B-2 rows (indices from 0 to B-1) of R are all zeros
-        - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
-        - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
-
-
-    In order to save the theta resampled B-1 times to R, we just need to save the first slice of theta_stored.
-    */
         
     arma::mat theta(p,N);
-    arma::cube theta_stored(p,N,B);
-    arma::mat hpsi;
-    // if (link_code==1) {
-        // Exponential Link
-        arma::vec m0(p,arma::fill::zeros);
-        arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
-        if (!m0_prior.isNull()) {
-		    m0 = Rcpp::as<arma::vec>(m0_prior);
-	    }
-	    // if (!C0_prior.isNull()) {
-		//     C0 = Rcpp::as<arma::mat>(C0_prior);
-	    // }
-        C0 = arma::chol(C0);
+    arma::vec m0(p,arma::fill::zeros);
+    arma::mat C0(p,p,arma::fill::eye); C0 *= std::pow(theta0_upbnd*0.5,2.);
+    if (!m0_prior.isNull()) {
+		m0 = Rcpp::as<arma::vec>(m0_prior);
+	}
 
-        for (unsigned int i=0; i<N; i++) {
-            theta.col(i) = m0 + C0.t() * arma::randn(p);
-        }
+    C0 = arma::chol(C0);
+    for (unsigned int i=0; i<N; i++) {
+        theta.col(i) = m0 + C0.t() * arma::randn(p);
+    }
 
-    // } else {
-    //     // Identity Link
-    //     theta = arma::randu(p,N,arma::distr_param(0.,theta0_upbnd)); // Consider it as a flat prior
-    // }
+    arma::cube theta_stored(p, N, n + B);
+    for (unsigned int b = 0; b < B; b++)
+    {
+        theta_stored.slice(b).zeros();
+    }
     theta_stored.slice(B-1) = theta;
-    /*
-    ------ Step 1. Initialization at time t = 0 ------
-    */
-    const double c1 = std::pow(1.-rho,static_cast<double>(L_)*alpha);
-    double c2 = -rho;
-    // const double c3 = -rho*rho;
-    arma::vec mt(p);
+
+
     arma::vec Wt(n);
-    bool resample = false;
+
 
     for (unsigned int t=0; t<n; t++) {
         R_CheckUserInterrupt();
-        // theta_stored: p x N x B, with B is the lag of the B-lag fixed-lag smoother
-        // theta: p x N
-        if (trans_code == 1)  {
+        arma::mat Theta_old = theta_stored.slice(t + B - 1);
+
+        
+        if (trans_code != 1)
+        {
+            arma::vec mt = arma::median(Theta_old, 1);
+            update_Gt(Gt, gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
+        }
+
+
+        if (R_IsNA(W))
+        { // Use discount factor if W is not given
+            Wt.at(t) = arma::var(Theta_old.row(0));
+            // Wsqrt = std::sqrt(Wt.at(t));
+            if (t > B)
+            {
+                Wt.at(t) *= 1. / delta_discount - 1.;
+            }
+            else
+            {
+                Wt.at(t) *= 1. / 0.99 - 1.;
+            }
+        }
+        double Wsqrt = std::sqrt(Wt.at(t));
+
+
+        for (unsigned int i=0; i<N; i++) {
+            arma::vec theta_old = Theta_old.col(i);
+            arma::vec theta_new = update_at(
+                p, gain_code, trans_code, theta_old, Gt, ctanh, alpha, ypad.at(t), rho
+            );
+
+            double omega_new = R::rnorm(0., Wsqrt);
+            theta_new.at(0) += omega_new;
+
+            theta.col(i) = theta_new;
+        }
+        
+        theta_stored.slice(t+B) = theta;
+        /*
+        ------ Step 2.1 Propagate ------
+        */
+
+
+
+        /*
+        ------ Step 2.2 Importance weights ------
+        */
+        if (trans_code == 1)
+        {
             // Koyama
-            Fy.zeros();
-            tmpi = std::min(t,p);
-            if (t>0) {
+            arma::vec Fy(p, arma::fill::zeros);
+            unsigned int tmpi = std::min(t, p);
+            if (t > 0)
+            {
                 // Checked Fy - CORRECT
-                Fy.head(tmpi) = arma::reverse(ypad.subvec(t+1-tmpi,t));
+                Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
             }
 
             Ft = Fphi % Fy; // L(p) x 1
         }
-        /*
-        ------ Step 1.0 Resample ------
-        Auxiliary Particle Filter
-        */
-        // if (resample && t>B) {
-        //     mt = arma::median(theta_stored.slice(B-1),1);
-        //     update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        //     theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
-        //     if (link_code==1) {
-        //         // Exponential link and identity gain
-        //         for (unsigned int i=0; i<N; i++) {
-        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
-        //         }
-        //         lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-        //         lambda = arma::exp(lambda);
-        //     } else if (trans_code==1){ // Koyama
-        //         hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-        //         for (unsigned int i=0; i<N; i++) {
-        //             lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-        //         }
-        //     } else {
-        //         // Koyck or Solow with identity link and different gain functions
-        //         lambda = mu0 + theta.row(1).t();
-        //     }
 
-        //     for (unsigned int i=0; i<N; i++) {
-        //         w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-        //     } // End for loop of i, index of the particles
+        arma::vec w(N);
+        arma::vec lambda(N);
+        for (unsigned int i=0; i<N; i++) 
+        {
+            arma::vec psi = theta.col(i); // p x 1
 
-        //     if (arma::accu(w)>EPS) { // normalize the particle weights
-        //         w /= arma::accu(w);
-        //         if (1./arma::dot(w,w) > min_eff) {
-        //             idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-        //             idx = Rcpp::as<arma::uvec>(idx_) - 1;
-        //             for (unsigned int b=0; b<B; b++) {
-        //                 theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-        //             }
-        //         }
-        //     }
-        // }
-        
-        /*
-        ------ Step 2.1 Propagate ------
-        Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N
-        using state evolution distribution P(theta[t+1,i]|theta[t,i]).
-        ------
-        >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
-        */
-        
-        mt = arma::median(theta_stored.slice(B-1),1);
-        update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        theta = update_at(p,gain_code,trans_code,theta_stored.slice(B-1),Gt,ctanh,alpha,ypad.at(t),rho);
-
-        if (R_IsNA(W)) {
-            Wsqrt = arma::stddev(theta_stored.slice(B-1).row(0));
-            if (t>B) {
-                Wsqrt *= std::sqrt(1./delta_discount-1.);
+            // theta: p x N
+            if (link_code == 1) 
+            {
+                // Exponential link and identity gain
+                double tmp = arma::as_scalar(Ft.t() * psi);
+                lambda.at(i) = std::min(mu0 + tmp, UPBND);
+                double tmp2 = std::exp(lambda.at(i));
+                lambda.at(i) = tmp2;
+            } else if (trans_code == 1) 
+            {
+                // Koyama
+                arma::vec hpsi = psi2hpsi(psi, gain_code, ctanh);
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t() * hpsi);
             } else {
-                Wsqrt *= std::sqrt(1./0.99-1.);
+                // Koyck or Solow with identity link and different gain functions
+                lambda.at(i) = mu0 + psi.at(1);
             }
+
+            w.at(i) = loglike_obs(ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false);
         }
-
-        omega = arma::randn(N) * Wsqrt;
-        theta.row(0) += omega.t();
-        
-        theta_stored.slices(0,B-2) = theta_stored.slices(1,B-1);
-        theta_stored.slice(B-1) = theta;
-        /*
-        ------ Step 2.1 Propagate ------
-        */
-        
-        
-
-        /*
-        ------ Step 2.2 Importance weights ------
-        Calculate the importance weight of lambda[t-L:t,i] for i=0,1,...,N, where i is the index of particles
-        using likelihood P(y[t]|lambda[t,i]).
-        ------
-        >> Step 2-3 and 2-4 of Kitagawa and Sato - This is also the observational equation (nonlinear, nongaussian)
-        */
-        if (link_code == 1) {
-            // Exponential link and identity gain
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
-            }
-            lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-            lambda = arma::exp(lambda);
-        } else if (trans_code==1){ // Koyama
-            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-            }
-        } else {
-            // Koyck or Solow with identity link and different gain functions
-            lambda = mu0 + theta.row(1).t();
-        }
-
-
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-        } // End for loop of i, index of the particles
         
         
         /*
@@ -1822,114 +1613,135 @@ void mcs_poisson(
         /*
         ------ Step 3 Resampling with Replacement ------
         */
-        if (arma::accu(w)>EPS) {
-            pmarg_y.at(t) = std::log(arma::accu(w)) - std::log(N_);
-            w /= arma::accu(w); // normalize the particle weights
-            idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-            idx = Rcpp::as<arma::uvec>(idx_) - 1;
-            for (unsigned int b=0; b<B; b++) {
-                theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
+        double wsum = arma::accu(w);
+        bool resample = false;
+
+        if (wsum > EPS)
+        {
+            // normalize the particle weights
+            arma::vec wtmp = w;
+            w = wtmp / wsum;
+            double Meff = 1. / arma::dot(w, w);
+            if (Meff > 0.2 * N_)
+            {
+                resample = true;
             }
+            else
+            {
+                resample = false;
+            }
+        }
+        else
+        {
+            resample = false;
+        }
+
+        if (resample)
+        {
+
+            Rcpp::NumericVector w_ = Rcpp::wrap(w);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+
+            // from t+1, to t+B
+            for (unsigned int b = t + 1; b < (t + B + 1); b++)
+            {
+                arma::mat ttmp = theta_stored.slice(b);
+                theta_stored.slice(b) = ttmp.cols(idx);
+            }
+
+            pmarg_y.at(t) = std::log(arma::accu(w)) - std::log(N_);
         } else {
-            if (w.has_nan()) {
+            if (w.has_nan())
+            {
                 w.elem(arma::find_nan(w)).fill(1.e-32);
             }
             pmarg_y.at(t) = std::log(arma::accu(w)) - std::log(N_);
         }
-
-        
-        
-        /*
-        ------ Step  Resampling with Replacement ------
-        */
-        R.at(t,0) = arma::median(theta_stored.slice(0).row(0)); // psi
-
-        if (trans_code == 1) { // TODO: CHECK THE KOYAMA CASE
-            // Koyama
-            hpsi = psi2hpsi(theta_stored.slice(0),gain_code,ctanh); // hpsi: p x N
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = arma::as_scalar(Ft.t()*hpsi.col(i));
-            }
-            R.at(t,1) = arma::median(lambda);
-        } else {
-            // Koyck or Solow
-            R.at(t,1) = arma::median(theta_stored.slice(0).row(1)); // theta
-        }
+        w.ones();
     }
 
-    /*
-    ------ R: an n x 3 matrix ------
-        - The first B-2 rows (indices from 0 to B-1) of R are all zeros
-        - Shift the the last (B-2):(n-1) rows (n-B+2 in totals) of R to 0:n-B+1
-        - For the last B-1 rows (indices from n-B+2 to n), takes values from theta_stored.slice(1,B-1)
-    */
-    // R.subvec(0,n-B+1) = R.subvec(B-2,n-1);
-    // R.submat(0,0,n-B+1,0) = R.submat(B-2,0,n-1,0);
-    R.rows(0,n-B+1) = R.rows(B-2,n-1);
-    for (unsigned int b=0; b<(B-1); b++) {
-        R.at(n-B+2+b,0) = arma::median(theta_stored.slice(b+1).row(0));
 
-        if (trans_code == 1) { // TODO: CHECK THE KOYAMA CASE
-            // Koyama
-            Fy.zeros();
-            tmpi = std::min(n-B+2+b,p);
-            Fy.head(tmpi) = arma::reverse(ypad.subvec(n-B+2+b+1-tmpi,n-B+2+b));
+    R.zeros();
+    {
+        arma::mat psi_all = theta_stored.row(0);        // N x (nt+B)
+        arma::mat psi = psi_all.cols(B - 1, n + B - 1); // N x (nt+1)
+        arma::vec RR = arma::median(psi, 0);            // (nt+1)
+
+        R.col(0) = RR; // (nt+1) x 2
+    }
+
+    if (trans_code == 1)
+    {
+        // Koyama
+        for (unsigned int t = 0; t < n; t++)
+        {
+            arma::vec Fy(p, arma::fill::zeros);
+            unsigned int tmpi = std::min(t, p);
+            if (t > 0)
+            {
+                // Checked Fy - CORRECT
+                Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
+            }
+
             Ft = Fphi % Fy; // L(p) x 1
-
-            hpsi = psi2hpsi(theta_stored.slice(b+1),gain_code,ctanh); // hpsi: p x N
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = arma::as_scalar(Ft.t()*hpsi.col(i));
+            // theta_stored: p x N x (nt+B)
+            arma::mat hpsi = psi2hpsi(theta_stored.slice(B + t), gain_code, ctanh);
+            // hpsi: p x N
+            arma::vec lambda(N);
+            for (unsigned int i = 0; i < N; i++)
+            {
+                lambda.at(i) = arma::as_scalar(Ft.t() * hpsi.col(i));
             }
-            R.at(n-B+2+b,1) = arma::median(lambda);
-        } else {
-            R.at(n-B+2+b,1) = arma::median(theta_stored.slice(b+1).row(1));
-        }
+
+            R.at(t + 1, 1) = arma::median(lambda);
+        } // end loop over t
     }
+    else
+    {
+        arma::mat ft_all = theta_stored.row(1);       // N x (nt+B)
+        arma::mat ft = ft_all.cols(B - 1, n + B - 1); // N x (nt+1)
+        arma::vec RR = arma::median(ft, 0);           // (nt+1)
+        R.col(1) = RR;
+    }
+
 
     return;
 }
 
 
 
-/*
-Particle Learning
-- Reference: Carvalho et al., 2010.
 
-- eta = (W, mu[0], rho, M)
-*/
 //' @export
 // [[Rcpp::export]]
 Rcpp::List pl_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-    const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
-    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
-    const double alpha = 1.,
-    const unsigned int L = 2, // number of lags
-	const unsigned int N = 5000, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-    const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
+    const arma::vec &Y, // nt x 1, the observed response
+    const arma::uvec &model_code,
+    const Rcpp::NumericVector &W_prior = Rcpp::NumericVector::create(0.01, 0.01), // IG[aw,bw]
+    const double W_true = NA_REAL,
+    const unsigned int L = 2,    // number of lags
+    const unsigned int N = 5000, // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
+    const double mu0 = 0.,
+    const double rho = 0.9,
     const double delta_nb = 1.,
-    const bool verbose = true,
-    const bool debug = false){ 
-    
-    unsigned int tmpi; // store temporary integer value
-    const unsigned int n = Y.n_elem; // number of observations
-    const double n_ = static_cast<double>(n);
-    const unsigned int M = 100;
-    const unsigned int B = 0.1*n;
-    const double min_eff = 0.8*static_cast<double>(N);
-    arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
+    const double theta0_upbnd = 2.)
+{
+    const double alpha = 1.;
+    const Rcpp::NumericVector ctanh = {1., 0., 1.}; // (1./M, 0, M)
 
-    double mu0 = eta_init.at(1);
-    double rho = eta_init.at(2);
-    const Rcpp::NumericVector ctanh = {1./eta_init.at(3),0.,eta_init.at(3)}; // (1./M, 0, M)
+    const unsigned int nt = Y.n_elem; // number of observations
+    const double N_ = static_cast<double>(N);
+    const double nt_ = static_cast<double>(nt);
+    arma::vec ypad(nt + 1, arma::fill::zeros);
+    ypad.tail(nt) = Y;
 
-    /* 
-    Dimension of state space depends on type of transfer functions 
+    /*
+    Define F[t] and G[t].
+
+    Dimension of state space depends on type of transfer functions
     - p: diemsnion of DLM state space
     - Ft: vector for the state-to-observation function
     - Gt: matrix for the state-to-state function
@@ -1939,327 +1751,1293 @@ Rcpp::List pl_poisson(
     const unsigned int trans_code = model_code.at(2);
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
-	unsigned int p, L_;
-	arma::vec Ft, Fphi;
+    unsigned int p, L_;
+    arma::vec Ft, Fphi;
     arma::mat Gt;
-    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+    init_by_trans(p, L_, Ft, Fphi, Gt, trans_code, L);
 
-    Fphi = arma::pow(Fphi,alpha);
-    arma::vec Fy(p,arma::fill::zeros);
     /* Dimension of state space depends on type of transfer functions */
 
-    // theta: DLM state vector
-    // p - dimension of state space
-    // N - number of particles
-    arma::vec lambda(N); // instantaneous intensity
-    arma::vec omega(N); // evolution variance
-    arma::vec w(N); // importance weight of each particle
-    Rcpp::IntegerVector idx_(N);
-    arma::uvec idx(N);
-        
-    arma::mat theta(p,N);
-    arma::cube theta_stored(p,N,n+1);
-    arma::mat hpsi;
-    if (link_code==1) {
-        // Exponential Link
-        arma::vec m0(p,arma::fill::zeros);
-        arma::mat C0(p,p,arma::fill::eye); C0 *= 3.;
-        if (!m0_prior.isNull()) {
-		    m0 = Rcpp::as<arma::vec>(m0_prior);
-	    }
-	    if (!C0_prior.isNull()) {
-		    C0 = Rcpp::as<arma::mat>(C0_prior);
-            C0 = arma::chol(C0);
-	    }
-
-        for (unsigned int i=0; i<N; i++) {
-            theta.col(i) = m0 + C0.t() * arma::randn(p);
-        }
-
-    } else {
-        // Identity Link
-        theta = arma::randu(p,N,arma::distr_param(0.,10.)); // Consider it as a flat prior
-    }
-
-    theta_stored.slice(0) = theta;
     /*
-    ------ Step 1. Initialization of theta[0] at time t = 0 ------
+    Initialize latent state theta[0].
     */
-    const double c1 = std::pow(1.-rho,static_cast<double>(L_)*alpha);
-    double c2 = -rho;
+    arma::mat theta(p, N);
+    arma::vec m0(p, arma::fill::zeros);
+    arma::mat C0(p, p, arma::fill::eye);
+    C0 *= std::pow(theta0_upbnd * 0.5, 2.);
+    if (!m0_prior.isNull())
+    {
+        m0 = Rcpp::as<arma::vec>(m0_prior);
+    }
+    C0 = arma::chol(C0);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        theta.col(i) = m0 + C0.t() * arma::randn(p);
+    }
+    arma::cube theta_stored(p, N, nt + 1);
+    theta_stored.slice(0) = theta;
 
-
-    arma::mat psi(n+1,N,arma::fill::zeros); // particles
-    psi.row(0) = theta.row(0);
-    arma::vec Meff(n,arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
-    arma::uvec resample_status(n,arma::fill::zeros);
-
-
-    arma::vec W(N); W.fill(eta_init.at(0));
-    arma::mat W_stored(N,n);
-    arma::vec res_stored(n);
-    arma::vec Wsqrt = arma::sqrt(W);
-    arma::vec res(N,arma::fill::zeros); // Sufficient statistics for W
-    arma::vec aw(N);
-    arma::vec bw(N);
-    double a1, a2, a3;
-    if (eta_select.at(0) == 1) { // W unknown
-        switch (eta_prior_type.at(0)) {
-            case 0: // Gamma, Wtilde = log(W)
-            {
-                a1 = eta_prior_val.at(0,0) - 0.5*n_;
-                a2 = eta_prior_val.at(1,0);
-                a3 = 0.;
-            }
-            break;
-            case 1: // Half-Cauchy
-            {
-
-            }
-            break;
-            case 2: // Inverse-Gamma, Wtilde = -log(W)
-            {
-                aw.fill(eta_prior_val.at(0,0) + 0.5*n_);
-                bw.fill(eta_prior_val.at(1,0));
-                // bw = eta_prior_val.at(1,0);
-            }
-            break;
-            default:
-            {
-
-            }
-        }
+    arma::mat aw(N, nt + 1);
+    aw.fill(W_prior[0]);
+    arma::mat bw(N, nt + 1);
+    bw.fill(W_prior[1]);
+    arma::mat Wt(N, nt + 1); // evolution variance
+    if (!R_IsNA(W_true))
+    {
+        Wt.fill(W_true);
+    }
+    else
+    {
+        double wtmp = arma::var(theta_stored.slice(0).row(0));
+        wtmp *= 1. / 0.99 - 1.;
+        Wt.col(0).fill(wtmp);
     }
 
-    arma::vec mt(p);
+    arma::vec Meff(nt, arma::fill::zeros);
+    // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(nt, arma::fill::zeros);
 
-
-    for (unsigned int t=0; t<n; t++) {
+    for (unsigned int t = 0; t < nt; t++)
+    {
         R_CheckUserInterrupt();
-        // theta_next: p x N, with B is the lag of the B-lag fixed-lag smoother
-        // theta: p x N
-        if (trans_code == 1) {
-            // Koyama
-            Fy.zeros();
-            tmpi = std::min(t,p);
-            if (t>0) {
-                // Checked Fy - CORRECT
-                // Fy.head(tmpi) = arma::reverse(Y.subvec(t-tmpi,t-1));
-                Fy.head(tmpi) = arma::reverse(ypad.subvec(t-tmpi+1,t));
-            }
 
+        /*
+        Propagate
+        */
+        arma::mat Theta_old = theta_stored.slice(t); // p x N
+
+        for (unsigned int i = 0; i < N; i++)
+        {
+            arma::vec theta_old = Theta_old.col(i); // p x 1
+            arma::vec theta_new = update_at(
+                p, gain_code, trans_code, theta_old, Gt, ctanh, 1., ypad.at(t), rho);
+
+            double Wsqrt = std::sqrt(Wt.at(i, t));
+            double omega_new = R::rnorm(0., Wsqrt);
+            theta_new.at(0) += omega_new;
+
+            theta_stored.slice(t + 1).col(i) = theta_new;
+
+            if (R_IsNA(W_true)) {
+                // infer evolution variance W
+                double err = theta_stored.at(0,i,t+1) - theta_stored.at(0,i,t);
+                double sse = std::pow(err,2.);
+                aw.at(i,t+1) = aw.at(i,t) + 0.5;
+                bw.at(i,t+1) = bw.at(i,t) + 0.5*sse;
+                if (t > std::min(0.1 * nt_,20.))
+                {
+                    Wt.at(i, t + 1) = 1. / R::rgamma(aw.at(i, t + 1), 1. / bw.at(i, t + 1));
+                }
+            } else {
+                Wt.at(i,t+1) = W_true;
+            }
+        }
+
+        if (R_IsNA(W_true) && (t <= std::min(0.1 * nt_, 20.)))
+        {
+            double wtmp = arma::var(theta_stored.slice(t + 1).row(0));
+            wtmp *= 1./0.99 - 1.;
+            Wt.col(t + 1).fill(wtmp);
+        }
+
+        /*
+        Resample
+        - theta (p x N);
+        - a_sigma2, b_sigma2, a_tau2, b_tau2 (N x 2)
+        - sigma2, tau2 (N x 2)
+        */
+        if (trans_code == 1)
+        {
+            // Update F[t] for Koyama model.
+            arma::vec Fy(p, arma::fill::zeros);
+            unsigned int tmpi = std::min(t, p);
+            if (t > 0)
+            {
+                // Checked Fy - CORRECT
+                Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
+            }
             Ft = Fphi % Fy; // L(p) x 1
         }
-        /*
-        ------ Step 2.0 Resample ------
-        Resampling theta[t,i] using the predictive likelihood P(y[t+1] | theta[t,i]).
-        It doesn't have analytical form so we use P(y[t+1] | theta[t+1,i]_hat = gt(theta[t,i]))
-        */
-        // E(theta[t+1] | theta[t]), theta[t] is obtained from the previous time point via initialization or SMC
-        mt = arma::median(theta_stored.slice(t),1);
-        update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        hpsi = update_at(p,gain_code,trans_code,theta_stored.slice(t),Gt,ctanh,alpha,ypad.at(t),rho); // p x N, theta[t+1,]
-        if (trans_code == 1) {
-            // Koyama
-            hpsi = psi2hpsi(hpsi,gain_code,ctanh); // hpsi: p x N
-        }
+        // Checked OK.
 
-        w.zeros();
-        for (unsigned int i=0; i<N; i++) {
-            lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-            if (link_code == 1) {
-                lambda.at(i) = std::exp(std::min(lambda.at(i),UPBND));
+        arma::vec weight(N); // importance weight of each particle
+        arma::vec lambda(N);
+        for (unsigned int i = 0; i < N; i++)
+        {
+            arma::vec psi = theta_stored.slice(t + 1).col(i); // p x 1, theta[t]
+
+            if (link_code == 1)
+            {
+                // Exponential link and identity gain
+                double tmp = arma::as_scalar(Ft.t() * psi);
+                lambda.at(i) = std::min(mu0 + tmp, UPBND);
+                double tmp2 = std::exp(lambda.at(i));
+                lambda.at(i) = tmp2;
+            }
+            else if (trans_code == 1)
+            {
+                // Koyama
+                arma::vec hpsi = psi2hpsi(psi, gain_code, ctanh);
+                lambda.at(i) = mu0 + arma::as_scalar(Ft.t() * hpsi);
+            }
+            else
+            {
+                // Koyck or Solow with identity link and different gain functions
+                lambda.at(i) = mu0 + psi.at(1);
             }
 
-            w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);            
-        } // End for loop of i, index of the particles
+            weight.at(i) = loglike_obs(
+                ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false);
+        }
+        // Checked. OK
 
-        if (arma::accu(w)>EPS) { // normalize the particle weights
-            w /= arma::accu(w);
-            if (1./arma::dot(w,w) > min_eff) {
-                idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-                idx = Rcpp::as<arma::uvec>(idx_) - 1;
-                for (unsigned int b=0; b<=t; b++) {
-                    theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-                }
+        double wsum = arma::accu(weight);
+        bool resample = false;
+        if (wsum > EPS)
+        {
+            // normalize the particle weights
+            arma::vec wtmp = weight;
+            weight = wtmp / wsum;
+            Meff.at(t) = 1. / arma::dot(weight, weight);
+            if (Meff.at(t) > std::max(100., 0.1 * N_))
+            {
+                resample = true;
+            }
+            else
+            {
+                resample = false;
             }
         }
-
-        if (debug) {
-            Rcout << "Done step 2.0" << std::endl;
-        }
-        /*
-        ------ Step 2.0 Resample ------
-        */
-
-        /*
-        ------ Step 2.1 Propagate ------
-        Propagate theta[t,i] to theta[t+1,i] for i=0,1,...,N
-        using state evolution distribution P(theta[t+1,i]|theta[t,i]).
-        ------
-        >> Step 2-1 and 2-2 of Kitagawa and Sato - This is also the state equation
-        */
-        
-        if (t>B) {
-            Wsqrt = arma::sqrt(W);
-            omega = arma::randn(N) % Wsqrt;
-        } else {
-            omega = arma::randn(N);
-            omega *= arma::stddev(theta_stored.slice(t).row(0));
-            omega *= std::sqrt(1./0.99-1.);
-        }
-        
-
-        mt = arma::median(theta_stored.slice(t),1);
-        update_Gt(Gt,gain_code, trans_code, mt, ctanh, alpha, ypad.at(t), rho);
-        theta = update_at(p,gain_code,trans_code,theta_stored.slice(t),Gt,ctanh,alpha,ypad.at(t),rho);
-        theta.row(0) += omega.t();
-
-        theta_stored.slice(t+1) = theta;
-
-        if (debug) {
-            Rcout << "Done step 2.1" << std::endl;
-        }
-        /*
-        ------ Step 2.1 Propagate ------
-        */
-        
-        
-
-        /*
-        ------ Step 2.2 Importance weights ------
-        Calculate the importance weight of lambda[t-L:t,i] for i=0,1,...,N, where i is the index of particles
-        using likelihood P(y[t+1]|lambda[t+1,i]).
-        ------
-        */
-        if (link_code==1) {
-            // Exponential link and identity gain
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*theta.col(i));
-            }
-            lambda.elem(arma::find(lambda>UPBND)).fill(UPBND);
-            lambda = arma::exp(lambda);
-        } else if (trans_code==1){ // Koyama
-            hpsi = psi2hpsi(theta,gain_code,ctanh); // hpsi: p x N
-            for (unsigned int i=0; i<N; i++) {
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t()*hpsi.col(i));
-            }
-        } else {
-            // Koyck or Solow with identity link and different gain functions
-            lambda = mu0 + theta.row(1).t();
-        }
-
-        for (unsigned int i=0; i<N; i++) {
-            w.at(i) = loglike_obs(ypad.at(t+1),lambda.at(i),obs_code,delta_nb,false);
-        } // End for loop of i, index of the particles
-
-        if (debug) {
-            Rcout << "Done step 2.2" << std::endl;
-        }
-        /*
-        ------ Step 2.2 Importance weights ------
-        */
-
-        /*
-        ------ Step 3 Resampling with Replacement ------
-        */
-        if (arma::accu(w)>EPS) { // normalize the particle weights
-            w /= arma::accu(w);
-            Meff.at(t) = 1./arma::dot(w,w);
-            idx_ = Rcpp::sample(N,N,true,Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(w)));
-            idx = Rcpp::as<arma::uvec>(idx_) - 1;
-            for (unsigned int b=0; b<=(t+1); b++) {
-                theta_stored.slice(b) = theta_stored.slice(b).cols(idx);
-            }
-            resample_status.at(t) = 1;
-        } else {
-            resample_status.at(t) = 0;
+        else
+        {
+            resample = false;
             Meff.at(t) = 0.;
         }
 
-        if (debug) {
-            Rcout << "Done step 3.0" << std::endl;
-        }
-        /*
-        ------ Step 3 Resampling with Replacement ------
-        */
+        if (resample)
+        {
+            Rcpp::NumericVector w_ = Rcpp::wrap(weight);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
 
-        /*
-        ------ Step 4 Sufficient Statistics for Global/Static Parameters ------
-        ------ Step 5 Sample Global/Static Parameters ------
-        */
-        if (eta_select.at(0) == 1 && t>B) {
-            for (unsigned int i=0; i<N; i++) {
-                psi.col(i) = arma::vectorise(theta_stored.tube(0,i));
-            }
-            res = arma::vectorise(arma::sum(arma::pow(arma::diff(psi.head_rows(t+1),1,0),2),0));
-            res_stored.at(t) = arma::median(res);
-            // res += arma::vectorise(arma::pow(psi.row(t+1) - psi.row(t),2)); // N x 1; psi: (n+1) x N
-            switch (eta_prior_type.at(0)) {
-                case 0: // Gamma, Wtilde = log(W)
-                {
-                    for (unsigned int i=0; i<N; i++) {
-                        a3 = 0.5*res.at(i);
-                        coef_W wcoef[1] = {{a1,a2,a3}};
-                        aw.at(i) = optimize_postW_gamma(wcoef[0]);
-                        bw.at(i) = postW_deriv2(aw.at(i),a2,a3);
-                        // W_stored.at(i) = std::exp(std::min(R::rnorm(aw.at(i),std::sqrt(-0.1/bw.at(i))),UPBND));
-                        W.at(i) = std::exp(std::min(aw.at(i),UPBND));
-                    }
-                }
-                break;
-                case 1: // Half-Cauchy
-                {
-                    ::Rf_error("Half-Cauchy prior for W not implemented yet.");
-                }
-                break;
-                case 2: // Inverse-Gamma
-                {
-                    bw = eta_prior_val.at(1,0) + 0.5*res;
-                    for (unsigned int i=0; i<N; i++) {
-                        W.at(i) = 1./R::rgamma(aw.at(i),1./bw.at(i));
-                    }
-                }
-                break;
-                default:
-                {
-                    ::Rf_error("This prior for W is not supported yet.");
-                }
-            }
+            arma::mat tttmp = theta_stored.slice(t + 1);
+            theta_stored.slice(t + 1) = tttmp.cols(idx);
 
-            W_stored.col(t) = W;
+            arma::vec atmp = aw.col(t + 1);
+            aw.col(t + 1) = atmp.elem(idx);
 
-            if (debug) {
-            Rcout << "Done step 4/5" << std::endl;
+            arma::vec btmp = bw.col(t + 1);
+            bw.col(t + 1) = btmp.elem(idx);
+
+            arma::vec stmp = Wt.col(t + 1);
+            Wt.col(t + 1) = stmp.elem(idx);
         }
-        }
-        
-        if (verbose) {
-			Rcout << "\rFiltering Progress: " << t+1 << "/" << n;
-		}
-        
+        weight.ones();
+        resample_status.at(t) = resample;
     }
 
-    if (verbose) {
-		Rcout << std::endl;
-	}
-
-
     Rcpp::List output;
-    arma::mat R = arma::quantile(psi,Rcpp::as<arma::vec>(qProb),1);
-    output["psi"] = Rcpp::wrap(R); // (n+1) x 3
-    output["W"] = Rcpp::wrap(arma::pow(W_stored.col(n-1),2.));
-    output["Wstored"] = Rcpp::wrap(W_stored);
-    output["aw"] = Rcpp::wrap(aw);
-    output["bw"] = Rcpp::wrap(bw); 
-    output["res"] = Rcpp::wrap(res_stored);
+    arma::mat psi = theta_stored.row(0); // N x (nt+1)
+    arma::mat RR = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 0);
+    output["psi"] = Rcpp::wrap(RR.t());         // (n+1) x 3
+    output["theta"] = Rcpp::wrap(theta_stored); // p, N, nt + 1
+
+    output["aw"] = Rcpp::wrap(aw.col(nt));
+    output["bw"] = Rcpp::wrap(bw.col(nt));
+    output["Wt"] = Rcpp::wrap(Wt);
 
     // if (debug) {
-        output["Meff"] = Rcpp::wrap(Meff);
-        output["resample_status"] = Rcpp::wrap(resample_status);
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
     // }
-    
 
     return output;
 }
 
+
+
+// Y[t] ~ Normal(Fmat/theta[t],sigma2)
+// theta[t] ~ Normal(Gmat*theta[t-1],tau2)
+Rcpp::List pl_gaussian_posterior(
+    const arma::mat &Y,           // nt x n, the observed response
+    const arma::uvec &eta_select, // 2 x 1, indicator for unknown (=1) or known (=0) (sigma2,tau2)
+    const unsigned int p = 2,                                              // dimension of the state space
+    const unsigned int N = 5000,                                           // number of particles
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &eta_prior_val = R_NilValue, // 2 x 2, priors for each element of eta: first column for sigma2, second column for tau2
+    const Rcpp::Nullable<Rcpp::NumericVector> &eta_true = R_NilValue,      // 2 x 1, if true/initial values should be provided here
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &Fmat = R_NilValue,          // p x n
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &Gmat = R_NilValue,          // p x p
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
+    const bool verbose = true,
+    const bool debug = false)
+{
+
+    const unsigned int nt = Y.n_rows; // number of observations
+    const unsigned int n = Y.n_cols; // dimension of Y[t]
+
+    const double n_ = static_cast<double>(n);
+    const double min_eff = 0.8 * static_cast<double>(N);
+
+    arma::mat F; // p x n
+    if (!Fmat.isNull()) {
+        F = Rcpp::as<arma::mat>(Fmat);
+    } else {
+        // p <= n
+        F.set_size(p,n);
+        F.diag().ones();
+    }
+
+    arma::mat G; // p x p
+    if (!Gmat.isNull()){
+        G = Rcpp::as<arma::mat>(Gmat);
+    } else {
+        G.set_size(p,p);
+        G.eye();
+    }
+    
+    arma::vec m0; // p x 1
+    if (!m0_prior.isNull()) {
+        m0 = Rcpp::as<arma::vec>(m0_prior);
+    } else {
+        m0.set_size(p);
+        m0.zeros();
+    }
+
+    arma::mat C0; // p x p
+    if (!C0_prior.isNull()) {
+        C0 = Rcpp::as<arma::mat>(C0_prior);
+    } else {
+        C0.set_size(p, p);
+        C0.eye();
+    }
+    arma::mat C0_chol = arma::chol(C0);
+
+    double sigma2_true, tau2_true;
+    if (!eta_true.isNull()) {
+        arma::vec tmp = Rcpp::as<arma::vec>(eta_true);
+        if (eta_select.at(0) == 0) { // fix sigma2
+            sigma2_true = tmp.at(0);
+        }
+        if (eta_select.at(1) == 0) { // fix tau2
+            tau2_true = tmp.at(1);
+        }
+    }
+
+    double a_sigma0 = 0.01;
+    double b_sigma0 = 0.01;
+    double a_tau0 = 0.01;
+    double b_tau0 = 0.01;
+    if (!eta_prior_val.isNull()) {
+        arma::mat tmp = Rcpp::as<arma::mat>(eta_prior_val);
+        a_sigma0 = tmp.at(0,0);
+        b_sigma0 = tmp.at(1,0);
+        a_tau0 = tmp.at(0,1);
+        b_tau0 = tmp.at(1,1);
+    }
+
+    // first column is [t-1], second column is [t]
+    arma::mat a_sigma(N,nt+1); 
+    arma::mat b_sigma(N,nt+1);
+    arma::mat sigma2(N,nt+1);
+    // sigma2.col(0).fill(R::runif(0.,1.));
+    // sigma2.col(0) = 1. / arma::randg(N, arma::distr_param(a_sigma0, 1. / b_sigma0));
+    for (unsigned int i=0; i<N; i++) {
+        a_sigma.at(i,0) = a_sigma0;
+        b_sigma.at(i,0) = b_sigma0;
+        sigma2.at(i,0) = R::runif(0.,1.);
+    }
+    // Rcout << sigma2.col(0).t() << std::endl;
+
+    // Rcout << "a_sigma0 = " << a_sigma0 << ", b_sigma0 = " << b_sigma0 
+    // sigma2.col(1) = 1. / arma::randg(N, arma::distr_param(a_sigma.at(0, 1), 1. / b_sigma.at(0, 1)));
+
+    arma::mat a_tau(N,nt+1);
+    arma::mat b_tau(N,nt+1);
+    arma::mat tau2(N,nt+1);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_tau.at(i, 0) = a_tau0;
+        a_tau.at(i, 0) = b_tau0;
+        tau2.at(i, 0) = R::runif(0., 1.);
+    }
+    // tau2.col(0).fill(R::runif(0., 1.));
+    // tau2.col(0) = 1. / arma::randg(N, arma::distr_param(a_tau0, 1. / b_tau0));
+    // tau2.col(1) = 1. / arma::randg(N, arma::distr_param(a_tau.at(0, 1), 1. / b_tau.at(0, 1)));
+
+    arma::mat theta(p, N);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        theta.col(i) = m0 + C0_chol.t() * arma::randn(p);
+    }
+    arma::cube theta_stored(p, N, nt+1);
+    theta_stored.slice(0) = theta;
+
+    const arma::mat FFt = F*F.t();
+    const arma::mat Ip(p,p,arma::fill::eye);
+    const arma::mat FtF = F.t()*F;
+    const arma::mat In(n,n,arma::fill::eye);
+    const double mvn_cnst = -0.5 * static_cast<double>(n) * std::log(2*arma::datum::pi);
+    arma::vec Meff(nt, arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(nt, arma::fill::zeros);
+
+    for (unsigned int t = 0; t < nt; t++)
+    {
+        R_CheckUserInterrupt();
+        arma::vec Yt = Y.row(t).t();
+
+        /*
+        Resample
+        - theta (p x N);
+        - a_sigma2, b_sigma2, a_tau2, b_tau2 (N x 2)
+        - sigma2, tau2 (N x 2)
+        */
+        arma::vec w(N); // importance weight of each particle
+        for (unsigned int i=0; i<N; i++) {
+            /*
+            Sigy = t(Sigy_chol) * Sigy_chol
+            Sigy_inv_chol = inv(Sigy_chol)
+            Sigy_inv_chol * t(Sigy_inv_chol) = Sigy_inv
+            */
+            arma::mat Sigy = FtF * sigma2.at(i, t) * tau2.at(i, t) + In * sigma2.at(i, t);
+            arma::mat Sigy_chol = arma::chol(arma::symmatu(Sigy));
+            arma::mat Sigy_inv_chol = arma::inv(arma::trimatu(Sigy_chol));
+            arma::mat Sigy_inv = arma::symmatu(Sigy_inv_chol * Sigy_inv_chol.t());
+            arma::vec muy = F.t() * G * theta.col(i);
+
+            double logdet_val_Sigy_inv;
+            double logdet_sign_Sigy_inv;
+            bool ok = arma::log_det(logdet_val_Sigy_inv, logdet_sign_Sigy_inv, Sigy_inv);
+            arma::vec err3 = Yt - muy;
+            double sse = arma::as_scalar(err3.t() * Sigy_inv * err3);
+
+            double loga = mvn_cnst + 0.5 * logdet_val_Sigy_inv - 0.5 * sse;
+            double alphat = std::exp(std::min(loga, 700.));
+            w.at(i) = alphat;
+        }
+
+        if (arma::accu(w) > EPS)
+        { // normalize the particle weights
+            w /= arma::accu(w);
+            Meff.at(t) = 1. / arma::dot(w, w);
+            if (Meff.at(t) > 0.1 * static_cast<double>(N))
+            {
+            resample_status.at(t) = 1;
+            }
+            else
+            {
+            resample_status.at(t) = 0;
+            }
+        }
+        else
+        {
+            resample_status.at(t) = 0;
+            Meff.at(t) = 0.;
+        }
+
+        if (resample_status.at(t) == 1)
+        {
+            Rcpp::NumericVector w_ = Rcpp::wrap(w);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+
+            theta_stored.slice(t) = theta.cols(idx);
+
+            arma::vec atmp = a_sigma.col(t);
+            a_sigma.col(t) = atmp.elem(idx);
+
+            arma::vec btmp = b_sigma.col(t);
+            b_sigma.col(t) = btmp.elem(idx);
+
+            arma::vec stmp = sigma2.col(t);
+            sigma2.col(t) = stmp.elem(idx);
+
+            arma::vec atmp2 = a_tau.col(t);
+            a_tau.col(t) = atmp2.elem(idx);
+
+            arma::vec btmp2 = b_tau.col(t);
+            b_tau.col(t) = btmp2.elem(idx);
+
+            arma::vec ttmp = tau2.col(t);
+            tau2.col(t) = ttmp.elem(idx);
+        }
+        else
+        {
+            theta_stored.slice(t) = theta;
+        }
+
+        /*
+        Propagate
+        */
+        w.ones(); // Equal weight to begin with because of resampling in the last iter.
+
+        for (unsigned int i=0; i<N; i++) {
+            arma::vec theta_old = theta_stored.slice(t).col(i);
+
+            arma::mat Sig_inv = FFt/sigma2.at(i,t) + Ip/(sigma2.at(i,t)*tau2.at(i,t));
+            arma::mat Sig_inv_chol = arma::chol(arma::symmatu(Sig_inv)); // Sig_inv = t(Sig_inv_chol)*Sig_inv_chol
+
+            arma::mat Sig_chol = arma::inv(arma::trimatu(Sig_inv_chol)); // Sigma = Sig_chol * t(Sig_chol)
+            arma::mat Sigma = Sig_chol * Sig_chol.t();
+
+            arma::vec tmp1 = F * Yt / sigma2.at(i,t);
+            arma::vec tmp2 = G * theta_old / (sigma2.at(i,t)*tau2.at(i,t));
+            arma::vec mu = Sigma * (tmp1 + tmp2);
+
+            arma::vec theta_new = mu + Sig_chol * arma::randn(p);
+            theta.col(i) = theta_new;
+
+            arma::vec err1 = Yt - F.t()*theta_new;
+            double sse1 = arma::as_scalar(err1.t()*err1);
+
+            arma::vec err2 = theta_new - G*theta_old;
+            double sse2 = arma::as_scalar(err2.t()*err2);
+
+            if (eta_select.at(0)==1) {
+                // infer sigma2
+                a_sigma.at(i, t+1) = a_sigma.at(i, t) + 0.5*static_cast<double>(n) + 0.5*static_cast<double>(p);
+                b_sigma.at(i, t+1) = b_sigma.at(i, t) + 0.5*sse1 + 0.5*sse2/tau2.at(i,t);
+                sigma2.at(i, t+1) = 1. / R::rgamma(a_sigma.at(i, t+1), 1./b_sigma.at(i, t+1));
+                // R::rgamma(shape, scale)
+            } else {
+                // fix sigma2
+                sigma2.at(i,t+1) = sigma2_true;
+            }
+
+            if (eta_select.at(1)==1) {
+                // infer tau2
+                a_tau.at(i, t+1) = a_tau.at(i, t) + 0.5*static_cast<double>(p);
+                b_tau.at(i, t+1) = b_tau.at(i, t) + 0.5*sse2/sigma2.at(i,t+1);
+                tau2.at(i, t+1) = 1. / R::rgamma(a_tau.at(i, t+1), 1./b_tau.at(i, t+1));
+                // R::rgamma(shape, scale)
+            } else {
+                // fix tau2
+                tau2.at(i,t+1) = tau2_true;
+            }
+        }
+
+
+        
+
+        if (verbose)
+        {
+            Rcout << "\rFiltering Progress: " << t + 1 << "/" << nt;
+        }
+    }
+
+    if (verbose)
+    {
+        Rcout << std::endl;
+    }
+
+    Rcpp::List output;
+    // arma::mat R = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 1);
+    output["theta"] = Rcpp::wrap(theta_stored); // (n+1) x 3
+    output["a_sigma"] = Rcpp::wrap(a_sigma.col(nt));
+    output["b_sigma"] = Rcpp::wrap(b_sigma.col(nt));
+    output["sigma2"] = Rcpp::wrap(sigma2.col(nt));
+    output["a_tau"] = Rcpp::wrap(a_tau.col(nt));
+    output["b_tau"] = Rcpp::wrap(b_tau.col(nt));
+    output["tau2"] = Rcpp::wrap(tau2.col(nt));
+
+    // if (debug) {
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
+    // }
+
+    return output;
+}
+
+
+
+Rcpp::List pl_gaussian_evolution(
+    const arma::mat &Y,                                                    // nt x n, the observed response
+    const arma::uvec &eta_select,                                          // 2 x 1, indicator for unknown (=1) or known (=0) (sigma2,tau2)
+    const unsigned int p = 2,                                              // dimension of the state space
+    const unsigned int N = 5000,                                           // number of particles
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &eta_prior_val = R_NilValue, // 2 x 2, priors for each element of eta: first column for sigma2, second column for tau2
+    const Rcpp::Nullable<Rcpp::NumericVector> &eta_true = R_NilValue,      // 2 x 1, if true/initial values should be provided here
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &Fmat = R_NilValue,          // p x n
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &Gmat = R_NilValue,          // p x p
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
+    const bool verbose = true,
+    const bool debug = false)
+{
+
+    const unsigned int nt = Y.n_rows; // number of observations
+    const unsigned int n = Y.n_cols;  // dimension of Y[t]
+
+    const double n_ = static_cast<double>(n);
+    const double min_eff = 0.8 * static_cast<double>(N);
+
+    arma::mat F; // p x n
+    if (!Fmat.isNull())
+    {
+        F = Rcpp::as<arma::mat>(Fmat);
+    }
+    else
+    {
+        // p <= n
+        F.set_size(p, n);
+        F.diag().ones();
+    }
+
+    arma::mat G; // p x p
+    if (!Gmat.isNull())
+    {
+        G = Rcpp::as<arma::mat>(Gmat);
+    }
+    else
+    {
+        G.set_size(p, p);
+        G.eye();
+    }
+
+    arma::vec m0; // p x 1
+    if (!m0_prior.isNull())
+    {
+        m0 = Rcpp::as<arma::vec>(m0_prior);
+    }
+    else
+    {
+        m0.set_size(p);
+        m0.zeros();
+    }
+
+    arma::mat C0; // p x p
+    if (!C0_prior.isNull())
+    {
+        C0 = Rcpp::as<arma::mat>(C0_prior);
+    }
+    else
+    {
+        C0.set_size(p, p);
+        C0.eye();
+    }
+    arma::mat C0_chol = arma::chol(C0);
+
+    double sigma2_true, tau2_true;
+    if (!eta_true.isNull())
+    {
+        arma::vec tmp = Rcpp::as<arma::vec>(eta_true);
+        if (eta_select.at(0) == 0)
+        { // fix sigma2
+            sigma2_true = tmp.at(0);
+        }
+        if (eta_select.at(1) == 0)
+        { // fix tau2
+            tau2_true = tmp.at(1);
+        }
+    }
+
+    double a_sigma0 = 0.01;
+    double b_sigma0 = 0.01;
+    double a_tau0 = 0.01;
+    double b_tau0 = 0.01;
+    if (!eta_prior_val.isNull())
+    {
+        arma::mat tmp = Rcpp::as<arma::mat>(eta_prior_val);
+        a_sigma0 = tmp.at(0, 0);
+        b_sigma0 = tmp.at(1, 0);
+        a_tau0 = tmp.at(0, 1);
+        b_tau0 = tmp.at(1, 1);
+    }
+
+    // first column is [t-1], second column is [t]
+    arma::mat a_sigma(N, nt + 1);
+    arma::mat b_sigma(N, nt + 1);
+    arma::mat sigma2(N, nt + 1);
+    // sigma2.col(0).fill(R::runif(0.,1.));
+    // sigma2.col(0) = 1. / arma::randg(N, arma::distr_param(a_sigma0, 1. / b_sigma0));
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_sigma.at(i, 0) = a_sigma0;
+        b_sigma.at(i, 0) = b_sigma0;
+        sigma2.at(i, 0) = R::runif(0., 1.);
+    }
+    // Rcout << sigma2.col(0).t() << std::endl;
+
+    // Rcout << "a_sigma0 = " << a_sigma0 << ", b_sigma0 = " << b_sigma0
+    // sigma2.col(1) = 1. / arma::randg(N, arma::distr_param(a_sigma.at(0, 1), 1. / b_sigma.at(0, 1)));
+
+    arma::mat a_tau(N, nt + 1);
+    arma::mat b_tau(N, nt + 1);
+    arma::mat tau2(N, nt + 1);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_tau.at(i, 0) = a_tau0;
+        a_tau.at(i, 0) = b_tau0;
+        tau2.at(i, 0) = R::runif(0., 1.);
+    }
+    // tau2.col(0).fill(R::runif(0., 1.));
+    // tau2.col(0) = 1. / arma::randg(N, arma::distr_param(a_tau0, 1. / b_tau0));
+    // tau2.col(1) = 1. / arma::randg(N, arma::distr_param(a_tau.at(0, 1), 1. / b_tau.at(0, 1)));
+
+    arma::mat theta(p, N);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        theta.col(i) = m0 + C0_chol.t() * arma::randn(p);
+    }
+    arma::cube theta_stored(p, N, nt + 1);
+    theta_stored.slice(0) = theta;
+
+    const arma::mat FFt = F * F.t();
+    const arma::mat Ip(p, p, arma::fill::eye);
+    const arma::mat FtF = F.t() * F;
+    const arma::mat In(n, n, arma::fill::eye);
+    const double mvn_cnst = -0.5 * static_cast<double>(n) * std::log(2 * arma::datum::pi);
+    arma::vec Meff(nt, arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(nt, arma::fill::zeros);
+
+    for (unsigned int t = 0; t < nt; t++)
+    {
+        R_CheckUserInterrupt();
+        arma::vec Yt = Y.row(t).t();
+        arma::vec Yt_old(n,arma::fill::zeros);
+        if (t>0) {
+            Yt_old = Y.row(t-1).t();
+        }
+
+        /*
+        Propagate
+        */
+        for (unsigned int i = 0; i < N; i++)
+        {
+            arma::vec theta_old = theta_stored.slice(t).col(i);
+            arma::mat Sigma = Ip * (sigma2.at(i,t)*tau2.at(i,t));
+            arma::mat Sig_chol = Ip * std::sqrt(sigma2.at(i,t)*tau2.at(i,t));
+
+            arma::vec mu = G * theta_old;
+            arma::vec theta_new = mu + Sig_chol * arma::randn(p);
+
+            theta_stored.slice(t+1).col(i) = theta_new;
+
+            arma::vec err1 = Yt_old - F.t() * theta_old;
+            double sse1 = arma::as_scalar(err1.t() * err1);
+
+            arma::vec err2 = theta_new - G * theta_old;
+            double sse2 = arma::as_scalar(err2.t() * err2);
+
+            if (eta_select.at(0) == 1)
+            {
+                // infer sigma2
+                a_sigma.at(i, t + 1) = a_sigma.at(i, t) + 0.5 * static_cast<double>(n) + 0.5 * static_cast<double>(p);
+                b_sigma.at(i, t + 1) = b_sigma.at(i, t) + 0.5 * sse1 + 0.5 * sse2 / tau2.at(i, t);
+                sigma2.at(i, t + 1) = 1. / R::rgamma(a_sigma.at(i, t + 1), 1. / b_sigma.at(i, t + 1));
+                // R::rgamma(shape, scale)
+            }
+            else
+            {
+                // fix sigma2
+                sigma2.at(i, t + 1) = sigma2_true;
+            }
+
+            if (eta_select.at(1) == 1)
+            {
+                // infer tau2
+                a_tau.at(i, t + 1) = a_tau.at(i, t) + 0.5 * static_cast<double>(p);
+                b_tau.at(i, t + 1) = b_tau.at(i, t) + 0.5 * sse2 / sigma2.at(i, t + 1);
+                tau2.at(i, t + 1) = 1. / R::rgamma(a_tau.at(i, t + 1), 1. / b_tau.at(i, t + 1));
+                // R::rgamma(shape, scale)
+            }
+            else
+            {
+                // fix tau2
+                tau2.at(i, t + 1) = tau2_true;
+            }
+        }
+
+        /*
+        Resample
+        - theta (p x N);
+        - a_sigma2, b_sigma2, a_tau2, b_tau2 (N x 2)
+        - sigma2, tau2 (N x 2)
+        */
+        arma::vec w(N); // importance weight of each particle
+        for (unsigned int i = 0; i < N; i++)
+        {
+            /*
+            Sigy = t(Sigy_chol) * Sigy_chol
+            Sigy_inv_chol = inv(Sigy_chol)
+            Sigy_inv_chol * t(Sigy_inv_chol) = Sigy_inv
+            */
+            arma::mat Sigy = In * sigma2.at(i, t+1);
+            arma::mat Sigy_inv = In * (1./sigma2.at(i,t+1));
+            arma::vec muy = F.t() * theta_stored.slice(t+1).col(i);
+
+            double logdet_val_Sigy_inv;
+            double logdet_sign_Sigy_inv;
+            bool ok = arma::log_det(logdet_val_Sigy_inv, logdet_sign_Sigy_inv, Sigy_inv);
+            arma::vec err3 = Yt - muy;
+            double sse = arma::as_scalar(err3.t() * Sigy_inv * err3);
+
+            double loga = mvn_cnst + 0.5 * logdet_val_Sigy_inv - 0.5 * sse;
+            double alphat = std::exp(std::min(loga, 700.));
+            w.at(i) = alphat;
+        }
+
+        if (arma::accu(w) > EPS)
+        { // normalize the particle weights
+            w /= arma::accu(w);
+            Meff.at(t) = 1. / arma::dot(w, w);
+            if (Meff.at(t) > 0.1 * static_cast<double>(N))
+            {
+                resample_status.at(t) = 1;
+            }
+            else
+            {
+                resample_status.at(t) = 0;
+            }
+        }
+        else
+        {
+            resample_status.at(t) = 0;
+            Meff.at(t) = 0.;
+        }
+
+        if (resample_status.at(t) == 1)
+        {
+            Rcpp::NumericVector w_ = Rcpp::wrap(w);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+
+            arma::mat tttmp = theta_stored.slice(t+1);
+            theta_stored.slice(t+1) = tttmp.cols(idx);
+
+            arma::vec atmp = a_sigma.col(t+1);
+            a_sigma.col(t+1) = atmp.elem(idx);
+
+            arma::vec btmp = b_sigma.col(t+1);
+            b_sigma.col(t+1) = btmp.elem(idx);
+
+            arma::vec stmp = sigma2.col(t+1);
+            sigma2.col(t+1) = stmp.elem(idx);
+
+            arma::vec atmp2 = a_tau.col(t+1);
+            a_tau.col(t+1) = atmp2.elem(idx);
+
+            arma::vec btmp2 = b_tau.col(t+1);
+            b_tau.col(t+1) = btmp2.elem(idx);
+
+            arma::vec ttmp = tau2.col(t+1);
+            tau2.col(t+1) = ttmp.elem(idx);
+        }
+        w.ones();
+
+
+        if (verbose)
+        {
+            Rcout << "\rFiltering Progress: " << t + 1 << "/" << nt;
+        }
+    }
+
+    if (verbose)
+    {
+        Rcout << std::endl;
+    }
+
+    Rcpp::List output;
+    // arma::mat R = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 1);
+    output["theta"] = Rcpp::wrap(theta_stored); // (n+1) x 3
+    output["a_sigma"] = Rcpp::wrap(a_sigma.col(nt));
+    output["b_sigma"] = Rcpp::wrap(b_sigma.col(nt));
+    output["sigma2"] = Rcpp::wrap(sigma2.col(nt));
+    output["a_tau"] = Rcpp::wrap(a_tau.col(nt));
+    output["b_tau"] = Rcpp::wrap(b_tau.col(nt));
+    output["tau2"] = Rcpp::wrap(tau2.col(nt));
+
+    // if (debug) {
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
+    // }
+
+    return output;
+}
+
+/*
+Use the conditional posterior distribution as proposal.
+*/
+Rcpp::List pl_gaussian_1d_posterior(
+    const arma::vec &Y,                                                    // nt x 1, the observed response
+    const arma::uvec &eta_select,                                          // 2 x 1, indicator for unknown (=1) or known (=0) (sigma2,tau2)
+    const unsigned int N = 5000,                                           // number of particles
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &eta_prior_val = R_NilValue, // 2 x 2, priors for each element of eta: first column for sigma2, second column for tau2
+    const Rcpp::Nullable<Rcpp::NumericVector> &eta_true = R_NilValue,      // 2 x 1, if true/initial values should be provided here
+    const double m0 = 0.,
+    const double C0 = 10.,
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
+    const bool verbose = true,
+    const bool debug = false)
+{
+
+    const unsigned int nt = Y.n_elem; // number of observations
+    const unsigned int n = 1;
+    const unsigned int p = 1;
+    const double min_eff = 0.8 * static_cast<double>(N);
+
+    double C0_sqrt = std::sqrt(C0);
+
+    double sigma2_true, tau2_true;
+    if (!eta_true.isNull())
+    {
+        arma::vec tmp = Rcpp::as<arma::vec>(eta_true);
+        if (eta_select.at(0) == 0)
+        { // fix sigma2
+            sigma2_true = tmp.at(0);
+        }
+        if (eta_select.at(1) == 0)
+        { // fix tau2
+            tau2_true = tmp.at(1);
+        }
+    }
+
+    double a_sigma0 = 0.01;
+    double b_sigma0 = 0.01;
+    double a_tau0 = 0.01;
+    double b_tau0 = 0.01;
+    if (!eta_prior_val.isNull())
+    {
+        arma::mat tmp = Rcpp::as<arma::mat>(eta_prior_val);
+        a_sigma0 = tmp.at(0, 0);
+        b_sigma0 = tmp.at(1, 0);
+        a_tau0 = tmp.at(0, 1);
+        b_tau0 = tmp.at(1, 1);
+    }
+
+    // first column is [t-1], second column is [t]
+    arma::mat a_sigma(N, nt + 1);
+    arma::mat b_sigma(N, nt + 1);
+    arma::mat sigma2(N, nt + 1);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_sigma.at(i, 0) = a_sigma0;
+        b_sigma.at(i, 0) = b_sigma0;
+        sigma2.at(i, 0) = R::runif(0., 1.);
+    }
+
+
+    arma::mat a_tau(N, nt + 1);
+    arma::mat b_tau(N, nt + 1);
+    arma::mat tau2(N, nt + 1);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_tau.at(i, 0) = a_tau0;
+        a_tau.at(i, 0) = b_tau0;
+        tau2.at(i, 0) = R::runif(0., 1.);
+    }
+
+
+    arma::vec theta(N);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        theta.at(i) = m0 + C0_sqrt * R::rnorm(0,1.);
+    }
+    arma::mat theta_stored(N, nt + 1);
+    theta_stored.col(0) = theta;
+
+    
+    const double mvn_cnst = -0.5 * std::log(2 * arma::datum::pi);
+    arma::vec Meff(nt, arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(nt, arma::fill::zeros);
+
+    for (unsigned int t = 0; t < nt; t++)
+    {
+        // t: for y means current [t], for others means past [t-1]
+
+        R_CheckUserInterrupt();
+        double Yt = Y.at(t);
+
+        arma::vec w(N,arma::fill::zeros); // importance weight of each particle
+
+        for (unsigned int i=0; i<N; i++) {
+            double Sigy = tau2.at(i,t) * sigma2.at(i,t) + sigma2.at(i,t);
+            double muy = theta.at(i);
+
+            double Sigy_inv = 1./Sigy;
+            double err3 = Yt - muy;
+            double sse = std::pow(err3,2.) * Sigy_inv;
+            double logdet_val_Sigy_inv = std::log(Sigy_inv);
+            double loga = mvn_cnst + 0.5 * logdet_val_Sigy_inv - 0.5 * sse;
+
+            double alphat = std::exp(std::min(loga, 700.));
+            w.at(i) = alphat;
+        }
+
+        /* Resample */
+        if (arma::accu(w) > EPS)
+        { // normalize the particle weights
+            w /= arma::accu(w);
+            Meff.at(t) = 1. / arma::dot(w, w);
+            if (Meff.at(t) > 0.1 * static_cast<double>(N))
+            {
+                resample_status.at(t) = 1;
+            }
+            else
+            {
+                resample_status.at(t) = 0;
+            }
+        }
+        else
+        {
+            resample_status.at(t) = 0;
+            Meff.at(t) = 0.;
+        }
+
+        if (resample_status.at(t) == 1)
+        {
+            Rcpp::NumericVector w_ = Rcpp::wrap(w);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+
+            theta_stored.col(t) = theta.elem(idx);
+
+            arma::vec atmp = a_sigma.col(t);
+            a_sigma.col(t) = atmp.elem(idx);
+
+            arma::vec btmp = b_sigma.col(t);
+            b_sigma.col(t) = btmp.elem(idx);
+
+            arma::vec stmp = sigma2.col(t);
+            sigma2.col(t) = stmp.elem(idx);
+
+            arma::vec atmp2 = a_tau.col(t);
+            a_tau.col(t) = atmp2.elem(idx);
+
+            arma::vec btmp2 = b_tau.col(t);
+            b_tau.col(t) = btmp2.elem(idx);
+
+            arma::vec ttmp = tau2.col(t);
+            tau2.col(t) = ttmp.elem(idx);
+        }
+        else
+        {
+            theta_stored.col(t) = theta;
+        }
+        w.ones(); // Equal weight to begin with because of resampling in the last iter.
+
+        for (unsigned int i = 0; i < N; i++)
+        {
+            
+            /* Propagate */
+            // theta: N, theta_stored: N x (nt+1)
+            double theta_old = theta_stored.at(i,t);
+            double Sig_inv = 1./sigma2.at(i,t) + 1./ (sigma2.at(i,t)*tau2.at(i,t));
+            double Sigma = 1./Sig_inv;
+
+            double tmp1 = Yt / sigma2.at(i, t);
+            double tmp2 = theta_old / (sigma2.at(i, t) * tau2.at(i, t));
+            double mu = Sigma * (tmp1 + tmp2);
+
+            double theta_new = mu + std::sqrt(Sigma)*R::rnorm(0.,1.);
+            theta.at(i) = theta_new;
+
+            double err1 = std::pow(Yt - theta_new,2.);
+            double err2 = std::pow(theta_new - theta_old,2.);
+
+            if (eta_select.at(0) == 1)
+            {
+                // sample sigma2
+                a_sigma.at(i, t + 1) = a_sigma.at(i, t) + 1.;
+                b_sigma.at(i, t + 1) = b_sigma.at(i, t) + 0.5*err2/tau2.at(i,t) + 0.5*err1;
+
+                sigma2.at(i, t + 1) = 1. / R::rgamma(a_sigma.at(i, t + 1), 1. / b_sigma.at(i, t + 1));
+                // R::rgamma(shape, scale)
+            }
+            else
+            {
+                // fix sigma2
+                sigma2.at(i, t + 1) = sigma2_true;
+            }
+
+            if (eta_select.at(1) == 1)
+            {
+                // infer tau2
+                a_tau.at(i, t + 1) = a_tau.at(i, t) + 0.5;
+                b_tau.at(i, t + 1) = b_tau.at(i, t) + 0.5 * err2/sigma2.at(i,t+1);
+                tau2.at(i, t + 1) = 1. / R::rgamma(a_tau.at(i, t + 1), 1. / b_tau.at(i, t + 1));
+                // R::rgamma(shape, scale)
+            }
+            else
+            {
+                // fix tau2
+                tau2.at(i, t + 1) = tau2_true;
+            }
+        }
+
+        
+
+        if (verbose)
+        {
+            Rcout << "\rFiltering Progress: " << t + 1 << "/" << nt;
+        }
+    }
+
+    if (verbose)
+    {
+        Rcout << std::endl;
+    }
+
+    Rcpp::List output;
+    // arma::mat R = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 1);
+    output["theta"] = Rcpp::wrap(theta_stored); // (n+1) x 3
+    output["a_sigma"] = Rcpp::wrap(a_sigma.col(nt));
+    output["b_sigma"] = Rcpp::wrap(b_sigma.col(nt));
+    output["sigma2"] = Rcpp::wrap(sigma2.col(nt));
+    output["a_tau"] = Rcpp::wrap(a_tau.col(nt));
+    output["b_tau"] = Rcpp::wrap(b_tau.col(nt));
+    output["tau2"] = Rcpp::wrap(tau2.col(nt));
+
+    // if (debug) {
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
+    // }
+
+    return output;
+}
+
+/*
+Use the evolution distribution as proposal distribution
+*/
+Rcpp::List pl_gaussian_1d_evolution(
+    const arma::vec &Y,                                                    // nt x 1, the observed response
+    const arma::uvec &eta_select,                                          // 2 x 1, indicator for unknown (=1) or known (=0) (sigma2,tau2)
+    const unsigned int N = 5000,                                           // number of particles
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &eta_prior_val = R_NilValue, // 2 x 2, priors for each element of eta: first column for sigma2, second column for tau2
+    const Rcpp::Nullable<Rcpp::NumericVector> &eta_true = R_NilValue,      // 2 x 1, if true/initial values should be provided here
+    const double m0 = 0.,
+    const double C0 = 10.,
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
+    const bool verbose = true,
+    const bool debug = false)
+{
+
+    const unsigned int nt = Y.n_elem; // number of observations
+    const unsigned int n = 1;
+    const unsigned int p = 1;
+    const double min_eff = 0.8 * static_cast<double>(N);
+
+    double C0_sqrt = std::sqrt(C0);
+
+    double sigma2_true, tau2_true;
+    if (!eta_true.isNull())
+    {
+        arma::vec tmp = Rcpp::as<arma::vec>(eta_true);
+        if (eta_select.at(0) == 0)
+        { // fix sigma2
+            sigma2_true = tmp.at(0);
+        }
+        if (eta_select.at(1) == 0)
+        { // fix tau2
+            tau2_true = tmp.at(1);
+        }
+    }
+
+    double a_sigma0 = 0.01;
+    double b_sigma0 = 0.01;
+    double a_tau0 = 0.01;
+    double b_tau0 = 0.01;
+    if (!eta_prior_val.isNull())
+    {
+        arma::mat tmp = Rcpp::as<arma::mat>(eta_prior_val);
+        a_sigma0 = tmp.at(0, 0);
+        b_sigma0 = tmp.at(1, 0);
+        a_tau0 = tmp.at(0, 1);
+        b_tau0 = tmp.at(1, 1);
+    }
+
+    // first column is [t-1], second column is [t]
+    arma::mat a_sigma(N, nt + 1);
+    arma::mat b_sigma(N, nt + 1);
+    arma::mat sigma2(N, nt + 1);
+    // sigma2.col(0).fill(R::runif(0.,1.));
+    // sigma2.col(0) = 1. / arma::randg(N, arma::distr_param(a_sigma0, 1. / b_sigma0));
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_sigma.at(i, 0) = a_sigma0;
+        b_sigma.at(i, 0) = b_sigma0;
+        sigma2.at(i, 0) = R::runif(0., 1.);
+    }
+    // Rcout << sigma2.col(0).t() << std::endl;
+
+    // Rcout << "a_sigma0 = " << a_sigma0 << ", b_sigma0 = " << b_sigma0
+    // sigma2.col(1) = 1. / arma::randg(N, arma::distr_param(a_sigma.at(0, 1), 1. / b_sigma.at(0, 1)));
+
+    arma::mat a_tau(N, nt + 1);
+    arma::mat b_tau(N, nt + 1);
+    arma::mat tau2(N, nt + 1);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        a_tau.at(i, 0) = a_tau0;
+        a_tau.at(i, 0) = b_tau0;
+        tau2.at(i, 0) = R::runif(0., 1.);
+    }
+    // tau2.col(0).fill(R::runif(0., 1.));
+    // tau2.col(0) = 1. / arma::randg(N, arma::distr_param(a_tau0, 1. / b_tau0));
+    // tau2.col(1) = 1. / arma::randg(N, arma::distr_param(a_tau.at(0, 1), 1. / b_tau.at(0, 1)));
+
+    arma::vec theta(N);
+    for (unsigned int i = 0; i < N; i++)
+    {
+        theta.at(i) = m0 + C0_sqrt * R::rnorm(0, 1.);
+    }
+    arma::mat theta_stored(N, nt + 1);
+    theta_stored.col(0) = theta;
+
+    const double mvn_cnst = -0.5 * std::log(2 * arma::datum::pi);
+    arma::vec Meff(nt, arma::fill::zeros); // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
+    arma::uvec resample_status(nt, arma::fill::zeros);
+
+    for (unsigned int t = 0; t < nt; t++)
+    {
+        // t: for y means current [t], for others means past [t-1]
+
+        R_CheckUserInterrupt();
+        double Yt = Y.at(t);
+        double Yt_old = 0.;
+        if (t>0) {
+            Yt_old = Y.at(t - 1);
+        }
+        
+        /* Propagate */
+        for (unsigned int i = 0; i < N; i++)
+        {
+            
+            // theta: N, theta_stored: N x (nt+1)
+            double theta_old = theta_stored.at(i, t);
+            double Sigma = sigma2.at(i,t)*tau2.at(i,t);
+            double mu = theta_old;
+
+            double theta_new = mu + std::sqrt(Sigma) * R::rnorm(0., 1.);
+            theta_stored.at(i,t+1) = theta_new;
+
+            double err1 = std::pow(Yt_old - theta_old, 2.);
+            double err2 = std::pow(theta_new - theta_old, 2.);
+
+            if (eta_select.at(0) == 1)
+            {
+                // sample sigma2
+                a_sigma.at(i, t+1) = a_sigma.at(i, t) + 1.;
+                b_sigma.at(i, t+1) = b_sigma.at(i, t) + 0.5*err1 + 0.5 * err2 / tau2.at(i, t);
+                sigma2.at(i,t+1) = 1./R::rgamma(a_sigma.at(i,t+1), 1. / b_sigma.at(i,t+1));
+                // R::rgamma(shape, scale)
+            }
+            else
+            {
+                // fix sigma2
+                sigma2.at(i, t + 1) = sigma2_true;
+            }
+
+            if (eta_select.at(1) == 1)
+            {
+                // infer tau2
+                a_tau.at(i, t+1) = a_tau.at(i, t) + 0.5;
+                b_tau.at(i, t+1) = b_tau.at(i, t) + 0.5 * err2 / sigma2.at(i, t + 1);
+                tau2.at(i,t+1) = 1./R::rgamma(a_tau.at(i,t+1), 1. / b_tau.at(i,t+1));
+                // R::rgamma(shape, scale)
+            }
+            else
+            {
+                // fix tau2
+                tau2.at(i, t + 1) = tau2_true;
+            }
+        } // Eng Propagation
+
+        /* Resample */
+        arma::vec w(N, arma::fill::zeros); // importance weight of each particle
+        for (unsigned int i = 0; i < N; i++)
+        {
+            double Sigy = sigma2.at(i,t+1);
+            double muy = theta_stored.at(i,t+1);
+
+            double Sigy_inv = 1. / Sigy;
+            double err3 = Yt - muy;
+            double sse = std::pow(err3, 2.) * Sigy_inv;
+            double logdet_val_Sigy_inv = std::log(Sigy_inv);
+            double loga = mvn_cnst + 0.5 * logdet_val_Sigy_inv - 0.5 * sse;
+
+            double alphat = std::exp(std::min(loga, 700.));
+            w.at(i) = alphat;
+        }
+
+        
+        if (arma::accu(w) > EPS)
+        { // normalize the particle weights
+            w /= arma::accu(w);
+            Meff.at(t) = 1. / arma::dot(w, w);
+            if (Meff.at(t) > 0.1 * static_cast<double>(N))
+            {
+                resample_status.at(t) = 1;
+            }
+            else
+            {
+                resample_status.at(t) = 0;
+            }
+        }
+        else
+        {
+            resample_status.at(t) = 0;
+            Meff.at(t) = 0.;
+        }
+
+        if (resample_status.at(t) == 1)
+        {
+            Rcpp::NumericVector w_ = Rcpp::wrap(w);
+            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+
+            arma::mat vvec = theta_stored.col(t+1);
+            theta_stored.col(t+1) = vvec.elem(idx);
+
+            arma::vec atmp = a_sigma.col(t+1);
+            a_sigma.col(t+1) = atmp.elem(idx);
+
+            arma::vec btmp = b_sigma.col(t+1);
+            b_sigma.col(t+1) = btmp.elem(idx);
+
+            arma::vec stmp = sigma2.col(t+1);
+            sigma2.col(t+1) = stmp.elem(idx);
+
+            arma::vec atmp2 = a_tau.col(t+1);
+            a_tau.col(t+1) = atmp2.elem(idx);
+
+            arma::vec btmp2 = b_tau.col(t+1);
+            b_tau.col(t+1) = btmp2.elem(idx);
+
+            arma::vec ttmp = tau2.col(t+1);
+            tau2.col(t+1) = ttmp.elem(idx);
+        }
+
+        w.ones(); // Equal weight to begin with because of resampling in the last iter.
+        // End Resample
+
+        if (verbose)
+        {
+            Rcout << "\rFiltering Progress: " << t + 1 << "/" << nt;
+        }
+    }
+
+    if (verbose)
+    {
+        Rcout << std::endl;
+    }
+
+    Rcpp::List output;
+    // arma::mat R = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 1);
+    output["theta"] = Rcpp::wrap(theta_stored); // (n+1) x 3
+    output["a_sigma"] = Rcpp::wrap(a_sigma.col(nt));
+    output["b_sigma"] = Rcpp::wrap(b_sigma.col(nt));
+    output["sigma2"] = Rcpp::wrap(sigma2.col(nt));
+    output["a_tau"] = Rcpp::wrap(a_tau.col(nt));
+    output["b_tau"] = Rcpp::wrap(b_tau.col(nt));
+    output["tau2"] = Rcpp::wrap(tau2.col(nt));
+
+    // if (debug) {
+    output["Meff"] = Rcpp::wrap(Meff);
+    output["resample_status"] = Rcpp::wrap(resample_status);
+    // }
+
+    return output;
+}

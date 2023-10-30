@@ -237,14 +237,19 @@ double test_postW_gamma(
 	const double a3);
 
 
-
+/**
+ * Apply gain function h(.) to 
+ * the latent random walk variable, psi[t]
+*/
 arma::mat psi2hpsi(
 	const arma::mat& psi,
 	const unsigned int gain_code,
 	const Rcpp::NumericVector& coef);
 
-
-
+/**
+ * Apply gain function h(.) to
+ * the latent random walk variable, psi[t]
+ */
 double psi2hpsi(
 	const double psi,
 	const unsigned int gain_code,

@@ -16,9 +16,6 @@ using namespace Rcpp;
 */
 
 
-/*
-a[t] = gt(m[t-1])
-*/
 arma::mat update_at(
 	const unsigned int p,
 	const unsigned int gain_code,
@@ -27,7 +24,7 @@ arma::mat update_at(
 	const arma::mat& Gt, // p x p
 	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.), // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha = 1.,
-	const double y = NA_REAL,  // n x 1
+	const double y = NA_REAL, 
 	const double rho = NA_REAL) {
 	
 	const unsigned int N = mt.n_cols;
@@ -62,14 +59,6 @@ arma::mat update_at(
 				at.row(1) -= binom(r,k)*coef2*mt.row(k);
 				at.row(k) = mt.row(k-1);
 			}
-
-			// at.elem(arma::find(at<EPS)).fill(EPS);
-
-			// double coef1 = std::pow((1.-rho)*(1.-rho),alpha);
-            // at.at(0) = mt.at(0); // psi[t]
-			// at.at(1) = coef1*y*hpsi;
-			// at.at(1) += 2*rho*mt.at(1) - rho*rho*mt.at(2);
-            // at.at(2) = mt.at(1); // theta[t-1]
 		}
 		break;
 		case 3: // Vanilla

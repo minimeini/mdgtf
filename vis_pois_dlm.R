@@ -41,7 +41,7 @@ plot_psi = function(sim_dat=NULL,
             "SMCS-FL","APF","SMCF-BF","SMCS-BS")
   clist = c("seagreen","orange","burlywood4",
             "maroon","purple","darkturquoise",
-            "black","salmon","mediumspringgreen",
+            "black","salmon","pink",
             "mediumaquamarine","cornflowerblue","sandybrown","royalblue")
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
@@ -74,7 +74,8 @@ plot_psi = function(sim_dat=NULL,
   
   nl2 = sum(names(psi_list)%in%c("LBA","HVB","MCMC",
                                  "SMCS-FL","SMCS-BS","APF","SMCF-BF",
-                                 "Koyama2021"))
+                                 "Koyama2021",
+                                 "PL"))
   
   if (is.null(time_label)) {
     time_label = c(1:length(y))
@@ -195,8 +196,14 @@ plot_psi = function(sim_dat=NULL,
   
   ####
   methods = unique(psi_list$method)
-  cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
+  # cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
+  cols = NULL
+  for (m in methods) {
+    ccctmp = which(m == mlist)
+    cols = c(cols,ccctmp)
+  }
   cols = clist[cols]
+
   p = ggplot(psi_list,aes(x=time,y=est,group=method)) +
     geom_line(aes(color=method),na.rm=TRUE) +
     geom_ribbon(aes(ymin=lobnd,ymax=hibnd,fill=method),

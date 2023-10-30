@@ -94,8 +94,8 @@ Rcpp::List predict_poisson(
             psi_stored.at(t-n,i) = theta_pred.at(0,t);
 
             if (trans_code == 1 && L>0) { // Koyama
-                update_Ft(Ft, Fy, trans_code, t, L_, ypred, Fphi, alpha);
-			    switch (gain_code) {
+                update_Ft_koyama(Ft, Fy, t, L_, ypred, Fphi, alpha);
+                switch (gain_code) {
 				    case 0: // Ramp
 				    {
 					    theta_pred.elem(arma::find(theta_pred<EPS)).fill(EPS);

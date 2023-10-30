@@ -53,27 +53,22 @@ Unknown parameters: psi[1:n]
 Known parameters: W, phi[1:L]
 Kwg: Identity link, exp(psi) state space
 */
+
 Rcpp::List mcs_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-	const double W,
+    const arma::vec &Y, // nt x 1, the observed response
+    const arma::uvec &model_code,
+    const double W_true, // Use discount factor if W is not given
     const double rho,
-    const double alpha,
     const unsigned int L, // number of lags
     const double mu0,
-    const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
-	const unsigned int N, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-    const double theta0_upbnd,
-    const Rcpp::NumericVector& qProb,
-    const Rcpp::NumericVector& ctanh,
+    const unsigned int B,                                // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const unsigned int N,                                // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior, // mean of normal prior for theta0
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior, // variance of normal prior for theta0
+    const double theta0_upbnd,                           // Upper bound of uniform prior for theta0
+    const Rcpp::NumericVector &qProb,
     const double delta_nb,
-    const double delta_discount,
-    const bool resample,
-    const bool verbose,
-    const bool debug);
-
+    const double delta_discount);
 
 
 
@@ -171,22 +166,20 @@ Particle Learning
 
 - eta = (W, mu[0], rho, M)
 */
-Rcpp::List pl_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-    const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
-    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
-    const double alpha,
-    const unsigned int L, // number of lags
-	const unsigned int N, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-    const Rcpp::NumericVector& qProb,
-    const double delta_nb,
-    const bool verbose,
-    const bool debug);
+// Rcpp::List pl_poisson(
+//     const arma::vec &Y, // nt x 1, the observed response
+//     const arma::uvec &model_code,
+//     const Rcpp::NumericVector &W_prior, // IG[aw,bw]
+//     const double W_true,
+//     const unsigned int L,    // number of lags
+//     const unsigned int N, // number of particles
+//     const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior,
+//     const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior,
+//     const Rcpp::NumericVector &qProb,
+//     const double mu0,
+//     const double rho,
+//     const double delta_nb,
+//     const double theta0_upbnd);
 
 
-    #endif
+#endif

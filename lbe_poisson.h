@@ -29,21 +29,37 @@
 8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
 */
 
-
-
+/**
+ * Calculate expected state evolution of time (t+1), given D[t],
+ * aka, prediction of [t+1]
+ *     E(theta[t+1] | D[t]) = gt(theta[t]).
+ * This is an exact calculation.
+ * using prior/previous information.
+ *
+ * Gt is only needed for the koyama case, in which Gt is invariant over time
+ *
+ * If input is m[t], then the output is a[t+1].
+ *
+ */
 arma::mat update_at(
 	const unsigned int p,
 	const unsigned int gain_code,
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-	const arma::mat& mt, // p x 1, mt = (psi[t], theta[t], theta[t-1])
+	const arma::mat& mt, // p x N, mt = (psi[t], theta[t], theta[t-1]), N for number of particles
 	const arma::mat& Gt, // p x p
 	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
 	const double alpha,
-	const double y,  // nt x 1
+	const double y,
 	const double rho);
 
 
 
+/**
+ * Update the Gt,
+ * which is gradient of dynamic evolution function, gt(.).
+ * 
+ * Gt is calculated at mt.
+*/
 void update_Gt(
 	arma::mat& Gt, // p x p
 	const unsigned int gain_code, 
@@ -56,6 +72,12 @@ void update_Gt(
 
 
 
+/**
+ * Calculate approximate state evolution variance of time [t+1], given D[t],
+ * aka, prediction of [t+1].
+ *      Var(theta[t+1] | D[t]) = G[t+1] * C[t] * t(G[t+1]) + W[t+1].
+ * W[t+1] can be substituted with discount factor, delta.
+*/
 void update_Rt(
 	arma::mat& Rt, // p x p
 	const arma::mat& Ct, // p x p
@@ -65,6 +87,10 @@ void update_Rt(
 	const double delta);
 
 
+/**
+ * Update the derivative of the state-to-obs function, f[t].
+ * Only used for Koyama's transmission delay, i.e., discretized Hawkes.
+*/
 void update_Ft_koyama(
 	arma::vec& Ft, // L x 1
 	arma::vec& Fy, // L x 1
@@ -77,7 +103,6 @@ void update_Ft_koyama(
 /**
 * Forward filter for univariate and multivariate input, Y.
 */
-/* Forward Filtering */
 void forwardFilter(
 	arma::mat& mt, // p x (nt+1), t=0 is the mean for initial value theta[0]
 	arma::mat& at, // p x (nt+1)
