@@ -47,10 +47,9 @@ arma::mat update_at(
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::mat& mt, // p x N, mt = (psi[t], theta[t], theta[t-1]), N for number of particles
 	const arma::mat& Gt, // p x p
-	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
-	const double alpha,
 	const double y,
-	const double rho);
+	const double rho,
+	const unsigned int t=9999);
 
 
 
@@ -65,8 +64,6 @@ void update_Gt(
 	const unsigned int gain_code, 
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::vec& mt, // p x 1
-	const Rcpp::NumericVector& ctanh, // 3 x 1
-	const double alpha,
 	const double y,  // obs
 	const double rho);
 
@@ -97,8 +94,7 @@ void update_Ft_koyama(
 	const unsigned int t, // current time point
 	const unsigned int L, // lag
 	const arma::vec& Y,  // (nt+1) x 1, obs
-	const arma::vec& Fphi,
-	const double alpha);
+	const arma::vec& Fphi);
 
 /**
 * Forward filter for univariate and multivariate input, Y.
@@ -118,8 +114,6 @@ void forwardFilter(
 	const unsigned int n, // number of observations
 	const unsigned int p, // dimension of the state space
 	const arma::vec& Y, // (nt+1) x 1, the observation (scalar), n: num of obs
-	const Rcpp::NumericVector& ctanh, // 3 x 1, coefficients for the hyperbolic tangent gain function
-	const double alpha,
 	const unsigned int L,
 	const double rho,
 	const double mu0,
@@ -166,8 +160,6 @@ Rcpp::List lbe_poisson(
 	const double W,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-	const Rcpp::NumericVector& ctanh,
-	const double alpha,
 	const double delta_nb,
 	const double ci_coverage,
 	const unsigned int npara,
@@ -181,7 +173,6 @@ Rcpp::List get_eta_koyama(
 	const arma::mat& mt, // p x (nt+1), t=0 is the mean for initial value theta[0]
 	const arma::cube& Ct, // p x p x (nt+1)
 	const unsigned int gain_code,
-	const double alpha,
 	const double mu0);
 
 
@@ -195,8 +186,6 @@ Rcpp::List get_optimal_delta(
 	const double mu0,
 	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
 	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-	const Rcpp::NumericVector& ctanh,
-	const double alpha,
 	const double delta_nb,
 	const unsigned int npara,
 	const double ci_coverage);

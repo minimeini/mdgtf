@@ -31,7 +31,6 @@ Rcpp::List mcmc_disturbance_pois(
     const arma::uvec& eta_prior_type, // 6 x 1
     const arma::mat& eta_prior_val, // 2 x 6, priors for each element of eta
 	const double L = 12, // For Koyama's model
-	const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.2,0,5.),
 	const Rcpp::Nullable<Rcpp::NumericVector>& w1_prior = R_NilValue, // (aw, Rw), w1 ~ N(aw, Rw), prior for w[1], the first state/evolution/state error/disturbance.
 	const Rcpp::Nullable<Rcpp::NumericVector>& wt_init = R_NilValue, // initial value of the evolution error at time t = 1
 	const Rcpp::Nullable<Rcpp::NumericVector>& wt_true = R_NilValue, // true value of system/evolution/state error/disturbance
@@ -145,9 +144,9 @@ Rcpp::List mcmc_disturbance_pois(
 
 	// TODO: check this
 	// First-order Taylor expansion of h(psi[t]) at h[t]
-	arma::vec hh = psi2hpsi(ht,gain_code,ctanh);
+	arma::vec hh = psi2hpsi(ht,gain_code);
 	arma::vec hph(n+1,arma::fill::zeros);
-	hpsi_deriv(hph,ht,gain_code,ctanh);
+	hpsi_deriv(hph,ht,gain_code);
 	arma::vec hhat = hh + hph%(psi0-ht); 
 
 	arma::vec Fphi = get_Fphi(L); // L x 1

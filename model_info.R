@@ -116,7 +116,7 @@ get_model_code = function(obs_dist = "nbinom", # {"nbinom","poisson"}
                           err_dist = "gaussian"){ # {"gaussian","laplace","cauchy","left_skewed_normal"}
   
   obs_code = switch(tolower(obs_dist),
-                    "nbinom"=0,"poisson"=1)
+                    "nbinom"=0,"poisson"=1,"nbinom_p"=2,"gaussian"=3)
   link_code = switch(tolower(link_func),
                      "identity"=0,"exponential"=1)
   trans_code = switch(tolower(trans_func),

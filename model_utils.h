@@ -71,13 +71,18 @@ inline constexpr double covid_s = 2.9;
 
 */
 
-void init_by_trans(
-	unsigned int& p, // dimension of DLM state space
-	unsigned int& L_,
-	const unsigned int trans_code,
-	const unsigned int L);
+arma::uvec sample(
+	const unsigned int n,
+	const unsigned int size,
+	const arma::vec &weights,
+	bool replace,
+	bool zero_start);
 
-
+	void init_by_trans(
+		unsigned int &p, // dimension of DLM state space
+		unsigned int &L_,
+		const unsigned int trans_code,
+		const unsigned int L);
 
 void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
@@ -89,18 +94,19 @@ void init_by_trans(
 	const unsigned int L);
 
 
+double binom(double n, double k);
 
-double binom(int n, int k);
+arma::vec get_solow_coef(
+	const unsigned int &rho,
+	const unsigned int &r);
 
-
-/*
-CDF of the log-normal distribution.
-*/
-double Pd(
-    const double d,
-    const double mu,
-    const double sigmasq);
-
+	/*
+	CDF of the log-normal distribution.
+	*/
+	double Pd(
+		const double d,
+		const double mu,
+		const double sigmasq);
 
 /*
 Difference of the subsequent CDFs of the log-normal distribution, which is the PDF at the discrete scale.
@@ -243,8 +249,7 @@ double test_postW_gamma(
 */
 arma::mat psi2hpsi(
 	const arma::mat& psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef);
+	const unsigned int gain_code);
 
 /**
  * Apply gain function h(.) to
@@ -252,28 +257,24 @@ arma::mat psi2hpsi(
  */
 double psi2hpsi(
 	const double psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef);
+	const unsigned int gain_code);
 
 
 
 void hpsi_deriv(
 	arma::mat& hpsi,
 	const arma::mat& psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef);
+	const unsigned int gain_code);
 
 
 double hpsi_deriv(
 	const double psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef);
+	const unsigned int gain_code);
 
 
 arma::mat hpsi_deriv(
 	const arma::mat& psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef);
+	const unsigned int gain_code);
 
 
 arma::mat hpsi2theta(
@@ -281,18 +282,17 @@ arma::mat hpsi2theta(
 	const arma::vec& y, // n x 1
 	const unsigned int trans_code,
 	const double theta0,
-	const double alpha,
 	const unsigned int L,
 	const double rho);
 
 
 
 double loglike_obs(
-	const double y, 
-	const double lambda,
-	const unsigned int obs_code,
-	const double delta_nb,
-	const bool return_log);
+	const double &y, 
+	const double &lambda,
+	const unsigned int &obs_code,
+	const double &delta_nb,
+	const bool &return_log);
 
 
 

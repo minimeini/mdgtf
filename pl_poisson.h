@@ -3,7 +3,6 @@
 
 #include "lbe_poisson.h"
 
-
 /*
 ------------------------
 ------ Model Code ------
@@ -54,6 +53,15 @@ Known parameters: W, phi[1:L]
 Kwg: Identity link, exp(psi) state space
 */
 
+
+void init_Ft(
+    arma::vec &Ft, 
+    const arma::vec &ypad, 
+    const arma::vec &Fphi,
+    const unsigned int &t, 
+    const unsigned int &p);
+
+
 Rcpp::List mcs_poisson(
     const arma::vec &Y, // nt x 1, the observed response
     const arma::uvec &model_code,
@@ -70,71 +78,50 @@ Rcpp::List mcs_poisson(
     const double delta_nb,
     const double delta_discount);
 
-
-
-void bf_poisson(
-    arma::cube& theta_stored, // p x N x (n+1)
-    arma::vec& w_stored, // (n+1) x 1
-    arma::mat& Gt,
-    const arma::vec& ypad, // (n+1) x 1, the observed response
-    const arma::uvec& model_code,
-	const double W,
+void smc_propagate_bootstrap(
+    arma::mat &Theta_new, // p x N
+    arma::vec &weights,   // N x 1
+    double &wt,
+    const double &y_new,
+    const double &y_old,        // (n+1) x 1, the observed response
+    const arma::mat &Theta_old, // p x N
+    const arma::mat &Gt,        // no need to update Gt
+    const arma::vec &Ft,        // must be already updated if used
+    const arma::uvec &model_code,
     const double mu0,
     const double rho,
-    const double alpha,
-    const unsigned int p, // dimension of DLM state space
-    const unsigned int L, // number of lags
-	const unsigned int N, // number of particles
-    const arma::vec& Ft0,
-    const arma::vec& Fphi,
-    const Rcpp::NumericVector& ctanh,
-    const double delta_nb);
-
-
-
-Rcpp::List ffbs_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-	const double W,
-    const double rho,
-    const double alpha,
-    const unsigned int L, // number of lags
-    const double mu0,
-	const unsigned int N, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-    const double theta0_upbnd,
-    const Rcpp::NumericVector& qProb,
-    const Rcpp::NumericVector& ctanh,
     const double delta_nb,
     const double delta_discount,
-    const unsigned int npara,
-    const bool resample, // true = auxiliary particle filtering; false = bootstrap filtering
-    const bool smoothing, // true = particle smoothing; false = no smoothing
-    const bool verbose,
-    const bool debug);
+    const unsigned int p, // dimension of DLM state space
+    const unsigned int N, // number of particles
+    const bool use_discount,
+    const bool use_default_val,
+    const unsigned int t = 9999);
 
+void smc_resample(
+    arma::cube &theta_stored, // p x N x (nt + B)
+    arma::vec &weights, // N x 1
+    double &meff,
+    bool &resample,
+    const unsigned int &t, // number of particles
+    const unsigned int &B);
 
-Rcpp::List pmmh_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-	const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
-    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
-    const double alpha,
+Rcpp::List ffbs_poisson(
+    const arma::vec &Y, // n x 1, the observed response
+    const arma::uvec &model_code,
+    const double W_true,
+    const double rho,
     const unsigned int L, // number of lags
-	const unsigned int N, // number of particles
-    const unsigned int nsample,
-    const unsigned int nburnin,
-    const unsigned int nthin,
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior,
-    const Rcpp::NumericVector& qProb,
-    const double MH_sd,
+    const double mu0,
+    const unsigned int N, // number of particles
+    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior,
+    const double theta0_upbnd,
+    const Rcpp::NumericVector &qProb,
     const double delta_nb,
-    const bool verbose,
-    const bool debug);
+    const double delta_discount,
+    const bool smoothing);
+
 
 
 

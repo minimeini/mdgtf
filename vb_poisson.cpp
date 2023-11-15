@@ -18,13 +18,11 @@ Rcpp::List vb_poisson(
     const arma::mat &eta_prior_val,   // 2 x 4, priors for each element of eta
     const unsigned int L = 0,
     const double delta = NA_REAL,
-    const double alpha = 1.,
     const unsigned int nburnin = 1000,
     const unsigned int nthin = 2,
     const unsigned int nsample = 5000, // number of iterations for variational inference
     const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
     const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
-    const Rcpp::NumericVector &ctanh = Rcpp::NumericVector::create(0.2, 0, 5.),
     const double aw_prior = 0.01, // aw: shape of inverse gamma
     const double bw_prior = 0.01, // bw: rate of inverse gamma
     const double delta_nb = 1.,
@@ -144,7 +142,7 @@ Rcpp::List vb_poisson(
         C0 *= std::pow(theta0_upbnd * 0.5, 2.);
     }
 
-    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,NA_REAL,delta_nb,false);
+    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L_,rho,mu0,W,NA_REAL,delta_nb,false);
     
 	if (use_smoothing) {
 		backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
@@ -246,7 +244,7 @@ Rcpp::List vb_poisson(
 
         // ht = R.col(0);
 
-        forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,ctanh,alpha,L_,rho,mu0,W,delta,delta_nb,false);
+        forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L_,rho,mu0,W,delta,delta_nb,false);
         
 	    if (use_smoothing) {
             backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);

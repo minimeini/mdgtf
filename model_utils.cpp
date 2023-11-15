@@ -71,6 +71,26 @@ using namespace Rcpp;
 */
 
 
+arma::uvec sample(
+	const unsigned int n, 
+	const unsigned int size, 
+	const arma::vec &weights, 
+	bool replace=true,
+	bool zero_start=true){
+	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
+	Rcpp::IntegerVector idx_ = Rcpp::sample(n, size, true, w_);
+
+	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
+	if (zero_start)
+	{
+		idx.for_each([](arma::uvec::elem_type &val)
+					 { val -= 1; });
+	}
+	
+	return idx;
+}
+
+
 
 void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
@@ -180,8 +200,25 @@ Binomial coefficients, i.e., n-choose-k
 */
 //' @export
 // [[Rcpp::export]]
-double binom(int n, int k) { return 1./((static_cast<double>(n)+1.)*boost::math::beta(std::max(static_cast<double>(n-k+1),EPS),std::max(static_cast<double>(k+1),EPS))); }
+double binom(double n, double k) { 
+	return 1./((n+1.)*boost::math::beta(std::max(n-k+1,EPS),std::max(k+1,EPS))); }
 
+
+arma::vec get_solow_coef(
+	const unsigned int &rho, 
+	const unsigned int &r // number of theta
+)
+{
+	arma::vec coef(r,arma::fill::zeros);
+	for (unsigned int i=0; i<r; i++)
+	{
+		double c1 = binom(static_cast<double>(r),static_cast<double>(i+1));
+		double c2 = std::pow(-rho,static_cast<double>(i+1));
+		coef.at(i) = c1 * c2;
+	}
+
+	return coef;
+}
 
 
 /*
@@ -655,8 +692,7 @@ double test_postW_gamma(
 // [[Rcpp::export]]
 arma::mat psi2hpsi(
 	const arma::mat& psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+	const unsigned int gain_code) {
 	
 	arma::mat hpsi;
 	hpsi.copy_size(psi);
@@ -682,21 +718,10 @@ arma::mat psi2hpsi(
 		break;
 		case 3: // Softplus
 		{
-			hpsi = psi;
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = arma::log(1. + arma::exp(hpsi));
-		}
-		break;
-		case 4: // Hyperbolic Tangent
-		{
-			hpsi = 0.5*coef[2] * (arma::tanh(coef[0]*psi + coef[1]) + 1.);
-		}
-		break;
-		case 5: // Logistic
-		{
-			hpsi = -coef[0] * (psi-coef[1]);
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = coef[2] / (1. + arma::exp(hpsi));
+			arma::mat hpsi0 = psi;
+			hpsi0.elem(arma::find(hpsi0>UPBND)).fill(UPBND);
+			arma::mat hpsi1 = arma::exp(hpsi0);
+			hpsi = arma::log(1. + hpsi1);
 		}
 		break;
 		default:
@@ -705,16 +730,73 @@ arma::mat psi2hpsi(
 		}
 	}
 
+	bool has_negative = arma::any(arma::vectorise(hpsi)<-EPS);
+	bool has_nonfinite = !hpsi.is_finite();
+
+	if (has_negative || has_nonfinite)
+	{
+		throw std::invalid_argument("psi2hpsi<mat>: hpsi is not positive or not finite.");
+	} else if (arma::any(arma::vectorise(hpsi) < EPS))
+	{
+		hpsi.elem(arma::find(hpsi<EPS)).fill(EPS);
+	}
 
 	return hpsi;
 }
 
+// arma::vec psi2hpsi(
+// 	const arma::vec &psi,
+// 	const unsigned int gain_code)
+// {
+
+// 	arma::vec hpsi;
+
+// 	switch (gain_code)
+// 	{
+// 	case 0: // Ramp
+// 	{
+// 		hpsi = psi;
+// 		hpsi.elem(arma::find(psi < EPS)).fill(EPS);
+// 	}
+// 	break;
+// 	case 1: // Exponential
+// 	{
+// 		hpsi = psi;
+// 		hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
+// 		hpsi = arma::exp(hpsi);
+// 	}
+// 	break;
+// 	case 2: // Identity
+// 	{
+// 		hpsi = psi;
+// 	}
+// 	break;
+// 	case 3: // Softplus
+// 	{
+// 		arma::vec hpsi0 = psi;
+// 		hpsi0.elem(arma::find(hpsi0 > UPBND)).fill(UPBND);
+// 		arma::mat hpsi1 = arma::exp(hpsi0);
+// 		hpsi = arma::log(1. + hpsi1);
+// 	}
+// 	break;
+// 	default:
+// 	{
+// 		::Rf_error("Not supported gain function.");
+// 	}
+// 	}
+
+// 	if (arma::any(hpsi < EPS))
+// 	{
+// 		throw std::invalid_argument("psi2hpsi is not positive.");
+// 	}
+
+// 	return hpsi;
+// }
 
 
 double psi2hpsi(
 	const double psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+	const unsigned int gain_code) {
 	
 	double hpsi;
 
@@ -739,20 +821,18 @@ double psi2hpsi(
 			hpsi = std::log(1. + std::exp(std::min(psi,UPBND)));
 		}
 		break;
-		case 4: // Hyperbolic Tangent
-		{
-			hpsi = 0.5*coef[2] * (std::tanh(coef[0]*psi + coef[1]) + 1.);
-		}
-		break;
-		case 5: // Logistic
-		{
-			hpsi = coef[2]/(1. + std::exp(std::min(-coef[0]*(psi-coef[1]),UPBND)));
-		}
-		break;
 		default:
 		{
 			::Rf_error("Not supported gain function.");
 		}
+	}
+
+	if ( (hpsi < -EPS) || !std::isfinite(hpsi))
+	{
+		throw std::invalid_argument("psi2hpsi<double> is not positive or not finite.");
+	} else if (hpsi < EPS)
+	{
+		hpsi = EPS;
 	}
 
 
@@ -765,8 +845,7 @@ double psi2hpsi(
 void hpsi_deriv(
 	arma::mat & hpsi,
 	const arma::mat& psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+	const unsigned int gain_code) {
 	
 	hpsi.copy_size(psi);
 
@@ -778,9 +857,9 @@ void hpsi_deriv(
 		break;
 		case 1: // Exponential
 		{
-			hpsi = psi;
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = arma::exp(hpsi);
+			arma::mat tmp = psi;
+			tmp.elem(arma::find(tmp>UPBND)).fill(UPBND);
+			hpsi = arma::exp(tmp);
 		}
 		break;
 		case 2: // Identity
@@ -790,24 +869,9 @@ void hpsi_deriv(
 		break;
 		case 3: // Softplus
 		{
-			hpsi = -psi;
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = 1./(1.+arma::exp(hpsi));
-		}
-		break;
-		case 4: // Hyperbolic Tangent
-		{
-			hpsi = coef[0]*psi + coef[1];
-			hpsi = 0.5*coef[0]*coef[2]/arma::pow(arma::cosh(hpsi),2.);
-		}
-		break;
-		case 5: // Logistic
-		{
-			arma::vec c = Rcpp::as<arma::vec>(coef);
-			hpsi = -coef[0] * (psi-coef[1]);
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = coef[2] / (1. + arma::exp(hpsi));
-			hpsi = (coef[0]/coef[2])*(hpsi%(coef[2] - hpsi));
+			arma::mat tmp = -psi;
+			tmp.elem(arma::find(tmp>UPBND)).fill(UPBND);
+			hpsi = 1./(1.+arma::exp(tmp));
 		}
 		break;
 		default:
@@ -816,6 +880,10 @@ void hpsi_deriv(
 		}
 	}
 
+	if (!hpsi.is_finite())
+	{
+		throw std::invalid_argument("hpsi_deriv<void>: non-finite output");
+	}
 
 	return;
 }
@@ -823,8 +891,7 @@ void hpsi_deriv(
 
 double hpsi_deriv(
 	const double psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+	const unsigned int gain_code) {
 	
 	double hpsi;
 
@@ -849,21 +916,15 @@ double hpsi_deriv(
 			hpsi = 1. / (1. + std::exp(std::min(-psi, UPBND)));
 		}
 		break;
-		case 4: // Hyperbolic Tangent
-		{
-			hpsi = 0.5*coef[0]*coef[2]/std::pow(std::cosh(coef[0]*psi+coef[1]),2);
-		}
-		break;
-		case 5: // Logistic
-		{
-			hpsi = coef[2]/(1.+std::exp(std::min(-coef[0]*(psi-coef[1]),UPBND)));
-			hpsi = (coef[0]/coef[2])*(hpsi*(coef[2] - hpsi));
-		}
-		break;
 		default:
 		{
 			::Rf_error("Not supported gain function.");
 		}
+	}
+
+	if (!std::isfinite(hpsi))
+	{
+		throw std::invalid_argument("hpsi_deriv<double>: non-finite output");
 	}
 
 
@@ -876,8 +937,7 @@ double hpsi_deriv(
 // [[Rcpp::export]]
 arma::mat hpsi_deriv(
 	const arma::mat& psi,
-	const unsigned int gain_code,
-	const Rcpp::NumericVector& coef = Rcpp::NumericVector::create(0.2,0,5.)) {
+	const unsigned int gain_code) {
 	
 	arma::mat hpsi;
 	hpsi.copy_size(psi);
@@ -890,9 +950,9 @@ arma::mat hpsi_deriv(
 		break;
 		case 1: // Exponential
 		{
-			hpsi = psi;
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = arma::exp(hpsi);
+			arma::mat tmp = psi;
+			tmp.elem(arma::find(tmp>UPBND)).fill(UPBND);
+			hpsi = arma::exp(tmp);
 		}
 		break;
 		case 2: // Identity
@@ -902,24 +962,10 @@ arma::mat hpsi_deriv(
 		break;
 		case 3: // Softplus
 		{
-			hpsi = -psi;
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = 1./(1.+arma::exp(hpsi));
-		}
-		break;
-		case 4: // Hyperbolic Tangent
-		{
-			hpsi = coef[0]*psi + coef[1];
-			hpsi = 0.5*coef[0]*coef[2]/arma::pow(arma::cosh(hpsi),2.);
-		}
-		break;
-		case 5: // Logistic
-		{
-			arma::vec c = Rcpp::as<arma::vec>(coef);
-			hpsi = -coef[0] * (psi-coef[1]);
-			hpsi.elem(arma::find(hpsi>UPBND)).fill(UPBND);
-			hpsi = coef[2] / (1. + arma::exp(hpsi));
-			hpsi = (coef[0]/coef[2])*(hpsi%(coef[2] - hpsi));
+			arma::mat tmp0 = -psi;
+			tmp0.elem(arma::find(tmp0 > UPBND)).fill(UPBND);
+			arma::mat tmp = arma::exp(tmp0);
+			hpsi = 1./(1.+ tmp);
 		}
 		break;
 		default:
@@ -928,6 +974,10 @@ arma::mat hpsi_deriv(
 		}
 	}
 
+	if (!hpsi.is_finite())
+	{
+		throw std::invalid_argument("hpsi_deriv<mat>: non-finite output");
+	}
 
 	return hpsi;
 }
@@ -943,7 +993,6 @@ arma::mat hpsi2theta(
 	const arma::vec& y, // n x 1
 	const unsigned int trans_code,
 	const double theta0 = 0.,
-	const double alpha = 1.,
 	const unsigned int L = 2,
 	const double rho = 0.9) {
 	
@@ -952,7 +1001,7 @@ arma::mat hpsi2theta(
 	arma::mat theta(n,k,arma::fill::zeros);
 
 	switch(trans_code) {
-		case 0: // Koyck
+		case 0: // Koyckget_model_code
 		{
 			theta.row(0).fill(rho*theta0);
 			for (unsigned int t=1; t<n; t++) {
@@ -966,7 +1015,6 @@ arma::mat hpsi2theta(
 		case 1: // Koyama
 		{
 			arma::vec Fphi = get_Fphi(L);
-        	Fphi = arma::pow(Fphi,alpha);
 			arma::vec Fy(L,arma::fill::zeros);
 			arma::mat Fhpsi(L,k);
 			theta.row(0).zeros();
@@ -990,7 +1038,7 @@ arma::mat hpsi2theta(
 			arma::mat theta_ext(n+1,k,arma::fill::zeros);
 			theta_ext.row(0).fill(theta0);
 
-			double c1 = std::pow(1.-rho,static_cast<double>(L)*alpha);
+			double c1 = std::pow(1.-rho,static_cast<double>(L));
 			double c2 = -rho;
 			theta_ext.row(1) = -binom(L,1)*c2*theta_ext.row(0);
 			// theta.row(1) = c1*theta.row(0) - c2*theta0 + c3*hpsi.row(1)*y.at(0);
@@ -1011,17 +1059,26 @@ arma::mat hpsi2theta(
 			::Rf_error("Unsupported type of transfer function.");
 		}
 	}
+
+	if (arma::any(arma::vectorise(theta)<-EPS) || !theta.is_finite())
+	{
+		throw std::invalid_argument("hpsi2theta: non-positive or non-finite theta.");
+	}
 	return theta;
 }
 
 
-
 double loglike_obs(
-	const double y, 
-	const double lambda,
-	const unsigned int obs_code = 1,
-	const double delta_nb = 1.,
-	const bool return_log = false) {
+	const double &y, 
+	const double &lambda,
+	const unsigned int &obs_code = 1,
+	const double &delta_nb = 1.,
+	const bool &return_log = false) {
+	
+	if (!std::isfinite(y) || !std::isfinite(lambda))
+	{
+		throw std::invalid_argument("loglike_obs: y or lambda is not finite.");
+	}
 	
 	double loglike = -9999.;
 	double yabs = std::abs(y);
@@ -1037,9 +1094,25 @@ double loglike_obs(
 
         	sample variance exceeds the sample mean
         	*/
-        	loglike = R::lgammafn(yabs+delta_nb) - R::lgammafn(yabs+1.) - R::lgammafn(delta_nb) + delta_nb*(std::log(delta_nb)-std::log(delta_nb+labs)) + yabs*(std::log(labs)-std::log(delta_nb+labs));
+			loglike = R::lgammafn(yabs+delta_nb);
+			loglike -=R::lgammafn(yabs+1.);
+			loglike -= R::lgammafn(delta_nb);
+			double c1 = std::log(delta_nb);
+			double c2 = std::log(delta_nb+labs);
+			loglike += delta_nb*(c1-c2);
+			double c3 = std::log(labs);
+			double c4 = std::log(delta_nb+labs);
+			loglike += yabs*(c3 - c4);
+
+
 			if (!return_log) {
+				// loglike = std::exp(loglike);
 				loglike = std::exp(std::min(loglike,UPBND));
+				if (!std::isfinite(loglike))
+				{
+					std::cout << "loglike = " << loglike << std::endl;
+					throw std::invalid_argument("loglike_obs: non-finite probabilitties.");
+				}
 			}
 		}
 		break;

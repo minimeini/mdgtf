@@ -19,8 +19,6 @@ Rcpp::List predict_poisson(
     const arma::mat& theta_last, // p x nsample for MCS or HVB, or p x 1 for LBE
     const Rcpp::Nullable<Rcpp::NumericMatrix>& Ct_last = R_NilValue, // p x p for LBE
     const Rcpp::Nullable<Rcpp::NumericVector>& qProb_ = R_NilValue,
-    const Rcpp::NumericVector& ctanh = Rcpp::NumericVector::create(0.3,0,1),
-    const double alpha = 1.,
     const double rho = 0.9,
     const unsigned int L = 2,
     const double mu0 = 0.,
@@ -87,14 +85,14 @@ Rcpp::List predict_poisson(
 
         for (unsigned int t=n; t<npred; t++) {
             // state - theta, especially psi
-            theta_pred.col(t) = update_at(p,gain_code,trans_code,theta_pred.col(t-1),Gt,ctanh,alpha,ypred.at(t-1),rho);
+            theta_pred.col(t) = update_at(p,gain_code,trans_code,theta_pred.col(t-1),Gt,ypred.at(t-1),rho);
             theta_pred.at(0,t) += wt.at(t);
 
             // Link - phi
             psi_stored.at(t-n,i) = theta_pred.at(0,t);
 
             if (trans_code == 1 && L>0) { // Koyama
-                update_Ft_koyama(Ft, Fy, t, L_, ypred, Fphi, alpha);
+                update_Ft_koyama(Ft, Fy, t, L_, ypred, Fphi);
                 switch (gain_code) {
 				    case 0: // Ramp
 				    {

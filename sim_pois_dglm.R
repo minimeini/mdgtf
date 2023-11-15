@@ -18,9 +18,6 @@ sim_pois_dglm2 = function(
     W = 0.01, # Evolution variance
     L = 2, # length of nonzero transmission delay (koyama) or number of failures (solow)
     rho = 0.7, # parameter for negative binomial transmission delay
-    coef = c(0.2,0,5), # coefficients for the hyperbolic tangent gain function
-    alpha = 1, # power on the transmission delay
-    solow_alpha = 0, # 0 - raise AR coef to alpha; 1 - raise MA & AR coef to alpha
     delta_nb = 30., # rho_nb = 34.08792
     ci_coverage = 0.95,
     rng.seed = NULL,
@@ -39,9 +36,8 @@ sim_pois_dglm2 = function(
 
   c1 = 2*rho
   c2 = rho^2
-  c3 = (1-rho)^(L*alpha)
-  alpha2 = ifelse(solow_alpha==1,alpha,1)
-  
+  c3 = (1-rho)^(L)
+
   if (is.null(mu0)) {mu0 = 0.}
   if (is.null(theta0)) {
     set.seed(rng.seed)
@@ -86,12 +82,6 @@ sim_pois_dglm2 = function(
   } else if (gain_func=="softplus") {
     hpsi[hpsi>UPBND] = UPBND
     hpsi = log(1. + exp(hpsi))
-  } else if (gain_func=="tanh") {
-    hpsi = 0.5*coef[3] * (tanh(coef[1]*hpsi + coef[2]) + 1.)
-  } else if (gain_func=="logistic") {
-    hpsi = -coef[1]*hpsi + coef[1]*coef[2]
-    hpsi[hpsi>UPBND] = UPBND
-    hpsi = coef[3] / (exp(hpsi) + 1)
   } else {
     stop("Not supported gain function.")
   }
@@ -107,7 +97,7 @@ sim_pois_dglm2 = function(
   lambda = rep(0,ntotal)
   y = rep(0,ntotal)
   
-  Fphi = get_Fphi(L)^alpha
+  Fphi = get_Fphi(L)
   trans_func = tolower(trans_func)
   link_func = tolower(link_func)
   obs_dist = tolower(obs_dist)
@@ -177,8 +167,7 @@ sim_pois_dglm2 = function(
   if (get_discount) {
     delta = get_optimal_delta(y[1:n],model_code,delta_grid,
                               rho=rho,L=L,mu0=mu0,
-                              delta_nb=delta_nb,
-                              ctanh=coef)$delta_optim[1]
+                              delta_nb=delta_nb)$delta_optim[1]
   } else {
     delta = 0.95
   }
@@ -188,8 +177,7 @@ sim_pois_dglm2 = function(
                 mu0=mu0,theta0=theta0,psi0=psi0,
                 W=W,rho=rho,L=L,
                 delta_nb=delta_nb,
-                delta_lbe=delta,
-                ctanh=coef,alpha=alpha)
+                delta_lbe=delta)
   # pred = list(y=y[(n+1):ntotal],
   #             psi=psi[(n+1):ntotal],
   #             theta=theta[(n+2):(ntotal+1)],

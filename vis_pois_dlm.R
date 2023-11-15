@@ -47,12 +47,12 @@ plot_psi = function(sim_dat=NULL,
             "maroon", # LBA **
             "purple", # HVB **
             "darkturquoise", # MCMC
-            "black",
+            "black", # True
             "salmon", # VB
             "gold", # PL **
             "mediumaquamarine", # SMCS-FL **
             "cornflowerblue", # APF
-            "sandybrown", # SMVF-BF
+            "sandybrown", # SMCF-BF
             "royalblue") # SMCS-BS **
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
@@ -119,7 +119,7 @@ plot_psi = function(sim_dat=NULL,
           "VB","True","PL","SMCS-FL",
           "SMCS-BS","APF","SMCF-BF")) {
       psi_list[[i]] = psi2hpsi(
-        psi_list[[i]],GainCode,coef=opts$ctanh)
+        psi_list[[i]],GainCode)
     }
 
     
@@ -134,7 +134,6 @@ plot_psi = function(sim_dat=NULL,
                                         yadjust,
                                         TransferCode,
                                         opts$theta0,
-                                        opts$alpha,
                                         opts$L,opts$rho)
         lambda_list[[cnt]] = lambda_list[[cnt]] + opts$mu0
       }

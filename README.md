@@ -2,7 +2,10 @@
 
 ## Dependencies
 
-- C++ libraries: [Armadillo](https://arma.sourceforge.net) and [NLopt](https://nlopt.readthedocs.io/en/latest/).
+- C++11
+- Machine learning: MLpack
+- Linear algebra: [Armadillo](https://arma.sourceforge.net)
+- C++ libraries:  and [NLopt](https://nlopt.readthedocs.io/en/latest/).
 - R packages: RcppArmadillo, nloptr, EpiEstim
 
 ## Available Models
