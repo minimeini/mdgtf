@@ -608,9 +608,7 @@ Rcpp::List hva_poisson(
     const unsigned int nthin = 2,
     const double delta_nb = 1.,
     const double delta_discount = 0.95,
-    const bool summarize_return = false,
-    const bool verbose = false,
-    const bool debug = false) {
+    const bool summarize_return = false) {
 
 
     const unsigned int ntotal = nburnin + nthin*nsample + 1;
@@ -641,7 +639,7 @@ Rcpp::List hva_poisson(
     const unsigned int m = std::max(arma::as_scalar<double>(arma::accu(eta_select)), 1.);
 
     if (k > m) {
-        ::Rf_error("k cannot be greater than m, total number of unknowns.");
+        throw std::invalid_argument("k cannot be greater than m, total number of unknowns.");
     }
     /* ------ Define Global Parameters ------ */
 
@@ -1013,45 +1011,7 @@ Rcpp::List hva_poisson(
             tilde2eta(eta, eta_tilde, idx_select, m);
         }
 
-        // if (s==0) {
-        //     logp_new = arma::accu(logprior) + logp_y - logq;
-        // } else {
-        //     logp_old = logp_new;
-        //     logp_new = arma::accu(logprior) + logp_y - logq;
-        //     logratio = logp_new - logp_old;
-        //     if (std::log(R::runif(0.,1.)) >= logratio) { // reject the eta_tilde
-        //         logp_new = logp_old;
 
-        //         xi = xi_old;
-        //         eps = eps_old;
-
-		// 		curEg2_mu = oldEg2_mu;
-        //         curEdelta2_mu = oldEdelta2_mu;
-        //         mu = mu - Change_delta_mu;
-
-        //         if (m>1) {
-        //             curEg2_B = oldEg2_B; // mk x 1
-        //             curEdelta2_B = oldEdelta2_B; // mk x 1
-        //             B = B - arma::reshape(Change_delta_B,m,k);
-        //         }
-
-        //         curEg2_d = oldEg2_d;
-        //         curEdelta2_d = oldEdelta2_d;
-        //         d = d - Change_delta_d;
-
-        //         curEg2_tau = oldEg2_tau;
-        //         curEdelta2_tau = oldEdelta2_tau;
-        //         tau = tau - Change_delta_tau;
-        //         gamma = tau2gamma(tau);
-        //         eta = eta_old;
-        //         eta2tilde(eta_tilde,eta,idx_select,m);
-        //         nu = tYJ(eta_tilde,gamma); // recover nu
-
-		// 	} else {
-		// 		mh_accept += 1.;
-		// 	}
-
-        // }
 
 
         if (!std::isfinite(eta.at(0))) {
@@ -1085,22 +1045,25 @@ Rcpp::List hva_poisson(
             cnt_stored.at(idx_run) = cnt;
 		}
 
-        if (verbose) {
-			Rcout << "\rProgress: " << s << "/" << ntotal-1;
-		}
+		Rcout << "\rProgress: " << s << "/" << ntotal-1;
     }
 
-    if (verbose) {
-		Rcout << std::endl;
-	}
+	Rcout << std::endl;
 
     Rcpp::List output;
-    // output["mu"] = Rcpp::wrap(mu_stored);
-    // output["d"] = Rcpp::wrap(d_stored);
-    // output["gamma"] = Rcpp::wrap(gamma_stored);
+
     if (summarize_return) {
         arma::vec qProb = {0.025,0.5,0.975};
-        output["psi"] = Rcpp::wrap(arma::quantile(psi_stored,qProb,1)); // (n+1) x 3
+        arma::mat RR = arma::quantile(psi_stored,qProb,1);
+        output["psi"] = Rcpp::wrap(RR); // (n+1) x 3
+
+        // arma::mat hpsiR = psi2hpsi(RR, gain_code); // hpsi: p x N
+        // double theta0 = 0;
+        // arma::mat thetaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
+
+        // output["hpsi"] = Rcpp::wrap(hpsiR);
+        // output["theta"] = Rcpp::wrap(thetaR);
+
     } else {
         output["psi"] = Rcpp::wrap(psi_stored); // (n+1) x niter
     }

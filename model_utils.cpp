@@ -5,70 +5,6 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppArmadillo,nloptr,BH)]]
 
 
-/*
---------------------------
------- Related Code ------
---------------------------
-
-- `mcmc_disturbance_poisson.cpp`
-- `sim_pois_dglm.R`
-*/
-
-
-
-/*
-------------------------
------- Model Code ------
-------------------------
-
-0 - (KoyamaMax) Identity link    + log-normal transmission delay kernel        + ramp function (aka max(x,0)) on gain factor (psi)
-1 - (KoyamaExp) Identity link    + log-normal transmission delay kernel        + exponential function on gain factor
-2 - (SolowMax)  Identity link    + negative-binomial transmission delay kernel + ramp function on gain factor
-3 - (SolowExp)  Identity link    + negative-binomial transmission delay kernel + exponential function on gain factor
-4 - (KoyckMax)  Identity link    + exponential transmission delay kernel       + ramp function on gain factor
-5 - (KoyckExp)  Identity link    + exponential transmission delay kernel       + exponential function on gain factor
-6 - (KoyamaEye) Exponential link + log-normal transmission delay kernel        + identity function on gain factor
-7 - (SolowEye)  Exponential link + negative-binomial transmission delay kernel + identity function on gain factor
-8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
-*/
-
-/*
------- ModelCode = 0 -------
-----------------------------
------- Koyama's Model ------
-----------------------------
-
------- Discretized Hawkes Form ------
-<obs> y[t] | lambda[t] ~ Pois(lambda[t])
-<link> lambda[t] = phi[1] max(psi[t],0) y[t-1] + phi[2] max(psi[t-1],0) y[t-2] + ... + phi[L] max(psi[t-L+1],0) y[t-L]
-<state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
-
-
------- Dynamic Linear Model Form ------
-<obs> y[t] | lambda[t] = Ft(theta[t]), 
-    where Ft(theta[t]) = phi[1] y[t-1] max(theta[t,1],0) + ... + phi[L] y[t-L] max(theta[t,L],0)
-<Link> theta[t] = G theta[t-1] + Omega[t], 
-    where G = 1 0 ... 0 0
-              1 0 ... 0 0
-              . .     . .
-              .   .   . .
-              .     . . .
-              0 0 ... 1 0
-        
-    and Omega[t] = (omega[t],0,...,0) ~ N(0,W[t]), W[t][1,1] = W and 0 otherwise.
-
------------------------
------- Inference ------
------------------------
-
-1. [x] Linear Bayes Approximation with first order Taylor expansion
-2. [x] Linear Bayes Approximation with second order Taylor expansion >> doesn't exist because the Hessian will be exactly zero
-3. [x] MCMC Disturbance sampler
-4. [x] Sequential Monte Carlo filtering and smoothing
-5. [x] Vanila variational Bayes
-6. [x] Hybrid variational Bayes
-
-*/
 
 
 arma::uvec sample(
@@ -744,54 +680,6 @@ arma::mat psi2hpsi(
 	return hpsi;
 }
 
-// arma::vec psi2hpsi(
-// 	const arma::vec &psi,
-// 	const unsigned int gain_code)
-// {
-
-// 	arma::vec hpsi;
-
-// 	switch (gain_code)
-// 	{
-// 	case 0: // Ramp
-// 	{
-// 		hpsi = psi;
-// 		hpsi.elem(arma::find(psi < EPS)).fill(EPS);
-// 	}
-// 	break;
-// 	case 1: // Exponential
-// 	{
-// 		hpsi = psi;
-// 		hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
-// 		hpsi = arma::exp(hpsi);
-// 	}
-// 	break;
-// 	case 2: // Identity
-// 	{
-// 		hpsi = psi;
-// 	}
-// 	break;
-// 	case 3: // Softplus
-// 	{
-// 		arma::vec hpsi0 = psi;
-// 		hpsi0.elem(arma::find(hpsi0 > UPBND)).fill(UPBND);
-// 		arma::mat hpsi1 = arma::exp(hpsi0);
-// 		hpsi = arma::log(1. + hpsi1);
-// 	}
-// 	break;
-// 	default:
-// 	{
-// 		::Rf_error("Not supported gain function.");
-// 	}
-// 	}
-
-// 	if (arma::any(hpsi < EPS))
-// 	{
-// 		throw std::invalid_argument("psi2hpsi is not positive.");
-// 	}
-
-// 	return hpsi;
-// }
 
 
 double psi2hpsi(
@@ -924,6 +812,7 @@ double hpsi_deriv(
 
 	if (!std::isfinite(hpsi))
 	{
+		std::cout << "psi = " << psi << std::endl;
 		throw std::invalid_argument("hpsi_deriv<double>: non-finite output");
 	}
 

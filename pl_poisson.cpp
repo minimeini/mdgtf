@@ -5,37 +5,6 @@ using namespace Rcpp;
 
 
 
-/*
----- Method ----
-- Monte Carlo Smoothing with static parameter W known
-- B-lag fixed-lag smoother (Anderson and Moore 1979)
-- Using the DLM formulation
-- Reference: 
-    Kitagawa and Sato at Ch 9.3.4 of Doucet et al.
-    Check out Algorithm step 2-4L for the explanation of B-lag fixed-lag smoother
-- Note: 
-    1. Initial version is copied from the `bf_pois_koyama_exp`
-    2. This is intended to be the Rcpp version of `hawkes_state_space.R`
-    3. The difference is that the R version the states are backshifted L times, where L is the maximum transmission delay to be considered.
-        To make this a Monte Carlo smoothing, we need to resample the states n times, where n is the total number of temporal observations.
-
----- Algorithm ----
-
-1. Generate a random number psi[0](j) ~ an initial distribution.
-2. Repeat the following steps for t = 1,...,n:
-    2-1. Generate a random number omega[t] ~ Normal(0,W)
-
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1])
-<state> psi[t] = psi[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: psi[1:n]
-Known parameters: W, phi[1:L]
-Kwg: Identity link, exp(psi) state space
-*/
 
 
 void init_Ft(
@@ -189,12 +158,19 @@ Rcpp::List mcs_poisson(
     output["psi"] = Rcpp::wrap(RR.t());
     output["psi_all"] = Rcpp::wrap(psi_all);
 
-    output["theta"] = Rcpp::wrap(theta_stored); // p x N
+    // arma::mat hpsiR = psi2hpsi(RR, gain_code); // hpsi: p x N
+    // double theta0 = 0;
+    // arma::mat thetaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
+
+    // output["hpsi"] = Rcpp::wrap(hpsiR);
+    // output["theta"] = Rcpp::wrap(thetaR);
+
+    // output["theta"] = Rcpp::wrap(t÷heta_stored); // p x N
     output["Wt"] = Rcpp::wrap(Wt);
 
     output["Meff"] = Rcpp::wrap(Meff);
     output["resample_status"] = Rcpp::wrap(resample_status);
-    output["weights"] = Rcpp::wrap(weights_stored);
+    // output["weights"] = Rcpp::wrap(weights_stored);
     output["marg_y"] = Rcpp::wrap(pmarg_y);
     
     return output;
@@ -248,7 +224,14 @@ void smc_propagate_bootstrap(
     { // Use discount factor if W is not given
         arma::rowvec psi = Theta_old.row(0);
         double tmp = arma::var(psi);
-        wt = tmp;
+        if (tmp > EPS)
+        {
+            wt = tmp;
+        }
+        else
+        {
+            wt = 1.;
+        }
         // Wsqrt = std::sqrt(Wt.at(t));
         if (use_default_val)
         {
@@ -260,6 +243,10 @@ void smc_propagate_bootstrap(
         }
     }
     double Wsqrt = std::sqrt(wt);
+    if (wt < EPS)
+    {
+        throw std::invalid_argument("smc_propagate_bootstrap: variance wt closed to 0.");
+    }
 
     for (unsigned int i = 0; i < N; i++)
     {
@@ -515,11 +502,16 @@ Rcpp::List ffbs_poisson(
     if (smoothing) {
         for (unsigned int t = nt; t > 0; t--)
         {
-            arma::vec w(N);          double Wsqrt = std::sqrt(Wt.at(t-1));
+            arma::vec w(N);          
+            double Wsqrt = std::sqrt(Wt.at(t-1));
             for (unsigned int i=0; i<N; i++) {
                 w = -0.5*arma::pow((psi_smooth.at(i,t)-psi_filter.col(t-1))/Wsqrt,2);
                 if (w.has_nan() || w.has_inf()) {
                     w.brief_print();
+                    std::cout << "psi_smooth.at(i,t)=" << psi_smooth.at(i,t);
+                    std::cout << " psi_filter.col(t-1)=" << std::endl;
+                    psi_filter.col(t-1).brief_print();
+                    std::cout << "Wsqrt=" << Wsqrt << std::endl;
                     ::Rf_error("step 1");
                 }
                 w.elem(arma::find(w>UPBND)).fill(UPBND);
@@ -553,34 +545,34 @@ Rcpp::List ffbs_poisson(
 
     Rcpp::List output;
 
-    arma::mat R(nt + 1, 3); // quantiles
     if (smoothing) {
-        R = arma::quantile(psi_smooth,Rcpp::as<arma::vec>(qProb),0); // 3 columns, smoothed psi
+        arma::mat R = arma::quantile(psi_smooth,Rcpp::as<arma::vec>(qProb),0); // 3 columns, smoothed psi
         output["psi"] = Rcpp::wrap(R.t());
-        output["psi_all"] = Rcpp::wrap(psi_smooth); 
-    } else {
-        R = arma::quantile(psi_filter,Rcpp::as<arma::vec>(qProb),0);
-        output["psi"] = Rcpp::wrap(R.t());
-    }
-    output["psi_filter_all"] = Rcpp::wrap(psi_filter);
+        // output["psi_all"] = Rcpp::wrap(psi_smooth);
+
+        // arma::mat hpsiR = psi2hpsi(R, gain_code); // hpsi: p x N
+        // double theta0 = 0;
+        // arma::mat thetaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
+
+        // output["hpsi"] = Rcpp::wrap(hpsiR);
+        // output["theta"] = Rcpp::wrap(thetaR);
+    } 
+
+    arma::mat R2 = arma::quantile(psi_filter, Rcpp::as<arma::vec>(qProb), 0);
+    output["psi_filter"] = Rcpp::wrap(R2.t());
+
+    // output["psi_filter_all"] = Rcpp::wrap(psi_filter);
     output["Meff"] = Rcpp::wrap(Meff);
     output["resample_status"] = Rcpp::wrap(resample_status);
-    output["weights"] = Rcpp::wrap(weights_stored);
+    // output["weights"] = Rcpp::wrap(weights_stored);
     output["Wt"] = Rcpp::wrap(Wt);
 
-    double log_marg_lik = 0.;
-    // for (unsigned int t=npara; t<(n+1); t++) {
-    //     log_marg_lik += std::log(std::max(w_stored.at(t),1.e-32));
-    // }
-    output["log_marg_lik"] = log_marg_lik;
-    // output["marg_lik"] = Rcpp::wrap(w_stored);
+
 
     // add RMSE and MAE between lambda[t] and y[t]
-    arma::vec hpsiR = psi2hpsi(arma::vectorise(R.row(1)),model_code.at(3)); // hpsi: p x N
-    double theta0 = 0;
-    arma::vec lambdaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
-    output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(lambdaR.tail(nt) - Y.tail(nt), 2.0))));
-    output["mae"] = arma::as_scalar(arma::mean(arma::abs(lambdaR.tail(nt) - Y.tail(nt))));
+    
+    // output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(thetaR.tail(nt) - Y.tail(nt), 2.0))));
+    // output["mae"] = arma::as_scalar(arma::mean(arma::abs(thetaR.tail(nt) - Y.tail(nt))));
 
     return output;
 }

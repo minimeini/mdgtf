@@ -32,6 +32,7 @@ plot_psi = function(sim_dat=NULL,
                     plot_hpsi=FALSE, # if FALSE, plot psi by default
                     plot_lambda=FALSE,
                     npara=0,
+                    fontsize=20,
                     max_Rt=2.5,
                     max_y=NULL,
                     time_label=NULL) {
@@ -49,11 +50,11 @@ plot_psi = function(sim_dat=NULL,
             "darkturquoise", # MCMC
             "black", # True
             "salmon", # VB
-            "gold", # PL **
-            "mediumaquamarine", # SMCS-FL **
-            "cornflowerblue", # APF
+            "royalblue", # PL **
+            "cornflowerblue", # SMCS-FL **
+            "gold", # APF
             "sandybrown", # SMCF-BF
-            "royalblue") # SMCS-BS **
+            "mediumaquamarine") # SMCS-BS **
   
   if (!is.null(sim_dat)&&("y" %in% names(sim_dat))) {
     y = sim_dat$y
@@ -218,11 +219,11 @@ plot_psi = function(sim_dat=NULL,
   p = ggplot(psi_list,aes(x=time,y=est,group=method)) +
     geom_line(aes(color=method),na.rm=TRUE) +
     geom_ribbon(aes(ymin=lobnd,ymax=hibnd,fill=method),
-                alpha=0.2,na.rm=TRUE) +
+                alpha=0.3,na.rm=TRUE) +
     scale_color_manual(name="Method",breaks=methods,values=cols) +
     scale_fill_manual(name="Method",breaks=methods,values=cols) +
-    theme_light() + xlab("Time") +
-    theme(text=element_text(size=20),
+    theme_minimal() + xlab("Time") +
+    theme(text=element_text(size=fontsize),
           legend.position="bottom") +
     guides(colour = guide_legend(nrow = 2))
   
@@ -250,11 +251,11 @@ plot_psi = function(sim_dat=NULL,
     p2 = ggplot(lambda_list,aes(x=time,y=est,group=method)) +
       geom_line(aes(color=method),na.rm=TRUE) +
       geom_ribbon(aes(ymin=lobnd,ymax=hibnd,fill=method),
-                  alpha=0.2,na.rm=TRUE) +
+                  alpha=0.3,na.rm=TRUE) +
       scale_color_manual(name="Method",breaks=methods,values=cols) +
       scale_fill_manual(name="Method",breaks=methods,values=cols) +
-      theme_light() + xlab("Time") + ylab(expression(lambda[t])) +
-      theme(text=element_text(size=20),
+      theme_minimal() + xlab("Time") + ylab(expression(lambda[t])) +
+      theme(text=element_text(size=fontsize),
             legend.position = "bottom") +
       geom_point(aes(x=time,y=y),
                  data=data.frame(

@@ -13,21 +13,7 @@
 
 
 
-/*
-------------------------
------- Model Code ------
-------------------------
 
-0 - (KoyamaMax) Identity link    + log-normal transmission delay kernel        + ramp function (aka max(x,0)) on gain factor (psi)
-1 - (KoyamaExp) Identity link    + log-normal transmission delay kernel        + exponential function on gain factor
-2 - (SolowMax)  Identity link    + negative-binomial transmission delay kernel + ramp function on gain factor
-3 - (SolowExp)  Identity link    + negative-binomial transmission delay kernel + exponential function on gain factor
-4 - (KoyckMax)  Identity link    + exponential transmission delay kernel       + ramp function on gain factor
-5 - (KoyckExp)  Identity link    + exponential transmission delay kernel       + exponential function on gain factor
-6 - (KoyamaEye) Exponential link + log-normal transmission delay kernel        + identity function on gain factor
-7 - (SolowEye)  Exponential link + negative-binomial transmission delay kernel + identity function on gain factor
-8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
-*/
 
 /**
  * Calculate expected state evolution of time (t+1), given D[t],
@@ -163,6 +149,7 @@ Rcpp::List lbe_poisson(
 	const double delta_nb,
 	const double ci_coverage,
 	const unsigned int npara,
+	const double theta0_upbnd,
 	const bool summarize_return,
 	const bool debug);
 

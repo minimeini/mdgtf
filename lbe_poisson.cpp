@@ -16,175 +16,6 @@ using namespace Rcpp;
 */
 
 
-// arma::mat update_at2(
-// 	const unsigned int p,
-// 	const unsigned int gain_code,
-// 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-// 	const arma::mat& mt, // p x N, mt = (psi[t], theta[t], theta[t-1])
-// 	const arma::mat& Gt, // p x p
-// 	const double y = NA_REAL, 
-// 	const double rho = NA_REAL) {
-	
-// 	const unsigned int N = mt.n_cols;
-// 	arma::mat at(p,N,arma::fill::zeros);
-// 	arma::rowvec hpsi;
-// 	if (trans_code != 1) {
-// 		hpsi = psi2hpsi(mt.row(0),gain_code); // 1 x N
-// 	}
-// 	double r = p - 1.;
-
-// 	switch (trans_code) {
-// 		case 0: // Koyck
-// 		{
-//             at.row(0) = mt.row(0); // psi[t]
-// 			at.row(1) = y * hpsi;
-// 			at.row(1) += rho*mt.row(1);
-// 		}
-// 		break;
-// 		case 1: // Koyama
-// 		{
-// 			at = Gt * mt;
-// 		}
-// 		break;
-// 		case 2: // Solow - Buggy
-// 		{
-// 			at.row(0) = mt.row(0);
-
-// 			double tmp1 = std::pow(1. - rho, r);
-// 			tmp1 *= std::abs(y);
-// 			arma::vec coef0 = arma::vectorise(tmp1 * hpsi); //N x 1
-// 			arma::vec coef = get_solow_coef(rho,p-1); // ((p-1)x1)
-// 			arma::vec theta_t0 = arma::vectorise(coef.t() * mt.rows(1,p-1)); // (1 x (p-1)) x ((p-1) x N) = 1 x N
-// 			if (theta_t0.max() > EPS)
-// 			{
-// 				theta_t0.clamp(EPS, theta_t0.max());
-// 			}
-// 			else
-// 			{
-// 				theta_t0.zeros();
-// 			}
-			
-
-// 			arma::vec theta_t = theta_t0 + coef0;
-
-// 			at.row(1) = theta_t.t();
-// 			at.rows(2,p-1) = mt.rows(1,p-2);
-// 			// double coef1 = std::pow(1. - rho, static_cast<double>(r));
-// 			// double coef2 = -rho;
-
-// 			// at.row(0) = mt.row(0); // psi[t]
-// 			// arma::vec tmp = coef1 * y * hpsi -binom(r, 1) * coef2 *mt.row(1);
-
-// 			// for (unsigned int k=2; k<p; k++) {
-// 			// 	coef2 *= -rho;
-// 			// 	tmp -= binom(r,k)*coef2*mt.row(k);
-// 			// 	at.row(k) = mt.row(k-1);
-// 			// }
-// 			// if (tmp.max()>EPS)
-// 			// {
-// 			// 	tmp.clamp(EPS,tmp.max());
-// 			// }
-
-
-// 			// arma::mat tmp = at.rows(1,p-1);
-// 			// if (arma::any(arma::vectorise(tmp) < -EPS))
-// 			// {
-// 			// 	throw std::invalid_argument("update_at: negative state update in solow");
-// 			// }
-// 		}
-// 		break;
-// 		case 3: // Vanilla
-// 		{
-// 			at = Gt * mt;
-// 		}
-// 		break;
-// 		default:
-// 		{
-// 			::Rf_error("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
-// 		}
-// 	}
-
-
-// 	return at;
-// }
-
-// //' @export
-// // [[Rcpp::export]]
-// arma::vec update_at(
-// 	const unsigned int p,
-// 	const unsigned int gain_code,
-// 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-// 	const arma::vec &mt,		   // p x 1, mt = (psi[t], theta[t], theta[t-1])
-// 	const arma::mat &Gt,		   // p x p
-// 	const double y = NA_REAL,
-// 	const double rho = NA_REAL)
-// {
-
-// 	arma::vec at(p, arma::fill::zeros);
-// 	double hpsi = 0.;
-// 	if (trans_code != 1)
-// 	{
-// 		hpsi = psi2hpsi(mt.at(0), gain_code); // 1 x N
-// 	}
-// 	double r = p - 1.;
-
-// 	switch (trans_code)
-// 	{
-// 	case 0: // Koyck
-// 	{
-// 		at.at(0) = mt.at(0); // psi[t]
-// 		at.at(1) = y * hpsi;
-// 		at.at(1) += rho * mt.at(1);
-// 	}
-// 	break;
-// 	case 1: // Koyama
-// 	{
-// 		at = Gt * mt;
-// 	}
-// 	break;
-// 	case 2: // Solow - Buggy
-// 	{
-// 		arma::mat Gast(p, p, arma::fill::zeros);
-// 		Gast.at(0, 0) = 1.;
-// 		for (unsigned int i = 1; i < r; i++)
-// 		{
-// 			Gast.at(i + 1, i) = 1.;
-// 		}
-
-// 		double tmp1 = std::pow(1. - rho, r);
-// 		Gast.at(1, 0) = hpsi * y * tmp1;
-
-// 		for (unsigned int i=1; i < p; i++)
-// 		{
-// 			double c1 = std::pow(-1.,static_cast<double>(i));
-// 			double c2 = binom(static_cast<double>(r),static_cast<double>(i));
-// 			double c3 = std::pow(rho,static_cast<double>(i));
-// 			Gast.at(1,i) = - c1;
-// 			Gast.at(1,i) *= c2;
-// 			Gast.at(1,i) *= c3;
-			
-// 		}
-
-// 		arma::vec old_vec(mt);
-// 		old_vec.at(0) = 1.;
-// 		at = Gast * old_vec;
-// 	}
-// 	break;
-// 	case 3: // Vanilla
-// 	{
-// 		at = Gt * mt;
-// 	}
-// 	break;
-// 	default:
-// 	{
-// 		::Rf_error("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
-// 	}
-// 	}
-
-
-// 	return at;
-// }
-
 arma::mat update_at(
 	const unsigned int p,
 	const unsigned int gain_code,
@@ -512,8 +343,7 @@ void forwardFilter(
 
 		} else if (link_code == 0 && obs_code == 0) {
 			// Negative-binomial DLM with Identity Link
-			// betat.at(t) = (mu0+ft)*(mu0+ft+delta_nb)/Qt + 2.;
-			// alphat.at(t) = (mu0+ft)/delta_nb * (betat.at(t) - 1.);
+
 			betat.at(t) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
 			alphat.at(t) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(t)-1.));
 			ft_ast = delta_nb*(alphat.at(t)+Y.at(t))/(betat.at(t)+delta_nb-1.) - mu0;
@@ -595,9 +425,7 @@ void backwardSmoother(
 				ht_prev = ht_cur;
 				Ht_prev = Ht_cur;
 			} catch (...) {
-				// Rcout << "t=" << t << std::endl;
-				// Rcout << "W=" << W << std::endl;
-				// Rcout << "R[t+1]=" << Rt.slice(t+1) << std::endl;
+
 				if (!R_IsNA(delta)) {
 					ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1); 
 					Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
@@ -645,10 +473,7 @@ void backwardSmoother(
 				Ht.at(0) = Ht_cur.at(0,0);
 			}
 			
-			// Rcout << "t=" << 0 << std::endl;
-			// Rcout << "W=" << W << std::endl;
-			// Rcout << "R[t+1]=" << Rt.slice(1) << std::endl;
-			// ::Rf_error("Inversion of R[t+1] failed.");
+
 		}
 	}
 	
@@ -757,6 +582,7 @@ Rcpp::List lbe_poisson(
 	const double delta_nb = 10.,
 	const double ci_coverage = 0.95,
 	const unsigned int npara = 20,
+	const double theta0_upbnd = 2.,
     const bool summarize_return = false,
 	const bool debug = false) { 
 
@@ -764,8 +590,6 @@ Rcpp::List lbe_poisson(
 	if (R_IsNA(delta) && R_IsNA(W)) {
 		::Rf_error("Either evolution error W or discount factor delta must be provided.");
 	}
-
-	const double critval = R::qnorm(1.-0.5*(1.-ci_coverage),0.,1.,true,false);
 
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
@@ -781,12 +605,10 @@ Rcpp::List lbe_poisson(
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y;
-	arma::mat mt(p,npad,arma::fill::zeros);
+	
 	arma::mat at(p,npad,arma::fill::zeros);
-	arma::cube Ct(p,p,npad); 
-	arma::mat Ip(p,p,arma::fill::eye);
-	Ip *= 1.;
-	Ct.each_slice() = Ip;
+	
+	
 	arma::cube Rt(p,p,npad);
 	arma::vec alphat(npad,arma::fill::zeros);
 	arma::vec betat(npad,arma::fill::zeros);
@@ -817,10 +639,6 @@ Rcpp::List lbe_poisson(
 				Gt0.at(k,k-1) = 1.;
 			}
 
-			// Gt0.at(1,1) = 2.*rho;
-			// Gt0.at(1,2) = -rho*rho;
-			// Gt0.at(2,1) = 1.;
-			// // Rcout << Gt0 << std::endl;
 		}
 		break;
 		case 3: // Vanilla
@@ -837,13 +655,21 @@ Rcpp::List lbe_poisson(
 	for (unsigned int t=0; t<npad; t++) {
 		Gt.slice(t) = Gt0;
 	}
+
+	arma::mat mt(p, npad, arma::fill::zeros);
 	if (!m0_prior.isNull()) {
 		arma::vec m00 = Rcpp::as<arma::vec>(m0_prior);
 		mt.at(0,0) = m00.at(0);
 	}
+
+	arma::cube Ct(p, p, npad);
+	arma::mat Ip(p, p, arma::fill::eye);
+	Ip *= std::pow(theta0_upbnd * 0.5,2.);
+	Ct.each_slice() = Ip;
 	if (!C0_prior.isNull()) {
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
+	
 
     
 	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L_,rho,mu0,W,delta,delta_nb,debug);
@@ -852,6 +678,7 @@ Rcpp::List lbe_poisson(
 	
 
 	Rcpp::List output;
+	const double critval = R::qnorm(1. - 0.5 * (1. - ci_coverage), 0., 1., true, false);
 	if (summarize_return) {
 		arma::mat psi(npad,3);
 		psi.col(0) = ht - critval*arma::sqrt(arma::abs(Ht));
@@ -881,6 +708,7 @@ Rcpp::List lbe_poisson(
 	arma::vec hpsiR = psi2hpsi(ht,model_code.at(3)); // hpsi: p x N
 	double theta0 = 0;
     arma::vec lambdaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
+	output["theta"] = Rcpp::wrap(lambdaR);
     output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(lambdaR.tail(n-npara) - Y.tail(n-npara),2.0))));
     output["mae"] = arma::as_scalar(arma::mean(arma::abs(lambdaR.tail(n-npara) - Y.tail(n-npara))));
 
