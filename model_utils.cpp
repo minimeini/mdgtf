@@ -4,8 +4,35 @@ using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr,BH)]]
 
+void bound_check(
+	const arma::mat &input,
+	const bool &check_zero = false,
+	const bool &check_negative = false)
+{
+	bool is_infinite = !input.is_finite();
+	if (is_infinite)
+	{
+		throw std::invalid_argument("bound_check: infinite.");
+	}
+	if (check_zero)
+	{
+		bool is_zero = input.is_zero();
+		if (is_zero)
+		{
+			throw std::invalid_argument("bound_check: zeros");
+		}
+	}
+	if (check_negative)
+	{
+		bool is_negative = arma::any(arma::vectorise(input) < EPS);
+		if (is_negative)
+		{
+			throw std::invalid_argument("bound_check: negative");
+		}
+	}
 
-
+	return;
+}
 
 arma::uvec sample(
 	const unsigned int n, 
@@ -50,7 +77,7 @@ void init_by_trans(
 		case 2: // Solow
 		{
 			p = L + 1;
-			L_ = L;
+			L_ = 0;
 		}
 		break;
 		case 3: // Vanilla
@@ -73,7 +100,6 @@ void init_by_trans(
 	unsigned int& L_,
 	arma::vec& Ft,
     arma::vec& Fphi,
-    arma::mat& Gt,
 	const unsigned int trans_code,
 	const unsigned int L = 2) {
 
@@ -86,7 +112,6 @@ void init_by_trans(
 			Ft.set_size(p); Ft.zeros();
 			Ft.at(1) = 1.;
 			Fphi.set_size(p); Fphi.zeros();
-			Gt.set_size(p,p); Gt.zeros();
 		}
 		break;
 		case 1: // Koyama
@@ -96,20 +121,16 @@ void init_by_trans(
 
 			Ft.set_size(p); Ft.zeros();
 			Fphi = get_Fphi(p);
-			Gt.set_size(p,p); Gt.zeros();
-			Gt.at(0,0) = 1.;
-			Gt.diag(-1).ones();
 		}
 		break;
 		case 2: // Solow
 		{
 			p = L + 1;
-			L_ = L;
+			L_ = 0;
 
 			Ft.set_size(p); Ft.zeros();
 			Ft.at(1) = 1.;
 			Fphi.set_size(p); Fphi.zeros();
-			Gt.set_size(p,p); Gt.zeros();
 		}
 		break;
 		case 3: // Vanilla
@@ -119,7 +140,6 @@ void init_by_trans(
 			
 			Ft.set_size(p); Ft.at(0) = 1.;
 			Fphi.set_size(p); Fphi.zeros();
-			Gt.set_size(p,p); Gt.zeros();
 		}
 		break;
 		default:
@@ -129,6 +149,136 @@ void init_by_trans(
 	}
 }
 
+void init_Gt(
+	arma::mat &Gt,
+	const double &rho,
+	const unsigned int &p,
+	const unsigned int &trans_code)
+{
+	Gt.set_size(p,p);
+	Gt.zeros();
+	const unsigned int r = p - 1;
+	Gt.at(0, 0) = 1.;
+
+	switch (trans_code)
+	{
+	case 0: // Koyck
+	{
+		Gt.at(1, 1) = rho;
+	}
+	break;
+	case 1: // Koyama
+	{
+		Gt.diag(-1).ones();
+	}
+	break;
+	case 2: // Solow - Checked. Correct.
+	{
+		// double coef2 = -rho;
+		// Gt0.at(1, 1) = -binom(L, 1) * coef2;
+		// for (unsigned int k = 2; k < p; k++)
+		// {
+		// 	coef2 *= -rho;
+		// 	Gt0.at(1, k) = -binom(L, k) * coef2;
+		// 	Gt0.at(k, k - 1) = 1.;
+		// }
+		
+		for (unsigned int i = 1; i < r; i++)
+		{
+			Gt.at(i + 1, i) = 1.;
+		}
+
+		double tmp1 = std::pow(1. - rho, r);
+		for (unsigned int i = 1; i < p; i++)
+		{
+			double c1 = std::pow(-1., static_cast<double>(i));
+			double c2 = binom(static_cast<double>(r), static_cast<double>(i));
+			double c3 = std::pow(rho, static_cast<double>(i));
+			Gt.at(1, i) = -c1;
+			Gt.at(1, i) *= c2;
+			Gt.at(1, i) *= c3;
+		}
+	}
+	break;
+	case 3: // Vanilla
+	{
+		Gt.at(0, 0) = rho;
+	}
+	break;
+	default:
+	{
+		throw std::invalid_argument("Not supported transfer function.\n");
+	}
+	}
+
+	return;
+}
+
+void init_Gt(
+	arma::cube &Gt, 
+	const double &rho, 
+	const unsigned int &p,
+	const unsigned int &trans_code)
+{
+	const unsigned int r = p - 1;
+	const unsigned int npad = Gt.n_slices;
+
+	for (unsigned int t = 0; t < npad; t++)
+	{
+		Gt.slice(t).zeros();
+		Gt.at(0, 0, t) = 1.;
+		switch (trans_code)
+		{
+		case 0: // Koyck
+		{
+			Gt.at(1, 1, t) = rho;
+		}
+		break;
+		case 1: // Koyama
+		{
+			Gt.slice(t).diag(-1).ones();
+		}
+		break;
+		case 2: // Solow - Checked. Correct.
+		{
+			// double coef2 = -rho;
+			// Gt0.at(1, 1) = -binom(L, 1) * coef2;
+			// for (unsigned int k = 2; k < p; k++)
+			// {
+			// 	coef2 *= -rho;
+			// 	Gt0.at(1, k) = -binom(L, k) * coef2;
+			// 	Gt0.at(k, k - 1) = 1.;
+			// }
+			for (unsigned int i = 1; i < r; i++)
+			{
+				Gt.at(i + 1, i, t) = 1.;
+			}
+
+			double tmp1 = std::pow(1. - rho, r);
+
+			for (unsigned int i = 1; i < p; i++)
+			{
+				double c1 = std::pow(-1., static_cast<double>(i));
+				double c2 = binom(static_cast<double>(r), static_cast<double>(i));
+				double c3 = std::pow(rho, static_cast<double>(i));
+				Gt.at(1, i, t) = -c1;
+				Gt.at(1, i, t) *= c2;
+				Gt.at(1, i, t) *= c3;
+			}
+		}
+		break;
+		case 3: // Vanilla
+		{
+			Gt.at(0, 0, t) = rho;
+		}
+		break;
+		default:
+		{
+			throw std::invalid_argument("Not supported transfer function.\n");
+		}
+		}
+	}
+}
 
 
 /*
@@ -629,6 +779,11 @@ double test_postW_gamma(
 arma::mat psi2hpsi(
 	const arma::mat& psi,
 	const unsigned int gain_code) {
+
+	if (!psi.is_finite())
+	{
+		throw std::invalid_argument("psi2hpsi<mat>: Input psi is not finite.");
+	}
 	
 	arma::mat hpsi;
 	hpsi.copy_size(psi);
@@ -671,6 +826,7 @@ arma::mat psi2hpsi(
 
 	if (has_negative || has_nonfinite)
 	{
+		hpsi.print();
 		throw std::invalid_argument("psi2hpsi<mat>: hpsi is not positive or not finite.");
 	} else if (arma::any(arma::vectorise(hpsi) < EPS))
 	{

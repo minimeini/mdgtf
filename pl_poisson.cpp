@@ -45,7 +45,6 @@ Rcpp::List mcs_poisson(
     const double delta_discount = 0.95)
 {
 
-    const unsigned int Bw = B;
     const unsigned int nt = Y.n_elem; // number of observations
     const double N_ = static_cast<double>(N);
     arma::vec ypad(nt + 1, arma::fill::zeros);
@@ -66,7 +65,8 @@ Rcpp::List mcs_poisson(
 	unsigned int p, L_;
 	arma::vec Ft, Fphi;
     arma::mat Gt;
-    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+    init_by_trans(p,L_,Ft,Fphi,trans_code,L);
+    init_Gt(Gt,rho,p,trans_code);
 
     /* Dimension of state space depends on type of transfer functions */
 
@@ -132,8 +132,8 @@ Rcpp::List mcs_poisson(
         arma::mat Theta_new(p, N, arma::fill::zeros);
 
         smc_propagate_bootstrap(
-            Theta_new, weights, wt,
-            y_new, y_old, Theta_old, Gt, Ft, model_code,
+            Theta_new, weights, wt, Gt,
+            y_new, y_old, Theta_old, Ft, model_code,
             mu0, rho, delta_nb, delta_discount, p, N,
             use_discount, use_default_val, t);
 
@@ -190,11 +190,11 @@ void smc_propagate_bootstrap(
     arma::mat &Theta_new, // p x N
     arma::vec &weights,   // N x 1
     double &wt,
+    arma::mat &Gt, 
     const double &y_new,
     const double &y_old,        // (n+1) x 1, the observed response
     const arma::mat &Theta_old, // p x N
-    const arma::mat &Gt,         // no need to update Gt
-    const arma::vec &Ft,        // must be already updated if used
+    const arma::vec &Ft, // must be already updated if used
     const arma::uvec &model_code,
     const double mu0,
     const double rho,
@@ -242,20 +242,22 @@ void smc_propagate_bootstrap(
             wt *= 1. / 0.99 - 1.;
         }
     }
-    double Wsqrt = std::sqrt(wt);
+    double Wsqrt = std::sqrt(wt) + EPS;
     if (wt < EPS)
     {
+        std::cout << "t=" << t <<" wt=" << wt << std::endl;
         throw std::invalid_argument("smc_propagate_bootstrap: variance wt closed to 0.");
     }
 
     for (unsigned int i = 0; i < N; i++)
     {
         arma::vec theta_old = Theta_old.col(i); // p x 1
+        // update_Gt(Gt, gain_code, trans_code, theta_old, y_old, rho);
         arma::mat theta_new = update_at(
-            p, gain_code, trans_code, theta_old, Gt, y_old, rho, t);
+            Gt, p, gain_code, trans_code, theta_old, y_old, rho, t);
 
         double omega_new = R::rnorm(0., Wsqrt);
-        if (t < 2)
+        if (t < p)
         {
             theta_new.at(0) += std::abs(omega_new);
         }
@@ -263,6 +265,7 @@ void smc_propagate_bootstrap(
         {
             theta_new.at(0) += omega_new;
         }
+
         
         Theta_new.col(i) = theta_new;
     }
@@ -399,7 +402,8 @@ Rcpp::List ffbs_poisson(
 	unsigned int p, L_;
 	arma::vec Ft, Fphi;
     arma::mat Gt;
-    init_by_trans(p,L_,Ft,Fphi,Gt,trans_code,L);
+    init_by_trans(p,L_,Ft,Fphi,trans_code,L);
+    init_Gt(Gt, rho, p, trans_code);
 
     /* Dimension of state space depends on type of transfer functions */
 
@@ -463,8 +467,8 @@ Rcpp::List ffbs_poisson(
         arma::mat Theta_new(p, N, arma::fill::zeros);
 
         smc_propagate_bootstrap(
-            Theta_new, weights, wt,
-            y_new, y_old, Theta_old, Gt, Ft, model_code,
+            Theta_new, weights, wt, Gt,
+            y_new, y_old, Theta_old, Ft, model_code,
             mu0, rho, delta_nb, delta_discount, p, N,
             use_discount, use_default_val, t);
 
@@ -512,13 +516,13 @@ Rcpp::List ffbs_poisson(
                     std::cout << " psi_filter.col(t-1)=" << std::endl;
                     psi_filter.col(t-1).brief_print();
                     std::cout << "Wsqrt=" << Wsqrt << std::endl;
-                    ::Rf_error("step 1");
+                     throw std::invalid_argument("step 1");
                 }
                 w.elem(arma::find(w>UPBND)).fill(UPBND);
                 w = arma::exp(w);
                 if (w.has_nan() || w.has_inf()) {
                     w.brief_print();
-                    ::Rf_error("step 2");
+                     throw std::invalid_argument("step 2");
                 }
                 if (arma::accu(w)<EPS) {
                     w.ones();
@@ -577,27 +581,23 @@ Rcpp::List ffbs_poisson(
     return output;
 }
 
-
-
-
-
-
 void mcs_poisson(
-    arma::mat& R, // (n+1) x 2, (psi,theta)
-    arma::vec& pmarg_y, // n x 1, marginal likelihood of y
-    const arma::vec& ypad, // (n+1) x 1, the observed response
-    const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
-	const double W,
+    arma::mat &R,       // (n+1) x 2, (psi,theta)
+    arma::vec &pmarg_y, // n x 1, marginal likelihood of y
+    double &W,
+    const arma::vec &ypad,        // (n+1) x 1, the observed response
+    const arma::uvec &model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
     const double rho,
     const unsigned int L, // number of lags
     const double mu0,
     const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
-	const unsigned int N, // number of particles
-    const arma::vec& m0,
-	const arma::mat& C0,
+    const unsigned int N, // number of particles
+    const arma::vec &m0,
+    const arma::mat &C0,
     const double theta0_upbnd = 2.,
     const double delta_nb = 1., // 0: negative binomial DLM; 1: poisson DLM
-    const double delta_discount = 0.95){
+    const double delta_discount = 0.95)
+{
 
     const unsigned int nt = ypad.n_elem - 1; // number of observations
     const double N_ = static_cast<double>(N);
@@ -610,12 +610,13 @@ void mcs_poisson(
     unsigned int p, L_;
     arma::vec Ft, Fphi;
     arma::mat Gt;
-    init_by_trans(p, L_, Ft, Fphi, Gt, trans_code, L);
+    init_by_trans(p, L_, Ft, Fphi, trans_code, L);
+    init_Gt(Gt, rho, p, trans_code);
 
     double C0_sqrt = theta0_upbnd * 0.5;
     arma::vec theta_init = arma::randn(N);
     theta_init.for_each([&m0, &C0_sqrt](arma::vec::elem_type &val)
-                        { val = std::abs(m0.at(0) + C0_sqrt * val); });
+                        { val = std::abs(m0.at(0) + C0_sqrt * std::abs(val)); });
 
     arma::cube theta_stored(p, N, nt + B);
     for (unsigned int b = 0; b < (nt + B); b++)
@@ -624,7 +625,7 @@ void mcs_poisson(
     }
     theta_stored.slice(B - 1).row(1) = theta_init.t();
 
-    arma::vec Wt(nt);
+    arma::vec Wt(nt,arma::fill::ones);
     if (!R_IsNA(W))
     {
         Wt.fill(W);
@@ -648,7 +649,7 @@ void mcs_poisson(
 
         bool use_discount = false;
         bool use_default_val = false;
-        if (R_IsNA(W))
+        if (R_IsNA(W) || W < EPS)
         { // Use discount factor if W is not given
             use_discount = true;
             if (t > B)
@@ -658,10 +659,25 @@ void mcs_poisson(
         }
 
         smc_propagate_bootstrap(
-            Theta_new, weights, wt,
-            y_new, y_old, Theta_old, Gt, Ft, model_code,
+            Theta_new, weights, wt, Gt,
+            y_new, y_old, Theta_old, Ft, model_code,
             mu0, rho, delta_nb, delta_discount, p, N,
             use_discount, use_default_val, t);
+        
+        if (!Gt.is_finite())
+        {
+            throw std::invalid_argument("mcs_poisson: Gt is non-finite");
+        }
+
+        if (!weights.is_finite())
+        {
+            throw std::invalid_argument("mcs_poisson: weights is non-finite");
+        }
+
+        if (!Theta_new.is_finite())
+        {
+            throw std::invalid_argument("mcs_poisson: Theta_new is non-finite");
+        }
 
         theta_stored.slice(t+B) = Theta_new;
         double ymarg = std::log(arma::accu(weights) + EPS8) - std::log(static_cast<double>(N));
@@ -675,6 +691,8 @@ void mcs_poisson(
         
     }
 
+    // W = std::max(W,EPS);
+
     if (!pmarg_y.is_finite())
     {
         throw std::invalid_argument("mcs_poisson<void>: non-finite log marginal probability of y");
@@ -682,7 +700,7 @@ void mcs_poisson(
 
 
 
-    // R.zeros(); // (n+1) x 2
+    R.zeros(); // (n+1) x 2
     {
         // theta_stored: p x N x (nt+B)
         arma::mat psi_all = theta_stored.row_as_mat(0);        // N x (nt+B)
@@ -694,9 +712,6 @@ void mcs_poisson(
 
     return;
 }
-
-
-
 
 //' @export
 // [[Rcpp::export]]
@@ -738,7 +753,8 @@ Rcpp::List pl_poisson(
     unsigned int p, L_;
     arma::vec Ft, Fphi;
     arma::mat Gt;
-    init_by_trans(p, L_, Ft, Fphi, Gt, trans_code, L);
+    init_by_trans(p, L_, Ft, Fphi, trans_code, L);
+    init_Gt(Gt, rho, p, trans_code);
 
     /* Dimension of state space depends on type of transfer functions */
 
@@ -797,7 +813,7 @@ Rcpp::List pl_poisson(
             arma::vec theta_old = Theta_old.col(i); // p x 1
             
             arma::vec theta_new = update_at(
-                p, gain_code, trans_code, theta_old, Gt, ypad.at(t), rho);
+                Gt, p, gain_code, trans_code, theta_old, ypad.at(t), rho);
 
             double Wsqrt = std::sqrt(Wt.at(i, t));
             double omega_new = R::rnorm(0., Wsqrt);

@@ -71,6 +71,11 @@ inline constexpr double covid_s = 2.9;
 
 */
 
+void bound_check(
+	const arma::mat &input,
+	const bool &check_zero,
+	const bool &check_negative);
+
 arma::uvec sample(
 	const unsigned int n,
 	const unsigned int size,
@@ -78,20 +83,32 @@ arma::uvec sample(
 	bool replace,
 	bool zero_start);
 
-	void init_by_trans(
-		unsigned int &p, // dimension of DLM state space
-		unsigned int &L_,
-		const unsigned int trans_code,
-		const unsigned int L);
+void init_by_trans(
+	unsigned int &p, // dimension of DLM state space
+	unsigned int &L_,
+	const unsigned int trans_code,
+	const unsigned int L);
 
 void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
 	unsigned int& L_,
 	arma::vec& Ft,
     arma::vec& Fphi,
-    arma::mat& Gt,
 	const unsigned int trans_code,
 	const unsigned int L);
+
+void init_Gt(
+	arma::cube &Gt,
+	const double &rho,
+	const unsigned int &p,
+	const unsigned int &trans_code);
+
+
+void init_Gt(
+	arma::mat &Gt,
+	const double &rho,
+	const unsigned int &p,
+	const unsigned int &trans_code);
 
 
 double binom(double n, double k);
@@ -100,13 +117,13 @@ arma::vec get_solow_coef(
 	const unsigned int &rho,
 	const unsigned int &r);
 
-	/*
+/*
 	CDF of the log-normal distribution.
-	*/
-	double Pd(
-		const double d,
-		const double mu,
-		const double sigmasq);
+*/
+double Pd(
+	const double d,
+	const double mu,
+	const double sigmasq);
 
 /*
 Difference of the subsequent CDFs of the log-normal distribution, which is the PDF at the discrete scale.

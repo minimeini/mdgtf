@@ -15,20 +15,22 @@ using namespace Rcpp;
 - Accommodate different link functions, different gain functions, different transfer functions.
 */
 
-
 arma::mat update_at(
+	arma::mat &Gt, // p x p
 	const unsigned int p,
 	const unsigned int gain_code,
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const arma::mat &mt,		   // p x N, mt = (psi[t], theta[t], theta[t-1])
-	const arma::mat &Gt,		   // p x p
-	const double y = NA_REAL,
-	const double rho = NA_REAL,
+	const double y,
+	const double rho,
 	const unsigned int t)
 {
 	const unsigned int N = mt.n_cols;
 	arma::mat at(p, N, arma::fill::zeros);
 	arma::vec hpsi(N,arma::fill::zeros);
+	// arma::mat Gtmp(Gt.begin(),Gt.n_elem);
+
+
 	if (trans_code != 1)
 	{
 		hpsi = psi2hpsi(arma::vectorise(mt.row(0)), gain_code); // 1 x N
@@ -52,48 +54,33 @@ arma::mat update_at(
 	break;
 	case 2: // Solow - Buggy
 	{
-		arma::mat Gast(p, p, arma::fill::zeros);
-		Gast.at(0, 0) = 1.;
-		for (unsigned int i = 1; i < r; i++)
-		{
-			Gast.at(i + 1, i) = 1.;
-		}
-
 		double tmp1 = std::pow(1. - rho, r);
-
-		for (unsigned int i = 1; i < p; i++)
-		{
-			double c1 = std::pow(-1., static_cast<double>(i));
-			double c2 = binom(static_cast<double>(r), static_cast<double>(i));
-			double c3 = std::pow(rho, static_cast<double>(i));
-			Gast.at(1, i) = -c1;
-			Gast.at(1, i) *= c2;
-			Gast.at(1, i) *= c3;
-		}
+		tmp1 *= y;
 
 		for (unsigned int i=0; i<N; i++)
 		{
-			arma::mat Gtmp(Gast);
-			Gtmp.at(1, 0) = hpsi.at(i) * y * tmp1;
+
+			Gt.at(1, 0) = hpsi.at(i) * tmp1;
 
 			arma::vec old_vec = mt.col(i);
-			double old_psi = old_vec.at(0);
+			double old_psi = old_vec.at(0); // psi[t-1]
 			old_vec.at(0) = 1.;
 
-			arma::vec new_vec = Gtmp * old_vec;
+			arma::vec new_vec = Gt * old_vec;
 			new_vec.at(0) = old_psi;
 			at.col(i) = new_vec;
 
-			if (new_vec.at(1) < -EPS)
+			if (arma::any(new_vec.subvec(1, p - 1) < -EPS))
 			{
-				old_vec.t().print();
-				new_vec.t().print();
-				Gtmp.print();
-				Rcout << "time = " << t << std::endl;
+				
 				throw std::invalid_argument("update_at: negative theta");
 			}
 		}
-		
+
+		if (arma::any(arma::vectorise(mt.rows(1, p - 1)) < -EPS))
+		{
+			throw std::invalid_argument("update_at: Input old state is not positive.");
+		}
 	}
 	break;
 	case 3: // Vanilla
@@ -103,8 +90,13 @@ arma::mat update_at(
 	break;
 	default:
 	{
-		::Rf_error("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
+		 throw std::invalid_argument("get_at function is only defined for Vanilla, Koyama, Solow, or Koyck's transmission kernels.");
 	}
+	}
+
+	if (!at.is_finite())
+	{
+		throw std::invalid_argument("update_at: output at is not finite.");
 	}
 
 	return at;
@@ -149,6 +141,13 @@ void update_Rt(
 		Rt /= delta; // single discount factor
 	} else {
 		Rt.at(0,0) += W;
+	}
+
+	bool is_zero = Rt.is_zero();
+	bool is_infinite = !Rt.is_finite();
+	if (is_zero || is_infinite)
+	{
+		throw std::invalid_argument("update_Rt: output Rt is all zero or nonfinite");
 	}
 }
 
@@ -201,8 +200,7 @@ void forwardFilter(
 	const double mu0 = 0.,
 	const double W = NA_REAL,
 	const double delta = NA_REAL,
-	const double delta_nb = 1.,
-	const bool debug = false) { 
+	const double delta_nb = 1.) { 
 	
 	/*
 	------ Initialization ------
@@ -232,17 +230,34 @@ void forwardFilter(
 	arma::vec hph(p);
 
 	/*
-	------ Reference Analysis for Koyama's Transfer Kernel ------
+	------ Reference Analysis ------
 	*/
-	if (trans_code == 1 && p>0) { // Koyama
-        at.col(1) = update_at(p,gain_code,trans_code,mt.col(0),Gt.slice(0),Y.at(0),rho, 1);
-		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(0), use_discount, W, delta);
-		update_Ft_koyama(Ft, Fy, 1, p, Y, Fphi);
-        hpsi = psi2hpsi(at.col(1),gain_code);
-		hph = hpsi_deriv(at.col(1),gain_code);
-		ft = arma::accu(Ft % hpsi);
-		Ft = Ft % hph;
-		Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+	if (L > 0 && trans_code==1)
+	{
+		at.col(1) = update_at(Gt.slice(1), p, gain_code, trans_code, mt.col(0), Y.at(0), rho, 1);
+		update_Gt(Gt.slice(1), gain_code, trans_code, mt.col(0), Y.at(0), rho);
+		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(1), use_discount, W, delta);
+
+		// if (trans_code == 1)
+		// { // Koyama
+			update_Ft_koyama(Ft, Fy, 1, L, Y, Fphi);
+			hpsi = psi2hpsi(at.col(1), gain_code);
+			hph = hpsi_deriv(at.col(1), gain_code);
+
+			ft = arma::accu(Ft % hpsi);
+			Ft = Ft % hph;
+			Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+		// }
+		// else
+		// { // Vanilla, Koyck, Solow
+		// 	ft = arma::as_scalar(Ft.t() * at.col(1));
+		// 	Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+		// }
+
+		if (!std::isfinite(Qt) || Qt < EPS)
+		{
+			throw std::invalid_argument("ForwardFilter: Qt is zero at reference analysis t=1.");
+		}
 
 		/*
 		------ Moment Matching ------
@@ -270,18 +285,26 @@ void forwardFilter(
 			Qt_ast = R::trigamma(alphat.at(1)+Y.at(0));
 
 		} else {
-			::Rf_error("This combination of likelihood and link function is not supported yet.");
+			 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
 		}
 
-        
-
 		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
+		et = std::abs(ft_ast - ft);
 		At = Rt.slice(1) * Ft / Qt; // p x 1
-		mt.col(1) = at.col(1) + At * et;
-		Ct.slice(1) = Rt.slice(1) - At*(Qt-Qt_ast)*At.t();
 
-		if (L > 1) {
+		arma::vec mnew = at.col(1) + At * et;
+		mt.col(1) = arma::abs(mnew);
+
+		arma::mat cnew = Rt.slice(1) - At * (Qt - Qt_ast) * At.t();
+		if (cnew.is_zero())
+		{
+			throw std::invalid_argument("C[1] is zero");
+		}
+		Ct.slice(1) = cnew;
+
+
+		
+		if (p > 1) {
 			for (unsigned int t=2; t<=L; t++) {
         		at.col(t) = at.col(1);
         		Rt.slice(t) = Rt.slice(1);
@@ -291,23 +314,26 @@ void forwardFilter(
 				betat.at(t) = betat.at(1);
     		}
 		}
-		
 	}
 
-	
 	/*
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 
 	for (unsigned int t=(L+1); t<=nt; t++) {
 		R_CheckUserInterrupt();
+		// std::cout << "t=" << t << std::endl;
+		// std::cout << "m[t-1]=";
+		// mt.col(t-1).t().print();
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		update_Gt(Gt.slice(t),gain_code, trans_code, mt.col(t-1), Y.at(t-1), rho);
-        at.col(t) = update_at(p, gain_code, trans_code, mt.col(t - 1), Gt.slice(t), Y.at(t - 1), rho, t);
+		at.col(t) = update_at(Gt.slice(t), p, gain_code, trans_code, mt.col(t - 1), Y.at(t - 1), rho, t);
+		update_Gt(Gt.slice(t), gain_code, trans_code, mt.col(t - 1), Y.at(t - 1), rho);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 
+		// std::cout << "Rt=";
+		// Rt.slice(t).print();
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
         if (trans_code == 1) { // Koyama
@@ -318,15 +344,21 @@ void forwardFilter(
 			ft = arma::accu(Ft % hpsi);
 			Ft = Ft % hph;
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-			if (Qt<EPS) {
-				std::cout << "t = " << t << std::endl;
-				std::cout << "at = " << at.col(t) << std::endl;
-				std::cout << "Qt = " << Qt << std::endl;
-				throw std::invalid_argument("Near zero value in Qt.");
-			}
 		} else { // Vanilla, Koyck, Solow
 			ft = arma::as_scalar(Ft.t() * at.col(t));
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+		}
+
+		// std::cout << "ft=" << ft << " Qt=" << Qt << std::endl;
+
+		if (!std::isfinite(Qt) || Qt < EPS)
+		{
+			std::cout << "t=" << t << std::endl;
+			std::cout << "Ct";
+			Ct.slice(t-1).print();
+			std::cout << "Rt";
+			Rt.slice(t).print();
+			throw std::invalid_argument("ForwardFilter: Qt is zero.");
 		}
 
 		/*
@@ -357,15 +389,40 @@ void forwardFilter(
 			Qt_ast = R::trigamma(alphat.at(t)+Y.at(t));
 
 		} else {
-			::Rf_error("This combination of likelihood and link function is not supported yet.");
+			 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
 		}
         
-                                
+		// std::cout << "alphat=" << alphat.at(t) << " betat=" << betat.at(t) << std::endl;
+		// std::cout << "ft_ast=" << ft_ast << " Qt_ast=" << Qt_ast << std::endl;
+
 		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
 		et = ft_ast - ft;
 		At = Rt.slice(t) * Ft / Qt; // p x 1
-		mt.col(t) = at.col(t) + At * et;
-		Ct.slice(t) = Rt.slice(t) - At*(Qt-Qt_ast)*At.t();
+
+		arma::vec mnew = at.col(t) + At * et;
+		if (t<=(p+1) && trans_code != 1)
+		{
+			mt.col(t) = arma::abs(mnew);
+		} else
+		{
+			mt.col(t) = mnew;
+		}
+
+		if (t>(p+1) && trans_code != 1 && arma::any(mnew.subvec(1,p-1)<-EPS))
+		{
+			std::cout << "a[t]=";
+			at.col(t).t().print();
+			std::cout << "At=";
+			At.t().print();
+			std::cout  << "et=" << et << std::endl;
+			std::cout << "mnew=";
+			mnew.t().print();
+			throw std::invalid_argument("forwardFilter: m[t] theta is not positive for distributed lags.");
+		}
+		
+
+		arma::mat cnew = Rt.slice(t) - At * (Qt - Qt_ast) * At.t();
+		Ct.slice(t) = cnew;
 
 		// Rcout << "\rFiltering: " << t << "/" << n;
 	}
@@ -502,7 +559,7 @@ void backwardSampler(
 		Ht = arma::chol(arma::symmatu(Ht + Ip));
 	} catch(...) {
 		Rcout << "W=" << W << std::endl;
-		::Rf_error("Cholesky decomposition failed");
+		 throw std::invalid_argument("Cholesky decomposition failed");
 	}
 	
 	arma::vec tmp = arma::randn(p,1);
@@ -520,7 +577,7 @@ void backwardSampler(
 			Rcout << "t=" << t << std::endl;
 			Rcout << "W=" << W << std::endl;
 			Rcout << "R[t+1]=" << Rt.slice(t+1) << std::endl;
-			::Rf_error("Inversion of R[t+1] failed.");
+			 throw std::invalid_argument("Inversion of R[t+1] failed.");
 		}
 		
 
@@ -531,7 +588,7 @@ void backwardSampler(
 			Ht = arma::chol(arma::symmatu(Ht + Ip));
 		} catch(...) {
 			Rcout << "W=" << W << std::endl;
-			::Rf_error("Cholesky decomposition failed");
+			 throw std::invalid_argument("Cholesky decomposition failed");
 		}
 		
 		tmp = arma::randn(p,1);
@@ -588,7 +645,7 @@ Rcpp::List lbe_poisson(
 
 
 	if (R_IsNA(delta) && R_IsNA(W)) {
-		::Rf_error("Either evolution error W or discount factor delta must be provided.");
+		 throw std::invalid_argument("Either evolution error W or discount factor delta must be provided.");
 	}
 
 	const unsigned int n = Y.n_elem;
@@ -616,63 +673,28 @@ Rcpp::List lbe_poisson(
 	arma::vec Ht(npad,arma::fill::zeros);
 
 	arma::cube Gt(p,p,npad);
-	arma::mat Gt0(p,p,arma::fill::zeros);
-	Gt0.at(0,0) = 1.;
-	switch (trans_code) {
-		case 0: // Koyck
-		{
-			Gt0.at(1,1) = rho;
-		}
-		break;
-		case 1: // Koyama
-		{
-			Gt0.diag(-1).ones();	
-		}
-		break;
-		case 2: // Solow - Checked. Correct.
-		{
-			double coef2 = -rho;
-			Gt0.at(1,1) = -binom(L,1)*coef2;
-			for (unsigned int k=2; k<p; k++) {
-				coef2 *= -rho;
-				Gt0.at(1,k) = -binom(L,k)*coef2;
-				Gt0.at(k,k-1) = 1.;
-			}
-
-		}
-		break;
-		case 3: // Vanilla
-		{
-			Gt0.at(0,0) = rho;	
-		}
-		break;
-		default:
-		{
-			::Rf_error("Not supported transfer function.\n");
-		}
-	}
-
-	for (unsigned int t=0; t<npad; t++) {
-		Gt.slice(t) = Gt0;
-	}
+	init_Gt(Gt,rho,p,trans_code);
 
 	arma::mat mt(p, npad, arma::fill::zeros);
 	if (!m0_prior.isNull()) {
 		arma::vec m00 = Rcpp::as<arma::vec>(m0_prior);
-		mt.at(0,0) = m00.at(0);
+		mt.at(0,0) = std::abs(m00.at(0));
 	}
 
 	arma::cube Ct(p, p, npad);
-	arma::mat Ip(p, p, arma::fill::eye);
-	Ip *= std::pow(theta0_upbnd * 0.5,2.);
-	Ct.each_slice() = Ip;
+	Ct.slice(0).eye();
+	Ct.for_each([&theta0_upbnd](arma::mat::elem_type &val){
+		val *= std::pow(theta0_upbnd * 0.5,2.) + EPS;});
+
 	if (!C0_prior.isNull()) {
 		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
 	}
-	
 
-    
-	forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L_,rho,mu0,W,delta,delta_nb,debug);
+
+	forwardFilter(
+		mt,at,Ct,Rt,Gt,alphat,betat,
+		obs_code,link_code,trans_code,gain_code,
+		n,p,Ypad,L_,rho,mu0,W,delta,delta_nb);
 	arma::vec Wt = (1.-delta) * arma::vectorise(Rt.tube(0,0));
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
@@ -783,7 +805,7 @@ Rcpp::List get_eta_koyama(
 			break;
 			default:
 			{
-				::Rf_error("get_Ft function is only defined for Koyama transmission kernels.");
+				 throw std::invalid_argument("get_Ft function is only defined for Koyama transmission kernels.");
 			}
 		} // END switch block
 	}
@@ -827,7 +849,7 @@ Rcpp::List get_optimal_delta(
 	double ymean,prob_success;
 	for (unsigned int i=0; i<m; i++) {
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,delta_nb,ci_coverage,20,false,false);
+		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,mu0,delta,W,m0_prior,C0_prior,delta_nb,ci_coverage,20,2.,false,false);
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
 		for (unsigned int j=npara; j<=n; j++) {

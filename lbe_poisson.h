@@ -28,16 +28,14 @@
  *
  */
 arma::mat update_at(
+	arma::mat &Gt, // p x p
 	const unsigned int p,
 	const unsigned int gain_code,
 	const unsigned int trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-	const arma::mat& mt, // p x N, mt = (psi[t], theta[t], theta[t-1]), N for number of particles
-	const arma::mat& Gt, // p x p
-	const double y,
-	const double rho,
-	const unsigned int t=9999);
-
-
+	const arma::mat &mt,		   // p x N, mt = (psi[t], theta[t], theta[t-1])
+	const double y = NA_REAL,
+	const double rho = NA_REAL,
+	const unsigned int t = 9999);
 
 /**
  * Update the Gt,
@@ -105,8 +103,7 @@ void forwardFilter(
 	const double mu0,
 	const double W,
 	const double delta,
-	const double delta_nb,
-	const bool debug);
+	const double delta_nb);
 
 
 void backwardSmoother(
@@ -150,8 +147,7 @@ Rcpp::List lbe_poisson(
 	const double ci_coverage,
 	const unsigned int npara,
 	const double theta0_upbnd,
-	const bool summarize_return,
-	const bool debug);
+	const bool summarize_return);
 
 
 

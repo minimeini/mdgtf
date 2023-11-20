@@ -45,7 +45,7 @@ sim_pois_dglm2 = function(
   }
   if (is.null(psi0)) {
     set.seed(rng.seed)
-    psi0 = rnorm(1,0,sd=1)
+    psi0 = abs(rnorm(1,0,sd=1))
   }
   # ------ Initialization ------ #
   
