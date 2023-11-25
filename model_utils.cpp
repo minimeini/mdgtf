@@ -6,28 +6,63 @@ using namespace Rcpp;
 
 void bound_check(
 	const arma::mat &input,
-	const bool &check_zero = false,
-	const bool &check_negative = false)
+	const std::string &name,
+	const bool &check_zero,
+	const bool &check_negative)
 {
 	bool is_infinite = !input.is_finite();
 	if (is_infinite)
 	{
-		throw std::invalid_argument("bound_check: infinite.");
+		std::cout << name + " = " << std::endl;
+		input.t().print();
+		throw std::invalid_argument("bound_check: " + name + " is nonfinite");
 	}
 	if (check_zero)
 	{
 		bool is_zero = input.is_zero();
 		if (is_zero)
 		{
-			throw std::invalid_argument("bound_check: zeros");
+			throw std::invalid_argument("bound_check: " + name + " is zeros");
 		}
 	}
 	if (check_negative)
 	{
-		bool is_negative = arma::any(arma::vectorise(input) < EPS);
+		bool is_negative = arma::any(arma::vectorise(input) < -EPS);
 		if (is_negative)
 		{
-			throw std::invalid_argument("bound_check: negative");
+			throw std::invalid_argument("bound_check: " + name + " is negative");
+		}
+	}
+
+	return;
+}
+
+void bound_check(
+	const double &input,
+	const std::string &name,
+	const bool &check_zero,
+	const bool &check_negative)
+{
+	bool is_infinite = !std::isfinite(input);
+	if (is_infinite)
+	{
+		std::cout << name + " = " << input << std::endl;
+		throw std::invalid_argument("bound_check: " + name + " is nonfinite");
+	}
+	if (check_zero)
+	{
+		bool is_zero = std::abs(input) < EPS;
+		if (is_zero)
+		{
+			throw std::invalid_argument("bound_check: " + name + " is zeros");
+		}
+	}
+	if (check_negative)
+	{
+		bool is_negative = input < -EPS;
+		if (is_negative)
+		{
+			throw std::invalid_argument("bound_check: " + name + " is negative");
 		}
 	}
 
@@ -38,8 +73,8 @@ arma::uvec sample(
 	const unsigned int n, 
 	const unsigned int size, 
 	const arma::vec &weights, 
-	bool replace=true,
-	bool zero_start=true){
+	bool replace,
+	bool zero_start){
 	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
 	Rcpp::IntegerVector idx_ = Rcpp::sample(n, size, true, w_);
 
@@ -53,13 +88,47 @@ arma::uvec sample(
 	return idx;
 }
 
+unsigned int sample(
+	const int n,
+	const arma::vec &weights,
+	bool zero_start)
+{
+	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
+	Rcpp::IntegerVector idx_ = Rcpp::sample(n, 1, true, w_);
 
+	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
+	unsigned int idx0 = idx[0];
+	if (zero_start)
+	{
+		idx0 -= 1;
+	}
+
+	return idx0;
+}
+
+unsigned int sample(
+	const int n,
+	bool zero_start)
+{
+	arma::vec weights(n,arma::fill::ones);
+	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
+	Rcpp::IntegerVector idx_ = Rcpp::sample(n, 1, true, w_);
+
+	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
+	unsigned int idx0 = idx[0];
+	if (zero_start)
+	{
+		idx0 -= 1;
+	}
+
+	return idx0;
+}
 
 void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
 	unsigned int& L_,
 	const unsigned int trans_code,
-	const unsigned int L = 2) {
+	const unsigned int L) {
 
 	switch (trans_code) {
 		case 0: // Koyck
@@ -101,7 +170,7 @@ void init_by_trans(
 	arma::vec& Ft,
     arma::vec& Fphi,
 	const unsigned int trans_code,
-	const unsigned int L = 2) {
+	const unsigned int L) {
 
 	switch (trans_code) {
 		case 0: // Koyck
@@ -120,7 +189,7 @@ void init_by_trans(
 			L_ = L;
 
 			Ft.set_size(p); Ft.zeros();
-			Fphi = get_Fphi(p);
+			Fphi = get_Fphi(p,p,0.9,1);
 		}
 		break;
 		case 2: // Solow
@@ -290,22 +359,6 @@ double binom(double n, double k) {
 	return 1./((n+1.)*boost::math::beta(std::max(n-k+1,EPS),std::max(k+1,EPS))); }
 
 
-arma::vec get_solow_coef(
-	const unsigned int &rho, 
-	const unsigned int &r // number of theta
-)
-{
-	arma::vec coef(r,arma::fill::zeros);
-	for (unsigned int i=0; i<r; i++)
-	{
-		double c1 = binom(static_cast<double>(r),static_cast<double>(i+1));
-		double c2 = std::pow(-rho,static_cast<double>(i+1));
-		coef.at(i) = c1 * c2;
-	}
-
-	return coef;
-}
-
 
 /*
 Function that computes \Phi_d in Koyama et al. (2021)
@@ -317,8 +370,6 @@ Pd=function(d,mu,sigmasq){
   phid
 }
 */
-//' @export
-// [[Rcpp::export]]
 double Pd(
     const double d,
     const double mu,
@@ -365,257 +416,61 @@ arma::vec knl(
 
 //' @export
 // [[Rcpp::export]]
-arma::vec get_Fphi(const unsigned int L=30){ // number of Lags to be considered
-    double tmpd;
-    const double sm2 = std::pow(covid_s/covid_m,2);
-    const double pk_mu = std::log(covid_m/std::sqrt(1.+sm2));
-    const double pk_sg2 = std::log(1.+sm2);
+arma::vec get_Fphi(
+	const unsigned int &n, // number of Lags
+	const unsigned int &L, // dimension of state space (-1 for solow)
+	const double &rho,
+	const unsigned int &trans_code)
+{
+	double Last = L;
+	if (Last == 0)
+	{
+		Last = n;
+	}
+	arma::vec Fphi(n, arma::fill::zeros);
 
-    arma::vec Fphi(L,arma::fill::zeros);
-    Fphi.at(0) = knl(1.,pk_mu,pk_sg2);
-    for (unsigned int d=1; d<L; d++) {
-        tmpd = static_cast<double>(d) + 1.;
-        Fphi.at(d) = knl(tmpd,pk_mu,pk_sg2);
-    }
+	switch (trans_code) 
+	{
+		case 0: 
+		{
+			// koyck
+		}
+		break;
+		case 1:
+		{
+			// koyama
+			Last = n;
+
+			double tmpd;
+			const double sm2 = std::pow(covid_s / covid_m, 2);
+			const double pk_mu = std::log(covid_m / std::sqrt(1. + sm2));
+			const double pk_sg2 = std::log(1. + sm2);
+			
+			Fphi.at(0) = knl(1., pk_mu, pk_sg2);
+			for (unsigned int d = 1; d < n; d++)
+			{
+				tmpd = static_cast<double>(d) + 1.;
+				Fphi.at(d) = knl(tmpd, pk_mu, pk_sg2);
+			}
+		}
+		break;
+		case 2: 
+		{
+			// solow
+			double c3 = std::pow(1.-rho,static_cast<double>(Last));
+			for (unsigned int d = 0; d < n; d++)
+			{
+				unsigned int k = d + 1;
+				double a = k + Last - 2.;
+				double b = k - 1.;
+				double c1 = binom(a,b);
+				double c2 = std::pow(-rho,k-1.);
+				Fphi.at(d) = (c1 * c2) * c3;
+			}
+		}
+	}
     return Fphi;
 }
-
-
-
-
-
-/*
-update_Fx
-
-TODO: check it.
-*/
-//' @export
-// [[Rcpp::export]]
-arma::mat update_Fx(
-	const unsigned int trans_code,
-	const unsigned int n, // number of observations
-	const arma::vec& Y, // n x 1, (y[1],...,y[n]), observtions
-	const arma::vec& hph, // (n+1) x 1, derivative of the gain function at h[t]
-	const double rho = 0.99, // memory of previous state, for exponential and negative binomial transmission delay kernel
-	const unsigned int L = 2, // length of nonzero transmission delay for Koyama's log-normal or number of trials for Solow's negative-binomial
-	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_ = R_NilValue) { // L x 1, (phi[1],...,phi[L]), for log-normal transmission delay kernel only
-
-	arma::mat Fx(n,n,arma::fill::zeros);
-	unsigned int tmpi;
-	double tmpd;
-
-	arma::vec Ypad(n+1,arma::fill::zeros);
-	Ypad.tail(n) = Y; // Ypad = (Y[0]=0,Y[1],...,Y[n])
-
-	switch (trans_code) {
-		case 0: // Koyck
-		{
-			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
-				tmpd = 1.;
-				Fx.at(t-1,t-1) = tmpd*Ypad.at(t-1)*hph.at(t);
-				for (unsigned int i=(t-1); i>=1; i--) { // i-1 is the column index in cpp, w[i]
-					tmpd *= rho;
-					Fx.at(t-1,i-1) = Fx.at(t-1,i) + tmpd*Ypad.at(i-1)*hph.at(i);
-				}
-			}
-		}
-		break;
-		case 1: // Koyama
-		{
-			arma::vec Fphi(L,arma::fill::ones);
-			if (!Fphi_.isNull()) {
-				Fphi = Rcpp::as<arma::vec>(Fphi_);
-			}
-
-			// Fill out the first two columns, starting from the second row of Fx
-			arma::vec Fy(L,arma::fill::zeros);
-			arma::vec Fh(L,arma::fill::zeros);
-        	for (unsigned int r=1; r<n; r++) { 
-            	// loop through row, r from 1 to n-1, aka time from 2 to n.
-            	tmpi = std::min(L,r); // number of nonzero terms
-            	Fy.zeros();
-				Fy.head(tmpi) = arma::reverse(Y.subvec(r-tmpi,r-1));
-				Fh.head(tmpi) = arma::reverse(hph.subvec(r-tmpi+2,r+1));
-            	tmpd = arma::accu(Fphi % Fy % Fh);
-            	Fx.at(r,0) = tmpd;
-            	Fx.at(r,1) = tmpd;
-            	// Fill out the rest of the columns until the diagonal element
-            	if (r>1) { // start from the third row
-                	for (unsigned int c=2; c<=r; c++) { 
-						// loop through columns until the diagonal
-                    	tmpi = std::min(L,r-c+1);
-                    	Fx.at(r,c) = arma::accu(Fphi.head(tmpi) % Fy.head(tmpi) % Fh.head(tmpi));
-                	}
-            	}
-        	}
-		}
-		break;
-		case 2: // Solow
-		{
-			// double coef = 0.;
-			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
-				tmpd = 1.;
-				// coef = static_cast<double>(t-t+1);
-				Fx.at(t-1,t-1) = tmpd*Ypad.at(t-1)*hph.at(t);
-				for (unsigned int i=(t-1); i>=1; i--) { 
-					// i-1 is the column index in cpp, w[i]
-					tmpd *= rho;
-					// coef = static_cast<double>(t-i+1);
-					Fx.at(t-1,i-1) = Fx.at(t-1,i) + binom(t-1-i+L,t-i)*tmpd*Ypad.at(i-1)*hph.at(i);
-				}
-			}
-			double coef2 = std::pow(1.-rho,static_cast<double>(L));
-			Fx.for_each( [&coef2](arma::mat::elem_type& val) {val *= coef2;});
-		}
-		break;
-		case 3: //Vanilla
-		{
-			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
-				tmpd = 1.;
-				Fx.at(t-1,t-1) = tmpd;
-				for (unsigned int i=(t-1); i>=1; i--) { // i-1 is the column index in cpp, w[i]
-					tmpd *= rho;
-					Fx.at(t-1,i-1) = Fx.at(t-1,i) + tmpd;
-				}
-			}
-		}
-		break;
-		default:
-		{
-			::Rf_error("Undefined model.");
-		}
-	}
-
-	return Fx;
-}
-
-
-/*
-TODO: check it.
-*/
-//' @export
-// [[Rcpp::export]]
-arma::vec update_theta0(
-	const unsigned int trans_code,
-	const unsigned int n, // number of observations
-	const arma::vec& Y, // n x 1, observations, (Y[1],...,Y[n])
-	const arma::vec& hhat, // (n+1) x 1, 1st Taylor expansion of h(psi[t]) at h[t]
-	const double theta00 = 0., // Initial value of the transfer function block for Vanilla or Koyck
-	const double rho = 0.99, // memory of previous state, for exponential and negative binomial transmission delay kernel
-	const unsigned int L = 1., // length of nonzero transmission delay for log-normal
-	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_ = R_NilValue) { // L x 1
-	
-	arma::vec theta0(n,arma::fill::zeros);
-	unsigned int tmpi;
-	double tmpd;
-
-	arma::vec Ypad(n+1,arma::fill::zeros);
-	Ypad.tail(n) = Y; // Ypad = (Y[0]=0,Y[1],...,Y[n])
-
-	// if (ModelCode==0) {
-	// 	// KoyamaMax
-	// 	theta0.zeros();
-
-	switch (trans_code) {
-		case 0:
-		{
-			// Koyck
-			::Rf_error("Koyck not supported yet.");
-		}
-		break;
-		case 1: // Koyama
-		{
-			arma::vec Fphi(L,arma::fill::ones);
-			if (!Fphi_.isNull()) {
-				Fphi = Rcpp::as<arma::vec>(Fphi_);
-			}
-
-			// Fill out the first two columns, starting from the second row of Fx
-			arma::vec Fy(L,arma::fill::zeros);
-			arma::vec Fh(L,arma::fill::zeros);
-        	for (unsigned int r=1; r<n; r++) { 
-            	// loop through row, r from 1 to n-1, aka time from 2 to n.
-            	tmpi = std::min(L,r); // number of nonzero terms
-            	Fy.zeros();
-				Fh.zeros();
-				Fy.head(tmpi) = arma::reverse(Y.subvec(r-tmpi,r-1));
-
-				Fh.head(tmpi) = arma::reverse(hhat.subvec(r-tmpi+2,r+1));
-                // 	// if r = 2, the third row, it would be (y[1],y[0]) in C, aka (y[2],y[1]) in R; 2 total elements
-                // 	// if r = (L-1), the L row, it would be (y[L-2],...,y[0]) in C, aka (y[L-1],...,y[1]) in R; (L-1) total elements
-                // 	// if r = L, the (L+1) row, it would be (y[L-1],...,y[0]) in C, aka (y[L],...,y[1]) in R; L total elements
-                // 	// if r = n-1, the n row, it would be (y[n-2],...,y[n-L-1]) in C, aka (y[n-1],...,y[n-L])
-                // 	// if r = 1 (t=2), second row, it would be (y[0]) in C, aka (y[1]) in R
-
-            	theta0.at(r) = arma::accu(Fphi % Fy % Fh);
-        	}
-		}
-		break;
-		case 2: // Solow
-		{
-			// double coef = 0.;
-			double coef2 = std::pow(1.-rho,static_cast<double>(L)); 
-			for (unsigned int t=1; t<=n; t++) { // t-1 is the row index in cpp, theta[t]
-				// tmpd = 1.;
-				// coef = static_cast<double>(t-t+1.);
-				// theta0.at(t-1) = coef*tmpd*Ypad.at(t-1)*hhat.at(t);
-				tmpd = 1.;
-				theta0.at(t-1) = 0.;
-				for (unsigned int l=0; l<=(t-1); l++) { 
-					// i-1 is the column index in cpp, w[i]
-					// tmpd *= rho;
-					// coef = static_cast<double>(t-i+1);
-					// theta0.at(t-1) += coef*tmpd*Ypad.at(i-1)*hhat.at(i);
-					theta0.at(t-1) += binom(L+l-1,l)*tmpd*Ypad.at(t-l-1)*hhat.at(t-l-1);
-					tmpd *= rho;
-				}
-				theta0.at(t-1) *= coef2;
-			}
-		}
-		break;
-		case 3:
-		{
-			// Vanilla
-			double tmpd2 = 1.;
-			for (unsigned int t=1; t<=n; t++) { // t-1 in cpp == theta[t]
-				tmpd2 *= rho;
-				theta0.at(t-1) = tmpd2*theta00;
-			}
-		}
-		break;
-		default:
-		{
-			::Rf_error("Undefined model.");
-		}
-	}
-
-
-	return theta0;
-}
-
-
-
-/*
-This is using an alternate model which holds in most cases for the reproduction number,
-since it barely drops below 0.
-
------- Model ------
-<obs>   y[t] | lambda[t] ~ Pois(lambda[t]),
-<link>  lambda[t] = max(lambda[0] + theta[t], 0),
-<state> theta[t] = phi[1] psi[t] y[t-1] + phi[2] psi[t-1] y[t-2] + ... + phi[L] psi[t-L+1] y[t-L],
-        psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W).
--------------------
-*/
-arma::vec update_theta(
-	const unsigned int n,
-	const arma::mat& Fx, // n x n
-	const arma::vec& w) { // n x 1
-	
-	arma::vec theta = Fx * w; // n x 1
-	return theta; 
-}
-
-
 
 double trigamma_obj(
 	unsigned n, // not sure what it is for
@@ -763,14 +618,14 @@ double test_postW_gamma(){
 [1] -2.995733
 ------
 */
-double test_postW_gamma(
-	const double a1 = -0.5,
-	const double a2 = 1.e2,
-	const double a3 = 0.5){
-	coef_W coef[1] = {{a1,a2,a3}};
-	double What = optimize_postW_gamma(coef[0]);
-	return What;
-}
+// double test_postW_gamma(
+// 	const double a1 = -0.5,
+// 	const double a2 = 1.e2,
+// 	const double a3 = 0.5){
+// 	coef_W coef[1] = {{a1,a2,a3}};
+// 	double What = optimize_postW_gamma(coef[0]);
+// 	return What;
+// }
 
 
 
@@ -821,17 +676,8 @@ arma::mat psi2hpsi(
 		}
 	}
 
-	bool has_negative = arma::any(arma::vectorise(hpsi)<-EPS);
-	bool has_nonfinite = !hpsi.is_finite();
-
-	if (has_negative || has_nonfinite)
-	{
-		hpsi.print();
-		throw std::invalid_argument("psi2hpsi<mat>: hpsi is not positive or not finite.");
-	} else if (arma::any(arma::vectorise(hpsi) < EPS))
-	{
-		hpsi.elem(arma::find(hpsi<EPS)).fill(EPS);
-	}
+	bound_check(hpsi, "psi2hpsi<mat>: hpsi", false, true);
+	hpsi.elem(arma::find(hpsi < EPS)).fill(EPS);
 
 	return hpsi;
 }
@@ -871,14 +717,8 @@ double psi2hpsi(
 		}
 	}
 
-	if ( (hpsi < -EPS) || !std::isfinite(hpsi))
-	{
-		throw std::invalid_argument("psi2hpsi<double> is not positive or not finite.");
-	} else if (hpsi < EPS)
-	{
-		hpsi = EPS;
-	}
-
+	bound_check(hpsi,"psi2hpsi<double>: hpsi",false,true);
+	hpsi = std::max(hpsi,EPS);
 
 	return hpsi;
 }
@@ -924,11 +764,7 @@ void hpsi_deriv(
 		}
 	}
 
-	if (!hpsi.is_finite())
-	{
-		throw std::invalid_argument("hpsi_deriv<void>: non-finite output");
-	}
-
+	bound_check(hpsi, "hpsi_deriv<void>: hpsi");
 	return;
 }
 
@@ -966,12 +802,7 @@ double hpsi_deriv(
 		}
 	}
 
-	if (!std::isfinite(hpsi))
-	{
-		std::cout << "psi = " << psi << std::endl;
-		throw std::invalid_argument("hpsi_deriv<double>: non-finite output");
-	}
-
+	bound_check(hpsi,"hpsi_deriv<double>: hpsi");
 
 	return hpsi;
 }
@@ -1019,10 +850,7 @@ arma::mat hpsi_deriv(
 		}
 	}
 
-	if (!hpsi.is_finite())
-	{
-		throw std::invalid_argument("hpsi_deriv<mat>: non-finite output");
-	}
+	bound_check(hpsi, "hpsi_deriv<mat>: hpsi");
 
 	return hpsi;
 }
@@ -1035,13 +863,13 @@ arma::mat hpsi_deriv(
 // [[Rcpp::export]]
 arma::mat hpsi2theta(
 	const arma::mat& hpsi, // (n+1) x k, each row is a different time point
-	const arma::vec& y, // n x 1
-	const unsigned int trans_code,
-	const double theta0 = 0.,
-	const unsigned int L = 2,
-	const double rho = 0.9) {
+	const arma::vec& ypad, // (n+1) x 1
+	const unsigned int &trans_code,
+	const double &theta0,
+	const unsigned int &L,
+	const double &rho) {
 	
-	const unsigned int n = y.n_elem;
+	const unsigned int n = ypad.n_elem - 1;
 	const unsigned int k = hpsi.n_cols;
 	arma::mat theta(n,k,arma::fill::zeros);
 
@@ -1053,50 +881,86 @@ arma::mat hpsi2theta(
 				// theta: if t = 1 in cpp <=> t = 2 in math
 				// y: if t = 1 in cpp <=> t = 2 in math
 				// hpsi: if t = 1 in cpp <=> t = 1 in math
-				theta.row(t) = rho*theta.row(t-1) + hpsi.row(t)*y.at(t-1);
+				theta.row(t) = rho*theta.row(t-1) + hpsi.row(t)*ypad.at(t);
 			}
 		}
 		break;
 		case 1: // Koyama
 		{
-			arma::vec Fphi = get_Fphi(L);
-			arma::vec Fy(L,arma::fill::zeros);
-			arma::mat Fhpsi(L,k);
-			theta.row(0).zeros();
-			unsigned int tmpi;
-			for (unsigned int t=1; t<n; t++) {
-				Fy.zeros();
-				tmpi = std::min(t,L);
-				Fy.head(tmpi) = arma::reverse(y.subvec(t-tmpi,t-1)); // p x 1
-				Fhpsi.zeros();
-				Fhpsi.head_rows(tmpi) = arma::reverse(hpsi.rows(t-tmpi+1,t)); // p x k
-				for (unsigned int i=0; i<k; i++) {
-					theta.at(t,i) = arma::accu(Fphi%Fy%Fhpsi.col(i));
+			arma::vec Fphi = get_Fphi(L,L,rho,1); // L x 1
+			arma::vec ypad2(n+L,1,arma::fill::zeros);
+			arma::mat hpsi_pad2(n+L,k,arma::fill::zeros);
+			for (unsigned int t=L; t<(n+L); t++)
+			{
+				ypad2.at(t) = ypad.at(t-L+1);
+				hpsi_pad2.row(t) = hpsi.row(t-L+1);
+			}
+
+			for (unsigned int t=1; t<=n; t++)
+			{
+				arma::vec ysub = ypad2.subvec(t-1, t-1+L-1); // L x 1
+				arma::mat hsub = hpsi_pad2.rows(t,t-1+L); // L x k
+				for (unsigned int i=0; i<=k; i++)
+				{
+					arma::vec tmp0 = ysub % hsub.col(i);
+					arma::vec tmp1 = arma::reverse(tmp0);
+					arma::vec tmp2 = Fphi % tmp1;
+					double tsum = arma::accu(tmp2);
+					bound_check(tsum, "hpsi2theta-theta", false, true);
+					tsum = std::max(tsum, EPS);
+
+					theta.at(t - 1, i) = tsum;
 				}
 			}
 		}
 		break;
 		case 2: // Solow
 		{
-			// double c1 = 2.*rho;
-			// double c2 = rho*rho;
-			arma::mat theta_ext(n+1,k,arma::fill::zeros);
-			theta_ext.row(0).fill(theta0);
+			/*
+			Solow: exact update of theta via the ARMA like equation with the past thetas.
 
-			double c1 = std::pow(1.-rho,static_cast<double>(L));
-			double c2 = -rho;
-			theta_ext.row(1) = -binom(L,1)*c2*theta_ext.row(0);
-			// theta.row(1) = c1*theta.row(0) - c2*theta0 + c3*hpsi.row(1)*y.at(0);
-			for (unsigned int t=2; t<(n+1); t++) {
-				theta_ext.row(t) = c1*hpsi.row(t-1)*y.at(t-2);
-				c2 = -rho;
-				for (unsigned int k=1; k<=std::min(t,L); k++) {
-					theta_ext.row(t) -= binom(L,k)*c2*theta_ext.row(t-k);
-					c2 *= -rho;
-				}
-				// theta.row(t) = c1*theta.row(t-1) - c2*theta.row(t-2) + c3*hpsi.row(t)*y.at(t-1);
+			theta_pad: (n+L) x k
+			Value: theta[-r+1], ..., theta[-1], theta[0], theta[1], ..., theta[n]
+			Index:	   0		    	r-2		   r-1		 r			   r+n-1
+			The indices refer to row index. The column index is the replications of theta.
+
+			hpsi: (n+1) x k
+			Value: 								hpsi[0],  hpsi[1], ..., hpsi[n]
+
+			y: n x 1
+			Value: 											y[0],  ...,  y[n-1]
+			*/
+			arma::mat theta_pad(n + L, k, arma::fill::zeros);
+			arma::vec coef(L,arma::fill::zeros); // L x 1
+			for (unsigned int t=L; t>=1; t--)
+			{
+				double c1 = binom(static_cast<double>(L),static_cast<double>(t));
+				double c2 = std::pow(-rho, static_cast<double>(t));
+				coef.at(L-t) = c1 * c2;
 			}
-			theta = theta_ext.tail_rows(n);
+
+			double cnst = std::pow(1.-rho,static_cast<double>(L));
+
+			for (unsigned int t=0; t<n; t++)
+			{
+				arma::mat theta_sub = theta_pad.rows(t, t+L-1); // L x k
+				double yt_old = ypad.at(t);
+				for (unsigned int i=0; i<k; i++)
+				{
+					arma::vec tmp = coef % theta_sub.col(i);
+					double hpsi_cur = hpsi.at(t+1,i);
+
+					double tmp1 = arma::accu(tmp);
+					double tmp2 = cnst * hpsi_cur;
+					tmp2 *= yt_old;
+					double tsum = -tmp1 + tmp2;
+					bound_check(tsum,"hpsi2theta-theta",false,true);
+					tsum = std::max(tsum, EPS);
+
+					theta_pad.at(t+L,i) = tsum;
+					theta.at(t,i) = tsum;
+				}
+			}
 		}
 		break;
 		default: // Otherwise
@@ -1105,20 +969,124 @@ arma::mat hpsi2theta(
 		}
 	}
 
-	if (arma::any(arma::vectorise(theta)<-EPS) || !theta.is_finite())
-	{
-		throw std::invalid_argument("hpsi2theta: non-positive or non-finite theta.");
-	}
 	return theta;
 }
 
+void hpsi2theta(
+	arma::vec &theta, // n x 1
+	const arma::vec &hpsi, // (n+1) x 1, each row is a different time point
+	const arma::vec &ypad, // (n+1) x 1
+	const unsigned int &trans_code,
+	const double &theta0,
+	const unsigned int &L,
+	const double &rho)
+{
+
+	const unsigned int n = ypad.n_elem - 1;
+	theta.set_size(n);
+	theta.zeros();
+
+	switch (trans_code)
+	{
+	case 0: // Koyckget_model_code
+	{
+		theta.row(0).fill(rho * theta0);
+		for (unsigned int t = 1; t < n; t++)
+		{
+			// theta: if t = 1 in cpp <=> t = 2 in math
+			// y: if t = 1 in cpp <=> t = 2 in math
+			// hpsi: if t = 1 in cpp <=> t = 1 in math
+			theta.row(t) = rho * theta.row(t - 1) + hpsi.row(t) * ypad.at(t);
+		}
+	}
+	break;
+	case 1: // Koyama
+	{
+		arma::vec Fphi = get_Fphi(L,L,rho,1); // L x 1
+		arma::vec ypad2(n + L, 1, arma::fill::zeros);
+		arma::vec hpsi_pad2(n + L, arma::fill::zeros);
+		for (unsigned int t = L; t < (n + L); t++)
+		{
+			ypad2.at(t) = ypad.at(t - L + 1);
+			hpsi_pad2.at(t) = hpsi.at(t - L + 1);
+		}
+
+		for (unsigned int t = 1; t <= n; t++)
+		{
+			arma::vec ysub = ypad2.subvec(t - 1, t - 1 + L - 1); // L x 1
+			arma::vec hsub = hpsi_pad2.subvec(t, t - 1 + L);		 // L x 1
+			arma::vec tmp0 = ysub % hsub;
+			arma::vec tmp1 = arma::reverse(tmp0);
+			arma::vec tmp2 = Fphi % tmp1;
+			double tsum = arma::accu(tmp2);
+			bound_check(tsum, "hpsi2theta-theta", false, true);
+			tsum = std::max(tsum, EPS);
+
+			theta.at(t - 1) = tsum;
+		}
+	}
+	break;
+	case 2: // Solow
+	{
+		/*
+		Solow: exact update of theta via the ARMA like equation with the past thetas.
+
+		theta_pad: (n+L) x 1
+		Value: theta[-r+1], ..., theta[-1], theta[0], theta[1], ..., theta[n]
+		Index:	   0		    	r-2		   r-1		 r			   r+n-1
+
+		hpsi: (n+1) x 1
+		Value: 								hpsi[0],  hpsi[1], ..., hpsi[n]
+
+		y: n x 1
+		Value: 											y[0],  ...,  y[n-1]
+		*/
+		arma::vec theta_pad(n + L, arma::fill::zeros);
+		arma::vec coef(L, arma::fill::zeros); // L x 1, in reverse order from large to small
+		for (unsigned int t = L; t >= 1; t--)
+		{
+			double c1 = binom(static_cast<double>(L), static_cast<double>(t));
+			double c2 = std::pow(-rho, static_cast<double>(t));
+			coef.at(L - t) = c1 * c2;
+		}
+
+		double cnst = std::pow(1. - rho, static_cast<double>(L));
+
+		for (unsigned int t = 0; t < n; t++)
+		{
+			arma::vec theta_sub = theta_pad.subvec(t, t + L - 1); // L x 1, in natural order from small to large
+			double yt_old = ypad.at(t);
+			arma::vec tmp = coef % theta_sub;
+
+			double hpsi_cur = hpsi.at(t + 1);
+
+			double tmp1 = arma::accu(tmp);
+			double tmp2 = cnst * hpsi_cur;
+			tmp2 *= yt_old;
+			double tsum = -tmp1 + tmp2;
+			bound_check(tsum, "hpsi2theta-theta", false, true);
+			tsum = std::max(tsum, EPS);
+
+			theta_pad.at(t + L) = tsum;
+			theta.at(t) = tsum;
+		}
+	}
+	break;
+	default: // Otherwise
+	{
+		::Rf_error("Unsupported type of transfer function.");
+	}
+	}
+
+	return;
+}
 
 double loglike_obs(
 	const double &y, 
 	const double &lambda,
-	const unsigned int &obs_code = 1,
-	const double &delta_nb = 1.,
-	const bool &return_log = false) {
+	const unsigned int &obs_code,
+	const double &delta_nb,
+	const bool &return_log) {
 	
 	if (!std::isfinite(y) || !std::isfinite(lambda))
 	{
@@ -1151,13 +1119,8 @@ double loglike_obs(
 
 
 			if (!return_log) {
-				// loglike = std::exp(loglike);
-				loglike = std::exp(std::min(loglike,UPBND));
-				if (!std::isfinite(loglike))
-				{
-					std::cout << "loglike = " << loglike << std::endl;
-					throw std::invalid_argument("loglike_obs: non-finite probabilitties.");
-				}
+				loglike = std::exp(loglike);
+				// loglike = std::exp(std::min(loglike,UPBND));
 			}
 		}
 		break;
@@ -1179,5 +1142,6 @@ double loglike_obs(
 		}
 	}
 
+	bound_check(loglike,"loglike_obs: loglike");
 	return loglike;
 }

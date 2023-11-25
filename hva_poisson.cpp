@@ -829,9 +829,12 @@ Rcpp::List hva_poisson(
             throw std::invalid_argument("hva_poisson: infinite log marginal likelihood.");
         }
 
-        R.col(1) = psi2hpsi(R.col(0), gain_code);
-        R.submat(1, 1, n, 1) = hpsi2theta(R.col(1), Y,trans_code,0.,L_, rho); // theta
-        R.at(0, 1) = 0.;
+        arma::vec hpsi_tmp = psi2hpsi(R.col(0), gain_code); // (n+1) x 1
+        arma::vec theta_tmp(n,arma::fill::zeros);
+        hpsi2theta(theta_tmp, hpsi_tmp, ypad, trans_code, 0., L, rho); // theta
+        arma::vec theta_tmp2(n+1,arma::fill::zeros);
+        theta_tmp2.tail(n) = theta_tmp;
+        R.col(1) = theta_tmp2;
 
         logp_y = arma::accu(pmarg_y.elem(arma::find_finite(pmarg_y)));
 
@@ -1041,7 +1044,7 @@ Rcpp::List hva_poisson(
 
     if (summarize_return) {
         arma::vec qProb = {0.025,0.5,0.975};
-        arma::mat RR = arma::quantile(psi_stored,qProb,1);
+        arma::mat RR = arma::quantile(psi_stored,qProb,1); 
         output["psi"] = Rcpp::wrap(RR); // (n+1) x 3
 
         // arma::mat hpsiR = psi2hpsi(RR, gain_code); // hpsi: p x N

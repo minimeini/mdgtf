@@ -30,7 +30,6 @@ arma::mat update_at(
 	arma::vec hpsi(N,arma::fill::zeros);
 	// arma::mat Gtmp(Gt.begin(),Gt.n_elem);
 
-
 	if (trans_code != 1)
 	{
 		hpsi = psi2hpsi(arma::vectorise(mt.row(0)), gain_code); // 1 x N
@@ -68,19 +67,13 @@ arma::mat update_at(
 
 			arma::vec new_vec = Gt * old_vec;
 			new_vec.at(0) = old_psi;
+
+			double aval = new_vec.at(1);
+			new_vec.at(1) = std::max(EPS,aval);
+
 			at.col(i) = new_vec;
-
-			if (arma::any(new_vec.subvec(1, p - 1) < -EPS))
-			{
-				
-				throw std::invalid_argument("update_at: negative theta");
-			}
 		}
 
-		if (arma::any(arma::vectorise(mt.rows(1, p - 1)) < -EPS))
-		{
-			throw std::invalid_argument("update_at: Input old state is not positive.");
-		}
 	}
 	break;
 	case 3: // Vanilla
@@ -215,7 +208,7 @@ void forwardFilter(
 	} else if (trans_code==3) { // Vanilla
 		Ft.at(0) = 1.;
 	} else if (trans_code==1 && L>0) { // Koyama
-		Fphi = get_Fphi(L);
+		Fphi = get_Fphi(L,L,rho,trans_code);
 		Fy.zeros(L);
     }
 
@@ -232,14 +225,21 @@ void forwardFilter(
 	/*
 	------ Reference Analysis ------
 	*/
-	if (L > 0 && trans_code==1)
+	if (L > 0 && trans_code == 1)
 	{
-		at.col(1) = update_at(Gt.slice(1), p, gain_code, trans_code, mt.col(0), Y.at(0), rho, 1);
+		arma::vec atmp = update_at(Gt.slice(1), p, gain_code, trans_code, mt.col(0), Y.at(0), rho, 1); // p x 1
+		// if (trans_code != 1)
+		// {
+		// 	arma::vec asub = atmp.subvec(1,atmp.n_elem-1);
+		// 	asub.elem(arma::find(asub < EPS)).fill(EPS);
+		// 	atmp.subvec(1,atmp.n_elem-1) = asub;
+		// }
+		at.col(1) = atmp;
 		update_Gt(Gt.slice(1), gain_code, trans_code, mt.col(0), Y.at(0), rho);
 		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(1), use_discount, W, delta);
 
 		// if (trans_code == 1)
-		// { // Koyama
+		{ // Koyama
 			update_Ft_koyama(Ft, Fy, 1, L, Y, Fphi);
 			hpsi = psi2hpsi(at.col(1), gain_code);
 			hph = hpsi_deriv(at.col(1), gain_code);
@@ -247,7 +247,7 @@ void forwardFilter(
 			ft = arma::accu(Ft % hpsi);
 			Ft = Ft % hph;
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
-		// }
+		}
 		// else
 		// { // Vanilla, Koyck, Solow
 		// 	ft = arma::as_scalar(Ft.t() * at.col(1));
@@ -268,22 +268,21 @@ void forwardFilter(
 			// Poisson DLM with Identity Link
 			betat.at(1) = phi / Qt;
 			alphat.at(1) = phi * betat.at(1);
-			Qt_ast = (alphat.at(1)+Y.at(0)) / (betat.at(1)+1.) / (betat.at(1)+1.);
+			Qt_ast = (alphat.at(1) + Y.at(0)) / (betat.at(1) + 1.) / (betat.at(1) + 1.);
 			ft_ast = Qt_ast * (betat.at(1)+1.) - mu0;
 
 		} else if (link_code == 0 && obs_code == 0) {
 			// Negative-binomial DLM with Identity Link
 			betat.at(1) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
 			alphat.at(1) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(1)-1.));
-			ft_ast = delta_nb*(alphat.at(1)+Y.at(0))/(betat.at(1)+delta_nb-1.) - mu0;
-			Qt_ast = (ft_ast+mu0)*delta_nb*(alphat.at(1)+Y.at(0)+betat.at(1)+delta_nb-1.)/(betat.at(1)+delta_nb-1.)/(betat.at(1)+delta_nb-2.);
+			ft_ast = delta_nb * (alphat.at(1) + Y.at(0)) / (betat.at(1) + delta_nb - 1.) - mu0;
+			Qt_ast = (ft_ast + mu0) * delta_nb * (alphat.at(1) + Y.at(0) + betat.at(1) + delta_nb - 1.) / (betat.at(1) + delta_nb - 1.) / (betat.at(1) + delta_nb - 2.);
 		} else if (link_code == 1 && obs_code == 1) {
 			// Poisson DLM with Exponential Link
 			alphat.at(1) = optimize_trigamma(Qt);
 			betat.at(1) = std::exp(R::digamma(alphat.at(1)) - mu0 - ft);
-        	ft_ast = R::digamma(alphat.at(1)+Y.at(0)) - std::log(betat.at(1)+1.) - mu0;
-			Qt_ast = R::trigamma(alphat.at(1)+Y.at(0));
-
+			ft_ast = R::digamma(alphat.at(1) + Y.at(0)) - std::log(betat.at(1) + 1.) - mu0;
+			Qt_ast = R::trigamma(alphat.at(1) + Y.at(0));
 		} else {
 			 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
 		}
@@ -293,7 +292,7 @@ void forwardFilter(
 		At = Rt.slice(1) * Ft / Qt; // p x 1
 
 		arma::vec mnew = at.col(1) + At * et;
-		mt.col(1) = arma::abs(mnew);
+		mt.col(1) = mnew;
 
 		arma::mat cnew = Rt.slice(1) - At * (Qt - Qt_ast) * At.t();
 		if (cnew.is_zero())
@@ -322,18 +321,13 @@ void forwardFilter(
 
 	for (unsigned int t=(L+1); t<=nt; t++) {
 		R_CheckUserInterrupt();
-		// std::cout << "t=" << t << std::endl;
-		// std::cout << "m[t-1]=";
-		// mt.col(t-1).t().print();
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		at.col(t) = update_at(Gt.slice(t), p, gain_code, trans_code, mt.col(t - 1), Y.at(t - 1), rho, t);
+		at.col(t) = update_at(Gt.slice(t), p, gain_code, trans_code, mt.col(t - 1), Y.at(t - 1), rho, t);		
 		update_Gt(Gt.slice(t), gain_code, trans_code, mt.col(t - 1), Y.at(t - 1), rho);
 		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
 
-		// std::cout << "Rt=";
-		// Rt.slice(t).print();
 		
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
         if (trans_code == 1) { // Koyama
@@ -349,17 +343,8 @@ void forwardFilter(
 			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
 		}
 
-		// std::cout << "ft=" << ft << " Qt=" << Qt << std::endl;
-
-		if (!std::isfinite(Qt) || Qt < EPS)
-		{
-			std::cout << "t=" << t << std::endl;
-			std::cout << "Ct";
-			Ct.slice(t-1).print();
-			std::cout << "Rt";
-			Rt.slice(t).print();
-			throw std::invalid_argument("ForwardFilter: Qt is zero.");
-		}
+		ft = std::max(ft,EPS);
+		bound_check(Qt,"ForwardFilter: Qt",true);
 
 		/*
 		------ Moment Matching ------
@@ -370,7 +355,7 @@ void forwardFilter(
 			// Poisson DLM with Identity Link
 			betat.at(t) = phi / Qt;
 			alphat.at(t) = phi * betat.at(t);
-			Qt_ast = (alphat.at(t)+Y.at(t)) / (betat.at(t)+1.) / (betat.at(t)+1.);
+			Qt_ast = (alphat.at(t) + Y.at(t)) / (betat.at(t) + 1.) / (betat.at(t) + 1.);
 			ft_ast = Qt_ast * (betat.at(t)+1.) - mu0;
 
 		} else if (link_code == 0 && obs_code == 0) {
@@ -378,49 +363,36 @@ void forwardFilter(
 
 			betat.at(t) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
 			alphat.at(t) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(t)-1.));
-			ft_ast = delta_nb*(alphat.at(t)+Y.at(t))/(betat.at(t)+delta_nb-1.) - mu0;
-			Qt_ast = (ft_ast+mu0)*delta_nb*(alphat.at(t)+Y.at(t)+betat.at(t)+delta_nb-1.)/(betat.at(t)+delta_nb-1.)/(betat.at(t)+delta_nb-2.);
-
+			ft_ast = delta_nb * (alphat.at(t) + Y.at(t)) / (betat.at(t) + delta_nb - 1.) - mu0;
+			Qt_ast = (ft_ast + mu0) * delta_nb * (alphat.at(t) + Y.at(t) + betat.at(t) + delta_nb - 1.) / (betat.at(t) + delta_nb - 1.) / (betat.at(t) + delta_nb - 2.);
 		} else if (link_code == 1 && obs_code == 1) {
 			// Poisson DLM with Exponential Link
 			alphat.at(t) = optimize_trigamma(Qt);
 			betat.at(t) = std::exp(R::digamma(alphat.at(t)) - phi);
-        	ft_ast = R::digamma(alphat.at(t)+Y.at(t)) - std::log(betat.at(t)+1.) - mu0;
-			Qt_ast = R::trigamma(alphat.at(t)+Y.at(t));
-
+			ft_ast = R::digamma(alphat.at(t) + Y.at(t)) - std::log(betat.at(t) + 1.) - mu0;
+			Qt_ast = R::trigamma(alphat.at(t) + Y.at(t));
 		} else {
 			 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
 		}
-        
-		// std::cout << "alphat=" << alphat.at(t) << " betat=" << betat.at(t) << std::endl;
-		// std::cout << "ft_ast=" << ft_ast << " Qt_ast=" << Qt_ast << std::endl;
+
+		ft_ast = std::max(ft_ast,EPS);
+		bound_check(Qt_ast, "ForwardFilter: Qt_ast", true);
+		
+		
 
 		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
 		et = ft_ast - ft;
 		At = Rt.slice(t) * Ft / Qt; // p x 1
 
 		arma::vec mnew = at.col(t) + At * et;
-		if (t<=(p+1) && trans_code != 1)
+		double mtmp = mnew.at(1);
+		if (trans_code != 1)
 		{
-			mt.col(t) = arma::abs(mnew);
-		} else
-		{
-			mt.col(t) = mnew;
+			mnew.at(1) = std::max(mtmp, EPS);
 		}
 
-		if (t>(p+1) && trans_code != 1 && arma::any(mnew.subvec(1,p-1)<-EPS))
-		{
-			std::cout << "a[t]=";
-			at.col(t).t().print();
-			std::cout << "At=";
-			At.t().print();
-			std::cout  << "et=" << et << std::endl;
-			std::cout << "mnew=";
-			mnew.t().print();
-			throw std::invalid_argument("forwardFilter: m[t] theta is not positive for distributed lags.");
-		}
-		
 
+		mt.col(t) = mnew;
 		arma::mat cnew = Rt.slice(t) - At * (Qt - Qt_ast) * At.t();
 		Ct.slice(t) = cnew;
 
@@ -662,6 +634,7 @@ Rcpp::List lbe_poisson(
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y;
+	Ypad.at(0) = static_cast<double>(sample(5,true));
 	
 	arma::mat at(p,npad,arma::fill::zeros);
 	
@@ -676,10 +649,14 @@ Rcpp::List lbe_poisson(
 	init_Gt(Gt,rho,p,trans_code);
 
 	arma::mat mt(p, npad, arma::fill::zeros);
-	if (!m0_prior.isNull()) {
-		arma::vec m00 = Rcpp::as<arma::vec>(m0_prior);
-		mt.at(0,0) = std::abs(m00.at(0));
+	if (trans_code != 1)
+	{
+		mt.fill(0.1 / static_cast<double>(p));
 	}
+	// if (!m0_prior.isNull()) {
+	// 	arma::vec m00 = Rcpp::as<arma::vec>(m0_prior);
+	// 	mt.at(0,0) = std::abs(m00.at(0));
+	// }
 
 	arma::cube Ct(p, p, npad);
 	Ct.slice(0).eye();
@@ -696,9 +673,9 @@ Rcpp::List lbe_poisson(
 		obs_code,link_code,trans_code,gain_code,
 		n,p,Ypad,L_,rho,mu0,W,delta,delta_nb);
 	arma::vec Wt = (1.-delta) * arma::vectorise(Rt.tube(0,0));
+
 	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	
-
 	Rcpp::List output;
 	const double critval = R::qnorm(1. - 0.5 * (1. - ci_coverage), 0., 1., true, false);
 	if (summarize_return) {
@@ -726,13 +703,17 @@ Rcpp::List lbe_poisson(
 		output["critval"] = critval;
 	}
 
+
 	output["Wt"] = Rcpp::wrap(Wt); // npad x 1
-	arma::vec hpsiR = psi2hpsi(ht,model_code.at(3)); // hpsi: p x N
+	arma::vec hpsiR = psi2hpsi(ht, gain_code); // hpsi: npad x 1
 	double theta0 = 0;
-    arma::vec lambdaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
-	output["theta"] = Rcpp::wrap(lambdaR);
-    output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(lambdaR.tail(n-npara) - Y.tail(n-npara),2.0))));
-    output["mae"] = arma::as_scalar(arma::mean(arma::abs(lambdaR.tail(n-npara) - Y.tail(n-npara))));
+	arma::vec thetaR(npad,arma::fill::zeros);
+	hpsi2theta(thetaR,hpsiR,Ypad,trans_code,theta0,L);
+	output["theta"] = Rcpp::wrap(thetaR);
+
+    output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(thetaR.tail(n-npara) - Y.tail(n-npara),2.0))));
+    output["mae"] = arma::as_scalar(arma::mean(arma::abs(thetaR.tail(n-npara) - Y.tail(n-npara))));
+
 
 	double logpred = 0.;
 	double prob_success;
@@ -751,6 +732,7 @@ Rcpp::List lbe_poisson(
 		}
 	}
 	output["logpred"] = logpred;
+
 
 	return output;
 }
@@ -774,7 +756,7 @@ Rcpp::List get_eta_koyama(
 
 	arma::vec Ft(p,arma::fill::zeros);
 	arma::vec Fy(p,arma::fill::zeros);
-	arma::vec Fphi = get_Fphi(p);
+	arma::vec Fphi = get_Fphi(p,p,0.9,1);
 
 	arma::mat mt_ramp;
 	if (gain_code == 0) {

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iomanip>
 #include <vector>
+#include <string>
 #include <cmath>
 #include <algorithm>
 #include <boost/math/special_functions/beta.hpp>
@@ -18,76 +19,76 @@ inline constexpr double UPBND = 700.;
 inline constexpr double covid_m = 4.7;
 inline constexpr double covid_s = 2.9;
 /*
-------------------------
 ------ Model Code ------
-------------------------
 
-0 - (KoyamaMax) Identity link    + log-normal transmission delay kernel        + ramp function (aka max(x,0)) on gain factor (psi)
-1 - (KoyamaExp) Identity link    + log-normal transmission delay kernel        + exponential function on gain factor
-2 - (SolowMax)  Identity link    + negative-binomial transmission delay kernel + ramp function on gain factor
-3 - (SolowExp)  Identity link    + negative-binomial transmission delay kernel + exponential function on gain factor
-4 - (KoyckMax)  Identity link    + exponential transmission delay kernel       + ramp function on gain factor
-5 - (KoyckExp)  Identity link    + exponential transmission delay kernel       + exponential function on gain factor
-6 - (KoyamaEye) Exponential link + log-normal transmission delay kernel        + identity function on gain factor
-7 - (SolowEye)  Exponential link + negative-binomial transmission delay kernel + identity function on gain factor
-8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
-*/
+obs_code
+- 0: nbinom
+- 1: poisson
+- 2: nbinom_p
+- 3: gaussian
 
-/*
------- ModelCode = 0 -------
-----------------------------
------- Koyama's Model ------
-----------------------------
+link_code
+- 0: identity
+- 1: exponential
 
------- Discretized Hawkes Form ------
-<obs> y[t] | lambda[t] ~ Pois(lambda[t])
-<link> lambda[t] = phi[1] max(psi[t],0) y[t-1] + phi[2] max(psi[t-1],0) y[t-2] + ... + phi[L] max(psi[t-L+1],0) y[t-L]
-<state> psi[t] = psi[t-1] + omega[t], omega[t] ~ N(0,W)
+trans_code
+- 0: koyck
+- 1: koyama
+- 2: solow
+- 3: vanilla
+
+gain_code
+- 0: ramp
+- 1: exponential
+- 2: identity
+- 3: softplus
+
+err_code
+- 0: gaussian
+- 1: laplace
+- 2: cauchy
+- 3: left_skewed_normal
 
 
------- Dynamic Linear Model Form ------
-<obs> y[t] | lambda[t] = Ft(theta[t]), 
-    where Ft(theta[t]) = phi[1] y[t-1] max(theta[t,1],0) + ... + phi[L] y[t-L] max(theta[t,L],0)
-<Link> theta[t] = G theta[t-1] + Omega[t], 
-    where G = 1 0 ... 0 0
-              1 0 ... 0 0
-              . .     . .
-              .   .   . .
-              .     . . .
-              0 0 ... 1 0
-        
-    and Omega[t] = (omega[t],0,...,0) ~ N(0,W[t]), W[t][1,1] = W and 0 otherwise.
 
------------------------
------- Inference ------
------------------------
-
-1. [x] Linear Bayes Approximation with first order Taylor expansion
-2. [x] Linear Bayes Approximation with second order Taylor expansion >> doesn't exist because the Hessian will be exactly zero
-3. [x] MCMC Disturbance sampler
-4. [x] Sequential Monte Carlo filtering and smoothing
-5. [x] Vanila variational Bayes
-6. [x] Hybrid variational Bayes
-
+------ ModelCode -------
 */
 
 void bound_check(
 	const arma::mat &input,
-	const bool &check_zero,
-	const bool &check_negative);
+	const std::string &name = "function",
+	const bool &check_zero = false,
+	const bool &check_negative = false);
+
+
+void bound_check(
+	const double &input,
+	const std::string &name = "function",
+	const bool &check_zero = false,
+	const bool &check_negative = false);
+
 
 arma::uvec sample(
 	const unsigned int n,
 	const unsigned int size,
 	const arma::vec &weights,
-	bool replace,
+	bool replace = true,
+	bool zero_start = true);
+
+unsigned int sample(
+	const int n,
+	const arma::vec &weights,
+	bool zero_start = true);
+
+unsigned int sample(
+	const int n,
 	bool zero_start);
 
 void init_by_trans(
 	unsigned int &p, // dimension of DLM state space
 	unsigned int &L_,
 	const unsigned int trans_code,
-	const unsigned int L);
+	const unsigned int L = 2);
 
 void init_by_trans(
 	unsigned int& p, // dimension of DLM state space
@@ -95,7 +96,7 @@ void init_by_trans(
 	arma::vec& Ft,
     arma::vec& Fphi,
 	const unsigned int trans_code,
-	const unsigned int L);
+	const unsigned int L = 2);
 
 void init_Gt(
 	arma::cube &Gt,
@@ -113,9 +114,6 @@ void init_Gt(
 
 double binom(double n, double k);
 
-arma::vec get_solow_coef(
-	const unsigned int &rho,
-	const unsigned int &r);
 
 /*
 	CDF of the log-normal distribution.
@@ -151,56 +149,11 @@ const double s = 2.9
 const unsigned int ModelCode = 0
 
 */
-arma::vec get_Fphi(const unsigned int L);
-
-
-
-/*
------- update_Fx ------
-
------- Default settings ------
-const unsigned int ModelCode = 0
-Checked. OK.
-*/
-arma::mat update_Fx(
-	const unsigned int trans_code,
-	const unsigned int n, // number of observations
-	const arma::vec& Y, // n x 1, (y[1],...,y[n]), observtions
-	const arma::vec& hph,// (n+1) x 1, derivative of the gain function at h[t]
-	const double rho, // memory of previous state, for exponential and negative binomial transmission delay kernel
-	const unsigned int L, // length of nonzero transmission delay for log-normal
-	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_);
-
-
-
-arma::vec update_theta0(
-	const unsigned int trans_code,
-	const unsigned int n, // number of observations
-	const arma::vec& Y, // n x 1, observations, (Y[1],...,Y[n])
-	const arma::vec& hhat, // (n+1) x 1, 1st Taylor expansion of h(psi[t]) at h[t]
-	const double theta00, // Initial value of the transfer function block
-	const double rho, // memory of previous state, for exponential and negative binomial transmission delay kernel
-	const unsigned int L, // length of nonzero transmission delay for log-normal
-	const Rcpp::Nullable<Rcpp::NumericVector>& Fphi_);
-
-
-/*
------- update_theta ------
-Update the hidden state vector
-
------- Formula ------
-ModelCode = 0 and ApproxModel = true:
-    theta[t] = Fphi[1]*y[t-1]*psi[t] + ... + Fphi[L]*y[t-L]*psi[t-L+1]
-    >>>>>> This is using an alternate model which holds in most cases for the reproduction number,
-since it barely drops below 0.
--------------------
-*/
-arma::vec update_theta(
-	const unsigned int n,
-	const arma::mat& Fx, // n x n
-	const arma::vec& w);
-
-
+arma::vec get_Fphi(
+	const unsigned int &n,	 // number of Lags
+	const unsigned int &L = 0,	 // dimension of state space (-1 for solow)
+	const double &rho = -1., // prob of negative binomial
+	const unsigned int &trans_code = 1);
 
 double trigamma_obj(
 	unsigned n,
@@ -254,10 +207,10 @@ double test_postW_gamma(){
 [1] -2.995733
 ------
 */
-double test_postW_gamma(
-	const double a1,
-	const double a2,
-	const double a3);
+// double test_postW_gamma(
+// 	const double a1,
+// 	const double a2,
+// 	const double a3);
 
 
 /**
@@ -296,20 +249,31 @@ arma::mat hpsi_deriv(
 
 arma::mat hpsi2theta(
 	const arma::mat& hpsi, // (n+1) x k
-	const arma::vec& y, // n x 1
-	const unsigned int trans_code,
-	const double theta0,
-	const unsigned int L,
-	const double rho);
+	const arma::vec& ypad, // n x 1
+	const unsigned int &trans_code,
+	const double &theta0 = 0.,
+	const unsigned int &L = 2,
+	const double &rho = 0.9);
+
+
+
+void hpsi2theta(
+	arma::vec &theta,
+	const arma::vec &hpsi, // (n+1) x 1, each row is a different time point
+	const arma::vec &ypad, // (n+1) x 1
+	const unsigned int &trans_code,
+	const double &theta0 = 0.,
+	const unsigned int &L = 2,
+	const double &rho = 0.9);
 
 
 
 double loglike_obs(
 	const double &y, 
 	const double &lambda,
-	const unsigned int &obs_code,
-	const double &delta_nb,
-	const bool &return_log);
+	const unsigned int &obs_code = 1,
+	const double &delta_nb = 1,
+	const bool &return_log = false);
 
 
 

@@ -12,6 +12,327 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppArmadillo)]]
 
 
+void get_increment_matrix(
+	arma::vec &t_row, // n x 1
+	const unsigned int &tidx,
+	const arma::vec &ypad, // (n+1)
+	const arma::vec &hpad, // (n+1)
+	const arma::vec & Fphi_pad // (n+1)
+)
+{
+	arma::vec phi_sub = Fphi_pad.subvec(1, tidx);	   // t x 1, phi[1], ..., phi[t]
+	arma::vec ysub = ypad.subvec(0,tidx-1);
+	arma::vec hsub = hpad.subvec(1,tidx);
+	arma::vec yh_tmp = ysub % hsub;
+	arma::vec yh_sub = arma::reverse(yh_tmp);	   // y[t-1]hph[t], ..., y[0]hph[1]
+	t_row = phi_sub % yh_sub;
+}
+
+
+void get_Fphi_pad(
+	arma::vec &Fphi_pad,
+	const unsigned int &trans_code,
+	const unsigned int &n,
+	const unsigned int &L,
+	const unsigned int &rho
+)
+{
+	arma::vec Fphi;
+	switch (trans_code)
+	{
+	case 1: // Koyama. CHECK[OK]
+	{
+		Fphi = get_Fphi(L,1,-1,trans_code);
+	}	
+	break;
+	case 2: // Solow
+	{
+		Fphi = get_Fphi(n, L, rho, trans_code); // L x 1
+	}
+	break;
+	default:
+	{
+		throw std::invalid_argument(
+			"get_Fphi_pad: undefined Fphi (trans_code = "+ std::to_string(trans_code) + ") for this transfer function.");
+	}
+	}
+
+	Fphi_pad.set_size(n+1);
+	Fphi_pad.zeros();
+
+	for (unsigned int l = 1; l <= Fphi.n_elem; l++)
+	{
+		Fphi_pad.at(l) = Fphi.at(l - 1);
+	}
+
+	return;
+}
+
+
+
+void update_Fn(
+	arma::mat &Fn, // n x n
+	const unsigned int &trans_code,
+	const unsigned int &gain_code,
+	const unsigned int &n,	  // number of observations
+	const arma::vec &y,		  // n x 1, (y[1],...,y[n]), observtions
+	const arma::vec &psi, // n x 1
+	const double &rho = 0.99,  // memory of previous state, for exponential and negative binomial transmission delay kernel
+	const unsigned int L = 2) // L for koyama, r for solow
+{ // L x 1, (phi[1],...,phi[L]), for log-normal transmission delay kernel only
+
+	// arma::mat Fx(n, n, arma::fill::zeros);
+	Fn.set_size(n, n);
+	Fn.zeros();
+
+	arma::vec ypad(n + 1, arma::fill::zeros);
+	ypad.tail(n) = y; // Ypad = (Y[0]=0,Y[1],...,Y[n])
+
+	arma::vec hph = hpsi_deriv(psi,gain_code);
+	arma::vec hph_pad(n+1, arma::fill::zeros);
+	hph_pad.tail(n) = hph;
+
+
+	arma::vec Fphi_pad;
+	get_Fphi_pad(Fphi_pad, trans_code, n, L, rho);
+
+		for (unsigned int t = 1; t <= n; t++)
+	{
+		arma::vec t_row(n,arma::fill::zeros);
+		get_increment_matrix(
+			t_row,  t, ypad, hph_pad, Fphi_pad);
+
+		arma::vec t_cumsum = arma::cumsum(t_row);
+		if (!(std::abs(t_row.at(0) - t_cumsum.at(0)) < EPS8))
+		{
+			throw std::invalid_argument("update_Fn: wrong cumsum index alignment.");
+		}
+
+		arma::vec Fn_row_t = arma::reverse(t_cumsum); // t x 1
+		for (unsigned int k = 1; k <= t; k++)
+		{
+			Fn.at(t - 1, k - 1) = Fn_row_t.at(k - 1);
+		}
+	}
+
+	return;
+}
+
+/*
+TODO: check it.
+*/
+void update_theta0(
+	arma::vec &theta0, // n x 1
+	const arma::vec &y,		   // n x 1, observations, (Y[1],...,Y[n])
+	const arma::vec &psi_hat,	   // n x 1, where the taylor expansion is performed
+	const unsigned int &n,
+	const unsigned int &trans_code,
+	const unsigned int &gain_code,
+	const double &rho = 0.99,   // memory of previous state, for exponential and negative binomial transmission delay kernel
+	const unsigned int &L = 1) // // L for koyama, r for solow
+{ // L x 1
+	theta0.set_size(n);
+	theta0.zeros();
+	
+	arma::vec hpsi = psi2hpsi(psi_hat,gain_code); // n x 1
+	arma::vec hderiv = hpsi_deriv(psi_hat, gain_code); // n x 1
+	arma::vec htmp = hderiv % psi_hat;			  // n x 1
+	arma::vec h0 = hpsi - htmp;
+
+	arma::vec ypad(n + 1, arma::fill::zeros);
+	ypad.tail(n) = y; // Ypad = (Y[0]=0,Y[1],...,Y[n])
+	arma::vec h0_pad(n + 1, arma::fill::zeros);
+	h0_pad.tail(n) = h0;
+
+	arma::vec Fphi_pad;
+	get_Fphi_pad(Fphi_pad, trans_code, n, L, rho);
+
+	for (unsigned int t = 1; t <= n; t++)
+	{
+		arma::vec t_row(n, arma::fill::zeros);
+		get_increment_matrix(
+			t_row, t, ypad, h0_pad, Fphi_pad);
+		theta0.at(t-1) = arma::accu(t_row);
+	}
+
+	if (theta0.at(0) < EPS8)
+	{
+		theta0.at(0) = EPS8;
+	}
+
+	bound_check(theta0, "update_theta0", true, false);
+
+	return;
+}
+
+
+
+void proposal_wt_approx(
+	double &bs,
+	double &Bs,
+	const arma::vec &y,	 // n x 1
+	const arma::vec &wt, // n x 1
+	const unsigned int &sidx, 
+	const unsigned int &gain_code,
+	const unsigned int &trans_code,
+	const unsigned int &link_code,
+	const unsigned int &obs_code,
+	const unsigned int &L,
+	const double &rho = 0.99,
+	const double &aw = 0,
+	const double &W = 1.,
+	const double &delta_nb = 1.)
+{
+	arma::vec yhat = y;
+	unsigned int n = y.n_elem;
+
+	arma::vec psi = arma::cumsum(wt);
+	arma::vec theta0(n,arma::fill::zeros);
+	update_theta0(theta0, y, psi, n, trans_code, gain_code, rho, L);
+
+	arma::mat Fn(n, n, arma::fill::zeros);
+	update_Fn(Fn, trans_code, gain_code, n, y, psi, rho, L);
+
+	arma::vec lambda = theta0 + Fn * wt;
+	lambda.elem(arma::find(lambda < EPS8)).fill(EPS8);
+	
+	if (link_code == 1)
+	{
+		// Linearlisation for exponential link
+		yhat = arma::log(lambda) + (y - lambda) / lambda;
+	} // Otherwise, yhat == Y.
+
+	arma::vec Vt(n,arma::fill::zeros);
+	if (obs_code == 1 && link_code == 1)
+	{
+		// Poisson obs + exponential link: V[t] = 1./lambda[t]
+		Vt = lambda;
+		Vt.for_each([](arma::vec::elem_type& val){val = 1./val;});
+	}
+	else if (obs_code == 1 && link_code == 0)
+	{
+		// Poisson obs + identity link
+		Vt = lambda;
+	}
+	else if (obs_code == 0)
+	{
+		// nbinom obs + identity link
+		arma::vec tmp1 = lambda;
+		tmp1.for_each([&delta_nb](arma::vec::elem_type& val){ val += delta_nb; });
+
+		arma::vec tmp2 = lambda % tmp1;
+		tmp2.for_each([&delta_nb](arma::vec::elem_type& val){ val /= delta_nb; });
+
+		Vt = tmp2;
+	}
+	Vt.elem(arma::find(Vt < EPS8)).fill(EPS8);
+
+	double ws_old = wt.at(sidx);
+	arma::vec Fn_col_s = Fn.col(sidx);
+	arma::vec yhat_s = yhat - lambda + Fn_col_s * ws_old;
+
+	arma::vec Fn_s2 = Fn_col_s % Fn_col_s;
+	arma::vec tmp = Fn_s2 / Vt;
+	double Btmp = arma::accu(tmp);
+	Btmp += 1. / W;
+	Btmp = 1. / Btmp;
+	bound_check(Btmp, "proposal_wt_approx-Btmp", true, true);
+
+	arma::vec Fn_yhat = Fn_col_s % yhat_s;
+	arma::vec tmp2 = Fn_yhat / Vt;
+	double btmp = arma::accu(tmp2);
+	bound_check(btmp, "proposal_wt_approx-btmp");
+
+
+	bs = Btmp * btmp;
+	Bs = Btmp;
+	// Bs_sqrt.at(s) = std::sqrt(Btmp);
+	// Bs_sqrt.at(s) *= mh_sd;
+	
+
+	return;
+}
+
+void wt2theta_exact(
+	arma::vec &theta, // n x 1
+	const arma::vec &wt, // n x 1
+	const arma::vec &y, // n x 1
+	const unsigned int &gain_code,
+	const unsigned int &trans_code,
+	const unsigned int &L,
+	const double &rho)
+{
+	unsigned int n = y.n_elem;
+	arma::vec psi = arma::cumsum(wt); // n x 1
+	arma::vec hpsi = psi2hpsi(psi, gain_code);
+
+	arma::vec ypad(n+1,arma::fill::zeros);
+	ypad.tail(y.n_elem) = y;
+	arma::vec hpsi_pad(n+1,arma::fill::zeros);
+	hpsi_pad.tail(hpsi.n_elem) = hpsi;
+
+	/* hpsi2theta IS PROBLEMATIC: is it exact or approximation? */
+	theta.zeros();
+	hpsi2theta(theta,hpsi_pad, ypad, trans_code, 0., L, rho);
+
+	if (!theta.is_finite())
+	{
+		throw std::invalid_argument("wt2theta_exact: nonfinite theta");
+	}
+}
+
+double logpost_wt_exact(
+	const arma::vec &y,  // n x 1
+	const arma::vec &wt, // n x 1
+	const unsigned int &sidx,
+	const unsigned int &gain_code,
+	const unsigned int &trans_code,
+	const unsigned int &link_code,
+	const unsigned int &obs_code,
+	const unsigned int &L,
+	const double &rho,
+	const double &mu0,
+	const unsigned int &delta_nb,
+	const double &aw, // prior mean of w[s]
+	const double &Rw) // prior SD of w[s]
+{
+	const unsigned int n = y.n_elem;
+	double Rw_sqrt = std::sqrt(Rw);
+
+	arma::vec theta_exact(n,arma::fill::zeros);
+	wt2theta_exact(
+		theta_exact,wt,y,
+		gain_code,trans_code,
+		L,rho);
+
+	arma::vec lambda_core = mu0 + theta_exact;
+	arma::vec lambda(n,arma::fill::zeros);
+	if (link_code == 1)
+	{
+		lambda_core.elem(arma::find(lambda > UPBND)).fill(UPBND);
+		lambda = arma::exp(lambda_core);
+	}
+	else
+	{
+		lambda = lambda_core;
+	}
+
+	double logpost = R::dnorm4(wt.at(sidx), aw, Rw_sqrt, true);
+	for (unsigned int t = sidx; t < n; t++)
+	{
+		double logp_increment = loglike_obs(
+			y.at(t), lambda.at(t),
+			obs_code, delta_nb, true);
+
+		logpost += logp_increment;
+	}
+
+	bound_check(logpost,"logpost_wt_exact");
+
+	return logpost;
+}
+
+
 
 
 /*
@@ -24,17 +345,15 @@ Unknown Parameters
 //' @export
 // [[Rcpp::export]]
 Rcpp::List mcmc_disturbance_pois(
-	const arma::vec& Y, // n x 1, the observed response
+	const arma::vec& y, // n x 1, the observed response
 	const arma::uvec& model_code, 
 	const arma::uvec& eta_select, // 6 x 1, indicator for unknown (=1) or known (=0), global parameters: W, mu0, rho, M,th0, psi0
     const arma::vec& eta_init, // 6 x 1, if true/initial values should be provided here
     const arma::uvec& eta_prior_type, // 6 x 1
     const arma::mat& eta_prior_val, // 2 x 6, priors for each element of eta
-	const double L = 12, // For Koyama's model
+	const double L = 12, // Lag Koyama's model; order for Solow's model
 	const Rcpp::Nullable<Rcpp::NumericVector>& w1_prior = R_NilValue, // (aw, Rw), w1 ~ N(aw, Rw), prior for w[1], the first state/evolution/state error/disturbance.
 	const Rcpp::Nullable<Rcpp::NumericVector>& wt_init = R_NilValue, // initial value of the evolution error at time t = 1
-	const Rcpp::Nullable<Rcpp::NumericVector>& wt_true = R_NilValue, // true value of system/evolution/state error/disturbance
-	const Rcpp::Nullable<Rcpp::NumericVector>& ht_ = R_NilValue, // (n+1) x 1, (h[0],h[1],...,h[n]), smoothing means or Taylor expansion locations of (psi[0],...,psi[n]) | Y
 	const Rcpp::NumericVector& MH_sd = Rcpp::NumericVector::create(1.4,0.01), // wt, W
 	const unsigned int wt_mh_type = 0, // 0 - N(0,W); 1 - 
 	const bool use_lambda_bound = false,
@@ -51,7 +370,7 @@ Rcpp::List mcmc_disturbance_pois(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
-	const unsigned int n = Y.n_elem;
+	const unsigned int n = y.n_elem;
 	const double n_ = static_cast<double>(n);
 	const unsigned int ntotal = nburnin + nthin*nsample + 1;
 
@@ -71,46 +390,50 @@ Rcpp::List mcmc_disturbance_pois(
 	double rho = eta_init.at(2);
 
 	
-	double th0 = eta_init.at(4);
-	arma::vec th0_stored(nsample);
-	double m_th0 = eta_prior_val.at(0,4);
-	double C_th0 = eta_prior_val.at(1,4);
-	double C_th0rt = std::sqrt(C_th0);
-	double m_th, C_th, C_thrt; 
-	double th0_new;
-	double th0_accept = 0.;
+	// double th0 = eta_init.at(4);
+	// arma::vec th0_stored(nsample);
+	// double m_th0 = eta_prior_val.at(0,4);
+	// double C_th0 = eta_prior_val.at(1,4);
+	// double C_th0rt = std::sqrt(C_th0);
+	// double m_th, C_th, C_thrt; 
+	// double th0_new;
+	// double th0_accept = 0.;
 
-	double psi0 = eta_init.at(5);
+	// double psi0 = eta_init.at(5);
 
 	// Local Parameter
 	bool wt_flag = true;
 	double aw,Rw,Rwrt;
-	arma::vec wt(n); 
+	arma::vec wt(n,arma::fill::zeros); 
 	arma::vec wt_accept(n);
 	arma::mat wt_stored(n,nsample,arma::fill::zeros);
-	if (!wt_true.isNull()) {
-		wt_flag = false;
-		wt = Rcpp::as<arma::vec>(wt_true);
-	} else {
-		wt_flag = true;
-		if (!w1_prior.isNull()) {
-			arma::vec w1Prior_ = Rcpp::as<arma::vec>(w1_prior);
-			aw = w1Prior_.at(0);
-			Rw = w1Prior_.at(1);
-		} else {
-			// Setting from Alves et al. (2010)
-			aw = 0.;
-			Rw = 100.;
-		}
-		Rwrt = std::sqrt(Rw);
+	if (!w1_prior.isNull())
+	{
+		arma::vec w1Prior_ = Rcpp::as<arma::vec>(w1_prior);
+		aw = w1Prior_.at(0);
+		Rw = w1Prior_.at(1);
+	}
+	else
+	{
+		// Setting from Alves et al. (2010)
+		aw = 0.;
+		Rw = 1./100.;
+	}
+	Rwrt = std::sqrt(Rw);
 
-		if (!wt_init.isNull()) {
-			wt = Rcpp::as<arma::vec>(wt_init);
-		} else {
-			wt = aw + arma::randn(n)*Rwrt;
+	if (!wt_init.isNull())
+	{
+		wt = Rcpp::as<arma::vec>(wt_init);
+	}
+	else
+	{
+		// wt = aw + arma::randn(n) * Rwrt;
+		wt = arma::randn(n) * 0.01;
+		for (unsigned int t=0; t<L; t++)
+		{
+			wt.at(t) = std::abs(wt.at(t));
 		}
 	}
-
 
 	// double rho, xi, xi_old, xi_new, rho_sq;
 	// arma::vec rho_stored(nsample);
@@ -132,189 +455,80 @@ Rcpp::List mcmc_disturbance_pois(
 	// }
 	// rho_sq = rho * rho;
 
-	
 
-	// Initialize the states via linear bayes smoothing
-	// Implemented: KoyamaMax (ModelCode = 0)
-	arma::vec ht(n+1,arma::fill::zeros); // (h[0],h[1],...,h[n])
-	if (!ht_.isNull()) {
-		ht = Rcpp::as<arma::vec>(ht_);
-		ht.at(0) = psi0;
-	}
-
-	// TODO: check this
-	// First-order Taylor expansion of h(psi[t]) at h[t]
-	arma::vec hh = psi2hpsi(ht,gain_code);
-	arma::vec hph(n+1,arma::fill::zeros);
-	hpsi_deriv(hph,ht,gain_code);
-	arma::vec hhat = hh + hph%(psi0-ht); 
-
-	arma::vec Fphi = get_Fphi(L); // L x 1
-
-	// TODO: check this
-	arma::mat Fx = update_Fx(trans_code,n,Y,hph,rho,L,Rcpp::wrap(Fphi));
-	arma::vec th0tilde = update_theta0(trans_code,n,Y,hhat,th0,rho,L,Rcpp::wrap(Fphi));
-
-	arma::vec theta(n,arma::fill::zeros); // n x 1
-	arma::vec lambda(n,arma::fill::zeros); // n x 1
-
-    double bt,Bt,Btrt;
-	arma::vec Ytilde = Y;
-	arma::vec Yhat(n);
-	arma::vec Vt(n);
-	arma::mat bt_stored(n,nsample);
-	arma::mat Bt_stored(n,nsample);
-	arma::vec bt_old(n);
-	arma::vec Bt_old(n);
-
-	double wt_old, wt_new;
-	double logp_old,logp_new,logq_old,logq_new,logratio;
-	
-	arma::mat theta_stored(n,nsample,arma::fill::zeros);
 	bool saveiter;
 
 	for (unsigned int b=0; b<ntotal; b++) {
 		R_CheckUserInterrupt();
 		saveiter = b > nburnin && ((b-nburnin-1)%nthin==0);
+		
+		// logp: n x 1
 
 		// [OK] Update evolution/state disturbances/errors, denoted by wt.
-		for (unsigned int t=0; t<n; t++) {
-			if (!wt_flag) { break; }
+		for (unsigned int s=0; s<n; s++)
+		{
+			// logp_old
+			double wt_old = wt.at(s);
+			double logp_old = logpost_wt_exact(
+				y,wt,s,
+				gain_code,trans_code,link_code,obs_code,
+				L,rho,mu0,delta_nb,0.,W
+			);
 
-			/* Part 1. Checked - OK */
-			wt_old = wt.at(t);
-		    theta = th0tilde + Fx * wt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND); //**
-
-			// lambda filled with old values of wt[t]
-			if (link_code==1) {
-				// Exponential Link
-				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye
-				lambda = arma::exp(mu0+theta);
-			} else {
-				// Others using identity link.
-				lambda = mu0+theta;
-			}
-
-			logp_old = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_old += loglike_obs(Y.at(j), lambda.at(j), obs_code, delta_nb,true);
-			}
-			if (t==0) {
-				logp_old += R::dnorm(wt_old,aw,Rwrt,true);
-			} else {
-				logp_old += R::dnorm(wt_old,0.,Wrt,true);
-			}
-			/* Part 1. Checked - OK */
-
-			/* Part 2. */
-			// Sample wt[t](new) given wt[t](old)
-			if (link_code==1) {
-				// Linearlisation for exponential link
-				Ytilde = theta + (Y - lambda) / lambda; 
-			} // Otherwise, Ytilde == Y.
+			// sample wt_new
+			double bs_old = 0.;
+			double Bs_old = 1.;
+			proposal_wt_approx(
+				bs_old,Bs_old,y,wt,s,
+				gain_code,trans_code,link_code,obs_code,
+				L,rho,0.,W,delta_nb);
 			
-		    Yhat = Ytilde - theta + Fx.col(t)*wt_old; // TODO - CHECK HERE
-			if (obs_code==1 && link_code==1) {
-				Vt = 1./lambda;
-			} else if (obs_code==1 && link_code==0) {
-				Vt = lambda;
-			} else if (obs_code==0) {
-				Vt = lambda % (lambda+delta_nb) / delta_nb;
-				// Vt = lambda;
-			}
-			// if (t==0) {
-			// 	Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
-        	//     bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/Vt));
-			// } else {
-			// 	Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
-        	//     bt = Bt * (arma::accu(Fx.col(t)%Yhat/Vt));
-			// }
-			bt = 0.;
-			Bt = W;
-			bt_old.at(t)= bt;
-			Bt_old.at(t) = Bt;
+			double Btmp_old = std::sqrt(Bs_old);
+			Btmp_old *= MH_sd[0];
 
-			Btrt = std::sqrt(Bt)*MH_sd[0];
-		    wt_new = R::rnorm(bt, Btrt);
-			if (!std::isfinite(wt_new)) {
-				// Just reject it and move onto next t.
-				wt.at(t) = wt_old;
-				continue;
-			}
+			double wt_new = R::rnorm(bs_old, Btmp_old);
+			bound_check(wt_new,"mcmc-wt-new" );
 
-			logq_new = R::dnorm(wt_new,bt,Btrt,true);
-			/* Part 2. */
+			// logq_new
+			double logq_new = R::dnorm(wt_new, bs_old, Btmp_old, true);
+			bound_check(logq_new,"mcmc-logq-new");
 
-			/* Part 3. */
-			wt.at(t) = wt_new;
-			theta = th0tilde + Fx * wt;
-			// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-			// lambda filled with new values of wt[t]
-			if (link_code==1) {
-				// Exponential Link
-				// 6 - KoyamaEye, 7 - SolowEye, 8 - KoyckEye, 9 - Vanilla
-				lambda = arma::exp(mu0+theta);
-				if (use_lambda_bound && (lambda.has_inf() || lambda.has_nan())) {
-					wt.at(t) = wt_old; // Reject if out of bound
-					continue;
-				}
-			} else {
-				// Others using identity link.
-				lambda = mu0+theta;
-				if (use_lambda_bound && arma::any(lambda<arma::datum::eps)) {
-					wt.at(t) = wt_old; // Reject if out of bound
-					continue;
-				}
-			}
-			logp_new = 0.;
-			for (unsigned int j=t;j<n;j++) {
-				logp_new += loglike_obs(Y.at(j), lambda.at(j), obs_code, delta_nb,true);
-			}
-			if (t==0) {
-				logp_new += R::dnorm(wt_new,aw,Rwrt,true);
-			} else {
-				logp_new += R::dnorm(wt_new,0.,Wrt,true);
-			}
-			/* Part 3. */
+			// logp_new
+			wt.at(s) = wt_new;
+			double logp_new = logpost_wt_exact(
+				y,wt,s,
+				gain_code,trans_code,link_code,obs_code,
+				L,rho,mu0,delta_nb,0.,W
+			);
 
-			/* Part 4. */
-			// Transition probability to wt[t](old) from wt[t](new)
-			if (link_code==1) {
-				// Linearlisation for exponential link
-				Ytilde = theta + (Y - lambda) / lambda; 
-			} // Otherwise, Ytilde == Y.
+			// logq_old
+			double bs_new = 0.;
+			double Bs_new = 1.;
+			proposal_wt_approx(
+				bs_new, Bs_new, y, wt, s,
+				gain_code, trans_code, link_code, obs_code,
+				L, rho, 0., W, delta_nb);
 
-		    Yhat = Ytilde - theta + Fx.col(t)*wt_new;
-			if (obs_code==1 && link_code==1) {
-				Vt = 1./lambda;
-			} else if (obs_code==1 && link_code==0) {
-				Vt = lambda;
-			} else if (obs_code==0) {
-				Vt = lambda % (lambda+delta_nb) / delta_nb;
-				// Vt = lambda;
+			double Btmp_new = std::sqrt(Bs_new);
+			Btmp_new *= MH_sd[0];
+			double logq_old = R::dnorm(wt_old,bs_new,Btmp_new,true);
+
+			double logratio = logp_new - logp_old;
+			logratio += logq_old - logq_new;
+			logratio = std::min(0.,logratio);
+
+			if (std::log(R::runif(0., 1.)) < logratio)
+			{
+				// accept
+				wt_accept.at(s) += 1.;
 			}
-			// if (t==0) {
-			// 	Bt = 1. / (1./Rw + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
-        	//     bt = Bt * (aw/Rw + arma::accu(Fx.col(t)%Yhat/Vt));
-			// } else {
-			// 	Bt = 1./(1./W + arma::accu(arma::pow(Fx.col(t),2.)/Vt));
-        	//     bt = Bt * (arma::accu(Fx.col(t)%Yhat/Vt));
-			// }
-			bt = 0.;
-			Bt = W;
-
-			Btrt = std::sqrt(Bt)*MH_sd[0];
-			logq_old = R::dnorm(wt_old,bt,Btrt,true);
-			/* Part 4. */
-
-			logratio = std::min(0.,logp_new-logp_old+logq_old-logq_new);
-			if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-				wt.at(t) = wt_old;
-			} else {
-				wt_accept.at(t) += 1.;
+			else
+			{
+				// reject
+				wt.at(s) = wt_old;
 			}
-	    } // Loops
+		}
+	
 
 
 		// [OK] Update state/evolution error variance
@@ -323,13 +537,13 @@ Rcpp::List mcmc_disturbance_pois(
 			switch (eta_prior_type.at(0)) {
 				case 0: // Gamma(aw=shape, bw=rate)
 				{
-					logp_old = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W) - eta_prior_val.at(1,0)*W - 0.5*res/W;
+					double logp_old_W = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W) - eta_prior_val.at(1,0)*W - 0.5*res/W;
 
 					W_new = std::exp(std::min(R::rnorm(std::log(W),MH_sd[1]),UPBND));
 
-					logp_new = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W_new) - eta_prior_val.at(1,0)*W_new - 0.5*res/W_new;
+					double logp_new_W = (eta_prior_val.at(0,0)-0.5*(n_-1.))*std::log(W_new) - eta_prior_val.at(1,0)*W_new - 0.5*res/W_new;
 
-					logratio = std::min(0.,logp_new-logp_old);
+					double logratio = std::min(0.,logp_new_W-logp_old_W);
 					if (std::log(R::runif(0.,1.)) < logratio) { // accept
 						W = W_new;
 						W_accept += 1.;
@@ -500,10 +714,8 @@ Rcpp::List mcmc_disturbance_pois(
 			}
 
 			wt_stored.col(idx_run) = wt;
-			bt_stored.col(idx_run) = bt_old;
-			Bt_stored.col(idx_run) = Bt_old;
 			W_stored.at(idx_run) = W;
-			theta_stored.col(idx_run) = th0tilde + Fx * wt;
+
 			// rho_stored.at(idx_run) = rho;
 			// E0_stored.at(idx_run) = E0;
 		}
@@ -519,10 +731,12 @@ Rcpp::List mcmc_disturbance_pois(
 	}
 
 	Rcpp::List output;
-	output["theta"] = Rcpp::wrap(theta_stored); // n x nsample
+	output["wt"] = Rcpp::wrap(wt_stored); // n x nsample
+
+	
 	arma::mat psi_stored(n+1,nsample);
 	psi_stored.tail_rows(n) = arma::cumsum(wt_stored,0);
-	psi_stored += psi0;
+
 	if (summarize_return) {
 		arma::vec qProb = {0.025,0.5,0.975};
 		output["psi"] = Rcpp::wrap(arma::quantile(psi_stored,qProb,1)); // (n+1) x 3
@@ -531,8 +745,7 @@ Rcpp::List mcmc_disturbance_pois(
 	}
 	wt_accept /= static_cast<double>(ntotal);
 	output["wt_accept"] = Rcpp::wrap(wt_accept);
-	output["bt"] = Rcpp::wrap(arma::median(bt_stored,1));
-	output["Bt"] = Rcpp::wrap(arma::median(Bt_stored,1));
+
 	if (eta_select.at(0)==1) {
 		output["W"] = Rcpp::wrap(W_stored);
 		if (eta_prior_type.at(0) != 2) {

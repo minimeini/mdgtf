@@ -33,6 +33,12 @@ sim_pois_dglm2 = function(
     trans_func=trans_func,
     gain_func=gain_func,
     err_dist=err_dist)
+  
+  obs_code = model_code[1]
+  link_code = model_code[2]
+  trans_code = model_code[3]
+  gain_code = model_code[4]
+  err_code = model_code[5]
 
   c1 = 2*rho
   c2 = rho^2
@@ -68,7 +74,7 @@ sim_pois_dglm2 = function(
   # wt - Checked. Correct.
   
   
-  psi = cumsum(wt) + psi0
+  psi = cumsum(wt)
   hpsi = psi
   gain_func = tolower(gain_func)
   if (gain_func=="ramp") {
@@ -92,12 +98,21 @@ sim_pois_dglm2 = function(
   
   # ------ Transfer ------ #
   theta = rep(0,ntotal+1)
-  theta[1] = theta0
 
   lambda = rep(0,ntotal)
   y = rep(0,ntotal)
   
-  Fphi = get_Fphi(L)
+  # get_Fphi: exported Cpp function.
+  # checked. OK
+  if (trans_code == 1)
+  {
+    Fphi = get_Fphi(L,1,rho,trans_code)
+  }
+  else
+  {
+    Fphi = get_Fphi(n,L,rho,trans_code)
+  }
+
   trans_func = tolower(trans_func)
   link_func = tolower(link_func)
   obs_dist = tolower(obs_dist)
@@ -105,6 +120,7 @@ sim_pois_dglm2 = function(
   # ------ Transfer ------ #
   if (trans_func == "solow") {
     # theta[2] = (2*rho)^alpha2*theta0
+    # binom: exported Cpp function
     theta[2] = -binom(L,1)*(-rho)^1*theta[1]
   } else {
     # theta[2] = EPS
@@ -139,6 +155,7 @@ sim_pois_dglm2 = function(
     } else if (trans_func == "solow") {
       theta[t+1] = c3*hpsi[t-1]*y[t-1]
       for (k in 1:min(c(t,L))) {
+        # binom: exported Cpp function
         theta[t+1] = theta[t+1] - binom(L,k)*(-rho)^k*theta[t+1-k]
       }
     }
@@ -165,6 +182,7 @@ sim_pois_dglm2 = function(
   stopifnot(all(is.finite(y)))
   
   if (get_discount) {
+    # get_optimal_delta: exported Cpp function
     delta = get_optimal_delta(y[1:n],model_code,delta_grid,
                               rho=rho,L=L,mu0=mu0,
                               delta_nb=delta_nb)$delta_optim[1]
