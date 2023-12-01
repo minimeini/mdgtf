@@ -3,55 +3,7 @@
 
 #include "lbe_poisson.h"
 
-/*
-------------------------
------- Model Code ------
-------------------------
 
-0 - (KoyamaMax) Identity link    + log-normal transmission delay kernel        + ramp function (aka max(x,0)) on gain factor (psi)
-1 - (KoyamaExp) Identity link    + log-normal transmission delay kernel        + exponential function on gain factor
-2 - (SolowMax)  Identity link    + negative-binomial transmission delay kernel + ramp function on gain factor
-3 - (SolowExp)  Identity link    + negative-binomial transmission delay kernel + exponential function on gain factor
-4 - (KoyckMax)  Identity link    + exponential transmission delay kernel       + ramp function on gain factor
-5 - (KoyckExp)  Identity link    + exponential transmission delay kernel       + exponential function on gain factor
-6 - (KoyamaEye) Exponential link + log-normal transmission delay kernel        + identity function on gain factor
-7 - (SolowEye)  Exponential link + negative-binomial transmission delay kernel + identity function on gain factor
-8 - (KoyckEye)  Exponential link + exponential transmission delay kernel       + identity function on gain factor
-*/
-
-
-
-/*
----- Method ----
-- Monte Carlo Smoothing with static parameter W known
-- B-lag fixed-lag smoother (Anderson and Moore 1979)
-- Using the DLM formulation
-- Reference: 
-    Kitagawa and Sato at Ch 9.3.4 of Doucet et al.
-    Check out Algorithm step 2-4L for the explanation of B-lag fixed-lag smoother
-- Note: 
-    1. Initial version is copied from the `bf_pois_koyama_exp`
-    2. This is intended to be the Rcpp version of `hawkes_state_space.R`
-    3. The difference is that the R version the states are backshifted L times, where L is the maximum transmission delay to be considered.
-        To make this a Monte Carlo smoothing, we need to resample the states n times, where n is the total number of temporal observations.
-
----- Algorithm ----
-
-1. Generate a random number psi[0](j) ~ an initial distribution.
-2. Repeat the following steps for t = 1,...,n:
-    2-1. Generate a random number omega[t] ~ Normal(0,W)
-
-
----- Model ----
-<obs>   y[t] ~ Pois(lambda[t])
-<link>  lambda[t] = phi[1]*y[t-1]*exp(psi[t]) + ... + phi[L]*y[t-L]*exp(psi[t-L+1])
-<state> psi[t] = psi[t-1] + omega[t]
-        omega[t] ~ Normal(0,W)
-
-Unknown parameters: psi[1:n]
-Known parameters: W, phi[1:L]
-Kwg: Identity link, exp(psi) state space
-*/
 
 
 void init_Ft(
