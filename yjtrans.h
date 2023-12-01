@@ -171,7 +171,9 @@ arma::vec gamma2tau(const arma::vec &gamma)
 // Ref: `tau2eta.m`
 double tau2gamma(const double tau)
 {
-    return 2. / (std::exp(-tau) + 1.);
+    double output = 2. / (std::exp(-tau) + 1.);
+    bound_check(output,"tau2gamma");
+    return output;
 } // Status: Checked. OK.
 
 arma::vec tau2gamma(const arma::vec &tau)
@@ -192,7 +194,9 @@ arma::vec tau2gamma(const arma::vec &tau)
 double dgamma_dtau_tau(const double tau)
 {
     double etau = std::exp(tau);
-    return 2. * etau / std::pow(1. + etau, 2.);
+    double output = 2. * etau / std::pow(1. + etau, 2.);
+    bound_check(output,"dgamma_dtau_tau");
+    return output;
 } // Status: Checked. OK.
 
 // (Element-wise)
@@ -219,28 +223,33 @@ double dtYJ_dtheta(
     {
         gamma_ = 0.0000001;
     }
+
+    double output;
     if (theta < arma::datum::eps)
     {
         if (log)
         {
-            return (1. - gamma_) * std::log(-theta + 1.);
+            output = (1. - gamma_) * std::log(-theta + 1.);
         }
         else
         {
-            return std::pow(-theta + 1., 1. - gamma_);
+            output = std::pow(-theta + 1., 1. - gamma_);
         }
     }
     else
     {
         if (log)
         {
-            return (gamma_ - 1.) * std::log(theta + 1.);
+            output = (gamma_ - 1.) * std::log(theta + 1.);
         }
         else
         {
-            return std::pow(theta + 1., gamma_ - 1.);
+            output = std::pow(theta + 1., gamma_ - 1.);
         }
     }
+
+    bound_check(output,"dtYJ_dtheta");
+    return output;
 } // Status: Checked. OK.
 
 arma::mat dtYJ_dtheta(
@@ -282,7 +291,9 @@ double dtYJ_dgamma(const double c, const double gamma)
 // Ref: line 24-27 of `grad_theta_logq.m`
 double dlogdYJ_dtheta(const double theta, const double gamma)
 {
-    return (gamma - 1.) / (1. + std::abs(theta));
+    double output = (gamma - 1.) / (1. + std::abs(theta));
+    bound_check(output,"dlogdYJ_dtheta");
+    return output;
 }
 
 // Element-wise
@@ -456,7 +467,7 @@ arma::mat get_sigma_inv(
     arma::mat tmp = Ik + B.t() * Dm2 * B;                     // k x k
     arma::mat SigInv = Dm2 - Dm2 * B * tmp.i() * B.t() * Dm2; // Woodbury formula
     SigInv = arma::symmatu(SigInv);                           // m x m
-
+    bound_check(SigInv,"get_sigma_inv: SigInv");
     return SigInv;
 }
 
@@ -474,7 +485,9 @@ arma::vec dlogq_dtheta(
     arma::mat dnu_dtheta = dtYJ_dtheta(theta, gamma);       // m x m
     arma::vec deriv = -dnu_dtheta.t() * SigInv * (nu - mu); // m x 1
     arma::vec deriv2 = dlogdYJ_dtheta(theta, gamma);        // m x 1
-    return deriv + deriv2;                                  // m x 1
+    arma::vec output = deriv + deriv2;
+    bound_check(output,"dlogq_dtheta: output");
+    return output;                                  // m x 1
 } // Status: Checked. OK.
 
 
@@ -495,7 +508,8 @@ arma::vec rtheta(
     eps = arma::randn(m, 1);
 
     arma::vec nu = mu + B * xi + d % eps;
-    return tYJinv(nu, gamma); // m x 1, static parameters
+    arma::vec output = tYJinv(nu, gamma);
+    return output; // m x 1, static parameters
 }
 
 
