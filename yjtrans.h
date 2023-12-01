@@ -78,6 +78,7 @@ double tYJ(
         // when theta >= 0 and gamma == 0
         nu = std::log(theta + 1.);
     }
+    bound_check(nu,"tYJ: nu");
     return nu;
 } // Status: Checked. OK.
 
@@ -128,8 +129,10 @@ double tYJinv(
         // when theta/nu >= 0 and gamma == 0
         theta = std::exp(nu) - 1.;
     }
+    bound_check(theta,"tYJinv: theta");
     return theta;
 } // Status: Checked. OK.
+
 
 arma::vec tYJinv(
     const arma::vec &nu, // m x 1
@@ -148,7 +151,9 @@ arma::vec tYJinv(
 // Ref: `eta2tau.m`
 double gamma2tau(const double gamma)
 {
-    return -std::log(2. / gamma - 1.);
+    double output = -std::log(2. / gamma - 1.);
+    bound_check(output,"gamma2tau");
+    return output;
 } // Status: Checked. OK.
 
 arma::vec gamma2tau(const arma::vec &gamma)
@@ -270,6 +275,7 @@ double dtYJ_dgamma(const double c, const double gamma)
         res = 1. + std::pow(1. + c, gmt) * (std::log(1. + c) * gmt - 1.);
         res *= std::pow(gmt, -2.);
     }
+    bound_check(res,"dtYJ_dgamma: res");
     return res;
 } // Check -- Correct
 
@@ -311,6 +317,7 @@ double dYJinv_dnu(const double nu, const double gamma)
         gmt = gamma_;
         res = std::pow(1. + gmt * nu, (1. - gmt) / gmt);
     }
+    bound_check(res, "dtYJ_dnu: res");
     return res;
 } // Status: Checked. OK.
 
@@ -358,6 +365,7 @@ double dYJinv_dgamma(const double nu, const double gamma)
         res *= std::pow(gmt, -2.);
         res *= std::pow(1. + gmt * nu, 1. / gmt);
     }
+    bound_check(res, "dtYJinv_dgamma: res");
     return res;
 } // Status: Checked. OK.
 
@@ -512,6 +520,7 @@ double logq0(
     {
         logq += dtYJ_dtheta(eta_tilde.at(i), gamma.at(i), true);
     }
+    bound_check(logq,"logq0");
     return logq;
 }
 

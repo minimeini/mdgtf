@@ -159,10 +159,7 @@ double dlogJoint_dWtilde(
     // res = sum((w[t])^2)
 
     double rdw = std::exp(std::log(res+EPS) - std::log(W+EPS)); // sum(w[t]^2) / W
-    if (!std::isfinite(rdw))
-    {
-        throw std::invalid_argument("dlogJoint_dWtilde<double>: non-finite res divided by W input.");
-    }
+    bound_check(rdw,"dlogJoint_dWtilde: rdw");
 
     double deriv;
     if (prior_type==0) {
@@ -205,12 +202,7 @@ double dlogJoint_dWtilde(
          throw std::invalid_argument("Unsupported prior for evolution variance W.");
     }
 
-    if (!std::isfinite(deriv))
-    {
-        std::cout << "res = " << res << ", W = " << W << ", G = " << G << std::endl;
-        throw std::invalid_argument("dlogJoint_dWtilde<double>: non-finite deriv output.");
-    }
-
+    bound_check(deriv, "dlogJoint_dWtilde: deriv");
     return deriv;
 }
 
@@ -254,11 +246,7 @@ double logprior_Wtilde(
          throw std::invalid_argument("Unsupported prior for evolution variance W.");
     }
 
-    if (!std::isfinite(logp))
-    {
-        std::cout << "aw="<<aw << " bw=" << bw << " Wtilde="<<Wtilde<<std::endl;
-        throw std::invalid_argument("logprior_Wtilde<double>: non-finite logp output.");
-    }
+    bound_check(logp,"logprior_Wtilde: logp");
 
     return logp;
 }
@@ -300,6 +288,7 @@ double dlogJoint_dlogmu0(
     }
 
     double deriv = mu0*res + amu - bmu*mu0;
+    bound_check(deriv, "dlogJoint_dlogmu0: deriv");
     return deriv;
 }
 
@@ -314,11 +303,7 @@ double logprior_logmu0(
     logmu0 = log(mu0)
     */
     double logp = amu*std::log(bmu) - std::lgamma(amu) + amu*logmu0 - bmu*std::exp(logmu0);
-    if (!std::isfinite(logp))
-    {
-        throw std::invalid_argument("logprior_logmu0<double>: non-finite logp output.");
-    }
-
+    bound_check(logp,"logprior_logmu0: logp");
     return logp;
 }
 
@@ -363,6 +348,7 @@ double dlogJoint_drho(
 
     double deriv = -L_*std::pow(1.-rho,L_)*rho*c1 - (1.-rho)*c2;
     deriv += arho - (arho+brho) * rho;
+    bound_check(deriv,"dlogJoint_drho: deriv");
     return deriv;
 }
 
@@ -387,7 +373,6 @@ double dlogJoint_drho2(
     arma::vec hy = hpsi % ypad; // (n+1) x 1, (h(psi[0])*y[0], h(psi[1])*y[1], ...,h(psi[n])*y[n])
     arma::vec lambda = mu0 + R.col(1); // (n+1) x 1
 
-    unsigned int r;
     double c10 = 0.; // d(Loglike) / d(theta[t])
     double c20 = 0.; // first part of d(theta[t]) / d(logit(rho)), l=0,...,t-1
     double c30 = 0.; // second part of d(theta[t]) / d(logit(rho)), l=1,...,t-1
@@ -413,6 +398,7 @@ double dlogJoint_drho2(
 
     double deriv = -L_*std::pow(1.-rho,L_)*rho*c2 + std::pow(1.-rho,L_+1.)*c3;
     deriv += arho - (arho+brho) * rho;
+    bound_check(deriv, "dlogJoint_drho2: deriv");
     return deriv;
 }
 
@@ -423,6 +409,7 @@ double logprior_logitrho(
     double brho = 1.) {
     
     double logp = std::lgamma(arho+brho) - std::lgamma(arho) - std::lgamma(brho) + arho*logitrho - (arho+brho)*std::log(1.+std::exp(logitrho));
+    bound_check(logp,"logprior_logitrho: logp");
     return logp;
 }
 
@@ -534,22 +521,19 @@ void update_mu(
     const double &learn_rate,
     const double &eps_step)
 {
-    if (!mu.is_finite())
-    {
-        throw std::invalid_argument("update_mu: non-finite mu input");
-    }
+    bound_check(mu,"update_mu: input mu");
 
     arma::vec oldEg2_mu = curEg2_mu;
     arma::vec oldEdelta2_mu = curEdelta2_mu;
 
     curEg2_mu = learn_rate * oldEg2_mu + (1. - learn_rate) * arma::pow(L_mu, 2.); // m x 1
     arma::vec Change_delta_mu = arma::sqrt(oldEdelta2_mu + eps_step) / arma::sqrt(curEg2_mu + eps_step) % L_mu;
-    if (!Change_delta_mu.is_finite())
-    {
-        throw std::invalid_argument("update_mu: non-finite Change_delta_mu");
-    }
+    bound_check(Change_delta_mu, "update_mu: Change_delta_mu");
+
     mu = mu + Change_delta_mu;
     curEdelta2_mu = learn_rate * oldEdelta2_mu + (1. - learn_rate) * arma::pow(Change_delta_mu, 2.);
+    bound_check(mu,"update_mu: mu");
+    bound_check(curEdelta2_mu, "update_mu: curEdelta2_mu");
 }
 
 /*
@@ -578,7 +562,8 @@ Rcpp::List hva_poisson(
     const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
     const arma::uvec& eta_prior_type, // 4 x 1
     const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
-    const double L = 2,
+    const double L_order = 2,
+    const unsigned int nlag_ = 0,
     const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
     const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
     const double theta0_upbnd = 2.,
@@ -631,10 +616,16 @@ Rcpp::List hva_poisson(
 
     /* ------ Define SMC ------ */
     // const unsigned int Blag = L;
+    unsigned int nlag, p, L;
+    set_dim(nlag, p, L, n, nlag_, L_order);
+    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    arma::vec Ft = init_Ft(p, trans_code);
+
     unsigned int Blag;
-    if (trans_code==1)
+    if (nlag < n)
     {
-        Blag = L;
+        // truncated
+        Blag = p;
     }
     else
     {
@@ -645,11 +636,10 @@ Rcpp::List hva_poisson(
 
 
     /* ------ Define Model ------ */
-	unsigned int p, L_;
-    init_by_trans(p,L_,trans_code,L);
+
     arma::vec rcomb(n,arma::fill::zeros);
-    for (unsigned int l=0; l<n; l++) {
-        rcomb.at(l) = binom(L_-1+l,l);
+    for (unsigned int l=1; l<=n; l++) {
+        rcomb.at(l-1) = binom(L - 2 + l,l - 1);
     }
     /* ------ Define Model ------ */
 
@@ -678,7 +668,7 @@ Rcpp::List hva_poisson(
     arma::vec Ht(n+1,arma::fill::zeros);
 
     arma::cube Gt(p,p,npad);
-    init_Gt(Gt,rho,p,trans_code);
+    init_Gt(Gt,rho,p,nlag,n);
     /*  ------ Define LBE ------ */
 
     /*  ------ Define HVB ------ */
@@ -749,14 +739,6 @@ Rcpp::List hva_poisson(
     /*  ------ Define HVB ------ */
 
 
-    /* ------ Define Rejection Sampling ------ */
-    
-    arma::vec logprior(m,arma::fill::zeros);
-    double logp_new, logp_old, logratio;
-    double logp_y = 0.;
-    /* ------ Define Rejection Sampling ------ */
-
-
     // arma::mat mu_stored(m,niter);
     // arma::mat d_stored(m,niter);
     // arma::mat gamma_stored(m,niter);
@@ -770,9 +752,7 @@ Rcpp::List hva_poisson(
     // arma::mat logp_stored(max_iter,nsample);
     // arma::vec logp_iter(max_iter,arma::fill::zeros);
 
-    arma::vec logp_y_stored(nsample);
     arma::vec logq_stored(nsample);
-    arma::mat logprior_stored(m,nsample);
     double mh_accept = 0.;
     // arma::mat theta_last(p,nsample);
     // arma::vec theta(p);
@@ -804,7 +784,7 @@ Rcpp::List hva_poisson(
         {
             mcs_poisson(
                 R,pmarg_y,NA_REAL,ypad,model_code,
-                rho,L,mu0,
+                rho,L,nlag,mu0,
                 Blag,N,
                 m0,C0,
                 theta0_upbnd,
@@ -815,7 +795,7 @@ Rcpp::List hva_poisson(
         {
             mcs_poisson(
                 R,pmarg_y,W,ypad,model_code,
-                rho,L,mu0,
+                rho,L,nlag,mu0,
                 Blag,N,
                 m0,C0,
                 theta0_upbnd,
@@ -824,19 +804,13 @@ Rcpp::List hva_poisson(
 
         }
 
-        if (!pmarg_y.is_finite())
-        {
-            throw std::invalid_argument("hva_poisson: infinite log marginal likelihood.");
-        }
-
         arma::vec hpsi_tmp = psi2hpsi(R.col(0), gain_code); // (n+1) x 1
         arma::vec theta_tmp(n,arma::fill::zeros);
-        hpsi2theta(theta_tmp, hpsi_tmp, ypad, trans_code, 0., L, rho); // theta
+        hpsi2theta(theta_tmp, hpsi_tmp, ypad, trans_code, L, nlag, rho); // theta
         arma::vec theta_tmp2(n+1,arma::fill::zeros);
         theta_tmp2.tail(n) = theta_tmp;
         R.col(1) = theta_tmp2;
 
-        logp_y = arma::accu(pmarg_y.elem(arma::find_finite(pmarg_y)));
 
         if (update_static) {
             // Logarithm marginal likelihood of y
@@ -852,14 +826,6 @@ Rcpp::List hva_poisson(
             delta_logJoint = dlogJoint_deta(ypad, R, eta, idx_select, eta_prior_type, eta_prior_val, m, L, rcomb, delta_nb, obs_code, gain_code); // m x 1
             // }
 
-            if (!std::isfinite(delta_logJoint.at(0)))
-            {
-                Rcout << "iter=" << s + 1 << std::endl;
-                Rcout << "delta_logJoint=" << delta_logJoint.at(0) << std::endl;
-                Rcout << "W=" << eta.at(0) << std::endl;
-                 throw std::invalid_argument("delta_logJoint is NA.");
-            }
-
             SigInv = get_sigma_inv(B, d, k);                             // m x m
             delta_logq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu); // m x 1
             delta_diff = delta_logJoint - delta_logq;                    // m x 1
@@ -871,23 +837,9 @@ Rcpp::List hva_poisson(
             dlogq_dtheta: the derivative of (log proposal probability) with respect to theta
             */
 
-            if (!std::isfinite(delta_logq.at(0)))
-            {
-                Rcout << "iter=" << s + 1 << std::endl;
-                Rcout << "W=" << eta.at(0) << std::endl;
-                Rcout << "delta_logq=" << delta_logq.at(0) << std::endl;
-                 throw std::invalid_argument("delta_logq is NA.");
-            }
-
             // TODO: transpose or no transpose
             L_mu = dYJinv_dnu(nu, gamma) * delta_diff; // m x 1
-            if (!std::isfinite(L_mu.at(0)))
-            {
-                Rcout << "iter=" << s + 1 << std::endl;
-                Rcout << "W=" << eta.at(0) << std::endl;
-                Rcout << "L_mu=" << L_mu.at(0) << std::endl;
-                 throw std::invalid_argument("L_mu is NA.");
-            }
+
 
             if (m > 1)
             {
@@ -898,22 +850,8 @@ Rcpp::List hva_poisson(
             }
 
             L_d = dYJinv_dD(nu, gamma, eps) * delta_diff; // m x 1
-            if (!std::isfinite(L_d.at(0)))
-            {
-                Rcout << "iter=" << s + 1 << std::endl;
-                Rcout << "W=" << eta.at(0) << std::endl;
-                Rcout << "L_d=" << L_d.at(0) << std::endl;
-                 throw std::invalid_argument("L_d is NA.");
-            }
-
             L_tau = dYJinv_dtau(nu, gamma) * delta_diff;
-            if (!std::isfinite(L_tau.at(0)))
-            {
-                Rcout << "iter=" << s + 1 << std::endl;
-                Rcout << "W=" << eta.at(0) << std::endl;
-                Rcout << "L_tau=" << L_tau.at(0) << std::endl;
-                 throw std::invalid_argument("L_tau is NA.");
-            }
+
 
             /*
             Step 4. Update Variational Parameters
@@ -970,11 +908,9 @@ Rcpp::List hva_poisson(
 
             // xi_old = xi;
             // eps_old = eps;
-            logprior = logprior_eta_tilde(eta_tilde, idx_select, eta_prior_type, eta_prior_val, m);
             nu = tYJ(eta_tilde, gamma); // recover nu
             tilde2eta(eta, eta_prior_type, eta_tilde, idx_select, m);
             logq = logq0(nu, eta_tilde, gamma, mu, SigInv, m);
-            logp_new = arma::accu(logprior) + logp_y - logq;
             // logp_iter.at(0) = logp_new;
             // for (unsigned int s = 1; s < max_iter; s++)
             // {
@@ -1003,12 +939,7 @@ Rcpp::List hva_poisson(
             // tilde2eta(eta, eta_tilde, idx_select, m);
 
             double Wtmp = eta.at(0);
-            if (Wtmp < EPS || !std::isfinite(Wtmp))
-            {
-                throw std::invalid_argument("Sampled zero or NaN W at this step.");
-            //     std::cout << "Warning<HVB>: Sampled zero W " << std::endl;
-            //     eta.at(0) = EPS;
-            }
+            bound_check(Wtmp, "hva_poisson: Wtmp at variational step",true,true);
         }
 
 
@@ -1029,9 +960,7 @@ Rcpp::List hva_poisson(
             mu0_stored.at(idx_run) = eta.at(1);
             rho_stored.at(idx_run) = eta.at(2);
             // logp_stored.col(idx_run) = logp_iter;
-            logp_y_stored.at(idx_run) = logp_y;
             logq_stored.at(idx_run) = logq;
-            logprior_stored.col(idx_run) = logprior;
             // theta_last.col(idx_run) = theta;
 		}
 
@@ -1070,9 +999,7 @@ Rcpp::List hva_poisson(
 
     output["psi_all"] = Rcpp::wrap(psi_stored);
 
-    output["logp_y"] = Rcpp::wrap(logp_y_stored);
     output["logq"] = Rcpp::wrap(logq_stored);
-    output["logprior"] = Rcpp::wrap(logprior_stored);
     // output["logp_diff"] = Rcpp::wrap(logp_stored);
     
     

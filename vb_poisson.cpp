@@ -16,7 +16,8 @@ Rcpp::List vb_poisson(
     const arma::vec &eta_init,        // 4 x 1, if true/initial values should be provided here
     const arma::uvec &eta_prior_type, // 4 x 1
     const arma::mat &eta_prior_val,   // 2 x 4, priors for each element of eta
-    const unsigned int L = 0,
+    const unsigned int L_order = 0,
+    const unsigned int nlag_ = 0,
     const double delta = NA_REAL,
     const unsigned int nburnin = 1000,
     const unsigned int nthin = 2,
@@ -50,13 +51,19 @@ Rcpp::List vb_poisson(
     const unsigned int trans_code = model_code.at(2);
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
-	unsigned int p, L_;
-    init_by_trans(p,L_,trans_code,L);
 
+    double W = eta_init.at(0);
+    double mu0 = eta_init.at(1);
+    double rho = eta_init.at(2);
+
+    unsigned int nlag, p, L;
+    set_dim(nlag, p, L, n, nlag_, L_order);
+    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    arma::vec Ft = init_Ft(p, trans_code);
 
 
     /* ----- Hyperparameter and Initialization ----- */
-    double W = eta_init.at(0);
+    
     double aw,bw;
     double a1,a2,a3;
     switch (eta_prior_type.at(0)) {
@@ -84,8 +91,7 @@ Rcpp::List vb_poisson(
         }
     }
 
-    double mu0 = eta_init.at(1);
-    double rho = eta_init.at(2);
+    
     
 
 	arma::mat at(p,npad,arma::fill::zeros);
@@ -142,7 +148,7 @@ Rcpp::List vb_poisson(
         C0 *= std::pow(theta0_upbnd * 0.5, 2.);
     }
 
-    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L_,rho,mu0,W,NA_REAL,delta_nb,false);
+    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L,nlag,rho,mu0,W,NA_REAL,delta_nb);
     
 	if (use_smoothing) {
 		backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
@@ -244,7 +250,7 @@ Rcpp::List vb_poisson(
 
         // ht = R.col(0);
 
-        forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L_,rho,mu0,W,delta,delta_nb,false);
+        forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L,nlag,rho,mu0,W,delta,delta_nb);
         
 	    if (use_smoothing) {
             backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);

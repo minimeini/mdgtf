@@ -66,6 +66,8 @@ plot_psi = function(sim_dat=NULL,
   if (is.null(yadjust)) {
     yadjust = y
   }
+  # yadjust = yadjust - opts$mu0
+  # yadjust[yadjust < .Machine$double.eps] = 0
 
   if (plot_lambda) {plot_hpsi=TRUE}
   ####

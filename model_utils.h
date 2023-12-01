@@ -54,6 +54,38 @@ err_code
 ------ ModelCode -------
 */
 
+void tolower(std::string &S);
+
+arma::uvec get_model_code(
+	const std::string &obs_dist,
+	const std::string &link_func,
+	const std::string &trans_func,
+	const std::string &gain_func,
+	const std::string &err_dist);
+
+void get_model_code(
+	unsigned int &obs_code,
+	unsigned int &link_code,
+	unsigned int &trans_code,
+	unsigned int &gain_code,
+	unsigned int &err_code,
+	const arma::uvec &model_code);
+
+
+/**
+ * set_dim
+ * @param nlag: number of labs. no truncation if nlag == 0 || nlag == nobs
+ * @param p: dimension of state space. p = (L+1) if using negative-binomial lags (thus no truncation); p = nlag with truncation
+ * @param L: only used in negative-binomial distributed lags, the number of failures.
+*/
+void set_dim(
+	unsigned int &nlag,
+	unsigned int &p,
+	unsigned int &L,
+	const unsigned int &nobs,
+	const unsigned int &nlag_ = 0,
+	const unsigned int &L_order = 0);
+
 void bound_check(
 	const arma::mat &input,
 	const std::string &name = "function",
@@ -66,6 +98,14 @@ void bound_check(
 	const std::string &name = "function",
 	const bool &check_zero = false,
 	const bool &check_negative = false);
+
+
+
+bool bound_check(
+	const double &input,
+	const bool &check_zero,
+	const bool &check_negative);
+
 
 
 arma::uvec sample(
@@ -84,33 +124,23 @@ unsigned int sample(
 	const int n,
 	bool zero_start);
 
-void init_by_trans(
-	unsigned int &p, // dimension of DLM state space
-	unsigned int &L_,
-	const unsigned int trans_code,
-	const unsigned int L = 2);
-
-void init_by_trans(
-	unsigned int& p, // dimension of DLM state space
-	unsigned int& L_,
-	arma::vec& Ft,
-    arma::vec& Fphi,
-	const unsigned int trans_code,
-	const unsigned int L = 2);
-
-void init_Gt(
-	arma::cube &Gt,
-	const double &rho,
-	const unsigned int &p,
+arma::vec init_Ft(
+	const unsigned int &p, // dimension of DLM state space
 	const unsigned int &trans_code);
-
 
 void init_Gt(
 	arma::mat &Gt,
 	const double &rho,
 	const unsigned int &p,
-	const unsigned int &trans_code);
+	const unsigned int &nlag,
+	const unsigned int &nobs);
 
+void init_Gt(
+	arma::cube &Gt,
+	const double &rho,
+	const unsigned int &p,
+	const unsigned int &nlag,
+	const unsigned int &nobs);
 
 double binom(double n, double k);
 
@@ -126,17 +156,45 @@ double Pd(
 /*
 Difference of the subsequent CDFs of the log-normal distribution, which is the PDF at the discrete scale.
 */
-double knl(
-    const double t,
-    const double mu,
-    const double sd2);
+double dlognorm0(
+	const double &lag,
+	const double &mu,
+	const double &sd2);
+
+arma::vec dlognorm(
+	const double &nlag,
+	const double &mu,
+	const double &sd2);
 
 
-arma::vec knl(
-	const arma::vec& tvec,
-	const double mu,
-	const double sd2);
+double dnbinom0(
+	const double &lag, // starting from 1
+	const double &rho,
+	const double &L_order);
 
+
+
+arma::vec dnbinom(
+	const double &nlag,
+	const double &rho,
+	const double &L_order);
+
+
+
+unsigned int get_truncation_nlag(
+	const unsigned int &trans_code,
+	const double &err_margin,
+	const unsigned int &L_order,
+	const double &rho);
+
+arma::vec dlags(
+	const unsigned int &nlags,
+	const arma::vec &params);
+
+double cross_entropy(
+	const unsigned int &nlags,
+	const arma::vec &params_p, // 3 x 1, params1[0] = trans_code: type of distribution
+	const arma::vec &params_q);
 
 /*
 ------ get_Fphi ------
@@ -150,9 +208,9 @@ const unsigned int ModelCode = 0
 
 */
 arma::vec get_Fphi(
-	const unsigned int &n,	 // number of Lags
-	const unsigned int &L = 0,	 // dimension of state space (-1 for solow)
-	const double &rho = -1., // prob of negative binomial
+	const unsigned int &nlag,			 // number of Lags
+	const unsigned int &L_order = 0, // dimension of state space (-1 for solow)
+	const double &rho = -1.,		 // prob of negative binomial
 	const unsigned int &trans_code = 1);
 
 double trigamma_obj(
@@ -219,53 +277,94 @@ double test_postW_gamma(){
 */
 arma::mat psi2hpsi(
 	const arma::mat& psi,
-	const unsigned int gain_code);
+	const unsigned int &gain_code);
 
 /**
  * Apply gain function h(.) to
  * the latent random walk variable, psi[t]
  */
 double psi2hpsi(
-	const double psi,
-	const unsigned int gain_code);
+	const double &psi,
+	const unsigned int &gain_code);
 
 
 
 void hpsi_deriv(
 	arma::mat& hpsi,
 	const arma::mat& psi,
-	const unsigned int gain_code);
+	const unsigned int &gain_code);
 
 
 double hpsi_deriv(
-	const double psi,
-	const unsigned int gain_code);
+	const double &psi,
+	const unsigned int &gain_code);
 
 
 arma::mat hpsi_deriv(
 	const arma::mat& psi,
-	const unsigned int gain_code);
+	const unsigned int &gain_code);
 
+arma::vec get_theta_coef_solow(const unsigned int &L, const double &rho);
+
+// double theta_new_solow_ar(
+// 	const arma::vec &theta_past, // L x 1
+// 	const double &hpsi_cur,		 // (n+1) x 1
+// 	const double &yt_prev,		 // y[t-1]
+// 	const unsigned int &tidx,	 // time index t, t=1,...,n
+// 	const double &rho,
+// 	const unsigned int &L);
+
+// double theta_new_solow_ar(
+// 	const arma::vec &theta_pad, // (n+L) x 1
+// 	const arma::vec &hpsi_pad,	// (n+1) x 1
+// 	const arma::vec &ypad,		// (n+1) x 1
+// 	const unsigned int &tidx,	// t = 1, ..., n
+// 	const unsigned int &L,
+// 	const arma::vec &coef,
+// 	const double &cnst);
+
+double theta_new_nobs(
+	const arma::vec &Fphi_sub, // nelem x 1
+	const arma::vec &hpsi_sub, // nelem x 1
+	const arma::vec &ysub);
+
+double theta_new_nobs(
+	const arma::vec &hpsi_pad, // (n+1) x 1
+	const arma::vec &ypad,	   // (n+1) x 1
+	const double &rho,
+	const unsigned int &trans_code,
+	const unsigned int &tidx, // t = 1, ..., n
+	const unsigned int &L_order,
+	const unsigned int &nlag);
 
 arma::mat hpsi2theta(
-	const arma::mat& hpsi, // (n+1) x k
-	const arma::vec& ypad, // n x 1
+	const arma::mat &hpsi_pad, // (n+1) x k, each row is a different time point
+	const arma::vec &ypad, // (n+1) x 1
 	const unsigned int &trans_code,
-	const double &theta0 = 0.,
-	const unsigned int &L = 2,
-	const double &rho = 0.9);
-
-
+	const unsigned int &L,
+	const unsigned int &nlag,
+	const double &rho);
 
 void hpsi2theta(
 	arma::vec &theta,
 	const arma::vec &hpsi, // (n+1) x 1, each row is a different time point
 	const arma::vec &ypad, // (n+1) x 1
 	const unsigned int &trans_code,
-	const double &theta0 = 0.,
 	const unsigned int &L = 2,
+	const unsigned int &nlag = 0,
 	const double &rho = 0.9);
 
+
+
+void wt2theta(
+	arma::vec &theta,	 // n x 1
+	const arma::vec &wt, // n x 1
+	const arma::vec &y,	 // n x 1
+	const unsigned int &gain_code,
+	const unsigned int &trans_code,
+	const double &rho,
+	const unsigned int &L,
+	const unsigned int &nlag = 0);
 
 
 double loglike_obs(

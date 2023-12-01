@@ -61,22 +61,22 @@ void init_Ft(
     const unsigned int &t, 
     const unsigned int &p);
 
-
 Rcpp::List mcs_poisson(
     const arma::vec &Y, // nt x 1, the observed response
     const arma::uvec &model_code,
-    const double W_true, // Use discount factor if W is not given
-    const double rho,
-    const unsigned int L, // number of lags
-    const double mu0,
-    const unsigned int B,                                // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
-    const unsigned int N,                                // number of particles
+    const double &W_true, // Use discount factor if W is not given
+    const double &rho,
+    const unsigned int &L_order, // number of lags
+    const unsigned int &nlag_,
+    const double &mu0,
+    const unsigned int &B,                               // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const unsigned int &N,                               // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior, // mean of normal prior for theta0
     const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior, // variance of normal prior for theta0
-    const double theta0_upbnd,                           // Upper bound of uniform prior for theta0
+    const double &theta0_upbnd,                          // Upper bound of uniform prior for theta0
     const Rcpp::NumericVector &qProb,
-    const double delta_nb,
-    const double delta_discount);
+    const double &delta_nb,
+    const double &delta_discount);
 
 void smc_propagate_bootstrap(
     arma::mat &Theta_new, // p x N
@@ -96,7 +96,9 @@ void smc_propagate_bootstrap(
     const unsigned int N, // number of particles
     const bool use_discount,
     const bool use_default_val,
-    const unsigned int t = 9999);
+    const unsigned int t = 9999,
+    const unsigned int nlag = 0,
+    const unsigned int nobs = 0);
 
 void smc_resample(
     arma::cube &theta_stored, // p x N x (nt + B)
@@ -111,7 +113,8 @@ Rcpp::List ffbs_poisson(
     const arma::uvec &model_code,
     const double W_true,
     const double rho,
-    const unsigned int L, // number of lags
+    const unsigned int L_order, // number of lags
+    const unsigned int nlag_,
     const double mu0,
     const unsigned int N, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior,
@@ -122,28 +125,23 @@ Rcpp::List ffbs_poisson(
     const double delta_discount,
     const bool smoothing);
 
-
-
-
 void mcs_poisson(
-    arma::mat& R, // (n+1) x 2, (psi,theta)
-    arma::vec& pmarg_y, // n x 1, marginal likelihood of y
+    arma::mat &R,       // (n+1) x 2, (psi,theta)
+    arma::vec &pmarg_y, // n x 1, marginal likelihood of y
     double &W,
-    const arma::vec& ypad, // (n+1) x 1, the observed response
-    const arma::uvec& model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
-    const double rho,
-    const unsigned int L, // number of lags
-    const double mu0,
-    const unsigned int B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
-	const unsigned int N, // number of particles
-    const arma::vec& m0_prior,
-	const arma::mat& C0_prior,
-    const double theta0_upbnd,
-    const double delta_nb,
-    const double delta_discount);
-
-
-
+    const arma::vec &ypad,        // (n+1) x 1, the observed response
+    const arma::uvec &model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
+    const double &rho,
+    const unsigned int &L_order, // number of lags
+    const unsigned int &nlag_,
+    const double &mu0,
+    const unsigned int &B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const unsigned int &N, // number of particles
+    const arma::vec &m0_prior,
+    const arma::mat &C0_prior,
+    const double &theta0_upbnd = 2.,
+    const double &delta_nb = 1.,
+    const double &delta_discount = 0.95);
 
 /*
 Particle Learning
