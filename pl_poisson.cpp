@@ -77,7 +77,7 @@ Rcpp::List mcs_poisson(
     arma::vec Ft = init_Ft(p, trans_code);
 
     arma::mat Gt;
-    init_Gt(Gt, par1, p, nlag, nt);
+    init_Gt(Gt, lag_par, p, nlag, truncated);
 
     /* Dimension of state space depends on type of transfer functions */
 
