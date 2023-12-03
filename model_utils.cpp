@@ -554,7 +554,16 @@ arma::vec match_params(
 			output.at(idx,1) = par2;
 
 			arma::vec params_out = {(double)trans_code_out,par1,par2};
-			output.at(idx,2) = cross_entropy(nlags,params_in,params_out);
+			try
+			{
+				output.at(idx, 2) = cross_entropy(nlags, params_in, params_out);
+			}
+			catch(...)
+			{
+				output.print();
+				throw std::invalid_argument("match_params: cross_entropy is infinite.");
+			}
+			
 			idx ++;
 		}
 	}
