@@ -9,19 +9,19 @@ using namespace Rcpp;
 Transform eta = (W,mu0,rho,M) to eta_tilde on the real space R^4
 */
 void eta2tilde(
-    arma::vec& eta_tilde, // m x 1
-    const arma::uvec &eta_prior_type,
-    const arma::vec& eta, // 4 x 1
-    const arma::uvec& idx_select, // m x 1 (m<=4)
-    const unsigned int m){ 
-    
+    arma::vec &eta_tilde,         // m x 1
+    const arma::vec &eta,         // 4 x 1
+    const arma::uvec &idx_select, // m x 1 (m<=4)
+    const unsigned int &W_prior_type,
+    const unsigned int &m)
+{
+
     for (unsigned int i=0; i<m; i++) {
         double etmp = eta.at(idx_select.at(i));
         switch(idx_select.at(i)) {
             case 0: // W   - Wtilde = log(W)
             {
-                unsigned int Wprior = eta_prior_type.at(0);
-                switch (Wprior)
+                switch (W_prior_type)
                 {
                 case 0:
                     eta_tilde.at(i) = std::log(etmp);
@@ -67,10 +67,10 @@ void eta2tilde(
 
 void tilde2eta(
     arma::vec &eta, // 4 x 1
-    const arma::uvec &eta_prior_type,
     const arma::vec &eta_tilde,   // m x 1
     const arma::uvec &idx_select, // m x 1
-    const unsigned int m)
+    const unsigned int &W_prior_type = 0,
+    const unsigned int &m = 1)
 {
 
     for (unsigned int i=0; i<m; i++) {
@@ -79,8 +79,7 @@ void tilde2eta(
         switch(itmp) {
             case 0: // W = exp(Wtilde)
             {
-                unsigned int Wprior = eta_prior_type.at(0);
-                switch (Wprior)
+                switch (W_prior_type)
                 {
                 case 0:
                     etmp = std::min(etmp, UPBND);
@@ -141,9 +140,11 @@ double dlogJoint_dWtilde(
     const arma::vec& psi, // (n+1) x 1, (psi[0],psi[1],...,psi[n])
     const double G, // evolution transition matrix
     const double W, // evolution variance conditional on V
-    const double aw,
-    const double bw,
-    const unsigned int prior_type = 0) { // 0 - Gamma(aw=shape,bw=rate); 1 - Half-Cauchy(aw=location=0, bw=scale); 2 - Inverse-Gamma(aw=shape,bw=rate)
+    const arma::vec &W_par) { // 0 - Gamma(aw=shape,bw=rate); 1 - Half-Cauchy(aw=location=0, bw=scale); 2 - Inverse-Gamma(aw=shape,bw=rate)
+
+    double aw = W_par.at(2);
+    double bw = W_par.at(3);
+    unsigned int W_prior_type = W_par.at(1);
 
     if (!psi.is_finite() || !std::isfinite(W))
     {
@@ -162,7 +163,8 @@ double dlogJoint_dWtilde(
     bound_check(rdw,"dlogJoint_dWtilde: rdw");
 
     double deriv;
-    if (prior_type==0) {
+    if (W_prior_type == 0)
+    {
         /*
         W ~ Gamma(aw=shape, bw=rate)
         Wtilde = log(W)
@@ -173,12 +175,16 @@ double dlogJoint_dWtilde(
         deriv -= bw*W;
         deriv += 0.5 * rdw;
         // deriv = aw - 0.5*n - bw*W + 0.5 * rdw;
-    } else if (prior_type==1) {
+    }
+    else if (W_prior_type == 1)
+    {
         /*
         sqrt(W) ~ Half-Cauchy(aw=location==0, bw=scale)
         */
         deriv = 0.5*n-0.5 * rdw + W/(bw*bw+W) - 0.5;
-    } else if (prior_type==2) {
+    }
+    else if (W_prior_type == 2)
+    {
         /*
         W ~ Inverse-Gamma(aw=shape, bw=rate)
         Wtilde = -log(W)
@@ -198,8 +204,10 @@ double dlogJoint_dWtilde(
         a_new += 0.5*n;
         a_new += 1.;
         deriv += a_new;
-    } else {
-         throw std::invalid_argument("Unsupported prior for evolution variance W.");
+    }
+    else
+    {
+        throw std::invalid_argument("Unsupported prior for evolution variance W.");
     }
 
     bound_check(deriv, "dlogJoint_dWtilde: deriv");
@@ -207,17 +215,17 @@ double dlogJoint_dWtilde(
 }
 
 double logprior_Wtilde(
-    const double Wtilde, // evolution variance conditional on V
-    const double aw,
-    const double bw,
-    const unsigned int prior_type = 0)
+    const double &Wtilde, // evolution variance conditional on V
+    const double &aw = 0.01,
+    const double &bw = 0.01,
+    const unsigned int &W_prior_type = 2)
 {
     double InvGamma_cnst = aw;
     InvGamma_cnst *= std::log(bw);
     InvGamma_cnst -= std::lgamma(aw);
 
     double logp = -16.;
-    if (prior_type==0) {
+    if (W_prior_type==0) {
         /*
         W ~ Gamma(aw=shape, bw=rate)
         Wtilde = log(W)
@@ -228,12 +236,16 @@ double logprior_Wtilde(
 
         double Wast = std::min(Wtilde,UPBND);
         logp -= bw * std::exp(Wast);
-    } else if (prior_type==1) {
+    }
+    else if (W_prior_type == 1)
+    {
         /*
         sqrt(W) ~ Half-Cauchy(aw=location==0, bw=scale)
         */
         throw std::invalid_argument("logprior_Wtilde for Half-Cauchy is not implemented yet.");
-    } else if (prior_type==2) {
+    }
+    else if (W_prior_type == 2)
+    {
         /*
         W ~ Inverse-Gamma(aw=shape, bw=rate)
         Wtilde = -log(W)
@@ -242,8 +254,10 @@ double logprior_Wtilde(
         logp += aw*Wtilde;
         double Wast = std::min(Wtilde, UPBND);
         logp -= bw * std::exp(Wast);
-    } else {
-         throw std::invalid_argument("Unsupported prior for evolution variance W.");
+    }
+    else
+    {
+        throw std::invalid_argument("Unsupported prior for evolution variance W.");
     }
 
     bound_check(logp,"logprior_Wtilde: logp");
@@ -264,8 +278,8 @@ double dlogJoint_dlogmu0(
     const arma::vec& ypad, // (n+1) x 1
     const arma::vec& theta, // (n+1) x 1, (theta[0],theta[1],...,theta[n])
     const double mu0, // a realization of mu[0]
-    const double amu, // shape parameter of the Gamma prior for mu[0]
-    const double bmu, // rate parameter of the Gamma prior for mu[0]
+    const double amu = 1., // shape parameter of the Gamma prior for mu[0]
+    const double bmu = 1., // rate parameter of the Gamma prior for mu[0]
     const double delta_nb = 1.,
     const unsigned int obs_code = 0) { // 0 - negative binomial; 1 - poisson
     /*
@@ -295,8 +309,8 @@ double dlogJoint_dlogmu0(
 
 double logprior_logmu0(
     const double logmu0, // evolution variance conditional on V
-    const double amu,
-    const double bmu) {
+    const double amu = 1.,
+    const double bmu = 1.) {
 
     /*
     mu0 ~ Gamma(aw=shape, bw=rate)
@@ -307,47 +321,50 @@ double logprior_logmu0(
     return logp;
 }
 
-
-double dlogJoint_drho(
+/**
+ * dlogJoint_dpar1: partial derivative w.r.t rho or mu.
+ * 
+ * @param lag_par: either (rho, L) or (mu, sg2)
+*/
+double dlogJoint_dpar1(
     const arma::vec& ypad, // (n+1) x 1
     const arma::mat& R, // (n+1) x 2, (psi,theta)
-    const unsigned int L,
+    const arma::vec& lag_par,
     const double mu0,
-    const double rho,
     const double delta_nb,
-    const unsigned int gain_code,
-    const double arho = 1.,
-    const double brho = 1.) {
+    const unsigned int gain_code) 
+{
+
+    double aprior = 1.;
+    double bprior = 1.;
+    double par1 = lag_par.at(0);
 
     const unsigned int n = ypad.n_elem - 1;
-    const double L_ = static_cast<double>(L);
+    unsigned int L = (unsigned int) lag_par.at(1);
+    double L_ = lag_par.at(1);
 
     arma::vec hpsi = psi2hpsi(R.col(0),gain_code); // (n+1) x 1
-    arma::vec lambda = mu0 + R.col(1); // (n+1) x 1
+    arma::vec lambda = lag_par.at(0) + R.col(1);         // (n+1) x 1
 
-    unsigned int r;
     double c1 = 0.;
     double c2 = 0.;
-    double c20 = 0.;
-    double c21 = 0.;
-    double c10 = 0.;
 
     for (unsigned int t=1; t<=n; t++) {
-        c10 = ypad.at(t)/lambda.at(t) - (ypad.at(t)+delta_nb)/(lambda.at(t)+delta_nb);
+        double c10 = ypad.at(t)/lambda.at(t) - (ypad.at(t)+delta_nb)/(lambda.at(t)+delta_nb);
         c1 += c10*hpsi.at(t-1)*ypad.at(t-1);
 
-        r = std::min(t,L);
-        c20 = 0.;
-        c21 = -rho;
+        unsigned int r = std::min(t,L);
+        double c20 = 0.;
+        double c21 = -par1;
         for (unsigned int k=1; k<=r; k++) {
             c20 += static_cast<double>(k)*binom(L,k)*c21*R.at(t-k,1);
-            c21 *= -rho;
+            c21 *= -par1;
         }
         c2 += c10*c20;
     }
 
-    double deriv = -L_*std::pow(1.-rho,L_)*rho*c1 - (1.-rho)*c2;
-    deriv += arho - (arho+brho) * rho;
+    double deriv = -L_ * std::pow(1. - par1, L_) * par1 * c1 - (1. - par1) * c2;
+    deriv += aprior - (bprior + aprior) * par1;
     bound_check(deriv,"dlogJoint_drho: deriv");
     return deriv;
 }
@@ -414,18 +431,11 @@ double logprior_logitrho(
 }
 
 
-/*
-logprior_eta_tilde
-------------------------
-`eta_prior_val`
-    aw  amu   arho    DK 
-    bw  bmu   brho    DK
-*/
+
 arma::vec logprior_eta_tilde(
     const arma::vec& eta_tilde, // m x 1
     const arma::uvec& idx_select, // m x 1
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
+    const arma::vec &W_par,
     const unsigned int m) {
     
     arma::vec logp(m);
@@ -434,17 +444,17 @@ arma::vec logprior_eta_tilde(
         switch(idx_select.at(i)) {
             case 0: // W   - Wtilde = -log(W)
             {
-                logp.at(i) = logprior_Wtilde(eta_tilde.at(i),eta_prior_val.at(0,0),eta_prior_val.at(1,0),eta_prior_type.at(0));
+                logp.at(i) = logprior_Wtilde(eta_tilde.at(i), W_par.at(2), W_par.at(3), (unsigned int) W_par.at(1));
             }
             break;
             case 1: // mu0 - mu0_tilde = log(mu[0])
             {
-                logp.at(i) = logprior_logmu0(eta_tilde.at(i),eta_prior_val.at(0,1),eta_prior_val.at(1,1));
+                logp.at(i) = logprior_logmu0(eta_tilde.at(i),1.,1.);
             }
             break;
             case 2: // rho - rho_tilde = log(rho/(1.-rho))
             {
-                logp.at(i) = logprior_logitrho(eta_tilde.at(i),eta_prior_val.at(0,2),eta_prior_val.at(1,2));
+                logp.at(i) = logprior_logitrho(eta_tilde.at(i),1.,1.);
             }
             break;
             case 3: // M - undefined
@@ -469,30 +479,29 @@ arma::vec dlogJoint_deta(
     const arma::mat& R, // (n+1) x 2, // (psi,theta)
     const arma::vec& eta, // 4 x 1
     const arma::uvec& idx_select, // m x 1
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4
+    const arma::vec &W_par,
+    const arma::vec &lag_par,
     const unsigned int m,
-    const unsigned int L,
     const arma::vec& rcomb,
-    const double delta_nb = 1.,
+    const double delta_nb = 30.,
     const unsigned int obs_code = 0, // 0 - NegBinom; 1 - Poisson
-    const unsigned int gain_code = 0) {
+    const unsigned int gain_code = 3) {
     arma::vec deriv(m);
     for (unsigned int i=0; i<m; i++) {
         switch(idx_select.at(i)) {
             case 0: // Wtilde = -log(W)
             {
-                deriv.at(i) = dlogJoint_dWtilde(R.col(0),1.,eta.at(0),eta_prior_val.at(0,0),eta_prior_val.at(1,0),eta_prior_type.at(0));
+                deriv.at(i) = dlogJoint_dWtilde(R.col(0),1.,eta.at(0),W_par);
             }
             break;
             case 1: // logmu0 = log(mu0)
             {
-                deriv.at(i) = dlogJoint_dlogmu0(ypad,R.col(1),eta.at(1),eta_prior_val.at(0,1),eta_prior_val.at(1,1),delta_nb,obs_code);
+                deriv.at(i) = dlogJoint_dlogmu0(ypad,R.col(1),eta.at(1),1.,1.,delta_nb,obs_code);
             }
             break;
             case 2: // rho_tilde = log(rho/(1-rho))
             {
-                deriv.at(i) = dlogJoint_drho2(ypad,R,L,eta.at(1),eta.at(2),delta_nb,gain_code,rcomb,eta_prior_val.at(0,2),eta_prior_val.at(1,2));
+                deriv.at(i) = dlogJoint_drho2(ypad, R, lag_par.at(1), eta.at(1), eta.at(2), delta_nb, gain_code, rcomb, 1., 1.);
             }
             break;
             case 3: // M - undefined
@@ -559,34 +568,17 @@ void update_vb_param(
     return;
 }
 
-/*
-eta = (W,mu[0],rho,M)
 
-`eta_select` 
-    Indicates if a global parameter should be inferred by HVA.
-    For example, eta_select = (true,true,false,false) means that W and mu[0] will be inferred and we should provide the true values for rho and M. 
-`eta_init`
-    True (eta_select set to false) or initial (eta_select set to true) values should be provided here.
-`eta_prior_type`
-    - W: 0 - Gamma(aw,bw); 1 - Half-Cauchy(aw=0,bw); 2 - Inverse-Gamma(aw,bw)
-    - mu[0]: 0 - Gamma(amu,bmu)
-    - rho: 
-    - M
-`eta_prio_val`
-    aw  amu   arho    DK 
-    bw  bmu   brho    DK
-*/
 //' @export
 // [[Rcpp::export]]
 Rcpp::List hva_poisson(
-    const arma::vec& Y, // n x 1
-    const arma::uvec& model_code,
-    const arma::uvec& eta_select, // 4 x 1, indicator for unknown (=1) or known (=0)
-    const arma::vec& eta_init, // 4 x 1, if true/initial values should be provided here
-    const arma::uvec& eta_prior_type, // 4 x 1
-    const arma::mat& eta_prior_val, // 2 x 4, priors for each element of eta
-    const double L_order = 2,
-    const unsigned int nlag_ = 0,
+    const arma::vec &Y, // n x 1
+    const arma::uvec &model_code,
+    const arma::uvec &eta_select,                                                           // (W, mu0, lag_par1, lag_par2)
+    const Rcpp::NumericVector &W_par_in = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (init, prior type, prior par1, prior par2)
+    const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.),
+    const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
+    const unsigned int nlag_in = 30,
     const double theta0_upbnd = 2.,
     const double Blag_pct = 0.1,
     const double learn_rate = 0.95,
@@ -595,15 +587,22 @@ Rcpp::List hva_poisson(
     const unsigned int nsample = 100,
     const unsigned int nburnin = 100,
     const unsigned int nthin = 2,
-    const double delta_nb = 1.,
+    const unsigned int Nsmc = 100,
     const double delta_discount = 0.88,
-    const bool summarize_return = false) {
-
+    const bool &truncated = true,
+    const bool summarize_return = false)
+{
 
     const unsigned int ntotal = nburnin + nthin*nsample + 1;
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
     arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
+
+    double delta_nb = obs_par_in[1];
+
+    Rcpp::NumericVector W_par = W_par_in;
+    Rcpp::NumericVector lag_par = lag_par_in;
+    Rcpp::NumericVector obs_par = obs_par_in;
 
     bool update_static = arma::accu(eta_select) > 0;
 
@@ -613,16 +612,34 @@ Rcpp::List hva_poisson(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
+    unsigned int W_prior_type = W_par[1];
+
 
     /* ------ Define Local Parameters ------ */
     arma::mat R(n+1,2,arma::fill::zeros); // (psi,theta)
     /* ------ Define Local Parameters ------ */
     
     /* ------ Define Global Parameters ------ */
-    arma::vec eta = eta_init; // eta = (W>0,mu0>0,rho in (0,1),M>0)
-    double W = eta.at(0);
-    double mu0 = eta.at(1);
-    double rho = eta.at(2);
+    double W = W_par[0];
+    double mu0 = 1.;
+
+
+    /*
+    (rho, L) for negative-binomial distributed lags
+    (mu, sg2) for log-normal distributed lags
+    */
+    
+    double par1 = lag_par[0];
+    double par2 = lag_par[1];
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = n;
+        p = par2 + 1;
+    }
+
+    
 
     const unsigned int m = std::max(arma::as_scalar<double>(arma::accu(eta_select)), 1.);
 
@@ -634,8 +651,8 @@ Rcpp::List hva_poisson(
 
     /* ------ Define SMC ------ */
     // const unsigned int Blag = L;
-    unsigned int nlag, p, L;
-    set_dim(nlag, p, L, n, nlag_, L_order);
+    
+    
 
     unsigned int Blag;
     if (nlag < n)
@@ -647,7 +664,6 @@ Rcpp::List hva_poisson(
     {
         Blag = static_cast<unsigned int>(Blag_pct * n); // B-fixed-lags Monte Carlo smoother
     }
-    const unsigned int N = 100; // number of particles for SMC
     /* ------ Define SMC ------ */
 
 
@@ -655,13 +671,13 @@ Rcpp::List hva_poisson(
 
     arma::vec rcomb(n,arma::fill::zeros);
     for (unsigned int l=1; l<=n; l++) {
-        rcomb.at(l-1) = binom(L - 2 + l,l - 1);
+        rcomb.at(l-1) = binom(par2 - 2 + l,l - 1);
     }
     /* ------ Define Model ------ */
 
 
     /*  ------ Define LBE ------ */
-    arma::vec m0(p,arma::fill::zeros);
+    double m0 = 0.;
     arma::mat C0(p,p,arma::fill::eye);
 	C0 *= std::pow(theta0_upbnd * 0.5, 2.);
 
@@ -679,8 +695,10 @@ Rcpp::List hva_poisson(
         idx_select.fill(1)
 ;
     }
+
+    arma::vec eta = {W, mu0, par1, par2};
     arma::vec eta_tilde(m, arma::fill::zeros);           // unknown part of eta which is also transformed to the real line
-    eta2tilde(eta_tilde, eta_prior_type, eta, idx_select, m);
+    eta2tilde(eta_tilde, eta, idx_select, W_prior_type, m);
     arma::vec gamma(m, arma::fill::ones);
     arma::vec nu = tYJ(eta_tilde, gamma); // m x 1, Yeo-Johnson transform of eta_tilde
 
@@ -732,42 +750,34 @@ Rcpp::List hva_poisson(
         */
         if (eta_select.at(0) == 1) {
             W = eta.at(0);
+            W_par.at(0) = W;
         }
         if (eta_select.at(1) == 1) {
             mu0 = eta.at(1);
+            obs_par[0] = mu0;
         }
         if (eta_select.at(2) == 1) {
-            rho = eta.at(2);
+            lag_par[0] = eta.at(2);
         }
 
         arma::vec pmarg_y(n, arma::fill::zeros);
+        bool use_discount = false;
         if (eta_select.at(0)==0 || s==0)
         {
-            mcs_poisson(
-                R,pmarg_y,NA_REAL,ypad,model_code,
-                rho,L,nlag,mu0,
-                Blag,N,
-                m0,C0,
-                theta0_upbnd,
-                delta_nb,
-                delta_discount);
+            use_discount = true;
         }
-        else 
-        {
-            mcs_poisson(
-                R,pmarg_y,W,ypad,model_code,
-                rho,L,nlag,mu0,
-                Blag,N,
-                m0,C0,
-                theta0_upbnd,
-                delta_nb,
-                delta_discount);
 
-        }
+        mcs_poisson(
+            R, pmarg_y, W, ypad, model_code,
+            obs_par, lag_par, nlag,
+            Blag, Nsmc, theta0_upbnd, 
+            delta_discount, truncated, use_discount);
 
         arma::vec hpsi_tmp = psi2hpsi(R.col(0), gain_code); // (n+1) x 1
         arma::vec theta_tmp(n,arma::fill::zeros);
-        hpsi2theta(theta_tmp, hpsi_tmp, ypad, trans_code, L, nlag, rho); // theta
+        hpsi2theta(
+            theta_tmp, hpsi_tmp, ypad, lag_par,
+            trans_code, nlag, truncated); // theta
         arma::vec theta_tmp2(n+1,arma::fill::zeros);
         theta_tmp2.tail(n) = theta_tmp;
         R.col(1) = theta_tmp2;
@@ -777,7 +787,7 @@ Rcpp::List hva_poisson(
             /*
             Step 3. Compute gradient of the log variational distribution (Model Dependent)
             */
-            arma::vec delta_logJoint = dlogJoint_deta(ypad, R, eta, idx_select, eta_prior_type, eta_prior_val, m, L, rcomb, delta_nb, obs_code, gain_code); // m x 1
+            arma::vec delta_logJoint = dlogJoint_deta(ypad, R, eta, idx_select, W_par, lag_par, m, rcomb, delta_nb, obs_code, gain_code); // m x 1
 
             arma::mat SigInv = get_sigma_inv(B, d,k);                             // m x m
             arma::vec delta_logq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu); // m x 1
@@ -822,10 +832,9 @@ Rcpp::List hva_poisson(
             eta_tilde = rtheta(xi, eps, gamma, mu, B, d);
 
             nu = tYJ(eta_tilde, gamma); // recover nu
-            tilde2eta(eta, eta_prior_type, eta_tilde, idx_select, m);
+            tilde2eta(eta, eta_tilde, idx_select, W_prior_type, m);
 
-            double Wtmp = eta.at(0);
-            bound_check(Wtmp, "hva_poisson: Wtmp at variational step",true,true);
+            bound_check(eta.at(0), "hva_poisson: eta at variational step", true, true);
         }
 
 
@@ -897,4 +906,3 @@ Rcpp::List hva_poisson(
 
     return output;
 }
-

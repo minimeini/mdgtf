@@ -41,20 +41,13 @@ void get_Fphi_pad(
 	const unsigned int &trans_code,
 	const unsigned int &nobs,
 	const unsigned int &nlag,
-	const unsigned int &L_order,
-	const unsigned int &rho)
+	const Rcpp::NumericVector &lag_par)
 {
-	unsigned int nlag_ = nlag;
-	if (nlag == 0)
-	{
-		nlag_ = nobs;
-	}
-	arma::vec Fphi = get_Fphi(nlag_, L_order, rho, trans_code); // nlag x 1
+	arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code); // nlag x 1
 
 	Fphi_pad.set_size(nobs + 1);
 	Fphi_pad.zeros();
-
-	for (unsigned int l = 1; l <= nlag_; l++)
+	for (unsigned int l = 1; l <= nlag; l++)
 	{
 		Fphi_pad.at(l) = Fphi.at(l - 1);
 	}
@@ -139,19 +132,21 @@ arma::vec update_theta0(
 }
 
 arma::vec get_Vt_hat(
-	const arma::vec &y,			 // n x 1
-	const arma::vec &wt,		 // n x 1
+	const arma::vec &y,	 // n x 1
+	const arma::vec &wt, // n x 1
 	const arma::vec &Fphi_pad,
 	const unsigned int &gain_code,
 	const unsigned int &link_code,
 	const unsigned int &obs_code,
-	const double &delta_nb = 1.,
-	const double &mu0 = 0.)
+	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.))
 {
 	if (link_code != 0)
 	{
 		throw std::invalid_argument("proposal_mh_var: only support identity link.");
 	}
+	double mu0 = obs_par[0];
+	double delta_nb = obs_par[1];
+
 	unsigned int n = y.n_elem;
 	arma::vec lambda_hat(n,arma::fill::zeros);
 	arma::vec Vt_hat(n,arma::fill::zeros);
@@ -207,13 +202,15 @@ arma::vec get_Vt_hat(
 	const unsigned int &gain_code,
 	const unsigned int &link_code,
 	const unsigned int &obs_code,
-	const double &delta_nb = 1.,
-	const double &mu0 = 0.)
+	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0.,30.))
 {
 	if (link_code != 0)
 	{
 		throw std::invalid_argument("proposal_mh_var: only support identity link.");
 	}
+	double mu0 = obs_par[0];
+	double delta_nb = obs_par[1];
+
 	unsigned int n = y.n_elem;
 	arma::vec lambda_hat(n, arma::fill::zeros);
 	arma::vec Vt_hat(n, arma::fill::zeros);
@@ -285,26 +282,25 @@ double loglike_obs(
 	const arma::vec &y,	 // n x 1
 	const arma::vec &wt, // n x 1
 	const unsigned int &sidx,
-	const unsigned int &gain_code,
-	const unsigned int &trans_code,
-	const unsigned int &link_code,
-	const unsigned int &obs_code,
-	const double &mu0,
-	const unsigned int &delta_nb,
-	const double &rho,
-	const unsigned int &L,
-	const unsigned int &nlag = 0) // prior SD of w[s]
+	const unsigned int &gain_code = 3,
+	const unsigned int &trans_code = 2,
+	const unsigned int &link_code = 0,
+	const unsigned int &obs_code = 0,
+	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.), // (mu0, delta_nb)
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const unsigned int &nlag = 20,
+	const bool &truncated = true) // prior SD of w[s]
 {
 	const unsigned int n = y.n_elem;
 	// double Rw_sqrt = std::sqrt(Rw);
 
 	arma::vec theta(n, arma::fill::zeros);
 	wt2theta(
-		theta, wt, y,
+		theta, wt, y, lag_par,
 		gain_code, trans_code,
-		rho, L, nlag);
+		nlag, truncated);
 
-	arma::vec lambda_core = mu0 + theta;
+	arma::vec lambda_core = obs_par[0] + theta;
 	arma::vec lambda(n, arma::fill::zeros);
 	if (link_code == 1)
 	{
@@ -322,7 +318,7 @@ double loglike_obs(
 	{
 		double logp_increment = loglike_obs(
 			y.at(t), lambda.at(t),
-			obs_code, delta_nb, true);
+			obs_code, obs_par[1], true);
 
 		logpost += logp_increment;
 	}
@@ -332,32 +328,27 @@ double loglike_obs(
 	return logpost;
 }
 
-
-
 void update_wt(
 	arma::vec &wt,
 	arma::vec &wt_accept,
 	arma::vec &Bs,
 	arma::vec &logp,
-	const arma::vec &y, // nobs x 1
-	const arma::vec &Fphi_pad, // (nobs + 1)
-	const arma::vec &lags_params, // (L_order, rho) or (mu, sg2)
-	const arma::vec &obs_params, // delta_nb, mu0
-	const arma::vec &prior_params, // w[t] ~ N(0, W)
+	const arma::vec &y,					// nobs x 1
+	const arma::vec &Fphi_pad,			// (nobs + 1)
+	const Rcpp::NumericVector &lag_par, // (L_order, rho) or (mu, sg2)
+	const Rcpp::NumericVector &obs_par, // delta_nb, mu0
+	const Rcpp::NumericVector &prior_par,		// w[t] ~ N(0, W)
 	const double &mh_sd,
 	const unsigned int &nobs,
 	const unsigned int &nlag,
 	const unsigned int &gain_code,
 	const unsigned int &trans_code,
 	const unsigned int &link_code,
-	const unsigned int &obs_code)
+	const unsigned int &obs_code,
+	const bool &truncated)
 {
-	double rho = lags_params.at(0);
-	unsigned int L_order = lags_params.at(1);
-	double delta_nb = obs_params.at(0);
-	double mu0 = obs_params.at(1);
-	double mu_wt = prior_params.at(0);
-	double sg_wt = std::sqrt(prior_params.at(1));
+	double mu_wt = prior_par[0];
+	double sg_wt = std::sqrt(prior_par[1]);
 
 	
 	for (unsigned int s = 0; s < nobs; s++)
@@ -365,16 +356,15 @@ void update_wt(
 		arma::mat Fn_hat(nobs,nobs,arma::fill::zeros);
 		arma::vec Vt_hat = get_Vt_hat(
 			Fn_hat, y, wt, Fphi_pad,
-			gain_code, link_code, obs_code,
-			delta_nb, mu0);
+			gain_code, link_code, obs_code, obs_par);
 
 		// logp_old
 		double wt_old = wt.at(s);
 
 		double logp_old = loglike_obs(
 			y, wt, s,
-			gain_code, trans_code, link_code, obs_code,
-			mu0, delta_nb, rho, L_order, nlag);
+			gain_code, trans_code, link_code, obs_code, 
+			obs_par, lag_par, nlag, truncated);
 		logp_old += R::dnorm4(wt_old, mu_wt, sg_wt, true);
 
 		Bs.at(s) = proposal_mh_var(y, Vt_hat, Fn_hat, s);
@@ -388,7 +378,7 @@ void update_wt(
 		double logp_new = loglike_obs(
 			y, wt, s,
 			gain_code, trans_code, link_code, obs_code,
-			mu0, delta_nb, rho, L_order, nlag); // likelihood
+			obs_par, lag_par, nlag, truncated);			   // likelihood
 		logp_new += R::dnorm4(wt_new, mu_wt, sg_wt, true); // prior
 
 		double logratio = logp_new - logp_old;
@@ -418,24 +408,24 @@ double update_W(
 	double &W_accept,
 	const double &W_old,
 	const arma::vec &wt,
-	const unsigned int &W_prior_type, // eta_prior_type.at(0)
-	const arma::vec &prior_params,	  // (aw_new, bw_prior), aw_new = eta_prior_val.at(0, 0) - 0.5 * ((double)nobs - 1.)
+	const Rcpp::NumericVector &W_par,
 	const double &mh_sd,
 	const unsigned int &nobs)
 {
 	double W = W_old;
-
 	double res = arma::accu(arma::pow(wt.tail(nobs - 1), 2.));
-	double aw_new = prior_params.at(0);
 	// double bw_prior = prior_params.at(1); // eta_prior_val.at(1, 0)
 
-	switch (W_prior_type) // eta_prior_type.at(0)
+	switch ( (unsigned int) W_par[1])
 	{
 	case 0: // Gamma(aw=shape, bw=rate)
 	{
-		double logp_old = prior_params.at(0) * std::log(W_old) - prior_params.at(1) * W_old - 0.5 * res / W_old;
+		double aw_new = W_par[2];
+		double bw_prior = W_par[3];
+
+		double logp_old = aw_new * std::log(W_old) - bw_prior * W_old - 0.5 * res / W_old;
 		double W_new = std::exp(std::min(R::rnorm(std::log(W_old), mh_sd), UPBND));
-		double logp_new = prior_params.at(0) * std::log(W_new) - prior_params.at(1) * W_new - 0.5 * res / W_new;
+		double logp_new = aw_new * std::log(W_new) - bw_prior * W_new - 0.5 * res / W_new;
 		double logratio = std::min(0., logp_new - logp_old);
 		if (std::log(R::runif(0., 1.)) < logratio)
 		{ // accept
@@ -451,8 +441,8 @@ double update_W(
 	break;
 	case 2: // Inverse-Gamma(nw=shape, nSw=rate)
 	{
-		double nSw_new = prior_params.at(1) + res; // prior_params.at(1) = nSw
-		W = 1. / R::rgamma(0.5 * prior_params.at(0), 2. / nSw_new); // prior_params.at(0) = nw_new
+		double nSw_new = W_par[3] + res;							// prior_params.at(1) = nSw
+		W = 1. / R::rgamma(0.5 * W_par[2], 2. / nSw_new);			// prior_params.at(0) = nw_new
 		W_accept += 1.;
 	}
 	break;
@@ -473,28 +463,27 @@ void update_mu0(
 	const arma::vec &y,			   // nobs x 1
 	const arma::vec &wt,
 	const arma::vec &Fphi_pad,	   // (nobs + 1)
-	const arma::vec &lags_params,  // (L_order, rho) or (mu, sg2)
+	const Rcpp::NumericVector &lag_par,  // (L_order, rho) or (mu, sg2)
 	const double &delta_nb,
 	const double &mh_sd,
 	const unsigned int &nlag,
 	const unsigned int &gain_code,
 	const unsigned int &trans_code,
 	const unsigned int &link_code,
-	const unsigned int &obs_code)
+	const unsigned int &obs_code,
+	const bool &truncated)
 {
-	double rho = lags_params.at(0);
-	unsigned int L_order = lags_params.at(1);
+	Rcpp::NumericVector obs_par = Rcpp::NumericVector::create(mu0, delta_nb);
 	
 	arma::vec Vt_hat = get_Vt_hat(
 		y, wt, Fphi_pad,
-		gain_code, link_code, obs_code,
-		delta_nb, mu0);
+		gain_code, link_code, obs_code, obs_par);
 
 	double mu0_old = mu0;
 	double logp_old = loglike_obs(
 		y, wt, 0,
 		gain_code, trans_code, link_code, obs_code,
-		mu0_old, delta_nb, rho, L_order, nlag);
+		obs_par, lag_par, nlag, truncated);
 
 	arma::vec tmp = 1. / Vt_hat;
 	double mu0_prec = arma::accu(tmp);
@@ -505,10 +494,11 @@ void update_mu0(
 	logp_mu0 = logp_old;
 	if (mu0_new > -EPS) // non-negative
 	{
+		obs_par[0] = mu0_new;
 		double logp_new = loglike_obs(
 			y, wt, 0,
 			gain_code, trans_code, link_code, obs_code,
-			mu0_new, delta_nb, rho, L_order, nlag);
+			obs_par, lag_par, nlag, truncated);
 		double logratio = std::min(0., logp_new - logp_old);
 		if (std::log(R::runif(0., 1.)) < logratio)
 		{ // accept
@@ -535,15 +525,15 @@ Rcpp::List mcmc_disturbance_pois(
 	const arma::vec &y, // n x 1, the observed response
 	const arma::uvec &model_code,
 	const Rcpp::IntegerVector &eta_select = Rcpp::IntegerVector::create(1, 0, 0),		 // W, mu0, rho
-	const Rcpp::NumericVector &W_par = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (Winit/Wtrue,WpriorType,par1,par2)
-	const Rcpp::NumericVector &rho_par = Rcpp::NumericVector::create(1., 0., 1., 1.),	 // similar
-	const double &L_order = 6,															 // Lag Koyama's model; order for Solow's model
-	const unsigned int &nlag_ = 0,														 // 0: no truncation; nlag > 0: truncated to nlag
+	const Rcpp::NumericVector &W_par_in = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (Winit/Wtrue,WpriorType,par1,par2)
+	const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6),
+	const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0.,30.),
+	const unsigned int &nlag_in = 20,
 	const Rcpp::NumericVector &mh_var = Rcpp::NumericVector::create(1., 1.),			 // mh and discount factor for wt
-	const double &delta_nb = 30.,
 	const unsigned int &nburnin = 0,
 	const unsigned int &nthin = 1,
 	const unsigned int &nsample = 1,
+	const bool &truncated = true, 
 	const bool &summarize_return = true)
 { // n x 1
 
@@ -553,8 +543,8 @@ Rcpp::List mcmc_disturbance_pois(
 	const unsigned int n = y.n_elem;
 	const unsigned int ntotal = nburnin + nthin * nsample + 1;
 
-	unsigned int nlag, p, L;
-	set_dim(nlag, p, L, n, nlag_, L_order);
+	bool W_selected = std::abs(eta_select[0] - 1.) < EPS8;
+	bool mu0_selected = std::abs(eta_select[1] - 1.) < EPS8;
 
 	arma::vec mh_sd(mh_var.begin(), mh_var.length());
 	mh_sd.for_each([](arma::vec::elem_type &val)
@@ -562,30 +552,35 @@ Rcpp::List mcmc_disturbance_pois(
 
 	// Global Parameter
 	// eta = (W, mu0, rho)
-	double W = W_par[0];
-	double mu0 = 0.;
-	double rho = rho_par[0];
-
-	arma::vec lags_params = {(double)L, rho};
-	arma::vec obs_params = {delta_nb, mu0};
-	arma::vec prior_params = {0., W};
-
-	// idx = std::max(1,(int) npar);
-	arma::mat param_stored(nsample, 3, arma::fill::zeros);
-
-	bool W_selected = std::abs(eta_select[0] - 1.) < EPS8;
-	bool mu0_selected = std::abs(eta_select[1] - 1.) < EPS8;
-
 	
-	arma::vec W_params = {0.,0.};
-	switch ((unsigned int) W_par[1])
+
+	Rcpp::NumericVector obs_par = obs_par_in;
+	double mu0 = obs_par[0];
+	double delta_nb = obs_par[1];
+
+	Rcpp::NumericVector lag_par =  lag_par_in;
+	double par1 = lag_par[0];
+	double par2 = lag_par[1];
+	unsigned int nlag = nlag_in;
+	unsigned int p = nlag;
+	if (!truncated)
+	{
+		nlag = n;
+		p = par2 + 1;
+	}
+
+	Rcpp::NumericVector W_par = W_par_in;
+	double W = W_par[0];
+	unsigned int W_prior_type = W_par[1];
+	Rcpp::NumericVector wt_par = Rcpp::NumericVector::create(0., W);
+	switch (W_prior_type)
 	{
 	case 0: // Gamma(aw=shape, bw=rate)
 	{
-		double aw_new = W_par[2]- 0.5 * ((double)n - 1.);
+		double aw_new = W_par[2] - 0.5 * ((double)n - 1.);
 		double bw_prior = W_par[3];
-		W_params.at(0) = aw_new;
-		W_params.at(1) = bw_prior;
+		W_par[2] = aw_new;
+		W_par[3] = bw_prior;
 	}
 	break;
 	case 1: // Half-Cauchy(aw=location==0, bw=scale)
@@ -598,8 +593,8 @@ Rcpp::List mcmc_disturbance_pois(
 		double nw = W_par[2];
 		double nSw = W_par[2] * W_par[3];
 		double nw_new = nw + (double)n - 1.;
-		W_params.at(0) = nw_new;
-		W_params.at(1) = nSw;
+		W_par[2] = nw_new;
+		W_par[3] = nSw;
 	}
 	break;
 	default:
@@ -608,25 +603,24 @@ Rcpp::List mcmc_disturbance_pois(
 	
 
 	arma::vec wt = arma::randn(n) * 0.01;
-	for (unsigned int t = 0; t < L; t++)
+	for (unsigned int t = 0; t < p; t++)
 	{
 		wt.at(t) = std::abs(wt.at(t));
 	}
 	
 
 	bool saveiter;
-	arma::mat logp_stored(n, nsample, arma::fill::zeros);
+	arma::vec param_accept(3,arma::fill::zeros);
+	arma::mat param_stored(nsample, 3, arma::fill::zeros);
 	arma::mat logp2_stored(3, nsample, arma::fill::zeros);
 
 	arma::vec wt_accept(n, arma::fill::zeros);
 	arma::mat wt_stored(n, nsample, arma::fill::zeros);
 	arma::mat Bs_stored(n, nsample, arma::fill::zeros);
+	arma::mat logp_stored(n, nsample, arma::fill::zeros);
+
 	arma::vec Fphi_pad; // nobs x 1
-	get_Fphi_pad(Fphi_pad, trans_code, n, nlag, L, rho);
-
-	double W_accept = 0.;
-	double mu0_accept = 0.;
-
+	get_Fphi_pad(Fphi_pad, trans_code, n, nlag, lag_par);
 	for (unsigned int b = 0; b < ntotal; b++)
 	{
 		R_CheckUserInterrupt();
@@ -638,22 +632,19 @@ Rcpp::List mcmc_disturbance_pois(
 		arma::vec Bs(n, arma::fill::zeros);
 		arma::vec logp(n, arma::fill::zeros);
 		update_wt(
-			wt, wt_accept, Bs, logp, 
+			wt, wt_accept, Bs, logp,
 			y, Fphi_pad,
-			lags_params,  // (r, rho)
-			obs_params,	  // delta_nb, mu0
-			prior_params, // w[t] ~ N(0, W)
+			lag_par, obs_par, wt_par, // w[t] ~ N(0, W)
 			mh_sd.at(0), n, nlag,
-			gain_code, trans_code, link_code, obs_code);
+			gain_code, trans_code, link_code, obs_code, truncated);
 
 		// [OK] Update state/evolution error variance W
 		if (W_selected)
 		{
 			double W_old = W;
-			W = update_W(W_accept, W_old, wt, 
-			(unsigned int) W_par[1], W_params, mh_sd.at(1), n);
-
-			prior_params.at(1) = W;
+			W = update_W(param_accept.at(0), W_old, wt, W_par, mh_sd.at(1), n);
+			W_par[0] = W;
+			wt_par[1] = W;
 		}
 
 
@@ -661,12 +652,12 @@ Rcpp::List mcmc_disturbance_pois(
 		if (mu0_selected)
 		{
 			update_mu0(
-				mu0, mu0_accept, logp_mu0, 
+				mu0, param_accept.at(1), logp_mu0, 
 				y, wt, Fphi_pad, 
-				lags_params, delta_nb, mh_sd.at(1), nlag, 
-				gain_code, trans_code, link_code, obs_code);
+				lag_par, obs_par[1], mh_sd.at(1), nlag, 
+				gain_code, trans_code, link_code, obs_code, truncated);
 			
-			obs_params.at(1) = mu0;
+			obs_par[0] = mu0;
 		}
 
 
@@ -777,14 +768,8 @@ Rcpp::List mcmc_disturbance_pois(
 	output["params"] = Rcpp::wrap(param_stored);
 	output["logp2"] = Rcpp::wrap(logp2_stored);
 
-	if (W_selected)
-	{
-		output["W_accept"] = W_accept / static_cast<double>(ntotal);
-	}
-	if (mu0_selected)
-	{
-		output["mu0_accept"] = mu0_accept / static_cast<double>(ntotal);
-	}
+	param_accept.for_each([&ntotal](arma::vec::elem_type &val){ val /= (double) ntotal; });
+	output["param_accept"] = Rcpp::wrap(param_accept);
 
 	return output;
 }

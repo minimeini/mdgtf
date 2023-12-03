@@ -72,19 +72,6 @@ void get_model_code(
 	const arma::uvec &model_code);
 
 
-/**
- * set_dim
- * @param nlag: number of labs. no truncation if nlag == 0 || nlag == nobs
- * @param p: dimension of state space. p = (L+1) if using negative-binomial lags (thus no truncation); p = nlag with truncation
- * @param L: only used in negative-binomial distributed lags, the number of failures.
-*/
-void set_dim(
-	unsigned int &nlag,
-	unsigned int &p,
-	unsigned int &L,
-	const unsigned int &nobs,
-	const unsigned int &nlag_ = 0,
-	const unsigned int &L_order = 0);
 
 void bound_check(
 	const arma::mat &input,
@@ -130,17 +117,17 @@ arma::vec init_Ft(
 
 void init_Gt(
 	arma::mat &Gt,
-	const double &rho,
-	const unsigned int &p,
-	const unsigned int &nlag,
-	const unsigned int &nobs);
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const unsigned int &p = 20,
+	const unsigned int &nlag = 20,
+	const bool &truncated = true);
 
 void init_Gt(
 	arma::cube &Gt,
-	const double &rho,
-	const unsigned int &p,
-	const unsigned int &nlag,
-	const unsigned int &nobs);
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const unsigned int &p = 20,
+	const unsigned int &nlag = 20,
+	const bool &truncated = true);
 
 double binom(double n, double k);
 
@@ -196,22 +183,23 @@ double cross_entropy(
 	const arma::vec &params_p, // 3 x 1, params1[0] = trans_code: type of distribution
 	const arma::vec &params_q);
 
-/*
------- get_Fphi ------
-Update the log-normal transmission delay distribution
+arma::vec match_params(
+	const arma::vec &params_in,
+	const unsigned int &trans_code_out,
+	const arma::vec &par1_grid, // n1 x 1
+	const arma::vec &par2_grid,	// n2 x 1
+	const unsigned int &nlags);
 
------- Default settings ------
-const double mu = 2.2204e-16
-const double m = 4.7
-const double s = 2.9
-const unsigned int ModelCode = 0
+unsigned int get_truncation_nlag(
+	const unsigned int &trans_code,
+	const double &err_margin,
+	const Rcpp::NumericVector &lag_par);
 
-*/
+
 arma::vec get_Fphi(
-	const unsigned int &nlag,			 // number of Lags
-	const unsigned int &L_order = 0, // dimension of state space (-1 for solow)
-	const double &rho = -1.,		 // prob of negative binomial
-	const unsigned int &trans_code = 1);
+	const unsigned int &nlag,		 // number of Lags
+	const Rcpp::NumericVector &lag_par,
+	const unsigned int &trans_code);
 
 double trigamma_obj(
 	unsigned n,
@@ -331,41 +319,38 @@ double theta_new_nobs(
 double theta_new_nobs(
 	const arma::vec &hpsi_pad, // (n+1) x 1
 	const arma::vec &ypad,	   // (n+1) x 1
-	const double &rho,
+	const unsigned int &tidx,  // t = 1, ..., n
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &trans_code,
-	const unsigned int &tidx, // t = 1, ..., n
-	const unsigned int &L_order,
-	const unsigned int &nlag);
+	const unsigned int &nlag_in,
+	const bool &truncated);
 
 arma::mat hpsi2theta(
 	const arma::mat &hpsi_pad, // (n+1) x k, each row is a different time point
-	const arma::vec &ypad, // (n+1) x 1
+	const arma::vec &ypad,	   // (n+1) x 1
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &trans_code,
-	const unsigned int &L,
-	const unsigned int &nlag,
-	const double &rho);
+	const unsigned int &nlag_in,
+	const bool &truncated);
 
 void hpsi2theta(
 	arma::vec &theta,
 	const arma::vec &hpsi, // (n+1) x 1, each row is a different time point
 	const arma::vec &ypad, // (n+1) x 1
-	const unsigned int &trans_code,
-	const unsigned int &L = 2,
-	const unsigned int &nlag = 0,
-	const double &rho = 0.9);
-
-
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const unsigned int &trans_code = 2,
+	const unsigned int &nlag_in = 20,
+	const bool &truncated = true);
 
 void wt2theta(
 	arma::vec &theta,	 // n x 1
 	const arma::vec &wt, // n x 1
 	const arma::vec &y,	 // n x 1
-	const unsigned int &gain_code,
-	const unsigned int &trans_code,
-	const double &rho,
-	const unsigned int &L,
-	const unsigned int &nlag = 0);
-
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const unsigned int &gain_code = 3,
+	const unsigned int &trans_code = 2,
+	const unsigned int &nlag = 20,
+	const bool &truncated = true);
 
 double loglike_obs(
 	const double &y, 

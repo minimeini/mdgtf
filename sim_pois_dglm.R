@@ -12,18 +12,22 @@ sim_pois_dglm2 = function(
     link_func = "identity", # {"identity","exponential"}
     trans_func = "koyama", # {"koyama","solow","koyck"}
     gain_func = "logistic", # {"exponential","softplus","logistic"}
-    err_dist = "gaussian", # {"gaussian","laplace","cauchy","left_skewed_normal"}
-    mu0 = 0.,
+    err_dist = "gaussian", # {"gaussian","laplace","cauchy","left_skewed_normal"},
+    obs_params = c(0.,30.), # (mu0, delta_nb),
+    lag_params = c(0.5,6), # (rho, L) or (mu, sg2)
     W = 0.01, # Evolution variance
-    L = 0, # length of nonzero transmission delay (koyama) or number of failures (solow)
-    nlag = 0,
-    rho = 0.7, # parameter for negative binomial transmission delay
-    delta_nb = 30., # rho_nb = 34.08792
+    nlag = 20,
     ci_coverage = 0.95,
     rng.seed = NULL,
     get_discount = TRUE,
+    truncated = TRUE,
     delta_grid = seq(from=0.8,to=0.99,by=0.01)) { # searching range for LBE discount factor
   
+  mu0 = obs_params[1]
+  delta_nb = obs_params[2]
+  
+  par1 = lag_params[1] # rho or mu
+  par2 = lag_params[2] # L or sg2
   
   ntotal = m + n
   model_code = get_model_code(
@@ -34,16 +38,6 @@ sim_pois_dglm2 = function(
   trans_code = model_code[3]
   gain_code = model_code[4]
   err_code = model_code[5]
-  
-  stopifnot(L>0 | nlag>0)
-  if (nlag == 0 | nlag == ntotal)
-  {
-    # no truncation
-    nlag = ntotal
-  } else if (L == 0) {
-    # truncated
-    L = nlag
-  }
 
 
   wt = rep(0,ntotal)
@@ -80,7 +74,7 @@ sim_pois_dglm2 = function(
   
   for (t in 2:(ntotal+1)) {
     tidx = t - 1
-    theta_pad[t] = theta_new_nobs(hpsi_pad,ypad,rho,trans_code,tidx,L,nlag)
+    theta_pad[t] = theta_new_nobs(hpsi_pad,ypad,tidx,lag_params,trans_code,nlag,truncated)
     lambda_pad[t] = mu0 + theta_pad[t]
     
     if (link_func == "exponential") {
@@ -105,18 +99,19 @@ sim_pois_dglm2 = function(
   if (get_discount) {
     # get_optimal_delta: exported Cpp function
     delta = get_optimal_delta(y[1:n],model_code,delta_grid,
-                              rho=rho,L=L,nlag=nlag,mu0=mu0,
-                              delta_nb=delta_nb)$delta_optim[1]
-  } else {
+                              obs_params,lag_params,2.,1,
+                              ci_coverage,nlag,truncated)$delta_optim[1]
+  } else 
+  {
     delta = 0.95
   }
 
   
-  params = list(model_code=model_code,
-                mu0=mu0,
-                W=W,rho=rho,L=L,nlag=nlag,
-                delta_nb=delta_nb,
-                delta_lbe=delta)
+  params = list(model_code = model_code,
+                obs_params = obs_params,
+                lag_params = lag_params,
+                W_params = c(W,2,0.01,0.01),
+                nlag=nlag, delta_lbe=delta)
   # pred = list(y=y[(n+1):ntotal],
   #             psi=psi[(n+1):ntotal],
   #             theta=theta[(n+2):(ntotal+1)],

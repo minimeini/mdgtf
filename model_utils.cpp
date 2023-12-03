@@ -141,51 +141,6 @@ void get_model_code(
 
 
 
-void set_dim(
-	unsigned int &nlag, 
-	unsigned int &p, 
-	unsigned int &L, // Only used for nbinom
-	const unsigned int &nobs,
-	const unsigned int &nlag_,
-	const unsigned int &L_order)
-{
-	if (nlag_ == 0 && L_order == 0)
-	{
-		throw std::invalid_argument("set_dim: need either nlag_ for truncated lags, or L_order when no truncation.");
-	}
-
-	if (nlag_ == 0)
-	{
-		// no truncation: don't need nlag_ here
-		nlag = nobs;
-	}
-	else
-	{
-		// truncated to nlag_: don't need L_order here
-		nlag = nlag_;
-	}
-
-	nlag = std::min(nlag, nobs);
-	bound_check(nlag, "set_dim: nlag", true);
-	nlag = std::max((unsigned int)1, nlag);
-	
-
-	L = L_order;
-	if (L_order == 0) {L = nlag;}
-	bound_check(L, "set_dim: L", true);
-
-	if (nlag == nobs)
-	{
-		// no truncation
-		p = L_order + 1;
-	}
-	else
-	{
-		// truncated
-		p = nlag;
-	}
-	bound_check(p, "set_dim: p", true);
-}
 
 
 
@@ -354,17 +309,16 @@ arma::vec init_Ft(
 
 void init_Gt(
 	arma::mat &Gt,
-	const double &rho,
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &p,
 	const unsigned int &nlag,
-	const unsigned int &nobs)
+	const bool &truncated)
 {
 	Gt.set_size(p,p);
 	Gt.zeros();
-	const unsigned int L = p - 1;
 	Gt.at(0, 0) = 1.;
 
-	if (nlag < nobs)
+	if (truncated)
 	{
 		// truncated
 		if (p == 1)
@@ -372,22 +326,22 @@ void init_Gt(
 			throw std::invalid_argument("init_Gt<mat>: p = 1 in truncation mode.");
 		}
 		Gt.diag(-1).ones();
-		
 	}
 	else
 	{
 		// not truncated and use negative-binomial lags
+		unsigned int L = lag_par[1];
+
 		for (unsigned int i = 1; i < L; i++)
 		{
 			Gt.at(i + 1, i) = 1.;
 		}
 
-		double tmp1 = std::pow(1. - rho, L);
 		for (unsigned int i = 1; i < p; i++)
 		{
 			double c1 = std::pow(-1., static_cast<double>(i));
 			double c2 = binom(static_cast<double>(L), static_cast<double>(i));
-			double c3 = std::pow(rho, static_cast<double>(i));
+			double c3 = std::pow(lag_par[0], static_cast<double>(i));
 			Gt.at(1, i) = -c1;
 			Gt.at(1, i) *= c2;
 			Gt.at(1, i) *= c3;
@@ -398,18 +352,18 @@ void init_Gt(
 }
 
 void init_Gt(
-	arma::cube &Gt, 
-	const double &rho, 
+	arma::cube &Gt,
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &p,
 	const unsigned int &nlag,
-	const unsigned int &nobs)
+	const bool &truncated)
 {
 	const unsigned int nslice = Gt.n_slices;
 
 	for (unsigned int t = 0; t < nslice; t++)
 	{
 		arma::mat Gt_tmp(p,p,arma::fill::zeros);
-		init_Gt(Gt_tmp, rho, p, nlag, nobs);
+		init_Gt(Gt_tmp, lag_par, p, nlag, truncated);
 		Gt.slice(t) = Gt_tmp;
 	}
 
@@ -460,7 +414,9 @@ double dlognorm0(
     const double &lag, // starting from 1
     const double &mu,
     const double &sd2) {
-    return Pd(lag,mu,sd2) - Pd(lag-1.,mu,sd2);
+	double output = Pd(lag, mu, sd2) - Pd(lag - 1., mu, sd2);
+	bound_check(output, "dlognorm0",false,true);
+	return output;
 }
 
 
@@ -495,8 +451,9 @@ double dnbinom0(
 	// double c1 = R::dnbinom(k-1,(double)Last,1.-rho);
 	// double c2 = std::pow(-1.,k-1.);
 	// Fphi.at(d) = c1 * c2;
-
-	return (c1 * c2) * c3;
+	double output = (c1 * c2) * c3;
+	bound_check(output,"dnbinom0",false,true);
+	return output;
 }
 
 
@@ -523,6 +480,7 @@ arma::vec dnbinom(
 		output.at(d) *= c3;
 	}
 
+	bound_check(output,"dnbinom",false,true);
 	return output;
 }
 
@@ -551,8 +509,7 @@ arma::vec dlags(
 	break;
 	}
 
-	bound_check(y, "dlags: y", true, true);
-	y.elem(arma::find(y<EPS)).fill(EPS);
+	bound_check(y,"dlags");
 	return y;
 }
 
@@ -567,22 +524,82 @@ double cross_entropy(
 	arma::vec y2 = dlags(nlags, params_q);
 	arma::vec logy2 = arma::log(y2);
 	arma::vec tmp = y1 % logy2;
-	return arma::accu(tmp);
+	double output = arma::accu(tmp);
+	bound_check(output,"cross_entropy");
+	return output;
 }
+
+//' @export
+// [[Rcpp::export]]
+arma::vec match_params(
+	const arma::vec &params_in,
+	const unsigned int &trans_code_out,
+	const arma::vec &par1_grid, // n1 x 1, mu or rho
+	const arma::vec &par2_grid,	// n2 x 1, sg2 or L_order
+	const unsigned int &nlags = 30
+)
+{
+	unsigned int n1 = par1_grid.n_elem;
+	unsigned int n2 = par2_grid.n_elem;
+	arma::mat output(n1*n2,3,arma::fill::zeros);
+
+	unsigned int idx = 0;
+	for (unsigned int i=0; i<n1; i++)
+	{
+		double par1 = par1_grid.at(i);
+		for (unsigned int j=0; j<n2; j++)
+		{
+			double par2 = par2_grid.at(j);
+			output.at(idx,0) = par1;
+			output.at(idx,1) = par2;
+
+			arma::vec params_out = {(double)trans_code_out,par1,par2};
+			output.at(idx,2) = cross_entropy(nlags,params_in,params_out);
+			idx ++;
+		}
+	}
+
+
+	arma::vec par2_hat(n1,arma::fill::zeros);
+	arma::vec out_hat(n1,arma::fill::zeros);
+	for (unsigned int i=0; i<n1; i++)
+	{
+		double par1 = par1_grid.at(i); 
+		arma::vec col1 = output.col(0);
+		arma::vec diff1 = arma::abs(col1 - par1);
+		arma::uvec idx_row = arma::find(diff1 < EPS);
+		arma::uvec idx_col = {0,1,2};
+		arma::mat out_sub = output.submat(idx_row,idx_col); // n2 x 3
+
+		arma::vec out = out_sub.col(2);
+		unsigned int i2 = out.index_max();
+		double par2 = out_sub.at(i2, 1);
+		par2_hat.at(i) = par2;
+		out_hat.at(i) = out_sub.at(i2,2); // cross_entropy (p1[i],p2_hat[i])
+	}
+
+	unsigned int imax = out_hat.index_max();
+	double par1 = par1_grid.at(imax);
+	double par2 = par2_hat.at(imax);
+
+	arma::vec params_out = {(double)trans_code_out,par1,par2};
+	return params_out;
+}
+
+
 
 //' @export
 // [[Rcpp::export]]
 unsigned int get_truncation_nlag(
 	const unsigned int &trans_code,
 	const double &err_margin = 0.01,
-	const unsigned int &L_order = 0,
-	const double &rho = 0.)
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6))
 {
 	unsigned int nlag = 1;
 	bool cont = true;
 	while (cont)
 	{
-		arma::vec Fphi = get_Fphi(nlag,L_order,rho,trans_code);
+		arma::vec Fphi = get_Fphi(nlag,lag_par,trans_code);
 		double prob = arma::accu(Fphi);
 
 		if (1 - prob <= err_margin)
@@ -601,16 +618,18 @@ unsigned int get_truncation_nlag(
 
 
 
-
+/**
+ * get_Fphi
+ * 
+ * Used in: LBA::forwardFilter, pl_poisson.cpp, MCMC::get_Fphi_pad
+*/
 //' @export
 // [[Rcpp::export]]
 arma::vec get_Fphi( // equivalent to `dlags` but fixed params for lognorm
-	const unsigned int &nlag, // number of Lags
-	const unsigned int &L_order, // dimension of state space (-1 for solow)
-	const double &rho,
-	const unsigned int &trans_code)
+	const unsigned int &nlag = 20, // number of Lags
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const unsigned int &trans_code = 2)
 {
-	bound_check(nlag, "get_Fphi: nlag", true, true);
 	arma::vec Fphi(nlag, arma::fill::zeros);
 
 	switch (trans_code) 
@@ -623,20 +642,20 @@ arma::vec get_Fphi( // equivalent to `dlags` but fixed params for lognorm
 		case 1: // Checked. OK
 		{
 			// koyama: discretized lognormal
-			const double sm2 = std::pow(covid_s / covid_m, 2);
-			const double pk_mu = std::log(covid_m / std::sqrt(1. + sm2));
-			const double pk_sg2 = std::log(1. + sm2);
-			// const double pk_mu = 1.5;
-			// const double pk_sg2 = 0.489;
-			Fphi = dlognorm(nlag, pk_mu, pk_sg2);
+			// const double sm2 = std::pow(covid_s / covid_m, 2);
+			// const double pk_mu = std::log(covid_m / std::sqrt(1. + sm2));
+			// const double pk_sg2 = std::log(1. + sm2);
+			// const double pk_mu = 1.386262;
+			// const double pk_sg2 = 0.3226017;
+			Fphi = dlognorm(nlag, lag_par[0], lag_par[1]);
 		}
 		break;
 		case 2:
 		{
 			// solow: negative binomial and thus no truncation
-			const double rho_hat = 0.395;
-			const double r_hat = 6;
-			Fphi = dnbinom(nlag, rho_hat, r_hat);
+			// const double rho_hat = 0.395;
+			// const double r_hat = 6;
+			Fphi = dnbinom(nlag, lag_par[0], lag_par[1]);
 		}
 		break;
 		default:
@@ -1056,61 +1075,6 @@ arma::vec get_theta_coef_solow(const unsigned int &L, const double &rho)
 }
 
 
-// //' @export
-// // [[Rcpp::export]]
-// double theta_new_solow_ar(
-// 	const arma::vec &theta_past,	  // L x 1
-// 	const double &hpsi_cur,	  // (n+1) x 1
-// 	const double &yt_prev,		  // y[t-1]
-// 	const unsigned int &tidx, // time index t, t=1,...,n
-// 	const double &rho,
-// 	const unsigned int &L) // order of distributed lags
-// {
-// 	const unsigned int theta_idx = tidx + L - 1; // (L, ..., L+n-1)
-// 	double new_info = std::pow(1.-rho,static_cast<double>(L));
-// 	new_info *= hpsi_cur;
-// 	new_info *= yt_prev;
-
-// 	// arma::vec theta_past = theta_pad.subvec(theta_idx-L,theta_idx-1);
-// 	arma::vec coef = get_theta_coef_solow(L,rho);
-
-// 	arma::vec tmp = coef % theta_past;
-// 	double old_info = arma::accu(tmp);
-// 	double theta_new = -old_info + new_info;
-// 	bound_check(theta_new, "theta_new_solow: theta_new", false, true);
-// 	theta_new = std::max(theta_new, EPS);
-// 	return theta_new;
-// }
-
-
-
-// /**
-//  * Autoregressive-like update
-// */
-// double theta_new_solow_ar(
-// 	const arma::vec &theta_pad, // (n+L) x 1
-// 	const arma::vec &hpsi_pad, // (n+1) x 1
-// 	const arma::vec &ypad, // (n+1) x 1
-// 	const unsigned int &tidx, // t = 1, ..., n
-// 	const unsigned int &L,
-// 	const arma::vec &coef, // L x 1
-// 	const double &cnst
-// )
-// {
-// 	double new_info = cnst;
-// 	new_info *= hpsi_pad.at(tidx);
-// 	new_info *= ypad.at(tidx-1);
-
-// 	unsigned int theta_idx = tidx + L - 1; // (L, ..., L+n-1)
-// 	arma::vec theta_past = theta_pad.subvec(theta_idx - L, theta_idx - 1);
-// 	arma::vec tmp = coef % theta_past;
-// 	double old_info = arma::accu(tmp);
-// 	double theta_new = -old_info + new_info;
-// 	bound_check(theta_new, "theta_new_solow: theta_new",false,true);
-// 	theta_new = std::max(theta_new,EPS);
-// 	return theta_new;
-// }
-
 
 double theta_new_nobs(
 	const arma::vec &Fphi_sub, // nelem x 1
@@ -1132,25 +1096,21 @@ double theta_new_nobs(
 double theta_new_nobs(
 	const arma::vec &hpsi_pad, // (n+1) x 1
 	const arma::vec &ypad,	   // (n+1) x 1
-	const double &rho,
-	const unsigned int &trans_code,
-	const unsigned int &tidx, // t = 1, ..., n
-	const unsigned int &L_order = 0,
-	const unsigned int &nlag = 0)
+	const unsigned int &tidx,  // t = 1, ..., n
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const unsigned int &trans_code = 2,
+	const unsigned int &nlag_in = 20,
+	const bool &truncated = true)
 {
-	if (L_order == 0 && nlag == 0)
-	{
-		throw std::invalid_argument("theta_new_nobs: either L_order or nlag must be specified.");
-	}
 	unsigned int nobs = ypad.n_elem - 1;
-	unsigned int nlag0 = nlag;
-	if (nlag == 0) {nlag0 = nobs;}
-	unsigned int nelem = std::min(tidx, nlag0);
+	unsigned int nlag = nlag_in;
+	if (!truncated) { nlag = nobs; }
+	unsigned int nelem = std::min(tidx, nlag);
 	if (nelem == 0) {
 		throw std::invalid_argument("theta_new_nobs: nelem must be positive integer.");
 	}
 
-	arma::vec Fphi = get_Fphi(nelem, L_order, rho, trans_code); // nelem x 1
+	arma::vec Fphi = get_Fphi(nelem, lag_par, trans_code); // nelem x 1
 	arma::vec hpsi_sub = hpsi_pad.subvec(tidx-nelem + 1, tidx);
 	arma::vec ysub = ypad.subvec(tidx-nelem, tidx - 1);
 	double theta_new = theta_new_nobs(Fphi,hpsi_sub,ysub);
@@ -1164,29 +1124,23 @@ double theta_new_nobs(
 arma::mat hpsi2theta(
 	const arma::mat& hpsi_pad, // (n+1) x k, each row is a different time point
 	const arma::vec& ypad, // (n+1) x 1
-	const unsigned int &trans_code,
-	const unsigned int &L = 0,
-	const unsigned int &nlag = 0,
-	const double &rho = 0.6) {
-	
-	if (L==0 && nlag==0)
-	{
-		throw std::invalid_argument("hpsi2theta: either no truncation with nbinom(L,rho) or truncated at nlag.");
-	}
-
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const unsigned int &trans_code = 2,
+	const unsigned int &nlag_in = 20,
+	const bool &truncated = true) 
+{
 	const unsigned int nobs = ypad.n_elem - 1;
-	unsigned int nlag0 = nlag;
-	if (nlag == 0) {nlag0 = nobs;}
+	unsigned int nlag = nlag_in;
+	if (!truncated) {nlag = nobs;}
 
 	const unsigned int k = hpsi_pad.n_cols;
 	arma::mat theta(nobs,k,arma::fill::zeros);
-
-	arma::vec Fphi = get_Fphi(nlag0, L, rho, trans_code); // nlag0 x 1
+	arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code); // nlag0 x 1
 
 
 	for (unsigned int t = 1; t <= nobs; t++)
 	{
-		unsigned int nelem = std::min(t, nlag0);
+		unsigned int nelem = std::min(t, nlag);
 		arma::vec ysub = ypad.subvec(t - nelem, t - 1); // nelem x 1
 		arma::mat hsub = hpsi_pad.rows(t - nelem + 1, t);		 // nelem x k
 		arma::vec Fphi_sub = Fphi.head(nelem);
@@ -1202,30 +1156,30 @@ arma::mat hpsi2theta(
 }
 
 void hpsi2theta(
-	arma::vec &theta, // n x 1
+	arma::vec &theta,		   // n x 1
 	const arma::vec &hpsi_pad, // (n+1) x 1, each row is a different time point
-	const arma::vec &ypad, // (n+1) x 1
+	const arma::vec &ypad,	   // (n+1) x 1
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &trans_code,
-	const unsigned int &L,
-	const unsigned int &nlag,
-	const double &rho)
+	const unsigned int &nlag_in,
+	const bool &truncated)
 {
 
 	const unsigned int nobs = ypad.n_elem - 1;
-	unsigned int nlag0 = nlag;
-	if (nlag == 0)
+	unsigned int nlag = nlag_in;
+	if (!truncated)
 	{
-		nlag0 = nobs;
+		nlag = nobs;
 	}
 
 	theta.set_size(nobs);
 	theta.zeros();
 
-	arma::vec Fphi = get_Fphi(nlag0, L, rho, trans_code); // nlag0 x 1
+	arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code); // nlag0 x 1
 
 	for (unsigned int t = 1; t <= nobs; t++)
 	{
-		unsigned int nelem = std::min(t, nlag0);
+		unsigned int nelem = std::min(t, nlag);
 		arma::vec ysub = ypad.subvec(t - nelem, t - 1);	  // nelem x 1
 		arma::vec hsub = hpsi_pad.subvec(t - nelem + 1, t); // nelem x k
 		arma::vec Fphi_sub = Fphi.head(nelem);
@@ -1241,11 +1195,11 @@ void wt2theta(
 	arma::vec &theta,	 // n x 1
 	const arma::vec &wt, // n x 1
 	const arma::vec &y,	 // n x 1
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &gain_code,
 	const unsigned int &trans_code,
-	const double &rho,
-	const unsigned int &L,
-	const unsigned int &nlag)
+	const unsigned int &nlag,
+	const bool &truncated)
 {
 	unsigned int n = y.n_elem;
 	arma::vec psi = arma::cumsum(wt);		   // n x 1
@@ -1257,7 +1211,7 @@ void wt2theta(
 	hpsi_pad.tail(hpsi.n_elem) = hpsi;
 
 	theta.zeros();
-	hpsi2theta(theta, hpsi_pad, ypad, trans_code, L, nlag, rho);
+	hpsi2theta(theta, hpsi_pad, ypad, lag_par, trans_code, nlag, truncated);
 }
 
 double loglike_obs(

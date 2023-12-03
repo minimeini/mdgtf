@@ -31,24 +31,25 @@ void init_Ft(
 Rcpp::List mcs_poisson(
     const arma::vec &Y, // nt x 1, the observed response
     const arma::uvec &model_code,
-    const double &W_true = NA_REAL, // Use discount factor if W is not given
-    const double &rho = 0.9,
-    const unsigned int &L_order = 12, // order of distributed lags or dimension of state space
-    const unsigned int &nlag_ = 0,
-    const double &mu0 = 2.220446e-16,
-    const unsigned int &B = 12,                                       // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const double &W = 0.01, // (init, prior type, prior par1, prior par2)
+    const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
+    const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
+    const unsigned int &nlag_in = 20,
+    const unsigned int &B = 20,                                       // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
     const unsigned int &N = 5000,                                     // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue, // mean of normal prior for theta0
-    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue, // variance of normal prior for theta0
     const double &theta0_upbnd = 2.,                                  // Upper bound of uniform prior for theta0
     const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
-    const double &delta_nb = 1.,
-    const double &delta_discount = 0.95)
+    const double &delta_discount = 0.88,
+    const bool &truncated = true,
+    const bool &use_discount = false)
 {
 
     const unsigned int nt = Y.n_elem; // number of observations
     arma::vec ypad(nt + 1, arma::fill::zeros);
     ypad.tail(nt) = Y;
+
+    double mu0 = obs_par[0];
+    double delta_nb = obs_par[1];
 
     /* 
     Dimension of state space depends on type of transfer functions 
@@ -62,13 +63,21 @@ Rcpp::List mcs_poisson(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
-    unsigned int nlag, p, L;
-    set_dim(nlag, p, L, nt, nlag_, L_order);
-    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    double par1 = lag_par[0];
+    unsigned int par2 = lag_par[1];
+
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = nt;
+        p = par2 + 1;
+    }
+    arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p, trans_code);
 
     arma::mat Gt;
-    init_Gt(Gt, rho, p, nlag, nt);
+    init_Gt(Gt, par1, p, nlag, nt);
 
     /* Dimension of state space depends on type of transfer functions */
 
@@ -76,10 +85,6 @@ Rcpp::List mcs_poisson(
     
     arma::vec m0(p,arma::fill::zeros);
     double C0_sqrt = theta0_upbnd*0.5;
-    if (!m0_prior.isNull())
-    {
-		m0 = Rcpp::as<arma::vec>(m0_prior);
-	}
 
     arma::vec theta_init = arma::randn(N);
     theta_init.for_each([&m0, &C0_sqrt](arma::vec::elem_type &val){ 
@@ -90,14 +95,9 @@ Rcpp::List mcs_poisson(
         theta_stored.slice(b).zeros();
     }
     theta_stored.slice(B-1).row(1) = theta_init.t();
-  
 
-    arma::vec Wt(nt);
-    if (!R_IsNA(W_true))
-    {
-        Wt.fill(W_true);
-    }
 
+    arma::vec Wt(nt); Wt.fill(W);
 
     arma::vec Meff(nt, arma::fill::zeros); 
     // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
@@ -111,20 +111,16 @@ Rcpp::List mcs_poisson(
     {
         R_CheckUserInterrupt();
 
-        if (nlag < nt)
+        if (truncated)
         { // truncated
             init_Ft(Ft,ypad,Fphi,t,p);
         }
-        
 
-        bool use_discount = false;
-        bool use_default_val = false;
-        if (R_IsNA(W_true))
-        { // Use discount factor if W is not given
-            use_discount = true;
-            if (t > B) { use_default_val = true; }
+        bool use_custom_val = false;
+        if (t > B)
+        {
+            use_custom_val = true;
         }
-
         double y_old = ypad.at(t);
         arma::mat Theta_old = theta_stored.slice(t + B - 1); // p x N
 
@@ -136,8 +132,8 @@ Rcpp::List mcs_poisson(
         smc_propagate_bootstrap(
             Theta_new, weights, wt, Gt,
             y_new, y_old, Theta_old, Ft, model_code,
-            mu0, rho, delta_nb, delta_discount, p, N,
-            use_discount, use_default_val, t, nlag, nt);
+            p, t, nlag, N, obs_par, lag_par, delta_discount, 
+            truncated, use_discount, use_custom_val);
 
         pmarg_y.at(t) = std::log(arma::accu(weights) + EPS) - std::log(static_cast<double>(N));
         Wt.at(t) = wt;
@@ -189,29 +185,29 @@ void smc_propagate_bootstrap(
     arma::mat &Theta_new, // p x N
     arma::vec &weights,   // N x 1
     double &wt,
-    arma::mat &Gt, 
+    arma::mat &Gt,
     const double &y_new,
     const double &y_old,        // (n+1) x 1, the observed response
     const arma::mat &Theta_old, // p x N
-    const arma::vec &Ft, // must be already updated if used
+    const arma::vec &Ft,        // must be already updated if used
     const arma::uvec &model_code,
-    const double mu0,
-    const double rho,
-    const double delta_nb,
-    const double delta_discount,
-    const unsigned int p, // dimension of DLM state space
-    const unsigned int N, // number of particles
-    const bool use_discount,
-    const bool use_default_val,
-    const unsigned int t,
-    const unsigned int nlag,
-    const unsigned int nobs)
+    const unsigned int &p, // dimension of DLM state space
+    const int &t,
+    const unsigned int &nlag,
+    const unsigned int &N, // number of particles
+    const Rcpp::NumericVector &obs_par,
+    const Rcpp::NumericVector &lag_par,
+    const double &delta_discount,
+    const bool &truncated,
+    const bool &use_discount,
+    const bool &use_custom_val)
 {
     const unsigned int obs_code = model_code.at(0);
     const unsigned int link_code = model_code.at(1);
     const unsigned int gain_code = model_code.at(3);
 
-
+    double mu0 = obs_par[0];
+    double delta_nb = obs_par[1];
 
 
     /*
@@ -231,7 +227,7 @@ void smc_propagate_bootstrap(
             wt = 1.;
         }
         // Wsqrt = std::sqrt(Wt.at(t));
-        if (use_default_val)
+        if (use_custom_val)
         {
             wt *= 1. / delta_discount - 1.;
         }
@@ -251,7 +247,7 @@ void smc_propagate_bootstrap(
         arma::vec theta_old = Theta_old.col(i); // p x 1
         // update_Gt(Gt, gain_code, trans_code, theta_old, y_old, rho);
         arma::mat theta_new = update_at(
-            Gt, p, gain_code, theta_old, y_old, rho, nlag, nobs);
+            Gt, theta_old, y_old, gain_code, lag_par, nlag, truncated);
 
         double omega_new = R::rnorm(0., Wsqrt);
         if (t < p)
@@ -287,16 +283,14 @@ void smc_propagate_bootstrap(
         else
         {
             double ft;
-            if (nlag < nobs)
+            if (truncated)
             {
-                // truncated
                 arma::vec hpsi = psi2hpsi(theta, gain_code);
                 ft = arma::as_scalar(Ft.t() * hpsi);
                 // lambda.at(i) = mu0 + ft;
             }
             else
             {
-                // no truncation
                 ft = theta.at(1);
                 // Koyck or Solow with identity link and different gain functions
                 // lambda.at(i) = mu0 + theta.at(1);
@@ -358,25 +352,28 @@ void smc_resample(
 //' @export
 // [[Rcpp::export]]
 Rcpp::List ffbs_poisson(
-    const arma::vec& Y, // n x 1, the observed response
-    const arma::uvec& model_code,
-	const double W_true = NA_REAL,
-    const double rho = 0.9,
-    const unsigned int L_order = 12, // number of lags
-    const unsigned int nlag_ = 0,
-    const double mu0 = 2.220446e-16,
-	const unsigned int N = 5000, // number of particles
-    const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-    const double theta0_upbnd = 2.,
-    const Rcpp::NumericVector& qProb = Rcpp::NumericVector::create(0.025,0.5,0.975),
-    const double delta_nb = 1.,
-    const double delta_discount = 0.95,
-    const bool smoothing = true){ 
+    const arma::vec &Y, // n x 1, the observed response
+    const arma::uvec &model_code,
+    const Rcpp::NumericVector &W_par = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (init, prior type, prior par1, prior par2)
+    const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
+    const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
+    const unsigned int &nlag_in = 20,
+    const unsigned int &N = 5000, // number of particles
+    const double &theta0_upbnd = 2.,
+    const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
+    const double &delta_discount = 0.95,
+    const bool &truncated = true,
+    const bool &use_discount = false,
+    const bool &smoothing = true)
+{
 
     const unsigned int nt = Y.n_elem; // number of observations
     arma::vec ypad(nt + 1, arma::fill::zeros);
     ypad.tail(nt) = Y;
+
+    double mu0 = obs_par[0];
+    double delta_nb = obs_par[1];
+    double m0 = 0.;
 
 
     /* 
@@ -391,28 +388,30 @@ Rcpp::List ffbs_poisson(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
-    unsigned int nlag, p, L;
-    set_dim(nlag, p, L, nt, nlag_, L_order);
-    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    double par1 = lag_par[0];
+    unsigned int par2 = lag_par[1];
+
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = nt;
+        p = par2 + 1;
+    }
+    arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p, trans_code);
     
     unsigned int B = p;
 
     arma::mat Gt;
-    init_Gt(Gt, rho, p, nlag, nt);
+    init_Gt(Gt, lag_par, p, nlag, truncated);
 
     /* Dimension of state space depends on type of transfer functions */
 
-    arma::vec m0(p, arma::fill::zeros);
     double C0_sqrt = theta0_upbnd * 0.5;
-    if (!m0_prior.isNull())
-    {
-        m0 = Rcpp::as<arma::vec>(m0_prior);
-    }
-
     arma::vec theta_init = arma::randn(N);
     theta_init.for_each([&m0, &C0_sqrt](arma::vec::elem_type &val)
-                        { val = std::abs(m0.at(0) + C0_sqrt * val); });
+                        { val = std::abs(m0 + C0_sqrt * val); });
 
     arma::cube theta_stored(p, N, nt + 1);
     for (unsigned int b = 0; b < (nt + 1); b++)
@@ -421,11 +420,9 @@ Rcpp::List ffbs_poisson(
     }
     theta_stored.slice(0).row(1) = theta_init.t();
 
+    double W = W_par[0];
     arma::vec Wt(nt);
-    if (!R_IsNA(W_true))
-    {
-         Wt.fill(W_true);
-    }
+    Wt.fill(W);
     /*
     ------ Step 1. Initialization theta[0,] at time t = 0 ------
     */
@@ -444,12 +441,10 @@ Rcpp::List ffbs_poisson(
             init_Ft(Ft, ypad, Fphi, t, p);
         }
 
-        bool use_discount = false;
-        bool use_default_val = false;
-        if (R_IsNA(W_true))
+        bool use_custom_val = false;
+        if (t > B)
         {
-            use_discount = true;
-            if (t > B) { use_default_val = true; }
+            use_custom_val = true;
         }
 
         double y_old = ypad.at(t);
@@ -464,8 +459,8 @@ Rcpp::List ffbs_poisson(
         smc_propagate_bootstrap(
             Theta_new, weights, wt, Gt,
             y_new, y_old, Theta_old, Ft, model_code,
-            mu0, rho, delta_nb, delta_discount, p, N,
-            use_discount, use_default_val, t, nlag, nt);
+            p, t, nlag, N, obs_par, lag_par, delta_discount,
+            truncated, use_discount, use_custom_val);
 
         theta_stored.slice(t + 1) = Theta_new;
         Wt.at(t) = wt;
@@ -572,20 +567,21 @@ void mcs_poisson(
     double &W,
     const arma::vec &ypad,        // (n+1) x 1, the observed response
     const arma::uvec &model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
-    const double &rho,
-    const unsigned int &L_order, // number of lags
-    const unsigned int &nlag_,
-    const double &mu0,
-    const unsigned int &B, // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const Rcpp::NumericVector &obs_par,
+    const Rcpp::NumericVector &lag_par, // init/true values of (mu, sg2) or (rho, L)
+    const unsigned int &nlag_in,
+    const unsigned int &B, // length of the B-lag fixed-lag smoother
     const unsigned int &N, // number of particles
-    const arma::vec &m0,
-    const arma::mat &C0,
     const double &theta0_upbnd,
-    const double &delta_nb, // 0: negative binomial DLM; 1: poisson DLM
-    const double &delta_discount)
+    const double &delta_discount,
+    const bool &truncated,
+    const bool &use_discount)
 {
 
     const unsigned int nt = ypad.n_elem - 1; // number of observations
+    double mu0 = obs_par[0];
+    double delta_nb = obs_par[1];
+    double m0 = 0.;
 
 
     const unsigned int obs_code = model_code.at(0);
@@ -594,18 +590,23 @@ void mcs_poisson(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
-    unsigned int nlag, p, L;
-    set_dim(nlag, p, L, nt, nlag_, L_order);
-    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = nt;
+        p = (unsigned int) lag_par[1] + 1;
+    }
+    arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p, trans_code);
 
     arma::mat Gt;
-    init_Gt(Gt, rho, p, nlag, nt);
+    init_Gt(Gt, lag_par, p, nlag, truncated);
 
     double C0_sqrt = theta0_upbnd * 0.5;
     arma::vec theta_init = arma::randn(N);
     theta_init.for_each([&m0, &C0_sqrt](arma::vec::elem_type &val)
-                        { val = std::abs(m0.at(0) + C0_sqrt * std::abs(val)); });
+                        { val = std::abs(m0 + C0_sqrt * std::abs(val)); });
 
     arma::cube theta_stored(p, N, nt + B);
     for (unsigned int b = 0; b < (nt + B); b++)
@@ -614,12 +615,8 @@ void mcs_poisson(
     }
     theta_stored.slice(B - 1).row(1) = theta_init.t();
 
-    arma::vec Wt(nt,arma::fill::ones);
-    if (!R_IsNA(W))
-    {
-        Wt.fill(W);
-    }
-
+    arma::vec Wt(nt);
+    Wt.fill(W);
 
     for (unsigned int t=0; t<nt; t++) {
         R_CheckUserInterrupt();
@@ -636,23 +633,17 @@ void mcs_poisson(
 
         arma::mat Theta_new(p, N, arma::fill::zeros);
 
-        bool use_discount = false;
-        bool use_default_val = false;
-        if (R_IsNA(W) || W < EPS)
-        { // Use discount factor if W is not given
-            use_discount = true;
-            if (t > B)
-            {
-                use_default_val = true;
-            }
+        bool use_custom_val = false;
+        if (t > B)
+        {
+            use_custom_val = true;
         }
 
         smc_propagate_bootstrap(
             Theta_new, weights, wt, Gt,
             y_new, y_old, Theta_old, Ft, model_code,
-            mu0, rho, delta_nb, delta_discount, p, N,
-            use_discount, use_default_val, t, nlag, nt);
-
+            p, t, nlag, N, obs_par, lag_par, delta_discount, 
+            truncated, use_discount, use_custom_val);
 
         theta_stored.slice(t+B) = Theta_new;
         double ymarg = std::log(arma::accu(weights) + EPS8) - std::log(static_cast<double>(N));
@@ -688,18 +679,18 @@ void mcs_poisson(
 Rcpp::List pl_poisson(
     const arma::vec &Y, // nt x 1, the observed response
     const arma::uvec &model_code,
-    const Rcpp::NumericVector &W_prior = Rcpp::NumericVector::create(0.01, 0.01), // IG[aw,bw]
-    const double W_true = NA_REAL,
-    const unsigned int L_order = 2,    // number of lags
-    const unsigned int nlag_ = 0,
+    const Rcpp::IntegerVector &eta_select = Rcpp::IntegerVector::create(1,0,0,0),
+    const Rcpp::NumericVector &W_par = Rcpp::NumericVector::create(0.01, 2, 0.01,0.01), // IG[aw,bw]
+    const double &mu0 = 0.,
+    const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+    const unsigned int nlag_in = 0,
     const unsigned int N = 5000, // number of particles
     const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
-    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
     const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
-    const double mu0 = 0.,
-    const double rho = 0.9,
-    const double delta_nb = 1.,
+    const double delta_nb = 30,
     const double theta0_upbnd = 2.,
+    const bool &truncated = true,
+    const bool &use_discount = false,
     const bool smoothing = false)
 {
     const unsigned int nt = Y.n_elem; // number of observations
@@ -722,13 +713,19 @@ Rcpp::List pl_poisson(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
-    unsigned int nlag, p, L;
-    set_dim(nlag, p, L, nt, nlag_, L_order);
-    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = nt;
+        p = (unsigned int) lag_par[1] + 1;
+    }
+
+    arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p,trans_code);
 
     arma::mat Gt;
-    init_Gt(Gt, rho, p, nlag, nt);
+    init_Gt(Gt, lag_par, p, nlag, truncated);
 
     /* Dimension of state space depends on type of transfer functions */
 
@@ -752,20 +749,12 @@ Rcpp::List pl_poisson(
     theta_stored.slice(0) = theta;
 
     arma::mat aw(N, nt + 1);
-    aw.fill(W_prior[0]);
+    aw.fill(W_par[2]);
     arma::mat bw(N, nt + 1);
-    bw.fill(W_prior[1]);
+    bw.fill(W_par[3]);
     arma::mat Wt(N, nt + 1); // evolution variance
-    if (!R_IsNA(W_true))
-    {
-        Wt.fill(W_true);
-    }
-    else
-    {
-        double wtmp = arma::var(theta_stored.slice(0).row(0));
-        wtmp *= 1. / 0.99 - 1.;
-        Wt.col(0).fill(wtmp);
-    }
+    Wt.fill(W_par[0]);
+    bool W_selected = std::abs(eta_select[0] - 1) < EPS;
 
     arma::vec Meff(nt, arma::fill::zeros);
     // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
@@ -780,14 +769,17 @@ Rcpp::List pl_poisson(
         */
         arma::mat Theta_old = theta_stored.slice(t); // p x N
         arma::vec mt = arma::median(Theta_old, 1);
-        update_Gt(Gt, gain_code, trans_code, mt, ypad.at(t), rho, nlag, nt);
+        update_Gt(
+            Gt, mt, ypad.at(t), lag_par, 
+            gain_code, trans_code, 
+            nlag, truncated);
 
         for (unsigned int i = 0; i < N; i++)
         {
             arma::vec theta_old = Theta_old.col(i); // p x 1
-            
             arma::vec theta_new = update_at(
-                Gt, p, gain_code, theta_old, ypad.at(t), rho, nlag, nt);
+                Gt, theta_old, ypad.at(t), 
+                gain_code, lag_par, nlag, truncated);
 
             double Wsqrt = std::sqrt(Wt.at(i, t));
             double omega_new = R::rnorm(0., Wsqrt);
@@ -795,7 +787,7 @@ Rcpp::List pl_poisson(
 
             theta_stored.slice(t + 1).col(i) = theta_new;
 
-            if (R_IsNA(W_true)) {
+            if (W_selected) {
                 // infer evolution variance W
                 double err = theta_stored.at(0,i,t+1) - theta_stored.at(0,i,t);
                 double sse = std::pow(err,2.);
@@ -806,11 +798,11 @@ Rcpp::List pl_poisson(
                     Wt.at(i, t + 1) = 1. / R::rgamma(aw.at(i, t + 1), 1. / bw.at(i, t + 1));
                 }
             } else {
-                Wt.at(i,t+1) = W_true;
+                Wt.at(i,t+1) = W_par[0];
             }
         }
 
-        if (R_IsNA(W_true) && (t <= std::min(0.1 * nt_, 20.)))
+        if (W_selected && (t <= std::min(0.1 * nt_, 20.)))
         {
             double wtmp = arma::var(theta_stored.slice(t + 1).row(0));
             wtmp *= 1./0.99 - 1.;
@@ -823,7 +815,7 @@ Rcpp::List pl_poisson(
         - a_sigma2, b_sigma2, a_tau2, b_tau2 (N x 2)
         - sigma2, tau2 (N x 2)
         */
-        if (nlag < nt)
+        if (truncated)
         {
             // Update F[t] for Koyama model.
             arma::vec Fy(p, arma::fill::zeros);
@@ -851,7 +843,7 @@ Rcpp::List pl_poisson(
                 double tmp2 = std::exp(lambda.at(i));
                 lambda.at(i) = tmp2;
             }
-            else if (nlag  < nt)
+            else if (truncated)
             {
                 // truncated
                 arma::vec hpsi = psi2hpsi(psi, gain_code);

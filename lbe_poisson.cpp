@@ -17,30 +17,27 @@ using namespace Rcpp;
 
 arma::mat update_at(
 	arma::mat &Gt, // p x p
-	const unsigned int &p,
+	const arma::mat &mt_prev, // p x N, m[t-1] = (psi[t-1], theta[t-1], theta[t-2])
+	const double &yprev,	  // y[t-1]
 	const unsigned int &gain_code,
-	const arma::mat &mt_prev,			// p x N, m[t-1] = (psi[t-1], theta[t-1], theta[t-2])
-	const double &yprev, // y[t-1]
-	const double &rho,
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &nlag,
-	const unsigned int &nobs)
+	const bool &truncated)
 {
 	const unsigned int N = mt_prev.n_cols;
-	arma::mat at_cur(p, N, arma::fill::zeros);
+	arma::mat at_cur(Gt.n_rows, N, arma::fill::zeros);
 	
 
-	if (nlag == nobs || nlag == 0)
+	if (!truncated)
 	{
 		// no truncation - only work for negative binomial for now.
-		unsigned int L = p - 1;
-
 		arma::vec hpsi_cur(N, arma::fill::zeros);
 		// arma::mat Gtmp(Gt.begin(),Gt.n_elem);
 
 		arma::vec psi_cur = arma::vectorise(mt_prev.row(0));
 		hpsi_cur = psi2hpsi(psi_cur, gain_code); // 1 x N
 
-		double tmp1 = std::pow(1. - rho, (double) L);
+		double tmp1 = std::pow(1. - lag_par[0], lag_par[1]);
 		tmp1 *= yprev;
 
 
@@ -66,10 +63,6 @@ arma::mat update_at(
 	else
 	{
 		// truncated to nlag
-		if (p != nlag)
-		{
-			throw std::invalid_argument("update_at: dimension of state space show be nlag under truncation.");
-		}
 		at_cur = Gt * mt_prev;
 	}
 
@@ -85,25 +78,21 @@ arma::mat update_at(
  */
 void update_Gt(
 	arma::mat &Gt, // p x p
+	const arma::vec &mt, // p x 1
+	const double &y,	 // obs
+	const Rcpp::NumericVector &lag_par,
 	const unsigned int &gain_code,
 	const unsigned int &trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
-	const arma::vec &mt,			// p x 1
-	const double &y,		// obs
-	const double &rho,
 	const unsigned int &nlag,
-	const unsigned int &nobs)
+	const bool &truncated)
 {
-	bool not_truncated = (nlag == nobs);
-	unsigned int p = Gt.n_rows;
-	double L = p - 1.;
-
-	if (not_truncated && (trans_code == 2))
+	if (!truncated && (trans_code == 2))
 	{ // Solow - Checked. Correct.
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code);
-		Gt.at(1,0) *= std::pow(1.-rho,L) * y;
+		Gt.at(1,0) *= std::pow(1.-lag_par[0],lag_par[1]) * y;
 		// Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 	}
-	else if (not_truncated && (trans_code == 0))
+	else if (!truncated && (trans_code == 0))
 	{ // Koyck
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code);
 		Gt.at(1,0) *= y;
@@ -115,8 +104,8 @@ void update_Rt(
 	const arma::mat &Ct,	   // p x p
 	const arma::mat &Gt,	   // p x p
 	const bool &use_discount,  // true if !R_IsNA(delta)
-	const double &W = NA_REAL, // known evolution error of psi
-	const double &delta = NA_REAL)
+	const double &W, // known evolution error of psi
+	const double &delta)
 { // discount factor
 
 	const unsigned int p = Rt.n_cols;
@@ -128,12 +117,7 @@ void update_Rt(
 		Rt.at(0,0) += W;
 	}
 
-	bool is_zero = Rt.is_zero();
-	bool is_infinite = !Rt.is_finite();
-	if (is_zero || is_infinite)
-	{
-		throw std::invalid_argument("update_Rt: output Rt is all zero or nonfinite");
-	}
+	bound_check(Rt,"update_Rt: Rt",true,false);
 }
 
 /*
@@ -150,9 +134,9 @@ void update_Ft_truncated(
 	const arma::vec &Y,	   // (n+1) x 1, obs
 	const arma::vec &Fphi,
 	const int &nlag,
-	const int &nobs)
+	const bool &truncated)
 {
-	if (nlag == nobs)
+	if (!truncated)
 	{
 		// no truncation
 		throw std::invalid_argument("update_Ft_truncated: Ft is only updated using truncated distributed lags.");
@@ -163,7 +147,6 @@ void update_Ft_truncated(
 	unsigned int nend = std::max(nlag - 1, t - 1);
 	unsigned int nelem = nend - nstart + 1;
 
-
 	Fy = arma::reverse(Y.subvec((unsigned int) nstart, nend));
 	Fy.elem(arma::find(Fy<=EPS)).fill(0.01/L_);
 	Ft = Fphi.head(nelem) % Fy;
@@ -172,34 +155,33 @@ void update_Ft_truncated(
 
 /* Forward Filtering */
 void forwardFilter(
-	arma::mat &mt,	   // p x (n+1), t=0 is the mean for initial value theta[0]
-	arma::mat &at,	   // p x (n+1)
-	arma::cube &Ct,	   // p x p x (n+1), t=0 is the var for initial value theta[0]
-	arma::cube &Rt,	   // p x p x (n+1)
-	arma::cube &Gt,	   // p x p x (n+1)
-	arma::vec &alphat, // (n+1) x 1
-	arma::vec &betat,  // (n+1) x 1
+	arma::mat &mt,			// p x (n+1), t=0 is the mean for initial value theta[0]
+	arma::mat &at,			// p x (n+1)
+	arma::cube &Ct,			// p x p x (n+1), t=0 is the var for initial value theta[0]
+	arma::cube &Rt,			// p x p x (n+1)
+	arma::cube &Gt,			// p x p x (n+1)
+	arma::vec &alphat,		// (n+1) x 1
+	arma::vec &betat,		// (n+1) x 1
+	const arma::vec &Y,		// (n+1) x 1, the observation (scalar), n: num of obs
+	const unsigned int &nt, // number of observations
+	const unsigned int &p,	// dimension of the state space
+	const Rcpp::NumericVector &obs_par,
+	const Rcpp::NumericVector &lag_par,
+	const double &W,
 	const unsigned int &obs_code,
 	const unsigned int &link_code,
 	const unsigned int &trans_code,
 	const unsigned int &gain_code,
-	const unsigned int &nt, // number of observations
-	const unsigned int &p,	// dimension of the state space
-	const arma::vec &Y,		// (n+1) x 1, the observation (scalar), n: num of obs
-	const unsigned int &L,
 	const unsigned int &nlag,
-	const double &rho,
-	const double &mu0,
-	const double &W,
-	const double &delta,
-	const double &delta_nb)
+	const double &delta_discount,
+	const bool &truncated,
+	const bool &use_discount)
 {
-
+	double mu0 = obs_par[0];
+	double delta_nb = obs_par[1];
 	/*
 	------ Initialization ------
 	*/
-	const bool use_discount = !R_IsNA(delta) && R_IsNA(W); // Not prioritize discount factor if it is given.
-
 	arma::vec Ft(p,arma::fill::zeros);
 	if (trans_code == 0 || trans_code == 2)
 	{ // Koyck or Solow
@@ -210,11 +192,10 @@ void forwardFilter(
 		Ft.at(0) = 1.;
 	}
 
-	arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+	arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
 	arma::vec Fy(nlag, arma::fill::zeros);
 
 	
-
 	/*
 	------ Initialization ------
 	*/
@@ -228,21 +209,19 @@ void forwardFilter(
 	/*
 	------ Reference Analysis ------
 	*/
-	if ( nlag < nt )
+	if ( truncated )
 	{
-		// truncated
-		arma::vec atmp = update_at(Gt.slice(1), p, gain_code, mt.col(0), Y.at(0), rho, nlag, nt); // p x 1
-		// if (trans_code != 1)
-		// {
-		// 	arma::vec asub = atmp.subvec(1,atmp.n_elem-1);
-		// 	asub.elem(arma::find(asub < EPS)).fill(EPS);
-		// 	atmp.subvec(1,atmp.n_elem-1) = asub;
-		// }
-		at.col(1) = atmp;
-		update_Gt(Gt.slice(1), gain_code, trans_code, mt.col(0), Y.at(0), rho, nlag, nt);
-		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(1), use_discount, W, delta);
+		at.col(1) = update_at(
+			Gt.slice(1), mt.col(0), Y.at(0),
+			gain_code, lag_par, nlag, truncated); // p x 1
 
-		update_Ft_truncated(Ft, Fy, 1, Y, Fphi, nlag, nt);
+		update_Gt(
+			Gt.slice(1), mt.col(0), Y.at(0), 
+			lag_par, gain_code, trans_code, 
+			nlag, truncated);
+		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(1), use_discount, W, delta_discount);
+
+		update_Ft_truncated(Ft, Fy, 1, Y, Fphi, nlag, truncated);
 
 		hpsi = psi2hpsi(at.col(1), gain_code);
 		hph = hpsi_deriv(at.col(1), gain_code);
@@ -251,10 +230,7 @@ void forwardFilter(
 		Ft = Ft % hph;
 		Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
 
-		if (!std::isfinite(Qt) || Qt < EPS)
-		{
-			throw std::invalid_argument("ForwardFilter: Qt is zero at reference analysis t=1.");
-		}
+		bound_check(Qt, "forwardFilter: Qt", true, false);
 
 		/*
 		------ Moment Matching ------
@@ -323,15 +299,20 @@ void forwardFilter(
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		at.col(t) = update_at(Gt.slice(t), p, gain_code, mt.col(t - 1), Y.at(t - 1), rho, nlag, nt);		
-		update_Gt(Gt.slice(t), gain_code, trans_code, mt.col(t - 1), Y.at(t - 1), rho, nlag, nt);
-		// Gt: only updated when there is no truncation and using negative-binomial distributed lags.
-		update_Rt(Rt.slice(t), Ct.slice(t-1), Gt.slice(t), use_discount, W, delta);
+		at.col(t) = update_at(
+			Gt.slice(t), mt.col(t-1), Y.at(t-1),
+			gain_code, lag_par, nlag, truncated); // p x 1
+		update_Gt(
+			Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
+			lag_par, gain_code, trans_code,
+			nlag, truncated);
+		update_Rt(Rt.slice(t), Ct.slice(t - 1), Gt.slice(t), use_discount, W, delta_discount);
 
 		
+
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-        if (nlag < nt) { // truncated
-			update_Ft_truncated(Ft, Fy, t, Y, Fphi, nlag, nt);
+        if (truncated) { // truncated
+			update_Ft_truncated(Ft, Fy, t, Y, Fphi, nlag, truncated);
 			hpsi = psi2hpsi(at.col(t),gain_code);
 			hph = hpsi_deriv(at.col(t),gain_code);
 
@@ -413,37 +394,42 @@ void backwardSmoother(
 	const arma::cube &Rt, // p x p x (n+1)
 	const arma::cube &Gt,
 	const double &W,
-	const double &delta)
+	const double &delta,
+	const bool &use_discount)
 { // 1: smoothing, 2: sampling (conditional)
 
 	ht.at(n) = mt.at(0,n);
 	Ht.at(n) = std::abs(Ct.at(0,0,n));
 
-	double coef1, coef2;
-	arma::mat Bt,Ht_prev,Ht_cur;
+	double coef1 = 1. - delta;
+	double coef2 = delta * delta;
+
+	arma::mat Bt, Ht_prev, Ht_cur;
 	arma::vec ht_prev, ht_cur;
-	if (!R_IsNA(delta) && R_IsNA(W)) {
-		coef1 = 1. - delta;
-		coef2 = delta * delta;
-	}
-	
-	if (!R_IsNA(W)) {
-		Bt.set_size(p,p);
-		Ht_cur.set_size(p,p);
-		ht_cur.set_size(p);
+	if (!use_discount)
+	{
+		Bt.set_size(p, p); Bt.zeros();
+		Ht_cur.set_size(p, p); Ht_cur.zeros();
+		ht_cur.set_size(p); ht_cur.zeros();
 
 		Ht_prev = Ct.slice(n);
 		ht_prev = mt.col(n);
 	}
 
-	
-	for (unsigned int t=(n-1); t>0; t--) {
+
+	for (unsigned int t=(n-1); t>0; t--) 
+	{
 		R_CheckUserInterrupt();
-		if (!R_IsNA(delta) && R_IsNA(W)) {
+		if (use_discount) 
+		{
 			ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1);
 			Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
-		} else if (!R_IsNA(W)) {
-			try {
+		} 
+		else 
+		{
+			// don't use discount
+			try 
+			{
 				Bt = Ct.slice(t) * Gt.slice(t+1).t() * Rt.slice(t+1).i();
 				ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
 				Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
@@ -453,22 +439,22 @@ void backwardSmoother(
 
 				ht_prev = ht_cur;
 				Ht_prev = Ht_cur;
-			} catch (...) {
+			} 
+			catch (...) 
+			{
 
-				if (!R_IsNA(delta)) {
-					ht.at(t) = coef1 * mt.at(0,t) + delta * ht.at(t+1); 
-					Ht.at(t) = coef1 * Ct.at(0,0,t) + coef2 * Ht.at(t+1);
-				} else {
-					Bt = Ct.slice(t) * Gt.slice(t+1).t() * arma::pinv(Rt.slice(t+1),1.e-6); // Pseudo inverse
-					ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t+1));
-					Ht_cur = Ct.slice(t) + Bt*(Ht_prev - Rt.slice(t+1))*Bt.t();
+				ht.at(t) = coef1 * mt.at(0, t) + delta * ht.at(t + 1);
+				Ht.at(t) = coef1 * Ct.at(0, 0, t) + coef2 * Ht.at(t + 1);
 
-					ht.at(t) = ht_cur.at(0);
-					Ht.at(t) = Ht_cur.at(0,0);
+				// Bt = Ct.slice(t) * Gt.slice(t + 1).t() * arma::pinv(Rt.slice(t + 1), 1.e-6); // Pseudo inverse
+				// ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t + 1));
+				// Ht_cur = Ct.slice(t) + Bt * (Ht_prev - Rt.slice(t + 1)) * Bt.t();
 
-					ht_prev = ht_cur;
-					Ht_prev = Ht_cur;
-				}
+				// ht.at(t) = ht_cur.at(0);
+				// Ht.at(t) = Ht_cur.at(0, 0);
+
+				// ht_prev = ht_cur;
+				// Ht_prev = Ht_cur;
 			}
 			
 		}
@@ -478,31 +464,36 @@ void backwardSmoother(
 	// Rcout << std::endl;
 
 	// t = 0
-	if (!R_IsNA(delta) && R_IsNA(W)) {
+	if (use_discount) 
+	{
 		ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
 		Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
-	} else if (!R_IsNA(W)) {
-		try {
+	} 
+	else 
+	{
+		try 
+		{
 			Bt = Ct.slice(0) * Gt.slice(1).t() * Rt.slice(1).i();
 			ht_cur = mt.col(0) + Bt * (ht_prev - at.col(1));
 			Ht_cur = Ct.slice(0) + Bt*(Ht_prev - Rt.slice(1))*Bt.t();
 
 			ht.at(0) = ht_cur.at(0);
 			Ht.at(0) = Ht_cur.at(0,0);
-		} catch (...) {
-			if (!R_IsNA(delta)) {
-				ht.at(0) = coef1 * mt.at(0,0) + delta * ht.at(1);
-				Ht.at(0) = coef1 * Ct.at(0,0,0) + coef2 * Ht.at(1);
-			} else {
-				Bt = Ct.slice(0) * Gt.slice(1).t() * arma::pinv(Rt.slice(1),1.e-6);
-				ht_cur = mt.col(0) + Bt * (ht_prev - at.col(1));
-				Ht_cur = Ct.slice(0) + Bt*(Ht_prev - Rt.slice(1))*Bt.t();
+		} 
+		catch (...) 
+		{
+			ht.at(0) = coef1 * mt.at(0, 0) + delta * ht.at(1);
+			Ht.at(0) = coef1 * Ct.at(0, 0, 0) + coef2 * Ht.at(1);
 
-				ht.at(0) = ht_cur.at(0);
-				Ht.at(0) = Ht_cur.at(0,0);
-			}
-			
+			// Bt = Ct.slice(t) * Gt.slice(t + 1).t() * arma::pinv(Rt.slice(t + 1), 1.e-6); // Pseudo inverse
+			// ht_cur = mt.col(t) + Bt * (ht_prev - at.col(t + 1));
+			// Ht_cur = Ct.slice(t) + Bt * (Ht_prev - Rt.slice(t + 1)) * Bt.t();
 
+			// ht.at(t) = ht_cur.at(0);
+			// Ht.at(t) = Ht_cur.at(0, 0);
+
+			// ht_prev = ht_cur;
+			// Ht_prev = Ht_cur;
 		}
 	}
 }
@@ -594,32 +585,33 @@ void backwardSampler(
 //' @export
 // [[Rcpp::export]]
 Rcpp::List lbe_poisson(
-	const arma::vec& Y, // n x 1, the observed response
-	const arma::uvec& model_code,
-	const double rho = 0.9,
-    const unsigned int L_order = 0, // order for nbinom distributed lags
-	const unsigned int nlag_ = 0,
-	const double mu0 = 0.,
-    const double delta = 0.9,
-	const double W = NA_REAL,
-	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const double delta_nb = 10.,
-	const double ci_coverage = 0.95,
-	const unsigned int npara = 20,
-	const double theta0_upbnd = 2.,
-    const bool summarize_return = false) { 
-
-
-	if (R_IsNA(delta) && R_IsNA(W)) {
-		 throw std::invalid_argument("Either evolution error W or discount factor delta must be provided.");
-	}
-
+	const arma::vec &Y, // n x 1, the observed response
+	const arma::uvec &model_code,
+	const double &W = 0.01, 
+	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
+	const unsigned int &nlag_in = 20,
+	const double &ci_coverage = 0.95,
+	const unsigned int &npara = 20,
+	const double &theta0_upbnd = 2.,
+	const double &delta_discount = 0.88,
+	const bool &truncated = true,
+	const bool &use_discount = false,
+	const bool &summarize_return = false)
+{
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
 
-	unsigned int nlag, p, L;
-	set_dim(nlag,p,L,n,nlag_,L_order);
+	unsigned int nlag = nlag_in;
+	unsigned int p = nlag;
+	if (!truncated)
+	{
+		nlag = n;
+		p = (unsigned int) lag_par[1] + 1;
+	}
+
+	double mu0 = obs_par[0];
+	double delta_nb = obs_par[1];
 
 	const unsigned int obs_code = model_code.at(0); // Poisson or negative binomial
     const unsigned int link_code = model_code.at(1); // identity or exponential
@@ -643,7 +635,7 @@ Rcpp::List lbe_poisson(
 	arma::vec Ht(npad,arma::fill::zeros);
 
 	arma::cube Gt(p,p,npad);
-	init_Gt(Gt,rho,p,nlag,n);
+	init_Gt(Gt,lag_par,p,nlag,truncated);
 
 	arma::mat mt(p, npad, arma::fill::zeros);
 	if (trans_code != 1)
@@ -660,22 +652,20 @@ Rcpp::List lbe_poisson(
 	Ct.for_each([&theta0_upbnd](arma::mat::elem_type &val){
 		val *= std::pow(theta0_upbnd * 0.5,2.) + EPS;});
 
-	if (!C0_prior.isNull()) {
-		Ct.slice(0) = Rcpp::as<arma::mat>(C0_prior);
-	}
-
 
 	forwardFilter(
-		mt,at,Ct,Rt,Gt,alphat,betat,
-		obs_code,link_code,trans_code,gain_code,
-		n,p,Ypad,L,nlag,rho,mu0,W,delta,delta_nb);
-	arma::vec Wt = (1.-delta) * arma::vectorise(Rt.tube(0,0));
+		mt, at, Ct, Rt, Gt, alphat, betat,
+		Ypad, n, p, obs_par, lag_par, W, 
+		obs_code, link_code, trans_code, gain_code,
+		nlag, delta_discount, truncated, use_discount);
+	arma::vec Wt = (1. - delta_discount) * arma::vectorise(Rt.tube(0, 0));
 
-	backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
-	
+	backwardSmoother(ht, Ht, n, p, mt, at, Ct, Rt, Gt, W, delta_discount, use_discount);
+
 	Rcpp::List output;
 	const double critval = R::qnorm(1. - 0.5 * (1. - ci_coverage), 0., 1., true, false);
-	if (summarize_return) {
+	if (summarize_return) 
+	{
 		arma::mat psi(npad,3);
 		psi.col(0) = ht - critval*arma::sqrt(arma::abs(Ht));
 		psi.col(1) = ht; // (n+1) x 1
@@ -688,7 +678,9 @@ Rcpp::List lbe_poisson(
 		psi0.col(2) = mt.row(0).t() + critval*arma::vectorise(arma::sqrt(arma::abs(Ct.tube(0,0))));
 		output["psi0"] = Rcpp::wrap(psi0);
 
-	} else {
+	} 
+	else 
+	{
 		output["mt"] = Rcpp::wrap(mt.row(0).t()); // mt: p x npad, filtering mean (1st order moment)
 		output["Ct"] = Rcpp::wrap(Ct.tube(0,0)); // Ct: p x p x npad, filtering variance (2nd order moment)
 		output["ht"] = Rcpp::wrap(ht); // npad x 1, smoothing mean (2nd order moment)
@@ -704,7 +696,7 @@ Rcpp::List lbe_poisson(
 	output["Wt"] = Rcpp::wrap(Wt); // npad x 1
 	arma::vec hpsiR = psi2hpsi(ht, gain_code); // hpsi: npad x 1
 	arma::vec thetaR(npad,arma::fill::zeros);
-	hpsi2theta(thetaR,hpsiR,Ypad,trans_code,L,nlag,rho);
+	hpsi2theta(thetaR,hpsiR,Ypad,lag_par,trans_code,nlag,truncated);
 	output["theta"] = Rcpp::wrap(thetaR);
 
     output["rmse"] = std::sqrt(arma::as_scalar(arma::mean(arma::pow(thetaR.tail(n-npara) - Y.tail(n-npara),2.0))));
@@ -713,14 +705,17 @@ Rcpp::List lbe_poisson(
 
 	double logpred = 0.;
 	double prob_success;
-	for (unsigned int j=npara; j<=n; j++) {
+	for (unsigned int j=npara; j<=n; j++) 
+	{
 		// Marginal log predictive likelihood
-		if (obs_code == 1) {
+		if (obs_code == 1) 
+		{
 			// Poisson DLM
 			prob_success = std::max(betat.at(j)/(1.+betat.at(j)),EPS);
 			logpred += R::dnbinom(Y.at(j-1),std::max(alphat.at(j),EPS),prob_success,true);
 
-		} else if (obs_code == 0 && alphat.at(j)>1.e-32 && betat.at(j)>1.e-32) {
+		} else if (obs_code == 0 && alphat.at(j)>1.e-32 && betat.at(j)>1.e-32) 
+		{
 			// Negative binomial DLM
 			logpred += R::lgammafn(Y.at(j-1)+delta_nb)-R::lgammafn(delta_nb)-R::lgammafn(Y.at(j-1)+1.);
 			logpred += R::lgammafn(std::max(alphat.at(j)+betat.at(j),EPS))-R::lgammafn(std::max(alphat.at(j),EPS))-R::lgammafn(std::max(betat.at(j),EPS));
@@ -733,65 +728,64 @@ Rcpp::List lbe_poisson(
 	return output;
 }
 
-
-//' @export
-// [[Rcpp::export]]
-Rcpp::List get_eta_truncated(
-	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
-	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
-	const arma::cube& Ct, // p x p x (n+1)
-	const unsigned int gain_code,
-	const double mu0 = 0.) {
+// //' @export
+// // [[Rcpp::export]]
+// Rcpp::List get_eta_truncated(
+// 	const arma::vec& Y, // n x 1, the observation (scalar), n: num of obs
+// 	const arma::mat& mt, // p x (n+1), t=0 is the mean for initial value theta[0]
+// 	const arma::cube& Ct, // p x p x (n+1)
+// 	const unsigned int gain_code,
+// 	const double mu0 = 0.) {
 	
-	const unsigned int n = Y.n_elem;
-	const unsigned int p = mt.n_rows;
+// 	const unsigned int n = Y.n_elem;
+// 	const unsigned int p = mt.n_rows;
 
-	arma::vec ft(n+1);
-	arma::vec Qt(n+1,arma::fill::zeros);
+// 	arma::vec ft(n+1);
+// 	arma::vec Qt(n+1,arma::fill::zeros);
 
-	arma::vec Ft(p,arma::fill::zeros);
-	arma::vec Fy(p,arma::fill::zeros);
-	arma::vec Fphi = get_Fphi(p,p,0.9,1);
+// 	arma::vec Ft(p,arma::fill::zeros);
+// 	arma::vec Fy(p,arma::fill::zeros);
+// 	arma::vec Fphi = get_Fphi(p,p,0.9,1);
 
-	arma::mat mt_ramp;
-	if (gain_code == 0) {
-		mt_ramp = mt;
-		mt_ramp.elem(arma::find(mt_ramp<EPS)).zeros(); // Ramp function
-	}
+// 	arma::mat mt_ramp;
+// 	if (gain_code == 0) {
+// 		mt_ramp = mt;
+// 		mt_ramp.elem(arma::find(mt_ramp<EPS)).zeros(); // Ramp function
+// 	}
 
-	for (unsigned int t=0; t<=n; t++) {
-		update_Ft_truncated(Ft, Fy, t, Y, Fphi, p, n);
-		switch (gain_code) {
-			case 0: // KoyamaMax
-			{
-				ft.at(t) = mu0 + arma::accu(Ft % mt_ramp.col(t));
-			}
-			break;
-			case 1: // KoyamaExp
-			{
-				ft.at(t) = mu0 + arma::accu(Ft % arma::exp(mt.col(t)));
-				Ft = Ft % arma::exp(mt.col(t));
-				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
-			}
-			break;
-			case 2: // KoyamaEye
-			{
-				ft.at(t) = mu0 + arma::accu(Ft % mt.col(t));
-				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
-			}
-			break;
-			default:
-			{
-				 throw std::invalid_argument("get_Ft function is only defined for Koyama transmission kernels.");
-			}
-		} // END switch block
-	}
+// 	for (unsigned int t=0; t<=n; t++) {
+// 		update_Ft_truncated(Ft, Fy, t, Y, Fphi, p, n);
+// 		switch (gain_code) {
+// 			case 0: // KoyamaMax
+// 			{
+// 				ft.at(t) = mu0 + arma::accu(Ft % mt_ramp.col(t));
+// 			}
+// 			break;
+// 			case 1: // KoyamaExp
+// 			{
+// 				ft.at(t) = mu0 + arma::accu(Ft % arma::exp(mt.col(t)));
+// 				Ft = Ft % arma::exp(mt.col(t));
+// 				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
+// 			}
+// 			break;
+// 			case 2: // KoyamaEye
+// 			{
+// 				ft.at(t) = mu0 + arma::accu(Ft % mt.col(t));
+// 				Qt.at(t) = arma::as_scalar(Ft.t() * Ct.slice(t) * Ft);
+// 			}
+// 			break;
+// 			default:
+// 			{
+// 				 throw std::invalid_argument("get_Ft function is only defined for Koyama transmission kernels.");
+// 			}
+// 		} // END switch block
+// 	}
 
-	Rcpp::List output;
-	output["mean"] = Rcpp::wrap(ft);
-	output["var"] = Rcpp::wrap(Qt);
-	return output;
-}
+// 	Rcpp::List output;
+// 	output["mean"] = Rcpp::wrap(ft);
+// 	output["var"] = Rcpp::wrap(Qt);
+// 	return output;
+// }
 
 
 /**
@@ -800,19 +794,19 @@ Rcpp::List get_eta_truncated(
 //' @export
 // [[Rcpp::export]]
 Rcpp::List get_optimal_delta(
-	const arma::vec& Y, // n x 1
-	const arma::uvec& model_code,
-	const arma::vec& delta_grid, // m x 1
-	const double rho = 0.9,
-    const unsigned int L = 0,
-	const unsigned int nlag_ = 0,
-	const double mu0 = 0.,
-	const Rcpp::Nullable<Rcpp::NumericVector>& m0_prior = R_NilValue,
-	const Rcpp::Nullable<Rcpp::NumericMatrix>& C0_prior = R_NilValue,
-	const double delta_nb = 1.,
-	const unsigned int npara = 1,
-	const double ci_coverage = 0.95) {
-
+	const arma::vec &Y, // n x 1
+	const arma::uvec &model_code,
+	const arma::vec &delta_grid,											  // m x 1
+	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.), // (mu0, delta_nb)
+	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const double &theta0_upbnd = 2.,
+	const unsigned int &npara = 1,
+	const double &ci_coverage = 0.95,
+	const unsigned int &nlag_in = 20,
+	const bool &truncated = true)
+{
+	double delta_nb = obs_par[1];
+	
 	const unsigned int n = Y.n_elem;
 	const unsigned int m = delta_grid.n_elem;
 	const double W = NA_REAL;
@@ -825,14 +819,21 @@ Rcpp::List get_optimal_delta(
 	arma::vec mae(m,arma::fill::zeros);
 	double delta;
 	double ymean,prob_success;
-	for (unsigned int i=0; i<m; i++) {
+	for (unsigned int i=0; i<m; i++) 
+	{
 		delta = delta_grid.at(i);
-		Rcpp::List lbe = lbe_poisson(Y,model_code,rho,L,nlag_,mu0,delta,W,m0_prior,C0_prior,delta_nb,ci_coverage,20,2.,false);
+		Rcpp::List lbe = lbe_poisson(
+			Y,model_code,W,obs_par,lag_par,
+			nlag_in, ci_coverage,npara,
+			theta0_upbnd,delta, truncated, true, false);
+		
 		arma::vec alphat = lbe["alphat"];
 		arma::vec betat = lbe["betat"];
-		for (unsigned int j=npara; j<=n; j++) {
+		for (unsigned int j=npara; j<=n; j++) 
+		{
 			// Marginal log predictive likelihood
-			if (obs_code == 1) {
+			if (obs_code == 1) 
+			{
 				// Poisson DLM
 				prob_success = betat.at(j)/(1.+betat.at(j));
 				logpred.at(i) += R::dnbinom(Y.at(j-1),alphat.at(j),prob_success,true);
@@ -844,7 +845,9 @@ Rcpp::List get_optimal_delta(
 				// MAE
 				mae.at(i) = std::abs(Y.at(j-1) - ymean);
 
-			} else if (obs_code == 0 && alphat.at(j)>1.e-32 && betat.at(j)>1.e-32) {
+			} 
+			else if (obs_code == 0 && alphat.at(j)>1.e-32 && betat.at(j)>1.e-32) 
+			{
 				// Negative binomial DLM
 				logpred.at(i) += R::lgammafn(Y.at(j-1)+delta_nb)-R::lgammafn(delta_nb)-R::lgammafn(Y.at(j-1)+1.);
 				logpred.at(i) += R::lgammafn(alphat.at(j)+betat.at(j))-R::lgammafn(alphat.at(j))-R::lgammafn(betat.at(j));
@@ -870,19 +873,17 @@ Rcpp::List get_optimal_delta(
 	return output;
 }
 
-
-
-//' @export
-// [[Rcpp::export]]
-double lbe_What(
-    const arma::vec& ht, // (n+1) x 1
-    const unsigned int nsample = 2000,
-    const double aw = 0.1,
-    const double bw = 0.1) {
+// //' @export
+// // [[Rcpp::export]]
+// double lbe_What(
+//     const arma::vec& ht, // (n+1) x 1
+//     const unsigned int nsample = 2000,
+//     const double aw = 0.1,
+//     const double bw = 0.1) {
     
-    double n_ = static_cast<double>(ht.n_elem) - 1.;
-    double aw_new = aw + 0.5*n_;
-    double bw_new = bw + 0.5* arma::accu(arma::pow(arma::diff(ht),2));
-    double What = bw_new / (aw_new - 1.);
-    return What;
-}
+//     double n_ = static_cast<double>(ht.n_elem) - 1.;
+//     double aw_new = aw + 0.5*n_;
+//     double bw_new = bw + 0.5* arma::accu(arma::pow(arma::diff(ht),2));
+//     double What = bw_new / (aw_new - 1.);
+//     return What;
+// }
