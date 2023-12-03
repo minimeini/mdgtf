@@ -16,11 +16,11 @@ using namespace Rcpp;
 */
 
 arma::mat update_at(
-	arma::mat &Gt, // p x p
+	arma::mat &Gt,			  // p x p
 	const arma::mat &mt_prev, // p x N, m[t-1] = (psi[t-1], theta[t-1], theta[t-2])
 	const double &yprev,	  // y[t-1]
+	const arma::vec &lag_par,
 	const unsigned int &gain_code,
-	const Rcpp::NumericVector &lag_par,
 	const unsigned int &nlag,
 	const bool &truncated)
 {
@@ -37,7 +37,7 @@ arma::mat update_at(
 		arma::vec psi_cur = arma::vectorise(mt_prev.row(0));
 		hpsi_cur = psi2hpsi(psi_cur, gain_code); // 1 x N
 
-		double tmp1 = std::pow(1. - lag_par[0], lag_par[1]);
+		double tmp1 = std::pow(1. - lag_par.at(0), lag_par.at(1));
 		tmp1 *= yprev;
 
 
@@ -80,7 +80,7 @@ void update_Gt(
 	arma::mat &Gt, // p x p
 	const arma::vec &mt, // p x 1
 	const double &y,	 // obs
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &gain_code,
 	const unsigned int &trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const unsigned int &nlag,
@@ -89,7 +89,7 @@ void update_Gt(
 	if (!truncated && (trans_code == 2))
 	{ // Solow - Checked. Correct.
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code);
-		Gt.at(1,0) *= std::pow(1.-lag_par[0],lag_par[1]) * y;
+		Gt.at(1,0) *= std::pow(1.-lag_par.at(0),lag_par.at(1)) * y;
 		// Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 	}
 	else if (!truncated && (trans_code == 0))
@@ -165,8 +165,8 @@ void forwardFilter(
 	const arma::vec &Y,		// (n+1) x 1, the observation (scalar), n: num of obs
 	const unsigned int &nt, // number of observations
 	const unsigned int &p,	// dimension of the state space
-	const Rcpp::NumericVector &obs_par,
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &obs_par,
+	const arma::vec &lag_par,
 	const double &W,
 	const unsigned int &obs_code,
 	const unsigned int &link_code,
@@ -177,8 +177,8 @@ void forwardFilter(
 	const bool &truncated,
 	const bool &use_discount)
 {
-	double mu0 = obs_par[0];
-	double delta_nb = obs_par[1];
+	double mu0 = obs_par.at(0);
+	double delta_nb = obs_par.at(1);
 	/*
 	------ Initialization ------
 	*/
@@ -213,7 +213,7 @@ void forwardFilter(
 	{
 		at.col(1) = update_at(
 			Gt.slice(1), mt.col(0), Y.at(0),
-			gain_code, lag_par, nlag, truncated); // p x 1
+			lag_par, gain_code, nlag, truncated); // p x 1
 
 		update_Gt(
 			Gt.slice(1), mt.col(0), Y.at(0), 
@@ -300,8 +300,8 @@ void forwardFilter(
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
 		at.col(t) = update_at(
-			Gt.slice(t), mt.col(t-1), Y.at(t-1),
-			gain_code, lag_par, nlag, truncated); // p x 1
+			Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
+			lag_par, gain_code, nlag, truncated); // p x 1
 		update_Gt(
 			Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
 			lag_par, gain_code, trans_code,
@@ -588,8 +588,8 @@ Rcpp::List lbe_poisson(
 	const arma::vec &Y, // n x 1, the observed response
 	const arma::uvec &model_code,
 	const double &W = 0.01, 
-	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
+	const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.),
+	const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
 	const unsigned int &nlag_in = 20,
 	const double &ci_coverage = 0.95,
 	const unsigned int &npara = 20,
@@ -602,16 +602,19 @@ Rcpp::List lbe_poisson(
 	const unsigned int n = Y.n_elem;
 	const unsigned int npad = n+1;
 
+	arma::vec lag_par(lag_par_in.begin(), lag_par_in.length());
+	arma::vec obs_par(obs_par_in.begin(), obs_par_in.length());
+
 	unsigned int nlag = nlag_in;
 	unsigned int p = nlag;
 	if (!truncated)
 	{
 		nlag = n;
-		p = (unsigned int) lag_par[1] + 1;
+		p = (unsigned int) lag_par.at(1) + 1;
 	}
 
-	double mu0 = obs_par[0];
-	double delta_nb = obs_par[1];
+	double mu0 = obs_par.at(0);
+	double delta_nb = obs_par.at(1);
 
 	const unsigned int obs_code = model_code.at(0); // Poisson or negative binomial
     const unsigned int link_code = model_code.at(1); // identity or exponential
@@ -797,15 +800,15 @@ Rcpp::List get_optimal_delta(
 	const arma::vec &Y, // n x 1
 	const arma::uvec &model_code,
 	const arma::vec &delta_grid,											  // m x 1
-	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.), // (mu0, delta_nb)
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.), // (mu0, delta_nb)
+	const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6),
 	const double &theta0_upbnd = 2.,
 	const unsigned int &npara = 1,
 	const double &ci_coverage = 0.95,
 	const unsigned int &nlag_in = 20,
 	const bool &truncated = true)
 {
-	double delta_nb = obs_par[1];
+	const double delta_nb = obs_par_in[1];
 	
 	const unsigned int n = Y.n_elem;
 	const unsigned int m = delta_grid.n_elem;
@@ -823,7 +826,7 @@ Rcpp::List get_optimal_delta(
 	{
 		delta = delta_grid.at(i);
 		Rcpp::List lbe = lbe_poisson(
-			Y,model_code,W,obs_par,lag_par,
+			Y,model_code,W,obs_par_in,lag_par_in,
 			nlag_in, ci_coverage,npara,
 			theta0_upbnd,delta, truncated, true, false);
 		

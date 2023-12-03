@@ -569,6 +569,67 @@ void update_vb_param(
 }
 
 
+
+void init_eta(
+    arma::uvec &idx_select,
+    arma::vec &eta,
+    const arma::uvec &eta_select,
+    const arma::vec &obs_par,
+    const arma::vec &lag_par,
+    const arma::vec &W_par,
+    const unsigned int &m,
+    const bool &update_static
+)
+{
+    if (update_static)
+    {
+        idx_select = arma::find(eta_select == 1);
+    }
+    else
+    {
+        idx_select.set_size(m);
+        idx_select.fill(1);
+    }
+
+    eta.set_size(m);
+    eta.zeros();
+    for (unsigned int i = 0; i < idx_select.n_elem; i++)
+    {
+        unsigned int idx = idx_select.at(i);
+        switch (idx)
+        {
+        case 0: // W is selected
+        {
+            eta.at(i) = W_par.at(0);
+        }
+        break;
+        case 1: // mu0 is selected
+        {
+            eta.at(i) = obs_par.at(0);
+        }
+        break;
+        case 2: // par 1 is selected
+        {
+            eta.at(i) = lag_par.at(0);
+        }
+        break;
+        case 3: // par 2 is selected
+        {
+            eta.at(i) = lag_par.at(1);
+        }
+        break;
+        default:
+        {
+            throw std::invalid_argument("HVB: number of unknown static parameters out of bound.");
+        }
+        }
+    }
+
+    return;
+}
+
+
+
 //' @export
 // [[Rcpp::export]]
 Rcpp::List hva_poisson(
@@ -578,31 +639,30 @@ Rcpp::List hva_poisson(
     const Rcpp::NumericVector &W_par_in = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (init, prior type, prior par1, prior par2)
     const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.),
     const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
-    const unsigned int nlag_in = 30,
-    const double theta0_upbnd = 2.,
-    const double Blag_pct = 0.1,
-    const double learn_rate = 0.95,
-    const double eps_step = 1.e-6,
-    const unsigned int k = 1, // k <= sum(eta_select)
-    const unsigned int nsample = 100,
-    const unsigned int nburnin = 100,
-    const unsigned int nthin = 2,
-    const unsigned int Nsmc = 100,
-    const double delta_discount = 0.88,
+    const unsigned int &nlag_in = 30,
+    const double &theta0_upbnd = 2.,
+    const double &Blag_pct = 0.1,
+    const double &learn_rate = 0.95,
+    const double &eps_step = 1.e-6,
+    const unsigned int &k = 1, // k <= sum(eta_select)
+    const unsigned int &nsample = 100,
+    const unsigned int &nburnin = 100,
+    const unsigned int &nthin = 2,
+    const unsigned int &Nsmc = 100,
+    const double &delta_discount = 0.88,
     const bool &truncated = true,
-    const bool summarize_return = false)
+    const bool &summarize_return = false)
 {
-
     const unsigned int ntotal = nburnin + nthin*nsample + 1;
     const unsigned int n = Y.n_elem;
     const unsigned int npad = n + 1;
     arma::vec ypad(n+1,arma::fill::zeros); ypad.tail(n) = Y;
 
-    double delta_nb = obs_par_in[1];
+    arma::vec W_par(W_par_in.begin(), W_par_in.length());
+    arma::vec lag_par(lag_par_in.begin(), lag_par_in.length());
+    arma::vec obs_par(obs_par_in.begin(), obs_par_in.length());
 
-    Rcpp::NumericVector W_par = W_par_in;
-    Rcpp::NumericVector lag_par = lag_par_in;
-    Rcpp::NumericVector obs_par = obs_par_in;
+    
 
     bool update_static = arma::accu(eta_select) > 0;
 
@@ -612,7 +672,8 @@ Rcpp::List hva_poisson(
     const unsigned int gain_code = model_code.at(3);
     const unsigned int err_code = model_code.at(4);
 
-    unsigned int W_prior_type = W_par[1];
+
+    unsigned int W_prior_type = W_par.at(1);
 
 
     /* ------ Define Local Parameters ------ */
@@ -620,23 +681,22 @@ Rcpp::List hva_poisson(
     /* ------ Define Local Parameters ------ */
     
     /* ------ Define Global Parameters ------ */
-    double W = W_par[0];
-    double mu0 = 1.;
-
+    double W = W_par.at(0);
+    double mu0 = obs_par.at(0);
+    double delta_nb = obs_par.at(1);
 
     /*
     (rho, L) for negative-binomial distributed lags
     (mu, sg2) for log-normal distributed lags
     */
     
-    double par1 = lag_par[0];
-    double par2 = lag_par[1];
+
     unsigned int nlag = nlag_in;
     unsigned int p = nlag;
     if (!truncated)
     {
         nlag = n;
-        p = par2 + 1;
+        p = (unsigned int) lag_par.at(1) + 1;
     }
 
     
@@ -671,7 +731,7 @@ Rcpp::List hva_poisson(
 
     arma::vec rcomb(n,arma::fill::zeros);
     for (unsigned int l=1; l<=n; l++) {
-        rcomb.at(l-1) = binom(par2 - 2 + l,l - 1);
+        rcomb.at(l - 1) = binom((unsigned int)lag_par.at(1) - 2 + l, l - 1);
     }
     /* ------ Define Model ------ */
 
@@ -684,20 +744,13 @@ Rcpp::List hva_poisson(
     /*  ------ Define LBE ------ */
 
     /*  ------ Define HVB ------ */
-    arma::uvec idx_select; // m x 1
-    if (update_static)
-    {
-        idx_select = arma::find(eta_select == 1);
-    }
-    else
-    {
-        idx_select.set_size(m);
-        idx_select.fill(1)
-;
-    }
+    arma::uvec idx_select(m); // m x 1
+    arma::vec eta(m, arma::fill::zeros);
+    init_eta(
+        idx_select, eta, eta_select, 
+        obs_par, lag_par, W_par, m, update_static);
 
-    arma::vec eta = {W, mu0, par1, par2};
-    arma::vec eta_tilde(m, arma::fill::zeros);           // unknown part of eta which is also transformed to the real line
+    arma::vec eta_tilde(m, arma::fill::zeros); // unknown part of eta which is also transformed to the real line
     eta2tilde(eta_tilde, eta, idx_select, W_prior_type, m);
     arma::vec gamma(m, arma::fill::ones);
     arma::vec nu = tYJ(eta_tilde, gamma); // m x 1, Yeo-Johnson transform of eta_tilde
@@ -748,18 +801,6 @@ Rcpp::List hva_poisson(
             - psi: (n+1) x 1 gain factor
             - eta = (W,mu0,rho,M)
         */
-        if (eta_select.at(0) == 1) {
-            W = eta.at(0);
-            W_par.at(0) = W;
-        }
-        if (eta_select.at(1) == 1) {
-            mu0 = eta.at(1);
-            obs_par[0] = mu0;
-        }
-        if (eta_select.at(2) == 1) {
-            lag_par[0] = eta.at(2);
-        }
-
         arma::vec pmarg_y(n, arma::fill::zeros);
         bool use_discount = false;
         if (eta_select.at(0)==0 || s==0)
@@ -835,6 +876,21 @@ Rcpp::List hva_poisson(
             tilde2eta(eta, eta_tilde, idx_select, W_prior_type, m);
 
             bound_check(eta.at(0), "hva_poisson: eta at variational step", true, true);
+
+            if (eta_select.at(0) == 1)
+            {
+                W = eta.at(0);
+                W_par.at(0) = W;
+            }
+            if (eta_select.at(1) == 1)
+            {
+                mu0 = eta.at(1);
+                obs_par.at(0) = mu0;
+            }
+            if (eta_select.at(2) == 1)
+            {
+                lag_par.at(0) = eta.at(2);
+            }
         }
 
 
@@ -892,9 +948,7 @@ Rcpp::List hva_poisson(
     output["psi_all"] = Rcpp::wrap(psi_stored);
 
     // output["logp_diff"] = Rcpp::wrap(logp_stored);
-    
-    
-    
+
     // output["theta_last"] = Rcpp::wrap(theta_last); dtYJ_dtheta
     // p x niter
 

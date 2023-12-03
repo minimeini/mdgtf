@@ -110,7 +110,7 @@ sim_pois_dglm2 = function(
   params = list(model_code = model_code,
                 obs_params = obs_params,
                 lag_params = lag_params,
-                W_params = c(W,2,0.01,0.01),
+                W_params = c(W,2,2,0.01),
                 nlag=nlag, delta_lbe=delta)
   # pred = list(y=y[(n+1):ntotal],
   #             psi=psi[(n+1):ntotal],

@@ -19,8 +19,8 @@ Rcpp::List mcs_poisson(
     const arma::vec &Y, // nt x 1, the observed response
     const arma::uvec &model_code,
     const double &W, // (init, prior type, prior par1, prior par2)
-    const Rcpp::NumericVector &obs_par,
-    const Rcpp::NumericVector &lag_par, // init/true values of (mu, sg2) or (rho, L)
+    const Rcpp::NumericVector &obs_par_in,
+    const Rcpp::NumericVector &lag_par_in, // init/true values of (mu, sg2) or (rho, L)
     const unsigned int &nlag_in,
     const unsigned int &B,              // length of the B-lag fixed-lag smoother
     const unsigned int &N,                                     // number of particles
@@ -40,12 +40,12 @@ void smc_propagate_bootstrap(
     const arma::mat &Theta_old, // p x N
     const arma::vec &Ft,        // must be already updated if used
     const arma::uvec &model_code,
+    const arma::vec &obs_par,
+    const arma::vec &lag_par,
     const unsigned int &p, // dimension of DLM state space
     const int &t = -1,
     const unsigned int &nlag = 0,
     const unsigned int &N = 5000, // number of particles
-    const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
-    const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
     const double &delta_discount = 0.88,
     const bool &truncated = true,
     const bool &use_discount = false,
@@ -62,9 +62,9 @@ void smc_resample(
 Rcpp::List ffbs_poisson(
     const arma::vec &Y, // n x 1, the observed response
     const arma::uvec &model_code,
-    const Rcpp::NumericVector &W_par, // (init, prior type, prior par1, prior par2)
-    const Rcpp::NumericVector &obs_par,
-    const Rcpp::NumericVector &lag_par, // init/true values of (mu, sg2) or (rho, L)
+    const Rcpp::NumericVector &W_par_in, // (init, prior type, prior par1, prior par2)
+    const Rcpp::NumericVector &obs_par_in,
+    const Rcpp::NumericVector &lag_par_in, // init/true values of (mu, sg2) or (rho, L)
     const unsigned int &nlag_in,
     const unsigned int &N, // number of particles
     const double &theta0_upbnd,
@@ -80,8 +80,8 @@ void mcs_poisson(
     double &W,
     const arma::vec &ypad,        // (n+1) x 1, the observed response
     const arma::uvec &model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
-    const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
-    const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6), // init/true values of (mu, sg2) or (rho, L)
+    const arma::vec &obs_par,
+    const arma::vec &lag_par, // init/true values of (mu, sg2) or (rho, L)
     const unsigned int &nlag_in = 20,
     const unsigned int &B = 10,   // length of the B-lag fixed-lag smoother
     const unsigned int &N = 5000, // number of particles

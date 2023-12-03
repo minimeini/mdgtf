@@ -309,7 +309,7 @@ arma::vec init_Ft(
 
 void init_Gt(
 	arma::mat &Gt,
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &p,
 	const unsigned int &nlag,
 	const bool &truncated)
@@ -330,7 +330,7 @@ void init_Gt(
 	else
 	{
 		// not truncated and use negative-binomial lags
-		unsigned int L = lag_par[1];
+		unsigned int L = lag_par.at(1);
 
 		for (unsigned int i = 1; i < L; i++)
 		{
@@ -341,7 +341,7 @@ void init_Gt(
 		{
 			double c1 = std::pow(-1., static_cast<double>(i));
 			double c2 = binom(static_cast<double>(L), static_cast<double>(i));
-			double c3 = std::pow(lag_par[0], static_cast<double>(i));
+			double c3 = std::pow(lag_par.at(0), static_cast<double>(i));
 			Gt.at(1, i) = -c1;
 			Gt.at(1, i) *= c2;
 			Gt.at(1, i) *= c3;
@@ -353,7 +353,7 @@ void init_Gt(
 
 void init_Gt(
 	arma::cube &Gt,
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &p,
 	const unsigned int &nlag,
 	const bool &truncated)
@@ -597,9 +597,10 @@ unsigned int get_truncation_nlag(
 {
 	unsigned int nlag = 1;
 	bool cont = true;
+	arma::vec lag_par_arma(lag_par.begin(),lag_par.length());
 	while (cont)
 	{
-		arma::vec Fphi = get_Fphi(nlag,lag_par,trans_code);
+		arma::vec Fphi = get_Fphi(nlag, lag_par_arma, trans_code);
 		double prob = arma::accu(Fphi);
 
 		if (1 - prob <= err_margin)
@@ -626,9 +627,9 @@ unsigned int get_truncation_nlag(
 //' @export
 // [[Rcpp::export]]
 arma::vec get_Fphi( // equivalent to `dlags` but fixed params for lognorm
-	const unsigned int &nlag = 20, // number of Lags
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
-	const unsigned int &trans_code = 2)
+	const unsigned int &nlag, // number of Lags
+	const arma::vec &lag_par,
+	const unsigned int &trans_code)
 {
 	arma::vec Fphi(nlag, arma::fill::zeros);
 
@@ -647,7 +648,7 @@ arma::vec get_Fphi( // equivalent to `dlags` but fixed params for lognorm
 			// const double pk_sg2 = std::log(1. + sm2);
 			// const double pk_mu = 1.386262;
 			// const double pk_sg2 = 0.3226017;
-			Fphi = dlognorm(nlag, lag_par[0], lag_par[1]);
+			Fphi = dlognorm(nlag, lag_par.at(0), lag_par.at(1));
 		}
 		break;
 		case 2:
@@ -655,7 +656,7 @@ arma::vec get_Fphi( // equivalent to `dlags` but fixed params for lognorm
 			// solow: negative binomial and thus no truncation
 			// const double rho_hat = 0.395;
 			// const double r_hat = 6;
-			Fphi = dnbinom(nlag, lag_par[0], lag_par[1]);
+			Fphi = dnbinom(nlag, lag_par.at(0), lag_par.at(1));
 		}
 		break;
 		default:
@@ -1097,7 +1098,7 @@ double theta_new_nobs(
 	const arma::vec &hpsi_pad, // (n+1) x 1
 	const arma::vec &ypad,	   // (n+1) x 1
 	const unsigned int &tidx,  // t = 1, ..., n
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const arma::vec &lag_par,
 	const unsigned int &trans_code = 2,
 	const unsigned int &nlag_in = 20,
 	const bool &truncated = true)
@@ -1124,7 +1125,7 @@ double theta_new_nobs(
 arma::mat hpsi2theta(
 	const arma::mat& hpsi_pad, // (n+1) x k, each row is a different time point
 	const arma::vec& ypad, // (n+1) x 1
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const arma::vec &lag_par,
 	const unsigned int &trans_code = 2,
 	const unsigned int &nlag_in = 20,
 	const bool &truncated = true) 
@@ -1159,7 +1160,7 @@ void hpsi2theta(
 	arma::vec &theta,		   // n x 1
 	const arma::vec &hpsi_pad, // (n+1) x 1, each row is a different time point
 	const arma::vec &ypad,	   // (n+1) x 1
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &trans_code,
 	const unsigned int &nlag_in,
 	const bool &truncated)
@@ -1195,7 +1196,7 @@ void wt2theta(
 	arma::vec &theta,	 // n x 1
 	const arma::vec &wt, // n x 1
 	const arma::vec &y,	 // n x 1
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &gain_code,
 	const unsigned int &trans_code,
 	const unsigned int &nlag,

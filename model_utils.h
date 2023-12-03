@@ -117,14 +117,14 @@ arma::vec init_Ft(
 
 void init_Gt(
 	arma::mat &Gt,
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const arma::vec &lag_par,
 	const unsigned int &p = 20,
 	const unsigned int &nlag = 20,
 	const bool &truncated = true);
 
 void init_Gt(
 	arma::cube &Gt,
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const arma::vec &lag_par,
 	const unsigned int &p = 20,
 	const unsigned int &nlag = 20,
 	const bool &truncated = true);
@@ -198,7 +198,7 @@ unsigned int get_truncation_nlag(
 
 arma::vec get_Fphi(
 	const unsigned int &nlag,		 // number of Lags
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &trans_code);
 
 double trigamma_obj(
@@ -320,7 +320,7 @@ double theta_new_nobs(
 	const arma::vec &hpsi_pad, // (n+1) x 1
 	const arma::vec &ypad,	   // (n+1) x 1
 	const unsigned int &tidx,  // t = 1, ..., n
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &trans_code,
 	const unsigned int &nlag_in,
 	const bool &truncated);
@@ -328,7 +328,7 @@ double theta_new_nobs(
 arma::mat hpsi2theta(
 	const arma::mat &hpsi_pad, // (n+1) x k, each row is a different time point
 	const arma::vec &ypad,	   // (n+1) x 1
-	const Rcpp::NumericVector &lag_par,
+	const arma::vec &lag_par,
 	const unsigned int &trans_code,
 	const unsigned int &nlag_in,
 	const bool &truncated);
@@ -337,7 +337,7 @@ void hpsi2theta(
 	arma::vec &theta,
 	const arma::vec &hpsi, // (n+1) x 1, each row is a different time point
 	const arma::vec &ypad, // (n+1) x 1
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5,6),
+	const arma::vec &lag_par,
 	const unsigned int &trans_code = 2,
 	const unsigned int &nlag_in = 20,
 	const bool &truncated = true);
@@ -346,7 +346,7 @@ void wt2theta(
 	arma::vec &theta,	 // n x 1
 	const arma::vec &wt, // n x 1
 	const arma::vec &y,	 // n x 1
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const arma::vec &lag_par,
 	const unsigned int &gain_code = 3,
 	const unsigned int &trans_code = 2,
 	const unsigned int &nlag = 20,

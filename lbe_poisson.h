@@ -31,8 +31,8 @@ arma::mat update_at(
 	arma::mat &Gt, // p x p
 	const arma::mat &mt_prev, // p x N, m[t-1] = (psi[t-1], theta[t-1], theta[t-2])
 	const double &yprev,	  // y[t-1]
+	const arma::vec &lag_par,
 	const unsigned int &gain_code,
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
 	const unsigned int &nlag = 20,
 	const bool &truncated = true);
 
@@ -45,10 +45,10 @@ arma::mat update_at(
 void update_Gt(
 	arma::mat &Gt,			   // p x p
 	const arma::vec &mt,	   // p x 1
-	const double &y = 0., // obs
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
-	const unsigned int &gain_code = 3,
-	const unsigned int &trans_code = 3, // 0 - Koyck, 1 - Koyama, 2 - Solow
+	const double &y, // obs
+	const arma::vec &lag_par,
+	const unsigned int &gain_code,
+	const unsigned int &trans_code, // 0 - Koyck, 1 - Koyama, 2 - Solow
 	const unsigned int &nlag = 20,
 	const bool &truncated = true);
 
@@ -93,8 +93,8 @@ void forwardFilter(
 	const arma::vec &Y,		// (n+1) x 1, the observation (scalar), n: num of obs
 	const unsigned int &nt, // number of observations
 	const unsigned int &p,	// dimension of the state space
-	const Rcpp::NumericVector &obs_par = Rcpp::NumericVector::create(0., 30.),
-	const Rcpp::NumericVector &lag_par = Rcpp::NumericVector::create(0.5, 6),
+	const arma::vec &obs_par,
+	const arma::vec &lag_par,
 	const double &W = 0.01,
 	const unsigned int &obs_code = 0,
 	const unsigned int &link_code = 0,
@@ -137,8 +137,8 @@ Rcpp::List lbe_poisson(
 	const arma::vec &Y, // n x 1, the observed response
 	const arma::uvec &model_code,
 	const double &W, // (init, prior type, prior par1, prior par2)
-	const Rcpp::NumericVector &obs_par, // (mu0, delta_nb)
-	const Rcpp::NumericVector &lag_par, // init/true values of (mu, sg2) or (rho, L)
+	const Rcpp::NumericVector &obs_par_in, // (mu0, delta_nb)
+	const Rcpp::NumericVector &lag_par_in, // init/true values of (mu, sg2) or (rho, L)
 	const unsigned int &nlag_in,
 	const double &ci_coverage,
 	const unsigned int &npara,
@@ -159,8 +159,8 @@ Rcpp::List get_optimal_delta(
 	const arma::vec &Y, // n x 1
 	const arma::uvec &model_code,
 	const arma::vec &delta_grid,						   // m x 1
-	const Rcpp::NumericVector &obs_par, // (mu0, delta_nb)
-	const Rcpp::NumericVector &lag_par,
+	const Rcpp::NumericVector &obs_par_in, // (mu0, delta_nb)
+	const Rcpp::NumericVector &lag_par_in,
 	const double &theta0_upbnd,
 	const unsigned int &npara,
 	const double &ci_coverage,
