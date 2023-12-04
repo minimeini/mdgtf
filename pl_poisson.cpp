@@ -3,26 +3,40 @@ using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]
 
-
-
-
-
-void init_Ft(
-    arma::vec &Ft, 
-    const arma::vec &ypad, 
-    const arma::vec &Fphi,
-    const unsigned int &t, 
-    const unsigned int &p)
+arma::vec update_Fy(
+    const arma::vec &ypad,
+    const unsigned int &t,
+    const unsigned int &nlag)
 {
-    arma::vec Fy(p, arma::fill::zeros);
-    unsigned int tmpi = std::min(t, p);
+    arma::vec Fy(nlag, arma::fill::zeros);
+    unsigned int tmpi = std::min(t, nlag);
     if (t > 0)
     {
         // Checked Fy - CORRECT
         Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
     }
+    // Fy.for_each([&mu0](arma::vec::elem_type &val)
+    //             { 
+    //                 double tmp = val - mu0;
+    //                 tmp = std::max(tmp, EPS);
+    //                 val = tmp; 
+    //             });
+    return Fy;
+}
 
+
+
+
+void update_Ft(
+    arma::vec &Ft, 
+    const arma::vec &ypad, 
+    const arma::vec &Fphi,
+    const unsigned int &t, 
+    const unsigned int &nlag)
+{
+    arma::vec Fy = update_Fy(ypad, t, nlag);
     Ft = Fphi % Fy; // L(p) x 1
+    return;
 }
 
 
@@ -114,7 +128,7 @@ Rcpp::List mcs_poisson(
 
         if (truncated)
         { // truncated
-            init_Ft(Ft,ypad,Fphi,t,p);
+            update_Ft(Ft, ypad, Fphi, t, p);
         }
 
         bool use_custom_val = false;
@@ -443,7 +457,7 @@ Rcpp::List ffbs_poisson(
 
         if (nlag < nt)
         { // truncated
-            init_Ft(Ft, ypad, Fphi, t, p);
+            update_Ft(Ft, ypad, Fphi, t, p);
         }
 
         bool use_custom_val = false;
@@ -567,7 +581,7 @@ Rcpp::List ffbs_poisson(
 }
 
 void mcs_poisson(
-    arma::mat &R,       // (n+1) x 2, (psi,theta)
+    arma::vec &psi,       // (n+1) x 2, (psi,theta)
     arma::vec &pmarg_y, // n x 1, marginal likelihood of y
     double &W,
     const arma::vec &ypad,        // (n+1) x 1, the observed response
@@ -631,9 +645,9 @@ void mcs_poisson(
         double y_new = ypad.at(t + 1);
         double y_old = ypad.at(t);
 
-        if (nlag < nt)
-        { // truncated
-            init_Ft(Ft, ypad, Fphi, t, p);
+        if (truncated)
+        {
+            update_Ft(Ft, ypad, Fphi, t, p);
         }
 
         arma::mat Theta_new(p, N, arma::fill::zeros);
@@ -665,16 +679,10 @@ void mcs_poisson(
 
     // W = std::max(W,EPS);
 
-
-
-    R.zeros(); // (n+1) x 2
-    {
-        // theta_stored: p x N x (nt+B)
-        arma::mat psi_all = theta_stored.row(0);        // N x (nt+B)
-        auto med_psi = arma::median(psi_all, 0); // 0: median for each column
-        arma::vec RR = arma::vectorise(med_psi); // (nt+1)
-        R.col(0) = RR.tail(R.n_rows); // (nt+1) x 2
-    }
+    arma::mat psi_all = theta_stored.row(0);  // N x (nt+B)
+    auto med_psi = arma::median(psi_all, 0);  // 0: median for each column
+    arma::vec psi_tmp = arma::vectorise(med_psi); // (nt+B)
+    psi = psi_tmp.tail(ypad.n_elem); // nt + 1
 
     return;
 }
@@ -828,15 +836,7 @@ Rcpp::List pl_poisson(
         */
         if (truncated)
         {
-            // Update F[t] for Koyama model.
-            arma::vec Fy(p, arma::fill::zeros);
-            unsigned int tmpi = std::min(t, p);
-            if (t > 0)
-            {
-                // Checked Fy - CORRECT
-                Fy.head(tmpi) = arma::reverse(ypad.subvec(t + 1 - tmpi, t));
-            }
-            Ft = Fphi % Fy; // L(p) x 1
+            update_Ft(Ft, ypad, Fphi, t, p);
         }
         // Checked OK.
 

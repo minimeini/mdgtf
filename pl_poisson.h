@@ -3,17 +3,17 @@
 
 #include "lbe_poisson.h"
 
+arma::vec update_Fy(
+    const arma::vec &ypad,
+    const unsigned int &t,
+    const unsigned int &nlag);
 
-
-
-void init_Ft(
-    arma::vec &Ft, 
-    const arma::vec &ypad, 
+void update_Ft(
+    arma::vec &Ft,
+    const arma::vec &ypad,
     const arma::vec &Fphi,
-    const unsigned int &t, 
-    const unsigned int &p);
-
-
+    const unsigned int &t,
+    const unsigned int &nlag);
 
 Rcpp::List mcs_poisson(
     const arma::vec &Y, // nt x 1, the observed response
@@ -75,7 +75,7 @@ Rcpp::List ffbs_poisson(
     const bool &smoothing);
 
 void mcs_poisson(
-    arma::mat &R,       // (n+1) x 2, (psi,theta)
+    arma::vec &psi,       // (n+1) x 1
     arma::vec &pmarg_y, // n x 1, marginal likelihood of y
     double &W,
     const arma::vec &ypad,        // (n+1) x 1, the observed response

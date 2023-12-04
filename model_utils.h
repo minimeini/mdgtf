@@ -54,7 +54,19 @@ err_code
 ------ ModelCode -------
 */
 
-void tolower(std::string &S);
+inline void tolower(std::string &S)
+{
+	for (char &x : S)
+	{
+		x = tolower(x);
+	}
+	return;
+}
+
+inline const char *const bool2string(bool b)
+{
+	return b ? "true" : "false";
+}
 
 arma::uvec get_model_code(
 	const std::string &obs_dist,
@@ -93,6 +105,13 @@ bool bound_check(
 	const bool &check_zero,
 	const bool &check_negative);
 
+
+
+void bound_check(
+	const double &input, 
+	const std::string &name,
+	const double &lobnd, 
+	const double &upbnd);
 
 
 arma::uvec sample(
@@ -311,6 +330,36 @@ arma::vec get_theta_coef_solow(const unsigned int &L, const double &rho);
 // 	const arma::vec &coef,
 // 	const double &cnst);
 
+arma::vec Fphi_times_hpsi(
+	const arma::vec &Fphi_sub, // nelem x 1
+	const arma::vec &hpsi_sub);
+
+unsigned int theta_nelem(
+	const unsigned int &nobs,
+	const unsigned int &nlag_in,
+	const unsigned int &tidx,
+	const bool &truncated);
+
+void theta_subset(
+	arma::vec &Fphi_sub,
+	arma::vec &hpsi_sub,
+	arma::vec &ysub,
+	const arma::vec &hpsi_pad, // (n+1) x 1
+	const arma::vec &ypad,	   // (n+1) x 1
+	const arma::vec &lag_par,
+	const unsigned int &tidx,
+	const unsigned int &nelem,
+	const unsigned int &trans_code);
+
+void theta_subset(
+	arma::vec &Fphi_sub,
+	arma::vec &hpsi_sub,
+	const arma::vec &hpsi_pad, // (n+1) x 1
+	const arma::vec &lag_par,
+	const unsigned int &tidx,
+	const unsigned int &nelem,
+	const unsigned int &trans_code);
+
 double theta_new_nobs(
 	const arma::vec &Fphi_sub, // nelem x 1
 	const arma::vec &hpsi_sub, // nelem x 1
@@ -356,9 +405,13 @@ double loglike_obs(
 	const double &y, 
 	const double &lambda,
 	const unsigned int &obs_code = 1,
-	const double &delta_nb = 1,
+	const double &delta_nb = 30.,
 	const bool &return_log = false);
 
-
+double dloglike_dlambda(
+	const double &y,
+	const double &lambda,
+	const double &delta_nb = 30.,
+	const unsigned int &obs_code = 0.);
 
 #endif

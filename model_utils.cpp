@@ -5,14 +5,6 @@ using namespace Rcpp;
 // [[Rcpp::depends(RcppArmadillo,nloptr,BH)]]
 
 
-void tolower(std::string &S)
-{
-	for (char &x : S)
-	{
-		x = tolower(x);
-	}
-	return;
-}
 
 //' @export
 // [[Rcpp::export]]
@@ -155,14 +147,14 @@ void bound_check(
 	{
 		// std::cout << name + " = " << std::endl;
 		// input.t().print();
-		throw std::invalid_argument("bound_check: " + name + " is nonfinite");
+		throw std::invalid_argument("bound_check: " + name + " is infinite.");
 	}
 	if (check_zero)
 	{
 		bool is_zero = input.is_zero();
 		if (is_zero)
 		{
-			throw std::invalid_argument("bound_check: " + name + " is zeros");
+			throw std::invalid_argument("bound_check: " + name + " is zero.");
 		}
 	}
 	if (check_negative)
@@ -170,7 +162,7 @@ void bound_check(
 		bool is_negative = arma::any(arma::vectorise(input) < -EPS);
 		if (is_negative)
 		{
-			throw std::invalid_argument("bound_check: " + name + " is negative");
+			throw std::invalid_argument("bound_check: " + name + " is negative.");
 		}
 	}
 
@@ -187,14 +179,14 @@ void bound_check(
 	if (is_infinite)
 	{
 		// std::cout << name + " = " << input << std::endl;
-		throw std::invalid_argument("bound_check: " + name + " is nonfinite");
+		throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input)  + " is infinite.");
 	}
 	if (check_zero)
 	{
 		bool is_zero = std::abs(input) < EPS;
 		if (is_zero)
 		{
-			throw std::invalid_argument("bound_check: " + name + " is zeros");
+			throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input) + " is zero.");
 		}
 	}
 	if (check_negative)
@@ -202,7 +194,7 @@ void bound_check(
 		bool is_negative = input < -EPS;
 		if (is_negative)
 		{
-			throw std::invalid_argument("bound_check: " + name + " is negative");
+			throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input) + " is negative.");
 		}
 	}
 
@@ -230,6 +222,30 @@ bool bound_check(
 	return out_of_bound;
 }
 
+
+void bound_check(
+	const double &input, 
+	const std::string &name,
+	const double &lobnd, 
+	const double &upbnd)
+{
+	bool is_infinite = !std::isfinite(input);
+	if (is_infinite)
+	{
+		// std::cout << name + " = " << input << std::endl;
+		throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input) + " is infinite.");
+	}
+
+	bool out_of_lobnd = input < lobnd;
+	bool out_of_upbnd = input > upbnd;
+	if (out_of_lobnd || out_of_upbnd)
+	{
+		throw std::invalid_argument(
+			"bound_check: " + name + 
+			" out of lobnd = " + bool2string(out_of_lobnd) + 
+			", out of upbnd = " + bool2string(out_of_upbnd));
+	}
+}
 
 
 
@@ -1084,17 +1100,78 @@ arma::vec get_theta_coef_solow(const unsigned int &L, const double &rho)
 	return coef;
 }
 
+arma::vec Fphi_times_hpsi(
+	const arma::vec &Fphi_sub, // nelem x 1
+	const arma::vec &hpsi_sub) // nelem x 1
+{
+	arma::vec hpsi_rev = arma::reverse(hpsi_sub);
+	arma::vec coef = Fphi_sub % hpsi_rev;
+	return coef;
+}
 
+
+unsigned int theta_nelem(
+	const unsigned int &nobs,
+	const unsigned int &nlag_in,
+	const unsigned int &tidx,
+	const bool &truncated
+)
+{
+	unsigned int nlag = nlag_in;
+	if (!truncated)
+	{
+		nlag = nobs;
+	}
+	unsigned int nelem = std::min(tidx, nlag);
+	if (nelem == 0)
+	{
+		throw std::invalid_argument("theta_new_nobs: nelem must be positive integer.");
+	}
+	return nelem;
+}
+
+void theta_subset(
+	arma::vec &Fphi_sub,
+	arma::vec &hpsi_sub,
+	arma::vec &ysub,
+	const arma::vec &hpsi_pad, // (n+1) x 1
+	const arma::vec &ypad,	   // (n+1) x 1
+	const arma::vec &lag_par,
+	const unsigned int &tidx,
+	const unsigned int &nelem,
+	const unsigned int &trans_code)
+{
+	Fphi_sub = get_Fphi(nelem, lag_par, trans_code);
+	hpsi_sub = hpsi_pad.subvec(tidx - nelem + 1, tidx);
+	ysub = ypad.subvec(tidx - nelem, tidx - 1);
+}
+
+void theta_subset(
+	arma::vec &Fphi_sub,
+	arma::vec &hpsi_sub,
+	const arma::vec &hpsi_pad, // (n+1) x 1
+	const arma::vec &lag_par,
+	const unsigned int &tidx,
+	const unsigned int &nelem,
+	const unsigned int &trans_code)
+{
+	Fphi_sub = get_Fphi(nelem, lag_par, trans_code);
+	hpsi_sub = hpsi_pad.subvec(tidx - nelem + 1, tidx);
+}
 
 double theta_new_nobs(
 	const arma::vec &Fphi_sub, // nelem x 1
 	const arma::vec &hpsi_sub, // nelem x 1
 	const arma::vec &ysub)  // nelem x 1
 {
-	arma::vec yh = hpsi_sub % ysub;
-	arma::vec yh2 = arma::reverse(yh);
-	arma::vec coef = Fphi_sub % yh2;
-	double theta_new = arma::accu(coef);
+	arma::vec ysub_hat = ysub;
+	ysub_hat.elem(arma::find(ysub_hat < EPS)).fill(EPS);
+
+	arma::vec yrev = arma::reverse(ysub_hat);
+	arma::vec coef = Fphi_times_hpsi(Fphi_sub, hpsi_sub);
+	arma::vec theta_vec = coef % yrev;
+
+	double theta_new = arma::accu(theta_vec);
 	bound_check(theta_new, "theta_new_nobs: theta_new", false, true);
 	theta_new = std::max(theta_new, EPS);
 	return theta_new;
@@ -1113,16 +1190,14 @@ double theta_new_nobs(
 	const bool &truncated = true)
 {
 	unsigned int nobs = ypad.n_elem - 1;
-	unsigned int nlag = nlag_in;
-	if (!truncated) { nlag = nobs; }
-	unsigned int nelem = std::min(tidx, nlag);
-	if (nelem == 0) {
-		throw std::invalid_argument("theta_new_nobs: nelem must be positive integer.");
-	}
+	unsigned int nelem = theta_nelem(nobs,nlag_in,tidx,truncated);
 
-	arma::vec Fphi = get_Fphi(nelem, lag_par, trans_code); // nelem x 1
-	arma::vec hpsi_sub = hpsi_pad.subvec(tidx-nelem + 1, tidx);
-	arma::vec ysub = ypad.subvec(tidx-nelem, tidx - 1);
+	arma::vec Fphi; arma::vec hpsi_sub; arma::vec ysub;
+	theta_subset(
+		Fphi, hpsi_sub, ysub,
+		hpsi_pad, ypad, lag_par,
+		tidx, nelem, trans_code);
+
 	double theta_new = theta_new_nobs(Fphi,hpsi_sub,ysub);
 	return theta_new;
 }
@@ -1262,8 +1337,8 @@ double loglike_obs(
 
 
 			if (!return_log) {
+				loglike = std::min(loglike, UPBND);
 				loglike = std::exp(loglike);
-				// loglike = std::exp(std::min(loglike,UPBND));
 			}
 		}
 		break;
@@ -1287,4 +1362,47 @@ double loglike_obs(
 
 	bound_check(loglike,"loglike_obs: loglike");
 	return loglike;
+}
+
+
+
+double dloglike_dlambda(
+	const double &y, 
+	const double &lambda,
+	const double &delta_nb,
+	const unsigned int &obs_code)
+{
+	double deriv = 0.;
+	switch (obs_code)
+	{
+	case 0: // negative-binomial parameterized by mean
+	{
+		deriv = y / lambda;
+		deriv -= (y + delta_nb) / (lambda + delta_nb);
+	}
+	break;
+	case 1: // Poisson
+	{
+		deriv = y / lambda;
+		deriv -= 1.;
+	}
+	break;
+	case 2: // negative-binomial parameterized by prob
+	{
+		throw std::invalid_argument("dloglike_dlambda: nbinom-p not implemented.");
+	}
+	break;
+	case 3: // Gaussian
+	{
+		throw std::invalid_argument("dloglike_dlambda: Gaussian not implemented.");
+	}
+	break;
+	default:
+	{
+		throw std::invalid_argument("dloglike_dlambda: unknown observation distribution.");
+	}
+	}
+
+	bound_check(deriv, "dloglike_dlambda: deriv");
+	return deriv;
 }

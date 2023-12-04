@@ -16,10 +16,11 @@ Core VB function is Loaiza-Maya's code: `VB_step.m` and `gradient_compute.m`
 
 theta
     - vector includes all unknown parameters to be learned by HVB.
-    - These parameters are already mapped to the real line.
+    - These parameters are already mapped to the real line but before YJ transform.
     - In our code, theta = YJinv(nu) and sometimes refer to as `YJinv`
     - In our code, it is also refer to as `eta_tilde`
 nu or phi
+    - vector of all unknown parameters to be learned by HVB after YJ transform.
     - Yeo-Johnson transfrom: theta -> nu, i.e., nu = tYJ(theta)
     - `nu` is used in Loaiza-Maya's manuscript.
     - Refer to as `phi` in Loaiza-Maya's Matlab code.
@@ -44,10 +45,6 @@ Yeo-Johnson Transformation
 - Gradients
 */
 
-arma::vec mat2vech(const arma::mat &lotri)
-{                                                            // m x k
-    return lotri.elem(arma::trimatl_ind(arma::size(lotri))); // dim=m*k-(k-1)*k/2
-}
 
 /*
 Yeo-Johnson Transform
@@ -57,27 +54,23 @@ double tYJ(
     const double theta,
     const double gamma)
 {
+    double sgn = (theta < 0.) ? -1. : 1.;
+    double gmt = (theta < 0.) ? (2. - gamma) : gamma;
+    bound_check(gmt, "tYJ: gmt", false, true);
+
     double nu;
-    if (theta < arma::datum::eps && std::abs(gamma - 2.) > arma::datum::eps)
+    double tmp = std::abs(theta);
+    if (gmt < EPS8)
     {
-        // when theta/nu < 0 and gamma != 2
-        nu = -(std::pow(-theta + 1., 2. - gamma) - 1.) / (2. - gamma);
-    }
-    else if (theta < arma::datum::eps)
-    {
-        // when theta < 0 and gamma == 2
-        nu = -std::log(-theta + 1.);
-    }
-    else if (std::abs(gamma) > arma::datum::eps)
-    {
-        // when theta >= 0 and gamma != 0
-        nu = (std::pow(theta + 1., gamma) - 1.) / gamma;
+        nu = std::log(tmp + 1.);
     }
     else
     {
-        // when theta >= 0 and gamma == 0
-        nu = std::log(theta + 1.);
+        nu = std::pow(tmp + 1., gmt) - 1.;
+        nu /= gmt;
     }
+    nu *= sgn;
+
     bound_check(nu,"tYJ: nu");
     return nu;
 } // Status: Checked. OK.
@@ -106,30 +99,26 @@ double tYJinv(
     const double nu,
     const double gamma)
 {
-    double theta, gmt;
-    if (nu < arma::datum::eps && std::abs(gamma - 2.) > arma::datum::eps)
+    bound_check(nu,"tYJinv: nu");
+    double sgn = (nu < 0.) ? -1. : 1.;
+    double gmt = (nu < 0.) ? (2. - gamma) : gamma;
+    bound_check(gmt, "tYJinv: gmt", false, true);
+
+    double tmp, theta;
+    if (gmt < EPS8)
     {
-        // when theta/nu < 0 and gamma != 2
-        gmt = 2. - gamma;
-        theta = 1. - std::pow(1. - gmt * nu, 1. / gmt);
-    }
-    else if (nu < arma::datum::eps)
-    {
-        // when theta/nu < 0 and gamma == 2
-        theta = 1. - std::exp(-nu);
-    }
-    else if (std::abs(gamma) > arma::datum::eps)
-    {
-        // when theta/nu >= 0 and gamma != 0
-        gmt = gamma;
-        theta = std::pow(1. + gmt * nu, 1. / gmt) - 1.;
+        tmp = std::abs(nu);
+        tmp = std::min(tmp,UPBND);
+        theta = std::exp(tmp) - 1.;
     }
     else
     {
-        // when theta/nu >= 0 and gamma == 0
-        theta = std::exp(nu) - 1.;
+        tmp = std::abs(nu*gmt);
+        theta = std::pow(1. + tmp, 1. / gmt) - 1.;
     }
-    bound_check(theta,"tYJinv: theta");
+    theta *= sgn;
+
+    bound_check(theta,"tYJinv: " + std::to_string(gmt < EPS8) + " theta");
     return theta;
 } // Status: Checked. OK.
 
@@ -151,7 +140,8 @@ arma::vec tYJinv(
 // Ref: `eta2tau.m`
 double gamma2tau(const double gamma)
 {
-    double output = -std::log(2. / gamma - 1.);
+    double output = std::log(gamma + EPS);
+    output -= std::log(2. - gamma + EPS);
     bound_check(output,"gamma2tau");
     return output;
 } // Status: Checked. OK.
@@ -171,8 +161,9 @@ arma::vec gamma2tau(const arma::vec &gamma)
 // Ref: `tau2eta.m`
 double tau2gamma(const double tau)
 {
-    double output = 2. / (std::exp(-tau) + 1.);
-    bound_check(output,"tau2gamma");
+    double neg_tau = std::min(-tau, UPBND);
+    double output = 2. / (std::exp(neg_tau) + 1.);
+    bound_check(output,"tau2gamma: gamma", 0., 2.);
     return output;
 } // Status: Checked. OK.
 
@@ -193,7 +184,8 @@ arma::vec tau2gamma(const arma::vec &tau)
 // Ref: `deta_dtau.m`
 double dgamma_dtau_tau(const double tau)
 {
-    double etau = std::exp(tau);
+    double etau = std::min(tau, UPBND);
+    etau = std::exp(etau);
     double output = 2. * etau / std::pow(1. + etau, 2.);
     bound_check(output,"dgamma_dtau_tau");
     return output;
@@ -218,36 +210,25 @@ double dtYJ_dtheta(
     const double gamma,
     const bool log = false)
 {
-    double gamma_ = gamma;
-    if (std::abs(gamma_) < 0.0000001)
-    {
-        gamma_ = 0.0000001;
-    }
-
     double output;
-    if (theta < arma::datum::eps)
+    double th_abs = std::abs(theta);
+    double sgn = (theta < 0.) ? -1 : 1;
+    if ((std::abs(gamma) < EPS8) || (std::abs(2 - gamma) < EPS8))
     {
-        if (log)
-        {
-            output = (1. - gamma_) * std::log(-theta + 1.);
-        }
-        else
-        {
-            output = std::pow(-theta + 1., 1. - gamma_);
-        }
+        output = - std::log(th_abs + 1.);
     }
     else
     {
-        if (log)
-        {
-            output = (gamma_ - 1.) * std::log(theta + 1.);
-        }
-        else
-        {
-            output = std::pow(theta + 1., gamma_ - 1.);
-        }
+        output = std::log(th_abs + 1.);
+        output *= sgn * (gamma - 1.);
     }
 
+    if (!log)
+    {
+        output = std::min(output,UPBND);
+        output = std::exp(output);
+    }
+    
     bound_check(output,"dtYJ_dtheta");
     return output;
 } // Status: Checked. OK.
@@ -269,21 +250,26 @@ arma::mat dtYJ_dtheta(
 /*
 Loaiza-Maya et al., PDF, bottom of p26
 */
-double dtYJ_dgamma(const double c, const double gamma)
+double dtYJ_dgamma(const double theta, const double gamma)
 {
-    double res, gmt;
-    if (c < arma::datum::eps)
+    double sgn = (theta < 0.) ? -1. : 1.;
+    double gmt = (theta < 0.) ? (2. - gamma) : gamma;
+    bound_check(gmt, "dtYJ_dgamma", false,true);
+
+    double res;
+    if (gmt < EPS8)
     {
-        gmt = 2. - gamma;
-        res = 1. - std::pow(1. - c, gmt) * (1. - gmt * std::log(1. - c));
-        res *= std::pow(gmt, -2.);
+        res = 0.;
     }
     else
     {
-        gmt = gamma;
-        res = 1. + std::pow(1. + c, gmt) * (std::log(1. + c) * gmt - 1.);
+        double th_abs = std::abs(theta);
+        res = std::pow(1. + th_abs, gmt);
+        res *= std::log(1. + th_abs) * gmt - 1.;
+        res += 1.;
         res *= std::pow(gmt, -2.);
     }
+    
     bound_check(res,"dtYJ_dgamma: res");
     return res;
 } // Check -- Correct
@@ -316,21 +302,26 @@ Correspond to `./Derivatives/dtheta_dphi.m`
 */
 double dYJinv_dnu(const double nu, const double gamma)
 {
-    double gmt, res;
-    double gamma_ = std::max(gamma, 0.0000001);
-    if (nu < arma::datum::eps)
+    double gmt = (nu < 0.) ? (2. - gamma) : gamma;
+    bound_check(gmt, "dYJinv_dnu: gmt", false, true);
+
+    double res, tmp;
+    if (gmt < EPS8)
     {
-        gmt = 2. - gamma_;
-        res = std::pow(1. - gmt * nu, (1. - gmt) / gmt);
+        tmp = std::abs(nu);
+        tmp = std::min(tmp, UPBND);
+        res = std::exp(tmp);
     }
     else
     {
-        gmt = gamma_;
-        res = std::pow(1. + gmt * nu, (1. - gmt) / gmt);
+        tmp = std::abs(gmt * nu);
+        double pow = (1. / gmt) - 1.;
+        res = std::pow(1. + tmp, pow);
     }
     bound_check(res, "dtYJ_dnu: res");
     return res;
 } // Status: Checked. OK.
+
 
 arma::mat dYJinv_dnu(
     const arma::vec &nu, // m x 1
@@ -361,22 +352,23 @@ dYJinv_dgamma(nu,gm)
 */
 double dYJinv_dgamma(const double nu, const double gamma)
 {
-    double gmt, res;
-    if (nu < arma::datum::eps)
+    double gmt = (nu < 0.) ? (2. - gamma) : gamma;
+    bound_check(gmt, "dYJinv_dgamma: gmt", false, true);
+
+    double res;
+    if (std::abs(gmt) < EPS8)
     {
-        gmt = 2. - gamma;
-        res = std::log(1. - gmt * nu) + gmt * nu / (1. - gmt * nu);
-        res *= std::pow(gmt, -2.);
-        res *= -std::pow(1. - gmt * nu, 1. / gmt);
+        res = 0.;
     }
-    else
+    else 
     {
-        gmt = gamma;
-        res = -std::log(1. + gmt * nu) + gmt * nu / (1. + gmt * nu);
+        double tmp = std::abs(gmt * nu);
+        res = std::log(1. + tmp) + gmt * nu / (1. + tmp);
         res *= std::pow(gmt, -2.);
-        res *= std::pow(1. + gmt * nu, 1. / gmt);
+        res *= -std::pow(1. + tmp, 1. / gmt);
     }
-    bound_check(res, "dtYJinv_dgamma: res");
+
+    bound_check(res, "dYJinv_dgamma: res");
     return res;
 } // Status: Checked. OK.
 
@@ -399,12 +391,6 @@ arma::mat dYJinv_dtau(
     return grad;
 } // Status: Checked. OK.
 
-// One-dimensional case of `dtheta_dBDelta.m`. We only have D in this case and thus eps.
-// Ref: `dtheta_dBDelta.m`
-double dYJinv_dBD(const double nu, const double gamma, const double eps)
-{
-    return dYJinv_dnu(nu, gamma) * eps;
-} // Status: Checked. OK.
 
 /*
 Appendix B.2 equation (ii)
@@ -412,20 +398,22 @@ Appendix B.2 equation (ii)
 arma::mat dYJinv_dB(
     const arma::vec &nu,    // m x 1
     const arma::vec &gamma, // m x 1
-    const arma::vec &xi)
+    const arma::vec &xi) // k x 1
 { // k x 1
 
     const unsigned int m = nu.n_elem;
 
     arma::mat dtheta_dnu = dYJinv_dnu(nu, gamma); // m x m
     arma::mat Im(m, m, arma::fill::eye);
-    arma::mat grad = dtheta_dnu * arma::kron(xi.t(), Im); // m x mk
+    arma::mat dnu_dB = arma::kron(xi.t(),Im); // (1 x k) and (m x m)
+    arma::mat dtheta_dB = dtheta_dnu * dnu_dB; // m x mk
 
-    return grad;
+    return dtheta_dB;
 } // Status: Checked. OK.
 
 /*
 Appendiex B.2 equation (iii)
+Ref: `dtheta_dBDelta.m`
 */
 arma::mat dYJinv_dD(
     const arma::vec &nu,    // m x 1
@@ -434,26 +422,12 @@ arma::mat dYJinv_dD(
 { // m x 1
 
     arma::mat dtheta_dnu = dYJinv_dnu(nu, gamma);     // m x m
-    arma::mat grad = dtheta_dnu * arma::diagmat(eps); // m x m
+    arma::mat dnu_dd = arma::diagmat(eps);
+    arma::mat dtheta_dd = dtheta_dnu * dnu_dd; // m x m
 
-    return grad;
+    return dtheta_dd;
 } // Status: Checked. OK.
 
-/*
-First order derivatives of YJ inv with respect to mu, sig, tau
-*/
-arma::vec dYJinv(
-    const double nu, // c = YJinv(nu), nu = mu+sig*eps
-    const double eps,
-    const double gamma)
-{
-
-    arma::vec dd(3);
-    dd.at(0) = dYJinv_dnu(nu, gamma);      // == line 20 of ./Derivatives/dtheta_dmu.m
-    dd.at(1) = dYJinv_dBD(nu, gamma, eps); // TODO: Check line 26 of ./Derivatives/dtheta_dBDelta.m
-    dd.at(2) = dYJinv_dtau(nu, gamma);     // == line 22 of ./Derivatives/dtheta_dtau.m
-    return dd;
-} // OK.
 
 
 arma::mat get_sigma_inv(
@@ -461,8 +435,8 @@ arma::mat get_sigma_inv(
     const arma::vec &d,
     const unsigned int k)
 {
-
-    arma::mat Dm2 = arma::diagmat(1. / arma::pow(d, 2.)); // m x m, D^{-2}
+    arma::vec dinv = 1. / arma::pow(d,2.);
+    arma::mat Dm2 = arma::diagmat(dinv); // m x m, D^{-2}
     arma::mat Ik(k, k, arma::fill::eye);
     arma::mat tmp = Ik + B.t() * Dm2 * B;                     // k x k
     arma::mat SigInv = Dm2 - Dm2 * B * tmp.i() * B.t() * Dm2; // Woodbury formula
@@ -492,7 +466,9 @@ arma::vec dlogq_dtheta(
 
 
 
-arma::vec rtheta(
+void rtheta(
+    arma::vec &nu,
+    arma::vec &theta,
     arma::vec &xi,          // k x 1
     arma::vec &eps,         // m x 1
     const arma::vec &gamma, // m x 1
@@ -507,9 +483,9 @@ arma::vec rtheta(
     xi = arma::randn(k, 1);
     eps = arma::randn(m, 1);
 
-    arma::vec nu = mu + B * xi + d % eps;
-    arma::vec output = tYJinv(nu, gamma);
-    return output; // m x 1, static parameters
+    nu = mu + B * xi + d % eps;
+    theta = tYJinv(nu, gamma);
+    return; // m x 1, static parameters
 }
 
 

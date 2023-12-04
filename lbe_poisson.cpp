@@ -40,7 +40,6 @@ arma::mat update_at(
 		double tmp1 = std::pow(1. - lag_par.at(0), lag_par.at(1));
 		tmp1 *= yprev;
 
-
 		for (unsigned int i = 0; i < N; i++)
 		{
 
@@ -89,13 +88,14 @@ void update_Gt(
 	if (!truncated && (trans_code == 2))
 	{ // Solow - Checked. Correct.
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code);
-		Gt.at(1,0) *= std::pow(1.-lag_par.at(0),lag_par.at(1)) * y;
+		Gt.at(1,0) *= std::pow(1.-lag_par.at(0),lag_par.at(1));
+		Gt.at(1, 0) *= y;
 		// Gt.at(1,0) *= std::pow((1.-rho)*(1.-rho),alpha)*y;
 	}
 	else if (!truncated && (trans_code == 0))
 	{ // Koyck
 		Gt.at(1,0) = hpsi_deriv(mt.at(0),gain_code);
-		Gt.at(1,0) *= y;
+		Gt.at(1, 0) *= y;
 	}
 }
 
@@ -148,6 +148,11 @@ void update_Ft_truncated(
 	unsigned int nelem = nend - nstart + 1;
 
 	Fy = arma::reverse(Y.subvec((unsigned int) nstart, nend));
+	// Fy.for_each([&mu0](arma::vec::elem_type &val){
+	// 	double tmp = val - mu0;
+	// 	tmp = std::max(tmp, EPS);
+	// 	val = tmp;
+	// });
 	Fy.elem(arma::find(Fy<=EPS)).fill(0.01/L_);
 	Ft = Fphi.head(nelem) % Fy;
 	return;

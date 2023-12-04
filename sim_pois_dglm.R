@@ -15,7 +15,7 @@ sim_pois_dglm2 = function(
     err_dist = "gaussian", # {"gaussian","laplace","cauchy","left_skewed_normal"},
     obs_params = c(0.,30.), # (mu0, delta_nb),
     lag_params = c(0.5,6), # (rho, L) or (mu, sg2)
-    W = 0.01, # Evolution variance
+    W_params = c(0.01,2,0.01,0.01),
     nlag = 20,
     ci_coverage = 0.95,
     rng.seed = NULL,
@@ -43,6 +43,7 @@ sim_pois_dglm2 = function(
   wt = rep(0,ntotal)
   if (!is.null(rng.seed)) { set.seed(rng.seed)}
   
+  W = W_params[1]
   err_dist = tolower(err_dist)
   if (err_dist == "gaussian") {
     wt = rnorm(ntotal,0,sqrt(W)) # wt[1] = 0
@@ -110,7 +111,7 @@ sim_pois_dglm2 = function(
   params = list(model_code = model_code,
                 obs_params = obs_params,
                 lag_params = lag_params,
-                W_params = c(W,2,2,0.01),
+                W_params = W_params,
                 nlag=nlag, delta_lbe=delta)
   # pred = list(y=y[(n+1):ntotal],
   #             psi=psi[(n+1):ntotal],
