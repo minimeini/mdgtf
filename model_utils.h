@@ -11,13 +11,9 @@
 #include <RcppArmadillo.h>
 #include <nlopt.h>
 #include "nloptrAPI.h"
+#include "utils.h"
 
 
-inline constexpr double EPS = 2.220446e-16;
-inline constexpr double EPS8 = 1.e-10;
-inline constexpr double UPBND = 700.;
-inline constexpr double covid_m = 4.7;
-inline constexpr double covid_s = 2.9;
 /*
 ------ Model Code ------
 
@@ -54,19 +50,6 @@ err_code
 ------ ModelCode -------
 */
 
-inline void tolower(std::string &S)
-{
-	for (char &x : S)
-	{
-		x = tolower(x);
-	}
-	return;
-}
-
-inline const char *const bool2string(bool b)
-{
-	return b ? "true" : "false";
-}
 
 arma::uvec get_model_code(
 	const std::string &obs_dist,
@@ -84,51 +67,6 @@ void get_model_code(
 	const arma::uvec &model_code);
 
 
-
-void bound_check(
-	const arma::mat &input,
-	const std::string &name = "function",
-	const bool &check_zero = false,
-	const bool &check_negative = false);
-
-
-void bound_check(
-	const double &input,
-	const std::string &name = "function",
-	const bool &check_zero = false,
-	const bool &check_negative = false);
-
-
-
-bool bound_check(
-	const double &input,
-	const bool &check_zero,
-	const bool &check_negative);
-
-
-
-void bound_check(
-	const double &input, 
-	const std::string &name,
-	const double &lobnd, 
-	const double &upbnd);
-
-
-arma::uvec sample(
-	const unsigned int n,
-	const unsigned int size,
-	const arma::vec &weights,
-	bool replace = true,
-	bool zero_start = true);
-
-unsigned int sample(
-	const int n,
-	const arma::vec &weights,
-	bool zero_start = true);
-
-unsigned int sample(
-	const int n,
-	bool zero_start);
 
 arma::vec init_Ft(
 	const unsigned int &p, // dimension of DLM state space
@@ -186,12 +124,6 @@ arma::vec dnbinom(
 	const double &L_order);
 
 
-
-unsigned int get_truncation_nlag(
-	const unsigned int &trans_code,
-	const double &err_margin,
-	const unsigned int &L_order,
-	const double &rho);
 
 arma::vec dlags(
 	const unsigned int &nlags,
@@ -363,7 +295,7 @@ void theta_subset(
 double theta_new_nobs(
 	const arma::vec &Fphi_sub, // nelem x 1
 	const arma::vec &hpsi_sub, // nelem x 1
-	const arma::vec &ysub);
+	const arma::vec &ysub); // nelem x 1
 
 double theta_new_nobs(
 	const arma::vec &hpsi_pad, // (n+1) x 1
@@ -408,10 +340,29 @@ double loglike_obs(
 	const double &delta_nb = 30.,
 	const bool &return_log = false);
 
+
+double sample_obs(
+	const double &lambda, 
+	const arma::vec &obs_par, 
+	const unsigned int &obs_code);
+
+
 double dloglike_dlambda(
 	const double &y,
 	const double &lambda,
 	const double &delta_nb = 30.,
 	const unsigned int &obs_code = 0.);
+
+arma::mat forecast_one_step(
+	const arma::mat &psi_pad, // (nobs+1) x N
+	const arma::vec &ypad,	  // (nobs+1) x 1
+	const arma::vec &W_par,
+	const arma::vec &lag_par,
+	const arma::vec &obs_par,
+	const unsigned int &obs_code,
+	const unsigned int &trans_code,
+	const unsigned int &gain_code,
+	const unsigned int &nlag_in,
+	const bool &truncated);
 
 #endif

@@ -1,0 +1,121 @@
+#pragma once
+#ifndef ERRDIST_H
+#define ERRDIST_H
+
+
+#include <RcppArmadillo.h>
+#include "utils.h"
+// [[Rcpp::plugins(cpp17)]]
+// [[Rcpp::depends(RcppArmadillo)]]
+
+/**
+ * @brief Definition of error distribution
+ *
+ * @param par1 W
+ * @param par2 w[0] the initial value of the error sequence
+ * @param wt (nT + 1), vector of normal errors.
+ * @param psi (nT + 1), vector of random walk, i.e., cumulative errors.
+ *
+ * @code{.cpp}
+ * arma::vec psi = arma::cumsum(wt)
+ * @endcode
+ *
+ */
+class ErrDist : public Dist
+{
+public:
+    ErrDist() : par1(_par1), par2(_par2), wt(_wt), psi(_psi) 
+    {
+        init_default();
+        return;
+    }
+
+
+    ErrDist(
+        const std::string &err_dist,
+        const double &par1,
+        const double &par2
+    ) : par1(_par1), par2(_par2), wt(_wt), psi(_psi)
+    {
+        init(err_dist, par1, par2);
+    }
+
+
+    void init(
+        const std::string &err_dist = "gaussian",
+        const double &par1 = 0.01,
+        const double &par2 = 0.)
+    {
+        _name = err_dist;
+        _par1 = par1;
+        _par2 = par2;
+        return;
+    }
+
+
+    void init_default()
+    {
+        _name = "gaussian";
+        _par1 = 0.01;  // mu0
+        _par2 = 0.; // delta_nb
+        return;
+    }
+
+
+    const double &par1;
+    const double &par2;
+    const arma::vec &wt;
+    const arma::vec &psi;
+
+    static arma::vec sample(
+        const unsigned int &nT, 
+        const double &W = 0.01, 
+        const double &w0 = 0.,
+        const bool &cumsum = true)
+    {
+        arma::vec wt(nT + 1, arma::fill::zeros);
+        double Wsd = std::sqrt(W);
+        wt.randn();
+        wt.for_each([&Wsd](arma::vec::elem_type &val)
+                    { val *= Wsd; });
+        wt.at(0) = w0;
+
+        arma::vec output = wt;
+        if (cumsum)
+        {
+            output = arma::cumsum(wt);
+        }
+
+        return output;
+    }
+
+    void sample(
+        const unsigned int &nT,
+        const bool &cumsum = true
+    )
+    {
+        _wt.set_size(nT + 1);
+        _wt.zeros();
+
+        double Wsd = std::sqrt(_par1);
+        _wt.randn();
+        _wt.for_each([&Wsd](arma::vec::elem_type &val)
+                    { val *= Wsd; });
+        _wt.at(0) = _par2;
+
+        if (cumsum)
+        {
+            _psi = arma::cumsum(_wt);
+        }
+        return;
+    }
+
+private:
+    unsigned int _nT;
+    arma::vec _wt;
+    arma::vec _psi;           // Initial value (at time = 0) of the normal errors.
+};
+
+
+
+#endif

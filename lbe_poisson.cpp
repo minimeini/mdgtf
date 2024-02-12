@@ -1,4 +1,6 @@
 #include "lbe_poisson.h"
+#include "TransFunc.hpp"
+
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp11)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]

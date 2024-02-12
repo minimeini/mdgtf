@@ -529,8 +529,7 @@ Rcpp::List mcmc_disturbance_pois(
 	const unsigned int &nburnin = 0,
 	const unsigned int &nthin = 1,
 	const unsigned int &nsample = 1,
-	const bool &truncated = true, 
-	const bool &summarize_return = true)
+	const bool &truncated = true)
 { // n x 1
 
 	unsigned int obs_code, link_code, trans_code, gain_code, err_code;
@@ -604,7 +603,6 @@ Rcpp::List mcmc_disturbance_pois(
 	}
 	
 
-	bool saveiter;
 	arma::vec param_accept(3,arma::fill::zeros);
 	arma::mat param_stored(nsample, 3, arma::fill::zeros);
 	arma::mat logp2_stored(3, nsample, arma::fill::zeros);
@@ -618,9 +616,6 @@ Rcpp::List mcmc_disturbance_pois(
 	for (unsigned int b = 0; b < ntotal; b++)
 	{
 		R_CheckUserInterrupt();
-		saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
-
-		
 
 		// [OK] Update evolution/state disturbances/errors, denoted by wt.
 		arma::vec Bs(n, arma::fill::zeros);
@@ -702,6 +697,7 @@ Rcpp::List mcmc_disturbance_pois(
 
 
 		// store samples after burnin and thinning
+		bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
 		if (saveiter || b == (ntotal - 1))
 		{
 			unsigned int idx_run;
@@ -744,15 +740,9 @@ Rcpp::List mcmc_disturbance_pois(
 	arma::mat psi_stored(n + 1, nsample);
 	psi_stored.tail_rows(n) = arma::cumsum(wt_stored, 0);
 
-	if (summarize_return)
-	{
-		arma::vec qProb = {0.025, 0.5, 0.975};
-		output["psi"] = Rcpp::wrap(arma::quantile(psi_stored, qProb, 1)); // (n+1) x 3
-	}
-	else
-	{
-		output["psi"] = Rcpp::wrap(psi_stored);
-	}
+	arma::vec qProb = {0.025, 0.5, 0.975};
+	output["psi"] = Rcpp::wrap(arma::quantile(psi_stored, qProb, 1)); // (n+1) x 3
+	output["psi_all"] = Rcpp::wrap(psi_stored);
 
 	wt_accept /= static_cast<double>(ntotal);
 	output["wt_accept"] = Rcpp::wrap(wt_accept);

@@ -46,10 +46,10 @@ Rcpp::List mcs_poisson(
     const arma::vec &Y, // nt x 1, the observed response
     const arma::uvec &model_code,
     const double &W = 0.01, // (init, prior type, prior par1, prior par2)
-    const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.),
+    const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.), // (mu0, delta_nb),
     const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6), // init/true values of (mu, sg2) or (rho, L)
     const unsigned int &nlag_in = 20,
-    const unsigned int &B = 20,                                       // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
+    const unsigned int &B = 20,        // length of the B-lag fixed-lag smoother (Anderson and Moore 1979; Kitagawa and Sato)
     const unsigned int &N = 5000,                                     // number of particles
     const double &theta0_upbnd = 2.,                                  // Upper bound of uniform prior for theta0
     const Rcpp::NumericVector &qProb = Rcpp::NumericVector::create(0.025, 0.5, 0.975),
@@ -169,7 +169,7 @@ Rcpp::List mcs_poisson(
     arma::mat psi = psi_all.cols(B-1, nt+B-1); // N x nt
     arma::mat RR = arma::quantile(psi, Rcpp::as<arma::vec>(qProb), 0); // 0: quantile for each column vector
     output["psi"] = Rcpp::wrap(RR.t());
-    output["psi_all"] = Rcpp::wrap(psi_all);
+    output["psi_all"] = Rcpp::wrap(psi_all.t());
 
     // arma::mat hpsiR = psi2hpsi(RR, gain_code); // hpsi: p x N
     // double theta0 = 0;

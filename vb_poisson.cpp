@@ -12,27 +12,21 @@ using namespace Rcpp;
 Rcpp::List vb_poisson(
     const arma::vec &Y, // n x 1, the observed response
     const arma::uvec &model_code,
-    const arma::uvec &eta_select,     // 4 x 1, indicator for unknown (=1) or known (=0), global parameters: W, mu0, rho, M
-    const arma::vec &eta_init,        // 4 x 1, if true/initial values should be provided here
-    const arma::uvec &eta_prior_type, // 4 x 1
-    const arma::mat &eta_prior_val,   // 2 x 4, priors for each element of eta
-    const unsigned int L_order = 0,
-    const unsigned int nlag_ = 0,
-    const double delta = NA_REAL,
-    const unsigned int nburnin = 1000,
-    const unsigned int nthin = 2,
-    const unsigned int nsample = 5000, // number of iterations for variational inference
-    const Rcpp::Nullable<Rcpp::NumericVector> &m0_prior = R_NilValue,
-    const Rcpp::Nullable<Rcpp::NumericMatrix> &C0_prior = R_NilValue,
-    const double aw_prior = 0.01, // aw: shape of inverse gamma
-    const double bw_prior = 0.01, // bw: rate of inverse gamma
-    const double delta_nb = 1.,
-    const double theta0_upbnd = 2.,
-    const double Blag_pct = 0.15,
-    const double delta_discount = 0.95,
-    const bool use_smoothing = true,
-    const bool summarize_return = true,
-    const bool verbose = true)
+    const Rcpp::IntegerVector &eta_select = Rcpp::IntegerVector::create(1, 0, 0),           // W, mu0, rho
+    const Rcpp::NumericVector &W_par_in = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (Winit/Wtrue,WpriorType,par1,par2)
+    const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6),
+    const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0., 30.),
+    const unsigned int &nlag_in = 20,
+    const double &delta = NA_REAL,
+    const unsigned int &nburnin = 1000,
+    const unsigned int &nthin = 2,
+    const unsigned int &nsample = 5000, // number of iterations for variational inference
+    const double &theta0_upbnd = 2.,
+    const double &delta_discount = 0.95,
+    const bool &truncated = true,
+    const bool &use_smoothing = true,
+    const bool &use_discount = false,
+    const bool &summarize_return = true)
 {
 
 
@@ -43,58 +37,62 @@ Rcpp::List vb_poisson(
 	Ypad.tail(n) = Y;
 
     const unsigned int ntotal = nburnin + nthin * nsample + 1;
-    const unsigned int Blag = static_cast<unsigned int>(Blag_pct * n); // B-fixed-lags Monte Carlo smoother
     const unsigned int N = 100;                                        // number of particles for SMC
 
-    const unsigned int obs_code = model_code.at(0);
-    const unsigned int link_code = model_code.at(1);
-    const unsigned int trans_code = model_code.at(2);
-    const unsigned int gain_code = model_code.at(3);
-    const unsigned int err_code = model_code.at(4);
+    unsigned int obs_code, link_code, trans_code, gain_code, err_code;
+    get_model_code(obs_code, link_code, trans_code, gain_code, err_code, model_code);
 
-    double W = eta_init.at(0);
-    double mu0 = eta_init.at(1);
-    double rho = eta_init.at(2);
+    arma::vec W_par(W_par_in.begin(), W_par_in.length());
+    arma::vec lag_par(lag_par_in.begin(), lag_par_in.length());
+    arma::vec obs_par(obs_par_in.begin(), obs_par_in.length());
 
-    unsigned int nlag, p, L;
-    set_dim(nlag, p, L, n, nlag_, L_order);
-    arma::vec Fphi = get_Fphi(nlag, L, rho, trans_code);
+    double W = W_par.at(0);
+    double mu0 = obs_par.at(0);
+    double delta_nb = obs_par.at(1);
+    double rho = lag_par.at(0);
+
+    const unsigned int Blag = nlag_in;
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = n;
+        p = (unsigned int)lag_par.at(1) + 1;
+    }
+
+    arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p, trans_code);
 
 
     /* ----- Hyperparameter and Initialization ----- */
-    
-    double aw,bw;
-    double a1,a2,a3;
-    switch (eta_prior_type.at(0)) {
-        case 0: // Gamma
-        {
-            a1 = eta_prior_val.at(0,0) - 0.5*n_;
-            a2 = eta_prior_val.at(1,0);
-            a3 = 0.;
-        }
-        break;
-        case 1: // Half-Cauchy
-        {
-
-        }
-        break;
-        case 2: // Inverse-Gamma
-        {
-            aw = eta_prior_val.at(0,0) + 0.5*n_;
-            bw = eta_prior_val.at(1,0);
-        }
-        break;
-        default:
-        {
-
-        }
+    unsigned int W_prior_type = W_par.at(1);
+    double aw, bw;
+    double a1, a2, a3;
+    switch (W_prior_type)
+    {
+    case 0: // Gamma
+    {
+        a1 = W_par.at(2) - 0.5 * n_;
+        a2 = W_par.at(3);
+        a3 = 0.;
+    }
+    break;
+    case 1: // Half-Cauchy
+    {
+    }
+    break;
+    case 2: // Inverse-Gamma
+    {
+        aw = W_par.at(2);
+        bw = W_par.at(3);
+    }
+    break;
+    default:
+    {
+    }
     }
 
-    
-    
-
-	arma::mat at(p,npad,arma::fill::zeros);
+    arma::mat at(p,npad,arma::fill::zeros);
 	const arma::mat Ip(p,p,arma::fill::eye);
 	
 	arma::cube Rt(p,p,npad);
@@ -105,52 +103,51 @@ Rcpp::List vb_poisson(
 
     arma::cube Gt(p,p,npad);
 	arma::mat Gt0(p,p,arma::fill::zeros);
-	Gt0.at(0,0) = 1.;
-	if (trans_code == 0) { // Koyck
-		Gt0.at(1,1) = rho;
-	} else if (trans_code == 1) { // Koyama
-		Gt0.diag(-1).ones();
-	} else if (trans_code == 2) { // Solow
-        double coef2 = -rho;
-		Gt0.at(1,1) = -binom(L,1)*coef2;
-		for (unsigned int k=2; k<p; k++) {
-			coef2 *= -rho;
-			Gt0.at(1,k) = -binom(L,k)*coef2;
-			Gt0.at(k,k-1) = 1.;
-		}
-	} else if (trans_code == 3) { // Vanilla
-        Gt0.at(0,0) = rho;
+    Gt0.at(0, 0) = 1.;
+    if (trans_code == 0)
+    { // Koyck
+        Gt0.at(1, 1) = rho;
     }
-	for (unsigned int t=0; t<npad; t++) {
-		Gt.slice(t) = Gt0;
-	}
-
-
+    else if (trans_code == 1)
+    { // Koyama
+        Gt0.diag(-1).ones();
+    }
+    else if (trans_code == 2)
+    { // Solow
+        double coef2 = -rho;
+        Gt0.at(1, 1) = -binom(lag_par.at(1), 1) * coef2;
+        for (unsigned int k = 2; k < p; k++)
+        {
+            coef2 *= -rho;
+            Gt0.at(1, k) = -binom(lag_par.at(1), k) * coef2;
+            Gt0.at(k, k - 1) = 1.;
+        }
+    }
+    else if (trans_code == 3)
+    { // Vanilla
+        Gt0.at(0, 0) = rho;
+    }
+    for (unsigned int t = 0; t < npad; t++)
+    {
+        Gt.slice(t) = Gt0;
+    }
 
     arma::mat mt(p, n + 1, arma::fill::zeros);
     arma::cube Ct(p, p, n + 1, arma::fill::zeros);
     Ct.each_slice() = Ip;
     arma::vec m0(p, arma::fill::zeros);
     arma::mat C0(p, p, arma::fill::eye);
+    C0 *= std::pow(theta0_upbnd * 0.5, 2.);
 
-    if (!m0_prior.isNull())
-    {
-        m0 = Rcpp::as<arma::vec>(m0_prior);
-        mt.col(0) = m0;
-    }
-    if (!C0_prior.isNull())
-    {
-        C0 = Rcpp::as<arma::mat>(C0_prior);
-        Ct.slice(0) = C0;
-    }
-    else
-    {
-        C0 *= std::pow(theta0_upbnd * 0.5, 2.);
-    }
 
-    forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L,nlag,rho,mu0,W,NA_REAL,delta_nb);
-    
-	if (use_smoothing) {
+    // forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L,nlag,rho,mu0,W,NA_REAL,delta_nb);
+    forwardFilter(
+        mt, at, Ct, Rt, Gt, alphat, betat,
+        Ypad, n, p, obs_par, lag_par, W,
+        obs_code, link_code, trans_code, gain_code,
+        nlag, delta_discount, truncated, use_discount);
+
+    if (use_smoothing) {
 		backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
 	} else {
         ht = mt.row(0).t();
@@ -180,7 +177,7 @@ Rcpp::List vb_poisson(
 
         // TODO: check this part
         if (eta_select.at(0)==1) {
-            switch (eta_prior_type.at(0)) {
+            switch (W_prior_type) {
                 case 0: // Gamma
                 {
                     a3 = 0.5*arma::accu(arma::pow(arma::diff(ht),2.));
@@ -250,7 +247,11 @@ Rcpp::List vb_poisson(
 
         // ht = R.col(0);
 
-        forwardFilter(mt,at,Ct,Rt,Gt,alphat,betat,obs_code,link_code,trans_code,gain_code,n,p,Ypad,L,nlag,rho,mu0,W,delta,delta_nb);
+        forwardFilter(
+            mt, at, Ct, Rt, Gt, alphat, betat,
+            Ypad, n, p, obs_par, lag_par, W, 
+            obs_code, link_code, trans_code, gain_code,
+            nlag, delta_discount, truncated, use_discount);
         
 	    if (use_smoothing) {
             backwardSmoother(ht,Ht,n,p,mt,at,Ct,Rt,Gt,W,delta);
@@ -278,7 +279,7 @@ Rcpp::List vb_poisson(
             aw_stored.at(idx_run) = aw;
             bw_stored.at(idx_run) = bw;
 
-            switch (eta_prior_type.at(0)) {
+            switch (W_prior_type) {
                 case 0: // Gamma
                 {
                     W_stored.at(idx_run) = std::exp(std::min(R::rnorm(aw,std::sqrt(-1./bw)),UPBND));
@@ -307,14 +308,11 @@ Rcpp::List vb_poisson(
 
         
 
-        if (verbose) {
-            Rcout << "\rProgress: " << i << "/" << ntotal-1;
-        }
+        Rcout << "\rProgress: " << i << "/" << ntotal-1;
         
     }
-    if (verbose) {
-        Rcout << std::endl;
-    }
+
+    Rcout << std::endl;
     
 
     Rcpp::List output;

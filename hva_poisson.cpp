@@ -688,8 +688,7 @@ Rcpp::List hva_poisson(
     const unsigned int &nthin = 2,
     const unsigned int &Nsmc = 100,
     const double &delta_discount = 0.88,
-    const bool &truncated = true,
-    const bool &summarize_return = false)
+    const bool &truncated = true)
 {
     const unsigned int ntotal = nburnin + nthin*nsample + 1;
     const unsigned int n = Y.n_elem;
@@ -946,21 +945,10 @@ Rcpp::List hva_poisson(
     Rcpp::List output;
 
     output["psi_all"] = Rcpp::wrap(psi_stored);
-    if (summarize_return) {
-        arma::vec qProb = {0.025,0.5,0.975};
-        arma::mat RR = arma::quantile(psi_stored,qProb,1); 
-        output["psi"] = Rcpp::wrap(RR); // (n+1) x 3
+    arma::vec qProb = {0.025, 0.5, 0.975};
+    arma::mat RR = arma::quantile(psi_stored, qProb, 1);
+    output["psi"] = Rcpp::wrap(RR); // (n+1) x 3
 
-        // arma::mat hpsiR = psi2hpsi(RR, gain_code); // hpsi: p x N
-        // double theta0 = 0;
-        // arma::mat thetaR = hpsi2theta(hpsiR, Y, trans_code, theta0, L, rho); // n x 1
-
-        // output["hpsi"] = Rcpp::wrap(hpsiR);
-        // output["theta"] = Rcpp::wrap(thetaR);
-
-    } else {
-        output["psi"] = Rcpp::wrap(psi_stored); // (n+1) x niter
-    }
 
     output["W"] = Rcpp::wrap(W_stored); // niter
     output["mu0"] = Rcpp::wrap(mu0_stored); // niter

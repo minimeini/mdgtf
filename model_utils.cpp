@@ -11,7 +11,7 @@ using namespace Rcpp;
 arma::uvec get_model_code(
 	const std::string &obs_dist = "nbinom",
 	const std::string &link_func = "identity",
-	const std::string &trans_func = "koyama",
+	const std::string &trans_func = "koyama", // lag distribution
 	const std::string &gain_func = "softplus",
 	const std::string &err_dist = "gaussian")
 {
@@ -131,179 +131,6 @@ void get_model_code(
 	return;
 }
 
-
-
-
-
-
-void bound_check(
-	const arma::mat &input,
-	const std::string &name,
-	const bool &check_zero,
-	const bool &check_negative)
-{
-	bool is_infinite = !input.is_finite();
-	if (is_infinite)
-	{
-		// std::cout << name + " = " << std::endl;
-		// input.t().print();
-		throw std::invalid_argument("bound_check: " + name + " is infinite.");
-	}
-	if (check_zero)
-	{
-		bool is_zero = input.is_zero();
-		if (is_zero)
-		{
-			throw std::invalid_argument("bound_check: " + name + " is zero.");
-		}
-	}
-	if (check_negative)
-	{
-		bool is_negative = arma::any(arma::vectorise(input) < -EPS);
-		if (is_negative)
-		{
-			throw std::invalid_argument("bound_check: " + name + " is negative.");
-		}
-	}
-
-	return;
-}
-
-void bound_check(
-	const double &input,
-	const std::string &name,
-	const bool &check_zero,
-	const bool &check_negative)
-{
-	bool is_infinite = !std::isfinite(input);
-	if (is_infinite)
-	{
-		// std::cout << name + " = " << input << std::endl;
-		throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input)  + " is infinite.");
-	}
-	if (check_zero)
-	{
-		bool is_zero = std::abs(input) < EPS;
-		if (is_zero)
-		{
-			throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input) + " is zero.");
-		}
-	}
-	if (check_negative)
-	{
-		bool is_negative = input < -EPS;
-		if (is_negative)
-		{
-			throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input) + " is negative.");
-		}
-	}
-
-	return;
-}
-
-bool bound_check(
-	const double &input,
-	const bool &check_zero,
-	const bool &check_negative)
-{
-	bool is_infinite = !std::isfinite(input);
-	bool out_of_bound = is_infinite;
-	if (check_zero)
-	{
-		bool is_zero = std::abs(input) < EPS;
-		out_of_bound = out_of_bound || is_zero;
-	}
-	if (check_negative)
-	{
-		bool is_negative = input < -EPS;
-		out_of_bound = out_of_bound || is_negative;
-	}
-
-	return out_of_bound;
-}
-
-
-void bound_check(
-	const double &input, 
-	const std::string &name,
-	const double &lobnd, 
-	const double &upbnd)
-{
-	bool is_infinite = !std::isfinite(input);
-	if (is_infinite)
-	{
-		// std::cout << name + " = " << input << std::endl;
-		throw std::invalid_argument("bound_check: " + name + " = " + std::to_string(input) + " is infinite.");
-	}
-
-	bool out_of_lobnd = input < lobnd;
-	bool out_of_upbnd = input > upbnd;
-	if (out_of_lobnd || out_of_upbnd)
-	{
-		throw std::invalid_argument(
-			"bound_check: " + name + 
-			" out of lobnd = " + bool2string(out_of_lobnd) + 
-			", out of upbnd = " + bool2string(out_of_upbnd));
-	}
-}
-
-
-
-
-arma::uvec sample(
-	const unsigned int n, 
-	const unsigned int size, 
-	const arma::vec &weights, 
-	bool replace,
-	bool zero_start){
-	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
-	Rcpp::IntegerVector idx_ = Rcpp::sample(n, size, true, w_);
-
-	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
-	if (zero_start)
-	{
-		idx.for_each([](arma::uvec::elem_type &val)
-					 { val -= 1; });
-	}
-	
-	return idx;
-}
-
-unsigned int sample(
-	const int n,
-	const arma::vec &weights,
-	bool zero_start)
-{
-	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
-	Rcpp::IntegerVector idx_ = Rcpp::sample(n, 1, true, w_);
-
-	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
-	unsigned int idx0 = idx[0];
-	if (zero_start)
-	{
-		idx0 -= 1;
-	}
-
-	return idx0;
-}
-
-unsigned int sample(
-	const int n,
-	bool zero_start)
-{
-	arma::vec weights(n,arma::fill::ones);
-	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
-	Rcpp::IntegerVector idx_ = Rcpp::sample(n, 1, true, w_);
-
-	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
-	unsigned int idx0 = idx[0];
-	if (zero_start)
-	{
-		idx0 -= 1;
-	}
-
-	return idx0;
-}
 
 
 arma::vec init_Ft(
@@ -1159,6 +986,7 @@ void theta_subset(
 	hpsi_sub = hpsi_pad.subvec(tidx - nelem + 1, tidx);
 }
 
+// ft
 double theta_new_nobs(
 	const arma::vec &Fphi_sub, // nelem x 1
 	const arma::vec &hpsi_sub, // nelem x 1
@@ -1198,12 +1026,24 @@ double theta_new_nobs(
 		hpsi_pad, ypad, lag_par,
 		tidx, nelem, trans_code);
 
+
 	double theta_new = theta_new_nobs(Fphi,hpsi_sub,ysub);
 	return theta_new;
 }
 
 
 
+/**
+ * @brief From gain function `hpsi` to transfer function `theta`.
+ * 
+ * @param hpsi_pad 
+ * @param ypad 
+ * @param lag_par 
+ * @param trans_code 
+ * @param nlag_in 
+ * @param truncated 
+ * @return arma::mat 
+ */
 //' @export
 // [[Rcpp::export]]
 arma::mat hpsi2theta(
@@ -1276,6 +1116,19 @@ void hpsi2theta(
 	return;
 }
 
+
+/**
+ * @brief From state errors `wt` to transfer function `theta`
+ * 
+ * @param theta transfer function
+ * @param wt errors of the latent state
+ * @param y 
+ * @param lag_par 
+ * @param gain_code 
+ * @param trans_code 
+ * @param nlag 
+ * @param truncated 
+ */
 void wt2theta(
 	arma::vec &theta,	 // n x 1
 	const arma::vec &wt, // n x 1
@@ -1364,6 +1217,38 @@ double loglike_obs(
 	return loglike;
 }
 
+//' @export
+// [[Rcpp::export]]
+double sample_obs(
+	const double &lambda, 
+	const arma::vec &obs_par, 
+	const unsigned int &obs_code)
+{
+	double y = 0.;
+	switch (obs_code)
+	{
+	case 0: // nbinom-mean
+	{
+		double delta_nb = obs_par.at(1);
+		double prob_succ = delta_nb / (lambda + delta_nb);
+		y = R::rnbinom(delta_nb, prob_succ);
+	}
+	break;
+	case 1:
+	{
+		y = R::rpois(lambda);
+	}
+	break;
+	default:
+	{
+		throw std::invalid_argument("sample_obs: obs dist not supported yet.");
+	}
+	}
+
+	bound_check(y, "sample_obs: y", false, true);
+	return y;
+}
+
 
 
 double dloglike_dlambda(
@@ -1405,4 +1290,65 @@ double dloglike_dlambda(
 
 	bound_check(deriv, "dloglike_dlambda: deriv");
 	return deriv;
+}
+
+//' @export
+// [[Rcpp::export]]
+arma::mat forecast_one_step(
+	const arma::mat &psi_pad, // (nobs+B) x N
+	const arma::vec &W_samples,
+	const arma::vec &ypad, // (nobs+1) x 1
+	const arma::vec &W_par,
+	const arma::vec &lag_par,
+	const arma::vec &obs_par,
+	const unsigned int &obs_code,
+	const unsigned int &trans_code,
+	const unsigned int &gain_code,
+	const unsigned int &nlag_in,
+	const bool &use_true_W = false,
+	const bool &truncated = true
+)
+{
+	unsigned int nobs = ypad.n_elem - 1;
+	unsigned int tidx = nobs + 1;
+	unsigned int N = psi_pad.n_cols;
+	unsigned int nelem = nlag_in;
+	if (!truncated) {nelem = nobs + 1;}
+
+
+	arma::vec Fphi_sub = get_Fphi(nelem, lag_par, trans_code);
+	arma::vec ysub = ypad.subvec(tidx - nelem, tidx - 1);
+
+	arma::mat psi_pad0 = psi_pad.rows(psi_pad.n_rows - nobs - 1, psi_pad.n_rows - 1); // (nobs + 1)
+	
+	arma::vec theta_new(N, arma::fill::zeros);
+	arma::vec ynew(N, arma::fill::zeros);
+	
+	for (unsigned int i=0; i<N; i++)
+	{
+		double W;
+		if (!use_true_W)
+		{
+			W = W_samples.at(i);
+		}
+		arma::vec psi_pad2(nobs + 2, arma::fill::zeros);
+		psi_pad2.head(nobs + 1) = psi_pad0.col(i);
+
+		double psi_new = R::rnorm(psi_pad.at(nobs,i), std::sqrt(W_par.at(0)));
+		psi_pad2.at(nobs + 1) = psi_new;
+		arma::vec hpsi_pad2 = psi2hpsi(psi_pad2, gain_code); // (nobs + 2) x 1
+		arma::vec hpsi_sub = hpsi_pad2.subvec(tidx - nelem + 1, tidx);
+
+		theta_new.at(i) = theta_new_nobs(Fphi_sub,hpsi_sub,ysub);
+		double lambda_new = obs_par.at(0) + theta_new.at(i);
+		ynew.at(i) = sample_obs(lambda_new, obs_par, obs_code);
+
+	}
+
+	arma::mat output(N,2);
+	output.col(0) = theta_new;
+	output.col(1) = ynew;
+
+	return output;
+
 }

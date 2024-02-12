@@ -7,7 +7,7 @@ EPS = .Machine$double.eps
 # TODO: compare it to the older version
 sim_pois_dglm2 = function(
     n = 200, # number of observations for training
-    m = 0, # number of observations for testing
+    m = 1, # number of observations for testing
     obs_dist = "nbinom", # {"nbinom","poisson"}
     link_func = "identity", # {"identity","exponential"}
     trans_func = "koyama", # {"koyama","solow","koyck"}
@@ -15,14 +15,17 @@ sim_pois_dglm2 = function(
     err_dist = "gaussian", # {"gaussian","laplace","cauchy","left_skewed_normal"},
     obs_params = c(0.,30.), # (mu0, delta_nb),
     lag_params = c(0.5,6), # (rho, L) or (mu, sg2)
-    W_params = c(0.01,2,0.01,0.01),
+    W_params = c(0.01,2,0.01,0.01), # (W, )
     nlag = 20,
     ci_coverage = 0.95,
     rng.seed = NULL,
     get_discount = TRUE,
     truncated = TRUE,
-    delta_grid = seq(from=0.8,to=0.99,by=0.01)) { # searching range for LBE discount factor
+    delta_grid = seq(from=0.8,to=0.99,by=0.01) # searching range for LBE discount factor
+    ) { 
   
+  
+
   mu0 = obs_params[1]
   delta_nb = obs_params[2]
   
@@ -36,10 +39,10 @@ sim_pois_dglm2 = function(
   obs_code = model_code[1]
   link_code = model_code[2]
   trans_code = model_code[3]
-  gain_code = model_code[4]
+  
+
+  ###
   err_code = model_code[5]
-
-
   wt = rep(0,ntotal)
   if (!is.null(rng.seed)) { set.seed(rng.seed)}
   
@@ -57,9 +60,10 @@ sim_pois_dglm2 = function(
   stopifnot(all(is.finite(wt)))
   # wt - Checked. Correct.
   
-  
+  gain_code = model_code[4]
   psi = cumsum(wt)
-  hpsi = psi2hpsi(matrix(psi,ncol=1),gain_code)
+  hpsi = psi2hpsi(matrix(psi, ncol = 1), gain_code)
+  ###
 
 
   link_func = tolower(link_func)
@@ -81,12 +85,8 @@ sim_pois_dglm2 = function(
     if (link_func == "exponential") {
       lambda_pad[t] = exp(min(c(lambda_pad[t], UPBND)))
     }
-
-    if (obs_dist == "nbinom") {
-      ypad[t] = rnbinom(1, delta_nb, delta_nb/(lambda_pad[t]+delta_nb))
-    } else {
-      ypad[t] = rpois(1,lambda_pad[t])
-    }
+    
+    ypad[t] = sample_obs(lambda_pad[t], obs_params, obs_code)
   }
   
   stopifnot(all(is.finite(theta_pad)))
@@ -113,10 +113,10 @@ sim_pois_dglm2 = function(
                 lag_params = lag_params,
                 W_params = W_params,
                 nlag=nlag, delta_lbe=delta)
-  # pred = list(y=y[(n+1):ntotal],
-  #             psi=psi[(n+1):ntotal],
-  #             theta=theta[(n+2):(ntotal+1)],
-  #             lambda=lambda[(n+1):ntotal])
+  pred = list(y=y[(n+1):ntotal],
+              psi=psi[(n+1):ntotal],
+              theta=theta[(n+1):ntotal],
+              lambda=lambda[(n+1):ntotal])
   
   return(list(y=y[1:n], # Observation
               lambda=lambda[1:n], # Intensity
@@ -124,7 +124,68 @@ sim_pois_dglm2 = function(
               psi=psi[1:n], # Gain Factor
               hpsi=hpsi[1:n], # Reproduction Number - Function of the Gain Factor
               wt=wt[1:n], # Evolution Variance
-              params=params
-              # pred=pred
+              params=params,
+              pred=pred
               )) # Model settings and initial values
+}
+
+
+
+
+sim_pois_dglm0 <- function(
+    psi,
+    obs_dist = "nbinom", # {"nbinom","poisson"}
+    link_func = "identity", # {"identity","exponential"}
+    trans_func = "koyama", # {"koyama","solow","koyck"}
+    gain_func = "softplus", # {"exponential","softplus","logistic"}
+    obs_params = c(0., 30.), # (mu0, delta_nb),
+    lag_params = c(1.4, 0.3), # (rho, L) or (mu, sg2)
+    nlag = 20,
+    rng.seed = NULL,
+    truncated = TRUE) {
+    
+  mu0 <- obs_params[1]
+  delta_nb <- obs_params[2]
+
+  par1 <- lag_params[1] # rho or mu
+  par2 <- lag_params[2] # L or sg2
+
+  
+  model_code <- get_model_code(
+    obs_dist, link_func, trans_func, gain_func, "gaussian"
+  )
+
+  obs_code <- model_code[1]
+  trans_code <- model_code[3]
+
+
+
+  hpsi_pad <- psi2hpsi(matrix(psi, ncol = 1), gain_code)
+  ntotal = length(hpsi_pad) - 1
+  print(ntotal)
+  ###
+
+
+  link_func <- tolower(link_func)
+  obs_dist <- tolower(obs_dist)
+
+  # ------ Transfer ------ #
+  theta_pad <- rep(0, ntotal + 1)
+  lambda_pad <- rep(0, ntotal + 1)
+  ypad <- rep(0, ntotal + 1)
+
+
+  for (t in 2:(ntotal + 1)) {
+    tidx <- t - 1
+    theta_pad[t] <- theta_new_nobs(hpsi_pad, ypad, tidx, lag_params, trans_code, nlag, truncated)
+    lambda_pad[t] <- mu0 + theta_pad[t]
+
+    if (link_func == "exponential") {
+      lambda_pad[t] <- exp(min(c(lambda_pad[t], UPBND)))
+    }
+
+    ypad[t] <- sample_obs(lambda_pad[t], obs_params, obs_code)
+  }
+
+  return (list(y=ypad, lambda=lambda_pad, ft=theta_pad, hpsi=hpsi_pad))
 }
