@@ -1,6 +1,5 @@
 #include "Model.hpp"
-#include "LinearBayes.h"
-#include "lbe_poisson.h"
+#include "LinearBayes.hpp"
 
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
@@ -312,8 +311,8 @@ Rcpp::List dgtf_infer(
     output["atilde"] = Rcpp::wrap(linear_bayes.atilde);
     output["Rtilde"] = Rcpp::wrap(linear_bayes.Rtilde);
 
-    arma::mat psi_filter = LBA::LinearBayes::get_psi(linear_bayes.mt, linear_bayes.Ct);
-    arma::mat psi_smooth = LBA::LinearBayes::get_psi(linear_bayes.atilde, linear_bayes.Rtilde);
+    arma::mat psi_filter = LBA::get_psi(linear_bayes.mt, linear_bayes.Ct);
+    arma::mat psi_smooth = LBA::get_psi(linear_bayes.atilde, linear_bayes.Rtilde);
     output["psi_filter"] = Rcpp::wrap(psi_filter);
     output["psi_smooth"] = Rcpp::wrap(psi_smooth);
 
