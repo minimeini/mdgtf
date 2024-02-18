@@ -23,6 +23,16 @@ inline void tolower(std::string &S)
 	return;
 }
 
+inline std::string tolower(const std::string &S)
+{
+	std::string SS = S;
+	for (char &x : SS)
+	{
+		x = tolower(x);
+	}
+	return SS;
+}
+
 inline const char *const bool2string(bool b)
 {
 	return b ? "true" : "false";
@@ -192,6 +202,42 @@ inline unsigned int sample(
 	}
 
 	return idx0;
+}
+
+inline arma::mat inverse(
+	const arma::mat &matrice,
+	const bool &force_pseudo = false,
+	const bool &try_pseudo = false)
+{
+	arma::mat mat_inv;
+	if (force_pseudo)
+	{
+		mat_inv = arma::pinv(matrice);
+	}
+	else
+	{
+		try
+		{
+			arma::mat mat_R = arma::chol(matrice);
+			arma::mat mat_Rinv = arma::inv(arma::trimatu(mat_R));
+			mat_inv = mat_Rinv * mat_Rinv.t();
+		}
+		catch (...)
+		{
+			if (try_pseudo)
+			{
+				std::cout << "\nWarning: matrice is not invertible, use pseudo inverse instead.\n\n";
+				mat_inv = arma::pinv(matrice);
+			}
+			else
+			{
+				throw std::invalid_argument("\nError: matrice is not invertible.");
+			}
+		}
+	}
+	
+
+	return mat_inv;
 }
 
 

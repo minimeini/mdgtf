@@ -1,0 +1,3 @@
+SnakeCase: name of a class; header of a specific component or algorithm.
+SNAKE_CASE: name of a constant value.
+snake_case: name of other things, all lower case connected by an underscore.

@@ -8,9 +8,13 @@ inline constexpr double UPBND = 700.;
 
 inline constexpr double covid_m = 4.7;
 inline constexpr double covid_s = 2.9;
-inline constexpr double NB_KAPPA = 0.395;
-inline constexpr double NB_R = 6;
 inline constexpr double LN_MU = 1.386262;
 inline constexpr double LN_SD2 = 0.3226017;
+
+inline constexpr double NB_KAPPA = 0.395;
+inline constexpr double NB_R = 6;
+
+inline constexpr double NB_LAMBDA = 0.;
+inline constexpr double NB_DELTA = 30;
 
 #endif

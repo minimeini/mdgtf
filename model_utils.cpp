@@ -1026,7 +1026,6 @@ double theta_new_nobs(
 		hpsi_pad, ypad, lag_par,
 		tidx, nelem, trans_code);
 
-
 	double theta_new = theta_new_nobs(Fphi,hpsi_sub,ysub);
 	return theta_new;
 }

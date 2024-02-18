@@ -7,7 +7,7 @@
 #include "TransFunc.hpp"
 #include "LinkFunc.hpp"
 #include "ObsDist.hpp"
-#include "model_utils.h"
+#include "utils.h"
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
@@ -25,39 +25,45 @@
 class Model
 {
 public:
-    Model() : dobs(_dobs), transfer(_transfer), flink(_flink), derr(_derr)
+    Model() : dim(_dim), dobs(_dobs), transfer(_transfer), flink(_flink), derr(_derr)
     {
         _dobs.init_default();
         _flink.init_default();
         _transfer.init_default();
         _derr.init_default();
+        _dim.init_default();
+
+        _transfer.dlag.get_Fphi(_dim.nL);
 
         return;
     }
 
     Model(
-        const Dim &dim,
-        const std::string &obs_dist,
-        const std::string &link_func,
-        const std::string &gain_func,
-        const std::string &lag_dist,
+        const Dim &dim_,
+        const std::string &obs_dist = "nbinom",
+        const std::string &link_func = "identity",
+        const std::string &gain_func = "softplus",
+        const std::string &lag_dist = "lognorm",
         const Rcpp::NumericVector &obs_param = Rcpp::NumericVector::create(0., 30.),
         const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R),
         const Rcpp::NumericVector &err_param = Rcpp::NumericVector::create(0.01, 0.), // (W, w[0])
-        const std::string &trans_func = "sliding") : dobs(_dobs), transfer(_transfer), flink(_flink), derr(_derr)
+        const std::string &trans_func = "sliding") : dim(_dim), dobs(_dobs), transfer(_transfer), flink(_flink), derr(_derr)
     {
+        _dim = dim_;
         _dobs.init(obs_dist, obs_param[0], obs_param[1]);
         _flink.init(link_func, obs_param[0]);
-        _transfer.init(dim, trans_func, gain_func, lag_dist, lag_param);
-        _derr.init("gaussian", err_param[0], err_param[1]);
+        _transfer.init(dim_, trans_func, gain_func, lag_dist, lag_param);
 
+        _derr.init("gaussian", err_param[0], err_param[1]);
         return;
     }
 
-    const ObsDist &dobs;
-    const TransFunc &transfer;
-    const LinkFunc &flink;
+    const Dim &dim;
+    ObsDist &dobs;
+    TransFunc &transfer;
+    LinkFunc &flink;
     const ErrDist &derr;
+
 
     void update_dobs(const double &value, const unsigned int &iloc)
     {
@@ -91,30 +97,41 @@ public:
         return;
     }
 
-    arma::vec simulate()
+
+    /**
+     * @brief Simulate from the DGTF model from the scratch.
+     * 
+     * @return arma::vec 
+     */
+    arma::vec simulate(const double &y0 = 0.)
     {
+        // Sample psi[t].
         _derr.sample(_dim.nT, true);
-
         _transfer.fgain.update_psi(_derr.psi);
-        _transfer.fgain.psi2hpsi();
 
-        _transfer.dlag.get_Fphi(_dim.nL);
+        // Get h(psi[t])
+        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(
+            _transfer.fgain.psi, 
+            _transfer.fgain.name); // Checked. OK.
+        _transfer.fgain.update_hpsi(hpsi); // Checked. OK.
+
+        // Get phi[1], ..., phi[nL]
+        _transfer.dlag.get_Fphi(_dim.nL); // Checked. OK.
 
         arma::vec y(_dim.nT + 1, arma::fill::zeros);
-        y.at(0) = _y0;
+        y.at(0) = y0;
         for (unsigned int t = 1; t < _dim.nT + 1; t++)
         {
-            double ft = _transfer.transfer_sliding(t, y);
-            double mu = _flink.ft2mu(ft);
-            y.at(t) = _dobs.sample(mu);
+            double ft = _transfer.transfer_sliding(t, y); // Checked. OK.
+            double mu = _flink.ft2mu(ft); // Checked. OK.
+            y.at(t) = _dobs.sample(mu); // Checked. OK.
         }
-        y.at(0) = 0.;
 
-        return y;
+        return y; // Checked. OK.
     }
 
     static arma::vec simulate(
-        const arma::vec &psi,
+        const arma::vec &psi, // (ntime + 1) x 1
         const unsigned int &nlag,
         const double &y0 = 0.,
         const std::string &gain_func = "softplus",
@@ -126,7 +143,7 @@ public:
     {
         ObsDist dobs(obs_dist, obs_param[0], obs_param[1]);
         unsigned int ntime = psi.n_elem - 1;
-        arma::vec hpsi = GainFunc::psi2hpsi(psi,gain_func); // Checked. OK.
+        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, gain_func);                 // Checked. OK.
         arma::vec Fphi = LagDist::get_Fphi(nlag, lag_dist, lag_param[0], lag_param[1]); // Checked. OK.
 
         arma::vec y(ntime + 1, arma::fill::zeros);
@@ -134,12 +151,11 @@ public:
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
             double ftt = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi); // Checked. OK.
-            double mu = LinkFunc::ft2mu(ftt, link_func, obs_param[0]);
-            y.at(t) = ObsDist::sample(mu, obs_param[1], obs_dist);
-            // y.at(t) = dobs.sample(mu);
+            double mu = LinkFunc::ft2mu(ftt, link_func, obs_param[0]);        // Checked. OK.
+            y.at(t) = ObsDist::sample(mu, obs_param[1], obs_dist);            // Checked. OK.
         }
 
-        return y;
+        return y; // Checked. OK.
     }
 
     
@@ -150,7 +166,7 @@ private:
     LinkFunc _flink;
     ErrDist _derr;
     Dim _dim;
-    double _y0 = 2;
+    double _y0 = 0.;
     double _mu0 = 1.;
 
 };

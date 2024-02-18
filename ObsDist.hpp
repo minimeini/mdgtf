@@ -5,6 +5,8 @@
 
 #include <RcppArmadillo.h>
 #include "utils.h"
+#include "distributions.hpp"
+
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
@@ -31,13 +33,14 @@ public:
 
     const double &par1;
     const double &par2;
+    std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
 
     void init(
         const std::string &obs_dist = "nbinom",
         const double &par1 = 0.,
         const double &par2 = 30.)
     {
-        _obs_list = AVAIL::map_obs_dist();
+        obs_list = AVAIL::obs_list;
         _name = obs_dist;
         _par1 = par1;
         _par2 = par2;
@@ -46,29 +49,36 @@ public:
 
     void init_default()
     {
-        _obs_list = AVAIL::map_obs_dist();
+        obs_list = AVAIL::obs_list;
         _name = "nbinom";
         _par1 = 0.;  // mu0
         _par2 = 30.; // delta_nb
         return;
     }
 
-
-    double sample(const double &mu)
+    /**
+     * @brief Draw a single sample from the observation distribution, characterized by two parameters
+     *
+     * @param lambda first parameter of the observation distribution
+     * @param par2 second parameter of the observation distribution
+     * @param obs_dist name of the observation distribution
+     * @return double
+     */
+    double sample(const double &lambda)
     {
         double y = 0.;
-        switch (_obs_list[_name])
+        switch (obs_list[_name])
         {
         case AVAIL::Dist::nbinomm:
         {
-            double prob_succ = par2 / (mu + par2);
+            double prob_succ = par2 / (lambda + par2);
             y = R::rnbinom(par2, prob_succ);
             break;
         }        
         default:
         {
             // Poisson observation distribution
-            y = R::rpois(mu);
+            y = R::rpois(lambda);
             break;
         }
         }
@@ -77,25 +87,36 @@ public:
         return y;
     }
 
+
+    /**
+     * @brief Draw a single sample from the observation distribution, characterized by two parameters
+     * 
+     * @param lambda first parameter of the observation distribution
+     * @param par2 second parameter of the observation distribution
+     * @param obs_dist name of the observation distribution
+     * @return double 
+     */
     static double sample(
-        const double &mu, // mean
+        const double &lambda, // mean
         const double &par2,
         const std::string &obs_dist)
     {
-        std::map<std::string, AVAIL::Dist> _obs_list = AVAIL::map_obs_dist();
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
         double y = 0.;
-        switch (_obs_list[obs_dist])
+        switch (obs_list[obs_dist])
         {
         case AVAIL::Dist::nbinomm:
         {
-            double prob_succ = par2 / (mu + par2);
-            y = R::rnbinom(par2, prob_succ);
+            // double prob_succ = par2 / (lambda + par2);
+            // y = R::rnbinom(par2, prob_succ);
+            y = nbinomm::sample(lambda, par2);
             break;
         }
         default:
         {
             // Poisson observation distribution
-            y = R::rpois(mu);
+            y = Poisson::sample(lambda);
+            // y = R::rpois(lambda);
             break;
         }
         }
@@ -104,8 +125,7 @@ public:
         return y;
     }
 
-private:
-    std::map<std::string, AVAIL::Dist> _obs_list;
+    
 };
 
 

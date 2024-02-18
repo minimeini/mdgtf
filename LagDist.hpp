@@ -8,249 +8,11 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
-#include <boost/math/special_functions/beta.hpp>
 #include <RcppArmadillo.h>
-#include "utils.h"
+#include "distributions.hpp"
+
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,BH)]]
-
-/**
- * @brief Negative-binomial distribution.
- * 
- */
-class nbinom
-{
-public:
-    nbinom() : nL(30), kappa(NB_KAPPA), r(NB_R) 
-    {
-        _r = static_cast<unsigned int>(r);
-    };
-    nbinom(const unsigned int nL_, const double kappa_, const double r_)
-    {
-        nL = nL_;
-        kappa = kappa_;
-        r = r_;
-        _r = static_cast<unsigned int>(r);
-
-        return;
-    }
-    /**
-     * @brief Binomial coefficients, i.e., n choose k.
-     *
-     * @param n
-     * @param k
-     * @return double
-     */
-    static double binom(const int &n, const int &k) { return 1. / ((static_cast<double>(n) + 1.) * boost::math::beta(std::max(static_cast<double>(n - k + 1), EPS), std::max(static_cast<double>(k + 1), EPS))); }
-
-    /**
-     * @brief Cumulative density function of negative-binomial distribution.
-     * [Checked. OK.]
-     *
-     * @param nL
-     * @param kappa
-     * @param r
-     * @return arma::vec
-     */
-    static arma::vec dnbinom(
-        const unsigned int &nL,
-        const double &kappa,
-        const double &r)
-    {
-        // double kappa = param[0];
-        // double r = param[1];
-
-        if (nL < 1)
-        {
-            throw std::invalid_argument("Number of lags, nL, must be positive.");
-        }
-
-        arma::vec output(nL, arma::fill::zeros);
-        double c3 = std::pow(1. - kappa, r);
-
-        for (unsigned int d = 0; d < nL; d++)
-        {
-            double lag = static_cast<double>(d) + 1.;
-            double a = lag + r - 2.;
-            double b = lag - 1.;
-            double c1 = binom(a, b);
-            double c2 = std::pow(kappa, b);
-
-            output.at(d) = c1 * c2;
-            output.at(d) *= c3;
-        }
-
-        bound_check<arma::vec>(output, "dnbinom", false, true);
-        return output;
-    }
-
-    arma::vec dnbinom()
-    {
-        if (nL < 1)
-        {
-            throw std::invalid_argument("Number of lags, nL, must be positive.");
-        }
-
-        arma::vec output(nL, arma::fill::zeros);
-        double c3 = std::pow(1. - kappa, r);
-
-        for (unsigned int d = 0; d < nL; d++)
-        {
-            double lag = static_cast<double>(d) + 1.;
-            double a = lag + r - 2.;
-            double b = lag - 1.;
-            double c1 = binom(a, b);
-            double c2 = std::pow(kappa, b);
-
-            output.at(d) = c1 * c2;
-            output.at(d) *= c3;
-        }
-
-        bound_check<arma::vec>(output, "dnbinom", false, true);
-        return output;
-    }
-
-
-    /**
-     * @brief Iterative form as in Solow(1960)
-     * 
-     * @param kappa 
-     * @param r 
-     * @return arma::vec 
-     */
-    static arma::vec iter_coef(const double &kappa, const double &r)
-    {
-        unsigned int _r = static_cast<unsigned int>(r);
-        arma::vec coef(_r, arma::fill::zeros);
-        for (unsigned int k = _r; k >= 1; k--)
-        {
-            double c1 = binom(r, k);
-            double c2 = std::pow( - kappa, k);
-            coef.at(r - k) = - c1 * c2;
-        }
-
-        bound_check<arma::vec>(coef, "nbinom::iter_coef: coef");
-        return coef;
-    }
-
-private:
-    unsigned int nL = 30;
-    double kappa = NB_KAPPA;
-    double r = NB_R;
-    unsigned int _r;
-
-    double dnbinom0(
-        const double &lag, // starting from 1
-        const double &rho,
-        const double &L_order)
-    {
-        double c3 = std::pow(1. - rho, L_order);
-        double a = lag + L_order - 2.;
-        double b = lag - 1.;
-        double c1 = binom(a, b);
-        double c2 = std::pow(rho, b);
-
-        // double c1 = R::dnbinom(k-1,(double)Last,1.-rho);
-        // double c2 = std::pow(-1.,k-1.);
-        // Fphi.at(d) = c1 * c2;
-        double output = (c1 * c2) * c3;
-        bound_check(output, "dnbinom0", false, true);
-        return output;
-    }
-};
-
-
-
-/**
- * @brief Discretized log-normal distribution characterized by mean and variance.
- *
- */
-class lognorm
-{
-public:
-    lognorm(): nL(30), mu(LN_MU), sd2(LN_SD2) {};
-    lognorm(
-        const unsigned int &nL_,
-        const double &mu_,
-        const double &sd2_)
-    {
-        nL = nL_;
-        mu = mu_;
-        sd2 = sd2_;
-    }
-
-
-    /**
-     * @brief P.M.F of discretized log-normal distribution, characterized by mean and variance.
-     * @brief General class methods.
-     * 
-     * @param nL unsigned int: number of lags, defines the length of the returned vector.
-     * @param mu double: the mean of the log-normal distribution.
-     * @param sd2 double: the variance of the log-normal distribution.
-     * 
-     * @return arma::vec
-     */
-    static arma::vec dlognorm(
-        const unsigned int &nL,
-        const double &mu,
-        const double &sd2)
-    {
-        lognorm lg;
-        arma::vec output(nL);
-        for (unsigned int d = 0; d < nL; d++)
-        {
-            output.at(d) = lg.dlognorm0(static_cast<double>(d) + 1., mu, sd2);
-        }
-
-        return output;
-    }
-
-    /**
-     * @brief P.M.F of discretized log-normal distribution, characterized by mean and variance.
-     * @brief Member function of a class instance.
-     *
-     * @param nL unsigned int: number of lags, defines the length of the returned vector.
-     * @param mu double: the mean of the log-normal distribution.
-     * @param sd2 double: the variance of the log-normal distribution.
-     *
-     * @return arma::vec
-     */
-    arma::vec dlognorm()
-    {
-        arma::vec output(nL);
-        for (unsigned int d = 0; d < nL; d++)
-        {
-            output.at(d) = dlognorm0(static_cast<double>(d) + 1., mu, sd2);
-        }
-
-        return output;
-    }
-
-private:
-    unsigned int nL = 30;
-    double mu = LN_MU;
-    double sd2 = LN_SD2;
-
-    double Pd(
-        const double d,
-        const double mu,
-        const double sigmasq)
-    {
-        arma::vec tmpv1(1);
-        tmpv1.at(0) = -(std::log(d) - mu) / std::sqrt(2. * sigmasq);
-        return arma::as_scalar(0.5 * arma::erfc(tmpv1));
-    }
-
-    double dlognorm0(
-        const double &lag, // starting from 1
-        const double &mu,
-        const double &sd2)
-    {
-        double output = Pd(lag, mu, sd2) - Pd(lag - 1., mu, sd2);
-        bound_check(output, "dlognorm0", false, true);
-        return output;
-    }
-};
 
 /**
  * @file LagDist.hpp
@@ -293,8 +55,8 @@ public:
         _name = name;
         _par1 = par1;
         _par2 = par2;
-        _lag_list = AVAIL::map_lag_dist();
-        _isnbinom = (_lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
+        lag_list = AVAIL::lag_list;
+        _isnbinom = (lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
 
         return;
     }
@@ -304,13 +66,14 @@ public:
         _name = "nbinom";
         _par1 = NB_KAPPA;
         _par2 = NB_R;
-        _lag_list = AVAIL::map_lag_dist();
-        _isnbinom = (_lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
+        lag_list = AVAIL::lag_list;
+        _isnbinom = (lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
     }
 
     const double &par1;
     const double &par2;
     const arma::vec &Fphi;
+    std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
     /**
      * @brief Set Fphi based on number of lags, type of lag distribution and its corresponding parameters
      *
@@ -321,7 +84,7 @@ public:
         _Fphi.set_size(nlag);
         _Fphi.zeros();
 
-        switch (_lag_list[_name])
+        switch (lag_list[_name])
         {
         case AVAIL::Dist::lognorm:
             _Fphi = lognorm::dlognorm(nlag, _par1, _par2);
@@ -357,9 +120,9 @@ public:
         const double &lag_par2)
     {
         arma::vec Fphi(nlag, arma::fill::zeros);
-        std::map<std::string, AVAIL::Dist> _lag_list = AVAIL::map_lag_dist();
+        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
 
-        switch (_lag_list[lag_dist])
+        switch (lag_list[lag_dist])
         {
         case AVAIL::Dist::lognorm:
             Fphi = lognorm::dlognorm(nlag, lag_par1, lag_par2);
@@ -408,7 +171,6 @@ public:
     }
 
 private:
-    std::map<std::string, AVAIL::Dist> _lag_list;
     arma::vec _Fphi;      // a vector of the lag distribution CDF at desired length _nL.
     bool _isnbinom;
 };

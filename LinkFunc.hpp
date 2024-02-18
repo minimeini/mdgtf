@@ -24,22 +24,26 @@ mu2ft: inverse link
 class LinkFunc // between mean and regressor
 {
 public:
-    LinkFunc()
+    LinkFunc() : name(_name), mu0(_mu0)
     {
         init_default();
         return;
     }
 
-    LinkFunc(const std::string &name, const double &mu0 = 0.)
+    LinkFunc(const std::string &name_, const double &mu0 = 0.) : name(_name), mu0(_mu0)
     {
-        init(name, mu0);
+        init(name_, mu0);
     }
+
+    std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+    const std::string &name;
+    const double &mu0;
 
     void init_default()
     {
         _mu0 = 0.;
         _name = "identity";
-        _link_list = AVAIL::map_link_func();
+        link_list = AVAIL::link_list;
         return;
     }
 
@@ -47,7 +51,7 @@ public:
     {
         _mu0 = mu0;
         _name = name;
-        _link_list = AVAIL::map_link_func();
+        link_list = AVAIL::link_list;
     }
 
     /**
@@ -63,7 +67,7 @@ public:
     {
         T eta = _mu0 + ft;
         T mu;
-        switch (_link_list[_name])
+        switch (link_list[_name])
         {
         case AVAIL::Func::exponential:
         {
@@ -84,7 +88,7 @@ public:
     {
         double eta = _mu0 + ft;
         double mu;
-        switch (_link_list[_name])
+        switch (link_list[_name])
         {
         case AVAIL::Func::exponential:
         {
@@ -103,11 +107,11 @@ public:
 
     static double ft2mu(const double &ft, const std::string &link_func, const double &mu0 = 0.)
     {
-        std::map<std::string, AVAIL::Func> _link_list = AVAIL::map_link_func();
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
 
         double eta = mu0 + ft;
         double mu;
-        switch (_link_list[link_func])
+        switch (link_list[link_func])
         {
         case AVAIL::Func::exponential:
         {
@@ -142,7 +146,7 @@ public:
         const T &mu)
     {
         T eta;
-        switch (_link_list[_name])
+        switch (link_list[_name])
         {
         case AVAIL::Func::exponential:
         {
@@ -166,7 +170,7 @@ public:
         const double &mu)
     {
         double eta;
-        switch (_link_list[_name])
+        switch (link_list[_name])
         {
         case AVAIL::Func::exponential:
         {
@@ -187,7 +191,6 @@ public:
     }
 
 private:
-    std::map<std::string, AVAIL::Func> _link_list;
     std::string _name;
     double _mu0;
 

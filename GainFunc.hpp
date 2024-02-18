@@ -25,7 +25,7 @@
 class GainFunc
 {
 public:
-    GainFunc() : psi(_psi), hpsi(_hpsi), dhpsi(_dhpsi)
+    GainFunc() : psi(_psi), hpsi(_hpsi), dhpsi(_dhpsi), name(_name)
     {
         init_default();
         return;
@@ -33,7 +33,7 @@ public:
 
     GainFunc(
         const std::string &name, 
-        const Dim &dim) : psi(_psi), hpsi(_hpsi), dhpsi(_dhpsi)
+        const Dim &dim) : psi(_psi), hpsi(_hpsi), dhpsi(_dhpsi), name(_name)
     {
         init(name, dim);
         return;
@@ -43,7 +43,7 @@ public:
         const std::string &name,
         const Dim &dim)
     {
-        _gain_list = AVAIL::map_gain_func();
+        gain_list = AVAIL::gain_list;
         _name = name;
 
         _psi.set_size(dim.nT + 1);
@@ -60,7 +60,7 @@ public:
         Dim dim;
         dim.init_default();
 
-        _gain_list = AVAIL::map_gain_func();
+        gain_list = AVAIL::gain_list;
         _name = "identity";
 
         _psi.set_size(dim.nT + 1);
@@ -70,6 +70,7 @@ public:
         _dhpsi = _hpsi;
     }
 
+    const std::string &name;
     const arma::vec &psi;   // Read-only. (nT + 1) x 1 vector: (psi[0], psi[1], ..., psi[nT]) with psi[0] = 0, the latent random walk, i.e., cumulative white noise.
     const arma::vec &hpsi;  // Read-only. (nT + 1) x 1 vector: (h(psi[0]), h(psi[1]), ..., h(psi[nT]))
     const arma::vec &dhpsi; // Read-only. (nT + 1) x 1 vector: (h'(psi[0]), h'(psi[1]), ..., h'(psi[nT])), where h' is the first-order derivative of h(psi[t]) with respect to psi[t].
@@ -79,60 +80,15 @@ public:
     void update_dhpsi(const arma::vec &dhpsi_) { _dhpsi = dhpsi_; }
 
 
-
-    /**
-     * @brief Gain function h(psi[t]). [Checked. OK.]
-     * 
-     */
-    void psi2hpsi()
-    {
-        _hpsi = _psi;
-        switch (_gain_list[_name])
-        {
-        case AVAIL::Func::ramp:
-        {
-            _hpsi.elem(arma::find(_hpsi < EPS)).fill(EPS);
-        }
-        break;
-        case AVAIL::Func::exponential:
-        {
-            _hpsi.elem(arma::find(_hpsi > UPBND)).fill(UPBND);
-            _hpsi = arma::exp(_hpsi);
-        }
-        break;
-        case AVAIL::Func::identity:
-        {
-            // do nothing
-        }
-        break;
-        case AVAIL::Func::softplus:
-        {
-            _hpsi.elem(arma::find(_hpsi > UPBND)).fill(UPBND);
-            arma::vec hpsi_tmp = arma::exp(_hpsi);
-            _hpsi = arma::log(1. + hpsi_tmp);
-        }
-        break;
-        default:
-        {
-            // Use identity gain: do nothing
-            _name = "identity";
-        }
-        break;
-        }
-
-        bound_check<arma::vec>(_hpsi, "psi2hpsi");
-
-        return;
-    }
-
-    static arma::vec psi2hpsi(
-        const arma::vec &psi, 
+    template <typename T>
+    static T psi2hpsi(
+        const T &psi, 
         const std::string &gain_func)
     {
-        std::map<std::string, AVAIL::Func> _gain_list = AVAIL::map_gain_func();
-        arma::vec hpsi = psi;
+        T hpsi = psi;
 
-        switch (_gain_list[gain_func])
+        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        switch (gain_list[gain_func])
         {
         case AVAIL::Func::ramp:
         {
@@ -153,7 +109,7 @@ public:
         case AVAIL::Func::softplus:
         {
             hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
-            arma::vec hpsi_tmp = arma::exp(hpsi);
+            T hpsi_tmp = arma::exp(hpsi);
             hpsi = arma::log(1. + hpsi_tmp);
         }
         break;
@@ -164,8 +120,49 @@ public:
         break;
         }
 
-        bound_check<arma::vec>(hpsi, "psi2hpsi");
+        bound_check<T>(hpsi, "psi2hpsi");
 
+        return hpsi;
+    }
+
+    static double psi2hpsi(
+        const double &psi,
+        const std::string &gain_func)
+    {
+        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        double hpsi = psi;
+
+        switch (gain_list[gain_func])
+        {
+        case AVAIL::Func::ramp:
+        {
+            hpsi = std::max(psi, EPS);
+        }
+        break;
+        case AVAIL::Func::exponential:
+        {
+            hpsi = std::exp(std::min(psi, UPBND));
+        }
+        break;
+        case AVAIL::Func::identity:
+        {
+            // do nothing
+        }
+        break;
+        case AVAIL::Func::softplus:
+        {
+            double htmp = std::exp(std::min(psi, UPBND));
+            hpsi = std::log( 1. + htmp);
+        }
+        break;
+        default:
+        {
+            // Use identity gain: do nothing
+        }
+        break;
+        }
+
+        bound_check(hpsi, "psi2hpsi");
         return hpsi;
     }
 
@@ -173,11 +170,16 @@ public:
      * @brief First-order derivative of the gain function, h'(psi[t]).
      * 
      */
-    void psi2dhpsi()
+    template <typename T>
+    static T psi2dhpsi(
+        const T &psi,
+        const std::string &gain_func
+    )
     {
-        _dhpsi.copy_size(_psi);
+        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        T dhpsi = psi;
 
-        switch (_gain_list[_name])
+        switch (gain_list[gain_func])
         {
         case AVAIL::Func::ramp: // Ramp
         {
@@ -186,32 +188,76 @@ public:
         break;
         case AVAIL::Func::exponential: // Exponential
         {
-            arma::mat tmp = _psi;
+            T tmp = psi;
             tmp.elem(arma::find(tmp > UPBND)).fill(UPBND);
-            _dhpsi = arma::exp(tmp);
+            dhpsi = arma::exp(tmp);
         }
         break;
         case AVAIL::Func::identity: // Identity
         {
-            _dhpsi.ones();
+            dhpsi.ones();
         }
         break;
         case AVAIL::Func::softplus: // Softplus
         {
-            arma::mat tmp = -_psi;
+            T tmp = -psi;
             tmp.elem(arma::find(tmp > UPBND)).fill(UPBND);
-            _dhpsi = 1. / (1. + arma::exp(tmp));
+            dhpsi = 1. / (1. + arma::exp(tmp));
         }
         break;
         default:
         {
-            _dhpsi.ones();
-            _name = "identity";
+            dhpsi.ones();
         }
         break;
         }
 
-        bound_check<arma::vec>(_dhpsi, "psi2dhpsi");
+        bound_check<T>(dhpsi, "psi2dhpsi");
+
+        return dhpsi;
+    }
+
+    static double psi2dhpsi(
+        const double &psi,
+        const std::string &gain_func)
+    {
+        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        double dhpsi = psi;
+
+        switch (gain_list[gain_func])
+        {
+        case AVAIL::Func::ramp: // Ramp
+        {
+            throw std::invalid_argument("Ramp function is non-differentiable.");
+        }
+        break;
+        case AVAIL::Func::exponential: // Exponential
+        {
+            double tmp = std::min(psi, UPBND);
+            dhpsi = std::exp(tmp);
+        }
+        break;
+        case AVAIL::Func::identity: // Identity
+        {
+            dhpsi = 1.;
+        }
+        break;
+        case AVAIL::Func::softplus: // Softplus
+        {
+            double tmp = -psi;
+            tmp = std::min(tmp, UPBND);
+            dhpsi = 1. / (1. + std::exp(tmp));
+        }
+        break;
+        default:
+        {
+            dhpsi = 1.;
+        }
+        break;
+        }
+
+        bound_check(dhpsi, "psi2dhpsi");
+        return dhpsi;
     }
 
     /**
@@ -245,8 +291,9 @@ public:
         return Fdh;
     }
 
+    std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+
 private:
-    std::map<std::string, AVAIL::Func> _gain_list;
     std::string _name = "softplus"; // name of the gain function.
     arma::vec _psi;  // (nT + 1) x 1 vector: (psi[0], psi[1], ..., psi[nT]) with psi[0] = 0, the latent random walk, i.e., cumulative white noise.
     arma::vec _hpsi; // (nT + 1) x 1 vector: (h(psi[0]), h(psi[1]), ..., h(psi[nT]))

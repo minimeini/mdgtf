@@ -2,9 +2,9 @@
 #ifndef ERRDIST_H
 #define ERRDIST_H
 
-
 #include <RcppArmadillo.h>
-#include "utils.h"
+#include "distributions.hpp"
+
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
@@ -67,6 +67,16 @@ public:
     const arma::vec &wt;
     const arma::vec &psi;
 
+
+    /**
+     * @brief Draw samples from the random-walk process, return either white noise w[t] or the cumulative error psi[t].
+     * 
+     * @param nT Number of samples we want to draw.
+     * @param W Variance of the random-walk process.
+     * @param w0 Initial value of the random-walk process.
+     * @param cumsum Reterun psi if true; otherwise return wt.
+     * @return arma::vec 
+     */
     static arma::vec sample(
         const unsigned int &nT, 
         const double &W = 0.01, 
@@ -89,6 +99,15 @@ public:
         return output;
     }
 
+    /**
+     * @brief Draw samples from the random-walk process, return either white noise w[t] or the cumulative error psi[t].
+     *
+     * @param nT Number of samples we want to draw.
+     * @param W Variance of the random-walk process.
+     * @param w0 Initial value of the random-walk process.
+     * @param cumsum Reterun psi if true; otherwise return wt.
+     * @return arma::vec
+     */
     void sample(
         const unsigned int &nT,
         const bool &cumsum = true

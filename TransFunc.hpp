@@ -18,7 +18,7 @@
 class TransFunc
 {
 public:
-    TransFunc()
+    TransFunc() : F0(_F0), G0(_G0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init_default();
         return;
@@ -27,8 +27,8 @@ public:
         const Dim &dim,
         const std::string &trans_func = "sliding",
         const std::string &gain_func = "softplus",
-        const std::string &lag_dist = "nbinom",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R))
+        const std::string &lag_dist = "lognorm",
+        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : F0(_F0),G0(_G0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init(dim, trans_func, gain_func, lag_dist, lag_param);
         return;
@@ -37,14 +37,22 @@ public:
 
     void init_default()
     {
-        Dim dim;
-        dim.init_default();
+        _dim.init_default();
 
-        _trans_list = AVAIL::map_trans_func();
+        trans_list = AVAIL::trans_list;
         _name = "sliding";
+        G0_sliding();
+        F0_sliding();
 
         dlag.init_default();
+        dlag.get_Fphi(_dim.nL);
+
         fgain.init_default();
+
+        _r = 1;
+        _ft.set_size(_dim.nT + 1);
+
+        _ft.zeros();
         return;
     }
 
@@ -55,11 +63,16 @@ public:
         const std::string &lag_dist = "nbinom",
         const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R))
     {
-        _trans_list = AVAIL::map_trans_func();
+        trans_list = AVAIL::trans_list;
+        _dim = dim;
+        _G0.set_size(_dim.nP, _dim.nP);
+        _G0.zeros();
 
-        _nlag = dim.nL;
-        _ntime = dim.nT;
+        // _nlag = dim.nL;
+        // _ntime = dim.nT;
         dlag.init(lag_dist, lag_param[0], lag_param[1]);
+        dlag.get_Fphi(dim.nL);
+
         fgain.init(gain_func, dim);
 
         /*
@@ -71,20 +84,31 @@ public:
         {
             _name = "sliding";
         }
+        else
+        {
+            _name = trans_func;
+        }
 
-        if (_trans_list[_name] == AVAIL::Transfer::iterative)
+        if (trans_list[_name] == AVAIL::Transfer::iterative)
         {
             _r = static_cast<unsigned int>(dlag.par2);
-            iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-            coef_now = coef_now = std::pow(1. - dlag.par1, dlag.par2);
+            _iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            _coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
             _ft.set_size(dim.nT + _r);
+            G0_iterative();
+            F0_iterative();
         }
         else
         {
             _r = 1;
             _ft.set_size(dim.nT + 1);
+            G0_sliding();
+            F0_sliding();
         }
+
+        
+        
 
         _ft.zeros();
         return;
@@ -93,8 +117,12 @@ public:
 
     LagDist dlag;
     GainFunc fgain;
-
-
+    const arma::mat &G0;
+    const arma::vec &F0;
+    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    const std::string &name;
+    const arma::vec &iter_coef;
+    const double &coef_now;
 
     /**
      * @brief From latent state psi[t] to transfer effect f[t] using the exact formula. Note that psi[t] is the random-walk component of the latent state theta[t].
@@ -105,9 +133,9 @@ public:
      */
     void update_ft_exact(const arma::vec &y) // y[0], y[1], ..., y[nT]
     {
-        for (unsigned int t = 1; t <= _ntime; t++)
+        for (unsigned int t = 1; t <= _dim.nT; t++)
         {
-            if (_trans_list[_name] == AVAIL::Transfer::iterative)
+            if (trans_list[_name] == AVAIL::Transfer::iterative)
             {
                 _ft.at(t + _r - 1) = transfer_iterative(t, y.at(t-1));
             }
@@ -119,12 +147,13 @@ public:
     }
 
 
+
     arma::vec get_ft(const bool &no_padding = true)
     {
         arma::vec ft;
         if (no_padding)
         {
-            ft = _ft.tail(_nlag + 1);
+            ft = _ft.tail(_dim.nL + 1);
         }
         else
         {
@@ -147,67 +176,13 @@ public:
         const unsigned int &t,
         const arma::vec &y) // (nT + 1) x 1: y[0], y[1], ..., y[nT]
     {
-        unsigned int nelem = std::min(t, _nlag);
-        arma::vec Fphi_t = dlag.Fphi.subvec(0, nelem - 1);      // Fphi[t]      = (phi[1], ..., phi[nL])'
+        unsigned int nelem = std::min(t, _dim.nL);
+        arma::vec Fphi_t = dlag.Fphi.subvec(0, nelem - 1); // Fphi[t] = (phi[1], ..., phi[nL])'
+        Fphi_t = arma::reverse(Fphi_t); // rev(Fphi[t]) = (phi[nL], ..., phi[1])
 
-        Fphi_t = arma::reverse(Fphi_t);                    // rev(Fphi[t]) = (phi[nL], ..., phi[1])
-        arma::vec Fy_t = y.subvec(t - nelem, t - 1);       // Fy[t]        = (y[t-nL], ..., y[t-1])'
+        arma::vec Fy_t = y.subvec(t - nelem, t - 1); // Fy[t] = (y[t-nL], ..., y[t-1])'
 
-        arma::vec Fhpsi_t = fgain.hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t]     = (h(psi[t+1-nL]), ..., h(psi[t]))'
-
-        arma::vec Fast_t = Fy_t % Fhpsi_t;
-        double ft = arma::accu(Fphi_t % Fast_t);
-        return ft;
-    }
-
-    static double transfer_sliding(
-        const unsigned int &t,
-        const unsigned int &nlag,
-        const arma::vec &y,
-        const arma::vec &Fphi,
-        const arma::vec &hpsi) // (nT + 1) x 1: y[0], y[1], ..., y[nT]
-    {
-        unsigned int nelem = std::min(t, nlag);
-        
-
-        // arma::vec Fphi_t = Fphi.subvec(0, nelem - 1); // Fphi[t]      = (phi[1], ..., phi[nL])'
-        arma::vec Fphi_t;
-        try
-        {
-            Fphi_t = Fphi.subvec(0, nelem - 1);
-        }
-        catch(...)
-        {
-            std::cout << "\n Fphi at nlem = " << nelem << ", t = " << t << std::endl;
-            throw std::invalid_argument("Fphi");
-        }
-        
-        Fphi_t = arma::reverse(Fphi_t);              // rev(Fphi[t]) = (phi[nL], ..., phi[1])
-
-        // arma::vec Fy_t = y.subvec(t - nelem, t - 1); // Fy[t]        = (y[t-nL], ..., y[t-1])'
-        arma::vec Fy_t;
-        try
-        {
-            Fy_t = y.subvec(t - nelem, t - 1);
-        }
-        catch(const std::exception& e)
-        {
-            std::cout << "\n Fy at nlem = " << nelem << ", t = " << t << std::endl;
-            throw std::invalid_argument("Fy");
-        }
-        
-
-        // arma::vec Fhpsi_t = hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t]     = (h(psi[t+1-nL]), ..., h(psi[t]))'
-        arma::vec Fhpsi_t;
-        try
-        {
-            Fhpsi_t = hpsi.subvec(t + 1 - nelem, t);
-        }
-        catch (const std::exception &e)
-        {
-            std::cout << "\n Fhpsi at nlem = " << nelem << ", t = " << t << std::endl;
-            throw std::invalid_argument("Fhpsi");
-        }
+        arma::vec Fhpsi_t = fgain.hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t] = (h(psi[t+1-nL]), ..., h(psi[t]))'
 
         arma::vec Fast_t = Fy_t % Fhpsi_t;
         double ft = arma::accu(Fphi_t % Fast_t);
@@ -215,7 +190,79 @@ public:
     }
 
     /**
-     * @brief Exact method that transfers psi[t] to f[t] using the iterative formula: f[t] is a sum of past transfer effects f[0:(t-1)], and current gain h(psi[t]) + previous observation (ancestor) y[t-1]. Only works for non-truncated negative-binomial lag distribution.
+     * @brief f[t](btheta[t],y[0:t]) calculate: sum Fphi[k] * h(psi[t + 1 - k]) * y[t - k]. This is exact formula for sliding transfer function. The effective number of elements is min(nL, t).
+     *
+     * @param t
+     * @param nlag
+     * @param y (nT + 1) x 1: y[0], y[1], ..., y[nT]; we use y[(t - min(nL,t)) : (t - 1)] at time t.
+     * @param Fphi Fphi[t] = (phi[1], ..., phi[min(nL, t)])'
+     * @param hpsi (nT + 1) x 1: h(psi[0]), h(psi[1]), ..., h(psi[nT])); we have h( btheta[t : (t + 1 - min(nL,t))] ) at time t.
+     * @return double
+     */
+    static double transfer_sliding(
+        const unsigned int &t,
+        const unsigned int &nlag,
+        const arma::vec &y,    // (nT + 1) x 1: y[0], y[1], ..., y[nT]
+        const arma::vec &Fphi, // Fphi[t]      = (phi[1], ..., phi[nL])'
+        const arma::vec &hpsi) // (nT + 1) x 1: h(psi[0]), h(psi[1]), ..., h(psi[nT])
+    {
+        unsigned int nelem = std::min(t, nlag);
+
+        arma::vec Fphi_t = Fphi.subvec(0, nelem - 1); // Fphi[t] = (phi[1], ..., phi[nL])'
+        Fphi_t = arma::reverse(Fphi_t);
+
+        arma::vec Fy_t = y.subvec(t - nelem, t - 1); // Fy[t] = (y[t-nL], ..., y[t-1])'
+        arma::vec Fhpsi_t = hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t] = (h(psi[t+1-nL]), ..., h(psi[t]))'
+
+        arma::vec Fast_t = Fy_t % Fhpsi_t;
+        double ft = arma::accu(Fphi_t % Fast_t);
+        return ft;
+    }
+
+
+    void F0_sliding()
+    {
+        _F0.set_size(_dim.nP);
+        _F0.zeros();
+        return;
+    }
+
+    static arma::vec F0_sliding(const unsigned int &nP)
+    {
+        arma::vec F0(nP, arma::fill::zeros);
+        return F0;
+    }
+
+    void G0_sliding()
+    {
+        // arma::mat G0(_dim.nP, _dim.nP, arma::fill::zeros);
+        _G0.set_size(_dim.nP, _dim.nP);
+        _G0.zeros();
+        _G0.at(0, 0) = 1.;
+        for (unsigned int i = 1; i < _dim.nP; i++)
+        {
+            _G0.at(i, i - 1) = 1.;
+        }
+        // G0.diag(-1).ones();
+
+        return;
+    }
+
+    static arma::mat G0_sliding(const Dim &dim) // Tested. OK.
+    {
+        arma::mat G0(dim.nP, dim.nP, arma::fill::zeros);
+        G0.at(0, 0) = 1.;
+        for (unsigned int i = 1; i < dim.nP; i++)
+        {
+            G0.at(i, i - 1) = 1.;
+        }
+        // G0.diag(-1).ones();
+
+        return G0;
+    }
+
+    /**
+     * @brief Exact method that transfers psi[t] to g[t](theta[t]) = f[t](psi[t], f[t-1], ..., f[t-r]) using the iterative formula: f[t] is a sum of past transfer effects f[0:(t-1)], and current gain h(psi[t]) + previous observation (ancestor) y[t-1]. Only works for non-truncated negative-binomial lag distribution.
      *
      * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
      * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
@@ -239,29 +286,108 @@ public:
          */
         arma::vec Fast_t = _ft.subvec(t - 1, t + _r - 2); // f[t-r], ..., f[t-1]
         Fast_t = arma::reverse(Fast_t); // f[t-1], ..., f[t-r]
-        double ft = arma::accu(Fast_t % iter_coef);
+        double ft = arma::accu(Fast_t % _iter_coef);
+        // iter_coef: c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
 
         double Fast_now = fgain.hpsi.at(t) * y_prev;
-        ft += coef_now * Fast_now;
+        ft += _coef_now * Fast_now;
 
         bound_check(ft, "transfer_iterative: ft");
         return ft;
     }
 
+    /**
+     * @brief g[t](\btheta[t-1], y[t-1]), exact formula
+     *
+     * @param ft_prev_rev btheta[1:(nP-1)] = btheta[1:r] = (f[t-1], ..., f[t-r])
+     * @param psi_now psi[t] = btheta[0]
+     * @param y_prev y[t-1]
+     * @param transfer
+     * @return double
+     */
+    static double transfer_iterative(
+        const arma::vec &ft_prev_rev, // (r x 1), f[t-1], ..., f[t-r]
+        const double &psi_now, // psi[t]
+        const double &y_prev, // y[t-1]
+        const std::string &gain_func,
+        const double &lag_par1,
+        const double &lag_par2)
+    {
+        // iter_coef: c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+        arma::vec iter_coef = nbinom::iter_coef(lag_par1, lag_par2);
+        double ft = arma::accu(ft_prev_rev % iter_coef); // sum[k] f[t-k]c(r,k)(-kappa)^k
+
+        double hpsi_now = GainFunc::psi2hpsi(psi_now, gain_func);
+        double Fast_now = hpsi_now * y_prev;
+        ft += nbinom::coef_now(lag_par1, lag_par2) * Fast_now; // (1-kappa)^r y[t-1] * h(psi[t])
+
+        bound_check(ft, "transfer_iterative: ft");
+        return ft;
+    }
+
+    void F0_iterative()
+    {
+        _F0.set_size(_dim.nP);
+        _F0.zeros();
+        _F0.at(1) = 1.;
+        return;
+    }
+
+    static arma::vec F0_iterative(const unsigned int &nP)
+    {
+        arma::vec F0(nP, arma::fill::zeros);
+        F0.at(1) = 1.;
+        return F0;
+    }
+
+    void G0_iterative()
+    {
+        // arma::mat G0(_dim.nP, _dim.nP, arma::fill::zeros);
+        _G0.set_size(_dim.nP, _dim.nP);
+        _G0.zeros();
+        _G0.at(0, 0) = 1.;
+        _G0.at(1, 0) = _coef_now; // (1 - kappa)^r
+        _G0.submat(1, 1, 1, _dim.nP - 1) = _iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+        for (unsigned int i = 2; i < _dim.nP; i++)
+        {
+            _G0.at(i, i-1) = 1.;
+        }
+
+        return;
+    }
+
+
+    static arma::mat G0_iterative(const Dim &dim, const LagDist &dlag) // Tested. OK.
+    {
+        arma::mat G0(dim.nP, dim.nP, arma::fill::zeros);
+        arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+        double coef_now = std::pow(1. - dlag.par1, dlag.par2);
+
+        G0.at(0, 0) = 1.;
+        G0.at(1, 0) = coef_now;                      // (1 - kappa)^r
+        G0.submat(1, 1, 1, dim.nP - 1) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+        for (unsigned int i = 2; i < dim.nP; i++)
+        {
+            G0.at(i, i - 1) = 1.;
+        }
+
+        return G0;
+    }
+
     void update_ft_approx();
 
 private:
-    std::map<std::string, AVAIL::Transfer> _trans_list;
+    
+    Dim _dim;
     unsigned int _r;
-    unsigned int _nlag;
-    unsigned int _ntime;
 
     std::string _name = "sliding";
-    arma::vec iter_coef;
-    double coef_now;
+    arma::vec _iter_coef;
+    double _coef_now;
 
     arma::vec _ft;
-    arma::vec _Ft;
+    arma::vec _F0;
+    arma::mat _G0;
 };
 
 #endif
