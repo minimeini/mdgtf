@@ -466,13 +466,13 @@ Rcpp::List ffbs_poisson(
             use_custom_val = true;
         }
 
-        double y_old = ypad.at(t);
+        double y_old = ypad.at(t); // y[0], ..., y[nt - 1]
         arma::mat Theta_old = theta_stored.slice(t); // p x N
 
         arma::vec weights(N, arma::fill::ones);
         double wt = Wt.at(t);
 
-        double y_new = ypad.at(t + 1);
+        double y_new = ypad.at(t + 1); // y[1], ..., y[nt]
         arma::mat Theta_new(p, N, arma::fill::zeros);
 
         smc_propagate_bootstrap(
@@ -795,6 +795,7 @@ Rcpp::List pl_poisson(
 
         for (unsigned int i = 0; i < N; i++)
         {
+            // Propagate
             arma::vec theta_old = Theta_old.col(i); // p x 1
             arma::vec theta_new = update_at(
                 Gt, theta_old, ypad.at(t),
@@ -840,6 +841,7 @@ Rcpp::List pl_poisson(
         }
         // Checked OK.
 
+        // resample
         arma::vec weight(N); // importance weight of each particle
         arma::vec lambda(N);
         for (unsigned int i = 0; i < N; i++)

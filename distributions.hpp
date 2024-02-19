@@ -38,6 +38,14 @@ public:
     {
         _par2 = par2;
     }
+
+    void init(const std::string &name, const double &par1, const double &par2)
+    {
+        _name = name;
+        _par1 = par1;
+        _par2 = par2;
+        return;
+    }
 };
 
 
@@ -102,6 +110,87 @@ public:
     }
 };
 
+
+class InverseGamma : public Dist
+{
+public:
+    InverseGamma() : Dist(), alpha(_par1), beta(_par2) 
+    {
+        _name = "invgamma";
+        _par1 = 0.01;
+        _par2 = 0.01;
+    }
+
+    InverseGamma(const double &shape, const double &rate) : Dist(), alpha(_par1), beta(_par2)
+    {
+        _name = "invgamma";
+        _par1 = shape;
+        _par2 = rate;
+    }
+
+    const double &alpha; // shape
+    const double &beta; // rate
+
+    double mode()
+    {
+        return mode(alpha, beta);
+    }
+
+    static double mode(const double &alpha, const double &beta)
+    {
+        return beta / (alpha + 1.);
+    }
+
+    double mean()
+    {
+        return mean(alpha, beta);
+    }
+    
+    static double mean(const double &alpha, const double &beta)
+    {
+        if (alpha > 1.)
+        {
+            return beta / (alpha - 1.);
+        }
+        else
+        {
+            return -1;
+        }
+    }
+
+    double var()
+    {
+        return var(alpha, beta);
+    }
+
+    static double var(const double &alpha, const double &beta)
+    {
+        if (alpha > 2.)
+        {
+            double nom = beta * beta;
+            double denom = std::pow(alpha - 1., 2.);
+            denom *= alpha - 2.;
+            return nom / denom;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+
+    double sample()
+    {
+        return sample(alpha, beta);
+    }
+
+    static double sample(const double &alpha, const double &beta)
+    {
+        double out = 1. / R::rgamma(alpha, 1. / beta);
+        bound_check(out, "InverseGamma::sample: out");
+        return out;
+    }
+};
+
 class Gamma : public Dist
 {
 public:
@@ -112,11 +201,11 @@ public:
         _par2 = 1.;
     }
 
-    Gamma(const double &alpha_, const double &beta_) : Dist(), alpha(_par1), beta(_par2)
+    Gamma(const double &shape, const double &rate) : Dist(), alpha(_par1), beta(_par2)
     {
         _name = "gamma";
-        _par1 = alpha_;
-        _par2 = beta_;
+        _par1 = shape;
+        _par2 = rate;
     }
 
     Gamma(const Dist &dist_) : Dist(), alpha(_par1), beta(_par2)
@@ -376,6 +465,33 @@ public:
         mean2conj();
     }
 
+    static double dnbinomm(
+        const double &y, 
+        const double &lambda, 
+        const double &delta, 
+        const bool &log=true)
+    {
+        // double kappa = lambda / (lambda + delta);
+        // double output = nbinom::dnbinom(y, kappa, delta);
+
+        double tmp1 = (R::lgammafn(y + delta) - R::lgammafn(y + 1.)) - R::lgammafn(delta);
+
+        double lognkappa = std::log(delta) - std::log(lambda + delta);
+        double tmp2 = delta * lognkappa;
+
+        double logkappa = std::log(lambda) - std::log(lambda + delta);
+        double tmp3 = y * logkappa;
+
+        double output = tmp1 + tmp2 + tmp3;
+        if (!log)
+        {
+            output = std::min(output, UPBND);
+            output = std::exp(output);
+        }
+
+        return output;
+    }
+
     double sample()
     {
         double prob_succ = par2 / (par1 + par2);
@@ -513,14 +629,7 @@ public:
 
         for (unsigned int d = 0; d < nL; d++)
         {
-            double lag = static_cast<double>(d) + 1.;
-            double a = lag + _par2 - 2.;
-            double b = lag - 1.;
-            double c1 = binom(a, b);
-            double c2 = std::pow(_par1, b);
-
-            output.at(d) = c1 * c2;
-            output.at(d) *= c3;
+            output.at(d) = dnbinom(static_cast<double>(d), _par1, _par2, c3);
         }
 
         bound_check<arma::vec>(output, "dnbinom", false, true);
@@ -554,17 +663,41 @@ public:
 
         for (unsigned int d = 0; d < nL; d++)
         {
-            double lag = static_cast<double>(d) + 1.;
-            double a = lag + r - 2.;
-            double b = lag - 1.;
-            double c1 = binom(a, b);
-            double c2 = std::pow(kappa, b);
+            // double lag = static_cast<double>(d) + 1.;
+            // double a = lag + r - 2.;
+            // double b = lag - 1.;
+            // double c1 = binom(a, b);
+            // double c2 = std::pow(kappa, b);
 
-            output.at(d) = c1 * c2;
-            output.at(d) *= c3;
+            // output.at(d) = c1 * c2;
+            // output.at(d) *= c3;
+
+            output.at(d) = dnbinom(static_cast<double>(d), kappa, r, c3);
         }
 
         bound_check<arma::vec>(output, "dnbinom", false, true);
+        return output;
+    }
+
+    static double dnbinom(const double &y, const double &kappa, const double &r)
+    {
+        double c3 = std::pow(1. - kappa, r);
+
+        double a = y + r - 1.;
+        double c1 = binom(a, y);
+        double c2 = std::pow(kappa, y);
+        double output = (c1 * c2) * c3;
+
+        return output;
+    }
+
+    static double dnbinom(const double &y, const double &kappa, const double &r, const double &c3)
+    {
+        double a = y + r - 1.;
+        double c1 = binom(a, y);
+        double c2 = std::pow(kappa, y);
+        double output = (c1 * c2) * c3;
+
         return output;
     }
 

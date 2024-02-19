@@ -28,50 +28,6 @@
 
 namespace LBA
 {
-    /**
-     * @brief vector function theta[t+1] = g(theta[t]). For LBA, a[t] = g[t](m[t-1]) = gt(model, mt_old, yold).
-     *
-     * @param model
-     * @param theta_cur // theta[t]
-     * @param ycur  // y[t]
-     *
-     * @return theta[t+1]: arma::vec
-     */
-    static arma::vec func_gt( // Checked. OK.
-        const Model &model,
-        const arma::vec &theta_cur, // nP x 1, (psi[t], f[t-1], ..., f[t-r])
-        const double &ycur)
-    {
-        arma::vec theta_next;
-        theta_next.copy_size(theta_cur);
-
-        switch (model.transfer.trans_list[model.transfer.name])
-        {
-        case AVAIL::Transfer::iterative:
-        {
-            theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
-            theta_next.at(1) = TransFunc::transfer_iterative(
-                theta_cur.subvec(1, model.dim.nP - 1), // f[t-1], ..., f[t-r]
-                theta_cur.at(0),                       // psi[t]
-                ycur,                                  // y[t-1]
-                model.transfer.name,
-                model.transfer.dlag.par1,
-                model.transfer.dlag.par2);
-            theta_next.subvec(2, model.dim.nP - 1) = theta_cur.subvec(1, model.dim.nP - 2);
-            break;
-        }
-        default: // AVAIL::Transfer::sliding
-        {
-            // theta_next = model.transfer.G0 * theta_cur;
-            theta_next.at(0) = theta_cur.at(0);
-            theta_next.subvec(1, model.dim.nP - 1) = theta_cur.subvec(0, model.dim.nP - 2);
-            break;
-        }
-        }
-
-        bound_check<arma::vec>(theta_next, "func_gt: theta_next");
-        return theta_next;
-    }
 
     /**
      * @brief First-order derivative of g[t] w.r.t theta[t]; used in the calculation of R[t] = G[t] C[t-1] t(G[t]) + W[t].
@@ -132,47 +88,7 @@ namespace LBA
         return Rt;
     }
 
-    /**
-     * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
-     *
-     * @param model
-     * @param t
-     * @param theta_cur
-     * @param yall
-     * @return double
-     */
-    static double func_ft(
-        const Model &model,
-        const unsigned int &t,      // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
-        const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall       // y[0], y[1], ..., y[nT]
-    )
-    {
-        double ft_cur;
-        if (model.transfer.trans_list[model.transfer.name] == AVAIL::sliding)
-        {
-            unsigned int nelem = std::min(t, model.dim.nL); // min(t,nL)
-            arma::vec yold(model.dim.nL, arma::fill::zeros);
-            yold.tail(nelem) = yall.subvec(t - nelem, t - 1); // 0, ..., 0, y[t - nelem], ..., y[t-1]
-            yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
-
-            arma::vec ft_vec = model.transfer.dlag.Fphi;
-
-            arma::vec hpsi_cur = GainFunc::psi2hpsi(theta_cur, model.transfer.fgain.name); // (h(psi[t]), ..., h(psi[t+1 - nL]))
-            arma::vec ftmp = yold % hpsi_cur;
-            ft_vec = ft_vec % ftmp;
-
-            ft_cur = arma::accu(ft_vec);
-        }
-        else
-        {
-            ft_cur = theta_cur.at(1);
-        }
-
-        bound_check(ft_cur, "func_ft: ft_cur");
-        return ft_cur;
-    }
-
+ 
     /**
      * @brief First-order derivative of f[t] w.r.t theta[t].
      *
@@ -228,7 +144,7 @@ namespace LBA
         const arma::vec &at,
         const arma::mat &Rt)
     {
-        mean_ft = func_ft(model, t, at, yall);
+        mean_ft = Model::func_ft(model, t, at, yall);
         _Ft = func_Ft(model, t, at, yall);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
@@ -424,7 +340,7 @@ namespace LBA
         psi_sd = arma::sqrt(arma::abs(psi_sd) + EPS);
         psi.col(0) = psi.col(1) - 2. * psi_sd;
         psi.col(2) = psi.col(1) + 2. * psi_sd;
-        return psi;
+        return psi; // (nT + 1) x 3
     }
 
     class LinearBayes
@@ -518,7 +434,9 @@ namespace LBA
             _Ct.for_each([&theta_upbnd](arma::cube::elem_type &val) { val *= theta_upbnd; });
             // set C[0]
 
-            _y = y; // (nT + 1) x 1;
+            _y.set_size(model.dim.nT + 1);
+            _y.zeros();
+            _y.tail(y.n_elem) = y; // (nT + 1) x 1;
             _y.elem(arma::find(_y < EPS)).fill(0.01 / static_cast<double>(_nP));
 
             return;
@@ -536,7 +454,7 @@ namespace LBA
         {
             for (unsigned int t = 1; t <= _model.dim.nT; t++)
             {
-                _at.col(t) = func_gt(_model, _mt.col(t-1), _y.at(t-1));
+                _at.col(t) = Model::func_gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 

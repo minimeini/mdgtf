@@ -158,7 +158,101 @@ public:
         return y; // Checked. OK.
     }
 
-    
+
+    /**
+     * @brief State evolution equation for the DLM form model
+     * 
+     * @param model 
+     * @param theta_cur 
+     * @param ycur 
+     * @return arma::vec 
+     */
+    static arma::vec func_gt( // Checked. OK.
+        const Model &model,
+        const arma::vec &theta_cur, // nP x 1, (psi[t], f[t-1], ..., f[t-r])
+        const double &ycur)
+    {
+        arma::vec theta_next;
+        theta_next.copy_size(theta_cur);
+
+        switch (model.transfer.trans_list[model.transfer.name])
+        {
+        case AVAIL::Transfer::iterative:
+        {
+            theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
+            theta_next.at(1) = TransFunc::transfer_iterative(
+                theta_cur.subvec(1, model.dim.nP - 1), // f[t-1], ..., f[t-r]
+                theta_cur.at(0),                       // psi[t]
+                ycur,                                  // y[t-1]
+                model.transfer.name,
+                model.transfer.dlag.par1,
+                model.transfer.dlag.par2);
+            theta_next.subvec(2, model.dim.nP - 1) = theta_cur.subvec(1, model.dim.nP - 2);
+            break;
+        }
+        default: // AVAIL::Transfer::sliding
+        {
+            // theta_next = model.transfer.G0 * theta_cur;
+            theta_next.at(0) = theta_cur.at(0);
+            theta_next.subvec(1, model.dim.nP - 1) = theta_cur.subvec(0, model.dim.nP - 2);
+            break;
+        }
+        }
+
+        bound_check<arma::vec>(theta_next, "func_gt: theta_next");
+        return theta_next;
+    }
+
+    /**
+     * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
+     *
+     * @param model
+     * @param t
+     * @param theta_cur
+     * @param yall
+     * @return double
+     */
+    static double func_ft(
+        const Model &model,
+        const int &t,      // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
+        const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
+        const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
+    )
+    {
+        double ft_cur;
+        if (model.transfer.trans_list[model.transfer.name] == AVAIL::sliding)
+        {
+            int nelem = std::min(t, (int)model.dim.nL); // min(t,nL)
+            
+            arma::vec yold(model.dim.nL, arma::fill::zeros);
+            if (nelem > 1)
+            {
+                yold.tail(nelem) = yall.subvec(t - nelem, t - 1); // 0, ..., 0, y[t - nelem], ..., y[t-1]
+            }
+            else if (t > 0) // nelem = 1 at t = 1
+            {
+                yold.at(model.dim.nL - 1) = yall.at(t - 1);
+            }
+            
+            
+            yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
+
+            arma::vec ft_vec = model.transfer.dlag.Fphi;
+
+            arma::vec hpsi_cur = GainFunc::psi2hpsi(theta_cur, model.transfer.fgain.name); // (h(psi[t]), ..., h(psi[t+1 - nL]))
+            arma::vec ftmp = yold % hpsi_cur;
+            ft_vec = ft_vec % ftmp;
+
+            ft_cur = arma::accu(ft_vec);
+        }
+        else
+        {
+            ft_cur = theta_cur.at(1);
+        }
+
+        bound_check(ft_cur, "func_ft: ft_cur");
+        return ft_cur;
+    }
 
 private:
     ObsDist _dobs; // Observation distribution

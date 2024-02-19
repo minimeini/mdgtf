@@ -12,7 +12,9 @@ class AVAIL
 public:
     enum Algo {
         LinearBayes,
-        SMC,
+        FFBS,
+        MCS,
+        ParticleLearning,
         MCMC,
         VariationBayes
     };
@@ -60,7 +62,14 @@ private:
         ALGO_MAP["linearbayes"] = Algo::LinearBayes;
         ALGO_MAP["linear_bayes"] = Algo::LinearBayes;
 
-        ALGO_MAP["smc"] = Algo::SMC;
+        ALGO_MAP["smc"] = Algo::MCS;
+        ALGO_MAP["mcs"] = Algo::MCS;
+
+        ALGO_MAP["ffbs"] = Algo::FFBS;
+
+        ALGO_MAP["pl"] = Algo::ParticleLearning;
+        ALGO_MAP["particlelearning"] = Algo::ParticleLearning;
+        ALGO_MAP["particle_learning"] = Algo::ParticleLearning;
 
         ALGO_MAP["mcmc"] = Algo::MCMC;
 

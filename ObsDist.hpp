@@ -125,6 +125,44 @@ public:
         return y;
     }
 
+
+    static double loglike(
+        const double &y, 
+        const std::string &obs_dist,
+        const double &lambda, 
+        const double &par2 = 1.,
+        const bool &return_log = true)
+    {
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        double density;
+        double ys = std::abs(y);
+        double lambda_s = std::max(lambda, EPS);
+
+        switch (obs_list[obs_dist])
+        {
+        case AVAIL::Dist::nbinomm:
+        {
+            density = nbinomm::dnbinomm(ys, lambda_s, par2, return_log);
+            break;
+        }
+        case AVAIL::Dist::poisson:
+        {
+            density = R::dpois(ys, lambda_s, return_log);
+            break;
+        }
+        case AVAIL::Dist::gaussian:
+        {
+            double sd = std::sqrt(par2);
+            density = R::dnorm4(y, lambda, sd, return_log);
+        }
+        default:
+            break;
+        }
+
+        bound_check(density, "ObsDist::loglike");
+        return density;
+    }
+
     
 };
 

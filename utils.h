@@ -156,7 +156,7 @@ inline arma::uvec sample(
 	bool zero_start)
 {
 	Rcpp::NumericVector w_ = Rcpp::NumericVector(weights.begin(), weights.end());
-	Rcpp::IntegerVector idx_ = Rcpp::sample(n, size, true, w_);
+	Rcpp::IntegerVector idx_ = Rcpp::sample(n, size, replace, w_);
 
 	arma::uvec idx = Rcpp::as<arma::uvec>(Rcpp::wrap(idx_));
 	if (zero_start)
