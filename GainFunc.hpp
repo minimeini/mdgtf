@@ -125,6 +125,48 @@ public:
         return hpsi;
     }
 
+    template <typename T>
+    void psi2hpsi()
+    {
+        T hpsi = psi; 
+
+        switch (gain_list[name])
+        {
+        case AVAIL::Func::ramp:
+        {
+            hpsi.elem(arma::find(hpsi < EPS)).fill(EPS);
+        }
+        break;
+        case AVAIL::Func::exponential:
+        {
+            hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
+            hpsi = arma::exp(hpsi);
+        }
+        break;
+        case AVAIL::Func::identity:
+        {
+            // do nothing
+        }
+        break;
+        case AVAIL::Func::softplus:
+        {
+            hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
+            T hpsi_tmp = arma::exp(hpsi);
+            hpsi = arma::log(1. + hpsi_tmp);
+        }
+        break;
+        default:
+        {
+            // Use identity gain: do nothing
+        }
+        break;
+        }
+
+        bound_check<T>(hpsi, "psi2hpsi");
+
+        return;
+    }
+
     static double psi2hpsi(
         const double &psi,
         const std::string &gain_func)

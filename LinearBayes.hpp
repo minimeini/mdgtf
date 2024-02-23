@@ -144,7 +144,7 @@ namespace LBA
         const arma::vec &at,
         const arma::mat &Rt)
     {
-        mean_ft = Model::func_ft(model, t, at, yall);
+        mean_ft = StateSpace::func_ft(model, t, at, yall);
         _Ft = func_Ft(model, t, at, yall);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
@@ -392,7 +392,7 @@ namespace LBA
         const double &W = 0.01,
         const double &discount_factor = 0.95,
         const bool &use_discount = false,
-        const double &theta_upbnd = 1.) : atilde(_atilde_t), Rtilde(_Rtilde_t), at(_at), Rt(_Rt), mt(_mt), Ct(_Ct), _model(model)
+        const double &theta_upbnd = 1.) : alpha_t(_alpha_t), beta_t(_beta_t), atilde(_atilde_t), Rtilde(_Rtilde_t), at(_at), Rt(_Rt), mt(_mt), Ct(_Ct), _model(model)
         {
             _W = W;
             _discount_factor = discount_factor;
@@ -406,12 +406,17 @@ namespace LBA
             _ft_prior_var = _ft;
             _ft_post_mean = _ft;
             _ft_post_var = _ft;
-            _alphat = _ft;
-            _betat = _ft;
+            _alphat = 0.01;
+            _betat = 0.01;
 
             _psi_mean.set_size(_nT + 1);
             _psi_mean.zeros();
             _psi_var = _psi_mean;
+
+            _alpha_t = _psi_mean;
+            _beta_t = _psi_mean;
+            _alpha_t.at(0) = _alphat;
+            _beta_t.at(0) = _betat;
 
             _At.set_size(_nP);
             _At.zeros();
@@ -448,13 +453,15 @@ namespace LBA
         const arma::cube &Ct;
         const arma::mat &atilde;
         const arma::cube &Rtilde;
+        const arma::vec &alpha_t;
+        const arma::vec &beta_t;
 
 
         void filter()
         {
             for (unsigned int t = 1; t <= _model.dim.nT; t++)
             {
-                _at.col(t) = Model::func_gt(_model, _mt.col(t-1), _y.at(t-1));
+                _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1));
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 
@@ -464,6 +471,8 @@ namespace LBA
                     _at.col(t), _Rt.slice(t));
 
                 func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), true);
+                _alpha_t.at(t) = _alphat;
+                _beta_t.at(t) = _betat;
 
                 _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
 
@@ -572,6 +581,7 @@ namespace LBA
 
         arma::vec _psi_mean; // (nT + 1) x 1
         arma::vec _psi_var; // (nT + 1) x 1
+        arma::vec _alpha_t, _beta_t; // (nT + 1) x 1
 
         arma::vec _Ft, _At; // nP x 1
         arma::mat _Gt; // nP x nP

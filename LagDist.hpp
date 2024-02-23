@@ -22,10 +22,10 @@
  * @param _name string: name of the lag distribution, must be one of the lag distribution listed in AVAIL (modified by set_lag_dist).
  * @param _par1 (par1, par2) are two parameters that defined the lag distribution: nbinom(kappa, r); lognorm(mu, sd2) (modified by set_lag_dist).
  * @param _par2 (par1, par2) are two parameters that defined the lag distribution: nbinom(kappa, r); lognorm(mu, sd2) (modified by set_lag_dist).
- * 
- * 
+ *
+ *
  * @param _Fphi nL x 1 vector: lag distributions, C.D.F of discrete random variables, characterized by two parameters.
- * 
+ *
  * @return Fphi
  */
 class LagDist : public Dist
@@ -102,19 +102,17 @@ public:
         return;
     }
 
-
-
     /**
      * @brief Get P.M.F of the lag distribution. [Checked. OK.s]
-     * 
+     *
      * @param nlag unsigned int
      * @param lag_dist nbinom or lognorm
      * @param lag_par1 kappa or mu
      * @param lag_par2 r or var
-     * @return arma::vec 
+     * @return arma::vec
      */
     static arma::vec get_Fphi(
-        const unsigned int &nlag, 
+        const unsigned int &nlag,
         const std::string &lag_dist,
         const double &lag_par1,
         const double &lag_par2)
@@ -171,7 +169,7 @@ public:
     }
 
 private:
-    arma::vec _Fphi;      // a vector of the lag distribution CDF at desired length _nL.
+    arma::vec _Fphi; // a vector of the lag distribution CDF at desired length _nL.
     bool _isnbinom;
 };
 

@@ -5,47 +5,65 @@
 #include <boost/math/special_functions/beta.hpp>
 #include "utils.h"
 
-/**
- * @brief Define a two-parameter distributions.
- *
- * @param name
- * @param par1
- * @param par2
- */
-class Dist
+
+class MVNorm
 {
-    // Dist() : name(_name) {}
-
-protected:
-    std::string _name;
-    double _par1;
-    double _par2;
-
 public:
-    Dist() : par1(_par1), par2(_par2), name(_name) {}
-
-    const double &par1;
-    const double &par2;
-    const std::string &name;
-
-    // const std::string &name;
-    void update_par1(const double &par1)
+    MVNorm(const unsigned int nP)
     {
-        _par1 = par1;
-    }
+        mu.set_size(nP);
+        mu.zeros();
 
-    void update_par2(const double &par2)
-    {
-        _par2 = par2;
-    }
+        Sigma.set_size(nP, nP);
+        Sigma.eye();
 
-    void init(const std::string &name, const double &par1, const double &par2)
-    {
-        _name = name;
-        _par1 = par1;
-        _par2 = par2;
         return;
     }
+
+    void update_mu(const arma::vec &mu_in)
+    {
+        mu = mu_in;
+        return;
+    }
+
+    void update_Sigma(const arma::mat &Sigma_in)
+    {
+        Sigma = Sigma_in;
+        return;
+    }
+
+    static arma::mat get_precision(const arma::mat &Sigma)
+    {
+        arma::mat prec = inverse(Sigma, false, true);
+        return prec;
+    }
+
+    static double dmvnorm(const arma::vec &x, const arma::vec &mu, const arma::mat &Sigma, const bool &return_log = true)
+    {
+        arma::mat prec = inverse(Sigma, false, true);
+        double logdet = arma::log_det_sympd(prec);
+        double cnst = static_cast<double>(mu.n_elem) * std::log(2. * arma::datum::pi);
+        
+        arma::vec diff = x - mu;
+        double dist = arma::as_scalar(diff.t() * prec * diff);
+
+        double logprob = - cnst + logdet - dist;
+        logprob *= 0.5;
+
+        if (return_log)
+        {
+            return logprob;
+        }
+        else
+        {
+            logprob = std::min(logprob, UPBND);
+            return std::exp(logprob);
+        }
+    }
+
+private:
+    arma::vec mu; // mean
+    arma::mat Sigma; // Variance-covariance matrix
 };
 
 
@@ -679,6 +697,15 @@ public:
         return output;
     }
 
+
+    /**
+     * @brief P.M.F of negative-binomial distribution.
+     * 
+     * @param y Number of failures before r successes
+     * @param kappa Probability of failures
+     * @param r Number of successes wanted.
+     * @return double 
+     */
     static double dnbinom(const double &y, const double &kappa, const double &r)
     {
         double c3 = std::pow(1. - kappa, r);
@@ -691,6 +718,15 @@ public:
         return output;
     }
 
+    /**
+     * @brief P.M.F of negative-binomial distribution.
+     *
+     * @param y Number of failures before r successes
+     * @param kappa Probability of failures
+     * @param r Number of successes wanted.
+     * @param c3 (1-kappa)^r
+     * @return double
+     */
     static double dnbinom(const double &y, const double &kappa, const double &r, const double &c3)
     {
         double a = y + r - 1.;
@@ -740,22 +776,6 @@ public:
 
 private:
     unsigned int _r;
-
-    double dnbinom0(const double &lag) // starting from 1
-    {
-        double c3 = std::pow(1. - _par1, _par2);
-        double a = lag + _par2 - 2.;
-        double b = lag - 1.;
-        double c1 = binom(a, b);
-        double c2 = std::pow(_par1, b);
-
-        // double c1 = R::dnbinom(k-1,(double)Last,1.-rho);
-        // double c2 = std::pow(-1.,k-1.);
-        // Fphi.at(d) = c1 * c2;
-        double output = (c1 * c2) * c3;
-        bound_check(output, "dnbinom0", false, true);
-        return output;
-    }
 };
 
 /**

@@ -62,49 +62,6 @@ public:
      * Exponential link:
      *      mu[t] = exp( eta[t] ) = exp( mu0 + f[t] )
      */
-    template <class T>
-    T ft2mu(const T &ft)
-    {
-        T eta = _mu0 + ft;
-        T mu;
-        switch (link_list[_name])
-        {
-        case AVAIL::Func::exponential:
-        {
-            mu = arma::exp(eta);
-            break;
-        }
-        default:
-        {
-            // Identity gain
-            mu = eta;
-            break;
-        }
-        }
-        return mu;
-    }
-
-    double ft2mu(const double &ft)
-    {
-        double eta = _mu0 + ft;
-        double mu;
-        switch (link_list[_name])
-        {
-        case AVAIL::Func::exponential:
-        {
-            mu = std::exp(eta);
-            break;
-        }
-        default:
-        {
-            // Identity gain
-            mu = eta;
-            break;
-        }
-        }
-        return mu;
-    }
-
     static double ft2mu(const double &ft, const std::string &link_func, const double &mu0 = 0.)
     {
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
@@ -116,6 +73,30 @@ public:
         case AVAIL::Func::exponential:
         {
             mu = std::exp(eta);
+            break;
+        }
+        default:
+        {
+            // Identity gain
+            mu = eta;
+            break;
+        }
+        }
+        return mu;
+    }
+
+    template <class T>
+    static T ft2mu(const T &ft, const std::string &link_func, const double &mu0 = 0.)
+    {
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+
+        T eta = mu0 + ft;
+        T mu;
+        switch (link_list[tolower(link_func)])
+        {
+        case AVAIL::Func::exponential:
+        {
+            mu = arma::exp(eta);
             break;
         }
         default:
@@ -142,11 +123,15 @@ public:
      *
      */
     template <class T>
-    T mu2ft(
-        const T &mu)
+    static T mu2ft(
+        const T &mu,
+        const std::string &link_func,
+        const double &mu0 = 0.)
     {
         T eta;
-        switch (link_list[_name])
+
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        switch (link_list[tolower(link_func)])
         {
         case AVAIL::Func::exponential:
         {
@@ -161,16 +146,20 @@ public:
         }
         }
 
-        T ft = eta - _mu0;
+        T ft = eta - mu0;
 
         return ft;
     }
 
-    double mu2ft(
-        const double &mu)
+    static double mu2ft(
+        const double &mu,
+        const std::string &link_func,
+        const double &mu0 = 0.)
     {
         double eta;
-        switch (link_list[_name])
+
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        switch (link_list[tolower(link_func)])
         {
         case AVAIL::Func::exponential:
         {
@@ -185,7 +174,7 @@ public:
         }
         }
 
-        double ft = eta - _mu0;
+        double ft = eta - mu0;
 
         return ft;
     }

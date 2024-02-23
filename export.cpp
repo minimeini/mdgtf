@@ -1,6 +1,8 @@
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
+#include "MCMC.hpp"
+#include "VariationalBayes.hpp"
 
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
@@ -182,6 +184,15 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
         opts = SMC::PL::default_settings();
         break;
     }
+    case AVAIL::Algo::MCMC:
+    {
+        opts = MCMC::Disturbance::default_settings();
+        break;
+    }
+    case AVAIL::Algo::HybridVariation:
+    {
+        opts = VB::Hybrid::default_settings();
+    }
     default:
         break;
     }
@@ -303,7 +314,7 @@ Model dgtf_initialize(const Rcpp::List &settings)
 
     Dim dim(ntime, nlag, lag_param[1]);
     Model model(
-        dim, obs_dist, link_func, gain_func, lag_dist,
+        dim, obs_dist, link_func, gain_func, lag_dist, err_dist,
         obs_param, lag_param, err_param, trans_func);
 
     return model;
@@ -317,10 +328,13 @@ Rcpp::List dgtf_simulate(const Rcpp::List &settings)
     Model model = dgtf_initialize(settings);
     arma::vec ysim = model.simulate();
     arma::vec psi = model.transfer.fgain.psi;
+    arma::vec wt = model.derr.wt;
 
     Rcpp::List output = settings;
     output["y"] = Rcpp::wrap(ysim);
     output["psi"] = Rcpp::wrap(psi);
+    output["wt"] = Rcpp::wrap(wt);
+    output["lambda"] = Rcpp::wrap(model.lambda);
     return output;
 }
 
@@ -369,7 +383,7 @@ Rcpp::List dgtf_infer(
             output["Rtilde"] = Rcpp::wrap(linear_bayes.Rtilde);
         }
         break;
-    }
+    } // case Linear Bayes
     case AVAIL::Algo::MCS:
     {
         SMC::MCS mcs(model, y, method_settings);
@@ -386,7 +400,7 @@ Rcpp::List dgtf_infer(
             output["psi"] = Rcpp::wrap(psi_filter);
         }
         break;
-    }
+    } // case MCS
     case AVAIL::Algo::FFBS:
     {
         bool do_smoothing = Rcpp::as<bool>(method_settings["do_smoothing"]);
@@ -424,7 +438,7 @@ Rcpp::List dgtf_infer(
             }
         }
         break;
-    }
+    } // case FFBS
     case AVAIL::Algo::ParticleLearning:
     {
         bool do_smoothing = Rcpp::as<bool>(method_settings["do_smoothing"]);
@@ -474,23 +488,26 @@ Rcpp::List dgtf_infer(
             }
         }
         break;
+    } // case particle learning
+    case AVAIL::Algo::MCMC:
+    {
+        MCMC::Disturbance mcmc(method_settings, model.dim);
+        mcmc.infer(model, y);
+        output = mcmc.get_output();
+        break;
+    }
+    case AVAIL::Algo::HybridVariation:
+    {
+        VB::Hybrid hvb(method_settings, model.dim);
+        hvb.infer(model, y);
+        output = hvb.get_output();
+        break;
     }
     default:
         break;
-    }
+    }// switch by algorithm
 
 
     return output;
 }
 
-//' @export
-// [[Rcpp::export]]
-double test_loglike(
-    const double &y,
-    const std::string &obs_dist,
-    const double &lambda,
-    const double &par2 = 1.,
-    const bool &return_log = true)
-{
-    return ObsDist::loglike(y, obs_dist, lambda, par2, return_log);
-}

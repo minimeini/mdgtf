@@ -28,11 +28,10 @@ public:
         const std::string &trans_func = "sliding",
         const std::string &gain_func = "softplus",
         const std::string &lag_dist = "lognorm",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : F0(_F0),G0(_G0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : F0(_F0), G0(_G0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init(dim, trans_func, gain_func, lag_dist, lag_param);
         return;
-        
     }
 
     void init_default()
@@ -107,13 +106,9 @@ public:
             F0_sliding();
         }
 
-        
-        
-
         _ft.zeros();
         return;
     }
-
 
     LagDist dlag;
     GainFunc fgain;
@@ -126,7 +121,7 @@ public:
 
     /**
      * @brief From latent state psi[t] to transfer effect f[t] using the exact formula. Note that psi[t] is the random-walk component of the latent state theta[t].
-     * 
+     *
      * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
      * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
      * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
@@ -137,7 +132,7 @@ public:
         {
             if (trans_list[_name] == AVAIL::Transfer::iterative)
             {
-                _ft.at(t + _r - 1) = transfer_iterative(t, y.at(t-1));
+                _ft.at(t + _r - 1) = transfer_iterative(t, y.at(t - 1));
             }
             else
             {
@@ -145,8 +140,6 @@ public:
             }
         }
     }
-
-
 
     arma::vec get_ft(const bool &no_padding = true)
     {
@@ -169,7 +162,7 @@ public:
      * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
      * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
      * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
-     * 
+     *
      * @return double
      */
     double transfer_sliding(
@@ -178,7 +171,7 @@ public:
     {
         unsigned int nelem = std::min(t, _dim.nL);
         arma::vec Fphi_t = dlag.Fphi.subvec(0, nelem - 1); // Fphi[t] = (phi[1], ..., phi[nL])'
-        Fphi_t = arma::reverse(Fphi_t); // rev(Fphi[t]) = (phi[nL], ..., phi[1])
+        Fphi_t = arma::reverse(Fphi_t);                    // rev(Fphi[t]) = (phi[nL], ..., phi[1])
 
         arma::vec Fy_t = y.subvec(t - nelem, t - 1); // Fy[t] = (y[t-nL], ..., y[t-1])'
 
@@ -211,14 +204,13 @@ public:
         arma::vec Fphi_t = Fphi.subvec(0, nelem - 1); // Fphi[t] = (phi[1], ..., phi[nL])'
         Fphi_t = arma::reverse(Fphi_t);
 
-        arma::vec Fy_t = y.subvec(t - nelem, t - 1); // Fy[t] = (y[t-nL], ..., y[t-1])'
+        arma::vec Fy_t = y.subvec(t - nelem, t - 1);       // Fy[t] = (y[t-nL], ..., y[t-1])'
         arma::vec Fhpsi_t = hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t] = (h(psi[t+1-nL]), ..., h(psi[t]))'
 
         arma::vec Fast_t = Fy_t % Fhpsi_t;
         double ft = arma::accu(Fphi_t % Fast_t);
         return ft;
     }
-
 
     void F0_sliding()
     {
@@ -272,20 +264,19 @@ public:
      */
     double transfer_iterative(
         const unsigned int &t,
-        const double &y_prev
-    )
+        const double &y_prev)
     {
         /**
          * @brief _ft: (nT + r) x 1
-         * 
-         * Indx:     0,     , ..., r-1,  r   , ..., r + nT - 1 
+         *
+         * Indx:     0,     , ..., r-1,  r   , ..., r + nT - 1
          * _ft = ( f[-(r-1)], ..., f[0], f[1], ..., f[nT] ),
          *         f[-(r-1)] = ... = f[0] = 0.
-         * 
+         *
          * f[t] is indexed by (t + r - 1).
          */
         arma::vec Fast_t = _ft.subvec(t - 1, t + _r - 2); // f[t-r], ..., f[t-1]
-        Fast_t = arma::reverse(Fast_t); // f[t-1], ..., f[t-r]
+        Fast_t = arma::reverse(Fast_t);                   // f[t-1], ..., f[t-r]
         double ft = arma::accu(Fast_t % _iter_coef);
         // iter_coef: c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
 
@@ -307,8 +298,8 @@ public:
      */
     static double transfer_iterative(
         const arma::vec &ft_prev_rev, // (r x 1), f[t-1], ..., f[t-r]
-        const double &psi_now, // psi[t]
-        const double &y_prev, // y[t-1]
+        const double &psi_now,        // psi[t]
+        const double &y_prev,         // y[t-1]
         const std::string &gain_func,
         const double &lag_par1,
         const double &lag_par2)
@@ -346,16 +337,15 @@ public:
         _G0.set_size(_dim.nP, _dim.nP);
         _G0.zeros();
         _G0.at(0, 0) = 1.;
-        _G0.at(1, 0) = _coef_now; // (1 - kappa)^r
+        _G0.at(1, 0) = _coef_now;                          // (1 - kappa)^r
         _G0.submat(1, 1, 1, _dim.nP - 1) = _iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
         for (unsigned int i = 2; i < _dim.nP; i++)
         {
-            _G0.at(i, i-1) = 1.;
+            _G0.at(i, i - 1) = 1.;
         }
 
         return;
     }
-
 
     static arma::mat G0_iterative(const Dim &dim, const LagDist &dlag) // Tested. OK.
     {
@@ -364,7 +354,7 @@ public:
         double coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
         G0.at(0, 0) = 1.;
-        G0.at(1, 0) = coef_now;                      // (1 - kappa)^r
+        G0.at(1, 0) = coef_now;                         // (1 - kappa)^r
         G0.submat(1, 1, 1, dim.nP - 1) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
         for (unsigned int i = 2; i < dim.nP; i++)
         {
@@ -374,10 +364,140 @@ public:
         return G0;
     }
 
-    void update_ft_approx();
+    /**
+     * @brief Transfer Function effect of the regressor.
+     *
+     * @param t
+     * @param y At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
+     * @param ft At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
+     * @param psi At least (psi[0], psi[1], ..., psi[t]), could be longer including future values.
+     * @param dim
+     * @param dlag
+     * @param gain_func
+     * @param trans_func
+     * @return double
+     */
+    static double func_ft(
+        const unsigned int &t, // 1, ..., nT
+        const arma::vec &y,    // At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
+        const arma::vec &ft,   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
+        const arma::vec &psi,  // At least (psi[0], psi[1], ..., psi[t]), could be longer including future values.
+        const Dim &dim,
+        const LagDist &dlag,
+        const std::string &gain_func,
+        const std::string &trans_func)
+    {
+        double ft_now = 0.;
+        std::string trans_func_name = tolower(trans_func);
+        std::string gain_func_name = tolower(gain_func);
+
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        switch (trans_list[trans_func_name])
+        {
+        case AVAIL::Transfer::sliding:
+        {
+            /*
+            It uses:
+            y[0], ..., y[t-1]
+            psi[0], ..., psi[t]
+            phi[1], ..., phi[nL]
+            */
+            arma::vec Fphi = LagDist::get_Fphi(dim.nL, dlag.name, dlag.par1, dlag.par2);
+            arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, gain_func_name);
+            ft_now = TransFunc::transfer_sliding(t, dim.nL, y, Fphi, hpsi);
+            break;
+        }
+        case AVAIL::Transfer::iterative:
+        {
+            /*
+            It uses:
+            f[0], ..., f[t-1]
+            y[t-1]
+            psi[t]
+            */
+            unsigned int r = static_cast<unsigned int>(dlag.par2);
+            arma::vec ft_prev(r, arma::fill::zeros);
+            int idx_s = std::max((int)(t - r), 0);
+            int idx_e = std::max((int)(t - 1), 0);
+            unsigned int nelem = idx_e - idx_s + 1;
+            if (nelem > 1)
+            {
+                ft_prev.tail(nelem) = ft.subvec(idx_s, idx_e); // 0, ..., 0, f[t-r], ..., f[t-1]
+            }
+            else
+            {
+                ft_prev.at(r - 1) = ft.at(idx_e);
+            }
+
+            arma::vec ft_prev_rev = arma::reverse(ft_prev);
+            ft_now = TransFunc::transfer_iterative(
+                ft_prev_rev, psi.at(t), y.at(t - 1),
+                gain_func_name, dlag.par1, dlag.par2);
+            break;
+        }
+        default:
+            break;
+        }
+
+        return ft_now;
+    }
+
+    double func_ft(
+        const unsigned int &t, // 1, ..., nT
+        const arma::vec &y,    // At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
+        const arma::vec &ft)   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
+    {
+        double ft_now = 0.;
+
+        switch (trans_list[name])
+        {
+        case AVAIL::Transfer::sliding:
+        {
+            /*
+            It uses:
+            y[0], ..., y[t-1]
+            psi[0], ..., psi[t]
+            phi[1], ..., phi[nL]
+            */
+            ft_now = transfer_sliding(t, y);
+            // ft_now = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
+            break;
+        }
+        case AVAIL::Transfer::iterative:
+        {
+            /*
+            It uses:
+            f[0], ..., f[t-1]
+            y[t-1]
+            psi[t]
+            */
+            unsigned int r = static_cast<unsigned int>(dlag.par2);
+            arma::vec ft_prev(r, arma::fill::zeros);
+            int idx_s = std::max((int)(t - r), 0);
+            int idx_e = std::max((int)(t - 1), 0);
+            unsigned int nelem = idx_e - idx_s + 1;
+            if (nelem > 1)
+            {
+                ft_prev.tail(nelem) = ft.subvec(idx_s, idx_e); // 0, ..., 0, f[t-r], ..., f[t-1]
+            }
+            else
+            {
+                ft_prev.at(r - 1) = ft.at(idx_e);
+            }
+
+            arma::vec ft_prev_rev = arma::reverse(ft_prev);
+            ft_now = transfer_iterative(t, y.at(t - 1));
+
+            break;
+        }
+        default:
+            break;
+        }
+
+        return ft_now;
+    }
 
 private:
-    
     Dim _dim;
     unsigned int _r;
 

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include "armadillo"
 
+
 /*
 This script is adapted from Loaiza-Maya's Matlalog_det_sympd code.
 Below is a reference regarding notations in this script versus notations in Loaiza-Maya's Matlab code and manuscript.
@@ -50,7 +51,7 @@ Yeo-Johnson Transformation
 Yeo-Johnson Transform
 Ref: `tYJ.m`
 */
-double tYJ(
+inline double tYJ(
     const double theta,
     const double gamma)
 {
@@ -75,9 +76,7 @@ double tYJ(
     return nu;
 } // Status: Checked. OK.
 
-//' @export
-// [[Rcpp::export]]
-arma::vec tYJ(
+inline arma::vec tYJ(
     const arma::vec &theta, // m x 1
     const arma::vec &gamma)
 { // m x 1
@@ -95,7 +94,7 @@ arma::vec tYJ(
 Inverse of Yeo-Johnson Transformation
 Ref: `tYJi.m`
 */
-double tYJinv(
+inline double tYJinv(
     const double nu,
     const double gamma)
 {
@@ -122,8 +121,7 @@ double tYJinv(
     return theta;
 } // Status: Checked. OK.
 
-
-arma::vec tYJinv(
+inline arma::vec tYJinv(
     const arma::vec &nu, // m x 1
     const arma::vec &gamma)
 { // m x 1
@@ -138,7 +136,7 @@ arma::vec tYJinv(
 
 // Transform gamma in (0,2) to the real line, denoted by tau
 // Ref: `eta2tau.m`
-double gamma2tau(const double gamma)
+inline double gamma2tau(const double gamma)
 {
     double output = std::log(gamma + EPS);
     output -= std::log(2. - gamma + EPS);
@@ -146,7 +144,7 @@ double gamma2tau(const double gamma)
     return output;
 } // Status: Checked. OK.
 
-arma::vec gamma2tau(const arma::vec &gamma)
+inline arma::vec gamma2tau(const arma::vec &gamma)
 {
     const unsigned int m = gamma.n_elem;
     arma::vec tau(m);
@@ -159,7 +157,7 @@ arma::vec gamma2tau(const arma::vec &gamma)
 
 // Transform tau in real line to (0,2), denoted by gamma
 // Ref: `tau2eta.m`
-double tau2gamma(const double tau)
+inline double tau2gamma(const double tau)
 {
     double neg_tau = std::min(-tau, UPBND);
     double output = 2. / (std::exp(neg_tau) + 1.);
@@ -167,7 +165,7 @@ double tau2gamma(const double tau)
     return output;
 } // Status: Checked. OK.
 
-arma::vec tau2gamma(const arma::vec &tau)
+inline arma::vec tau2gamma(const arma::vec &tau)
 { // m x 1
     const unsigned int m = tau.n_elem;
     arma::vec gamma(m);
@@ -182,7 +180,7 @@ arma::vec tau2gamma(const arma::vec &tau)
 // First-order derivative of gamma with respect to tau
 // given the value of tau
 // Ref: `deta_dtau.m`
-double dgamma_dtau_tau(const double tau)
+inline double dgamma_dtau_tau(const double tau)
 {
     double etau = std::min(tau, UPBND);
     etau = std::exp(etau);
@@ -194,7 +192,7 @@ double dgamma_dtau_tau(const double tau)
 // (Element-wise)
 // First-order derivative of gamma with respect to tau
 // given the value of gamma
-double dgm_dtau_gm(const double gamma)
+inline double dgm_dtau_gm(const double gamma)
 {
     return 0.5 * gamma * (2. - gamma);
 }
@@ -205,7 +203,7 @@ given the value of theta and gamma
 
 Ref: `./Derivatives/dtYJ_dtheta.m`
 */
-double dtYJ_dtheta(
+inline double dtYJ_dtheta(
     const double theta,
     const double gamma,
     const bool log = false)
@@ -233,7 +231,7 @@ double dtYJ_dtheta(
     return output;
 } // Status: Checked. OK.
 
-arma::mat dtYJ_dtheta(
+inline arma::mat dtYJ_dtheta(
     const arma::vec &theta, // m x 1
     const arma::vec &gamma)
 { // m x 1
@@ -250,7 +248,7 @@ arma::mat dtYJ_dtheta(
 /*
 Loaiza-Maya et al., PDF, bottom of p26
 */
-double dtYJ_dgamma(const double theta, const double gamma)
+inline double dtYJ_dgamma(const double theta, const double gamma)
 {
     double sgn = (theta < 0.) ? -1. : 1.;
     double gmt = (theta < 0.) ? (2. - gamma) : gamma;
@@ -275,7 +273,7 @@ double dtYJ_dgamma(const double theta, const double gamma)
 } // Check -- Correct
 
 // Ref: line 24-27 of `grad_theta_logq.m`
-double dlogdYJ_dtheta(const double theta, const double gamma)
+inline double dlogdYJ_dtheta(const double theta, const double gamma)
 {
     double output = (gamma - 1.) / (1. + std::abs(theta));
     bound_check(output,"dlogdYJ_dtheta");
@@ -283,7 +281,7 @@ double dlogdYJ_dtheta(const double theta, const double gamma)
 }
 
 // Element-wise
-arma::vec dlogdYJ_dtheta(
+inline arma::vec dlogdYJ_dtheta(
     const arma::vec &theta, // m x 1
     const arma::vec &gamma)
 { // m x 1
@@ -300,7 +298,7 @@ arma::vec dlogdYJ_dtheta(
 First order derivatives of YJinv(theta) with respect to nu
 Correspond to `./Derivatives/dtheta_dphi.m`
 */
-double dYJinv_dnu(const double nu, const double gamma)
+inline double dYJinv_dnu(const double nu, const double gamma)
 {
     double gmt = (nu < 0.) ? (2. - gamma) : gamma;
     bound_check(gmt, "dYJinv_dnu: gmt", false, true);
@@ -322,8 +320,7 @@ double dYJinv_dnu(const double nu, const double gamma)
     return res;
 } // Status: Checked. OK.
 
-
-arma::mat dYJinv_dnu(
+inline arma::mat dYJinv_dnu(
     const arma::vec &nu, // m x 1
     const arma::vec &gamma)
 { // m x 1
@@ -350,7 +347,7 @@ dYJinv_dgamma(nu,gm)
 -dYJ_dgamma(c,gm)/dYJ_dc(c,gm) 
 --- Note the following equivalency ---
 */
-double dYJinv_dgamma(const double nu, const double gamma)
+inline double dYJinv_dgamma(const double nu, const double gamma)
 {
     double gmt = (nu < 0.) ? (2. - gamma) : gamma;
     bound_check(gmt, "dYJinv_dgamma: gmt", false, true);
@@ -373,12 +370,12 @@ double dYJinv_dgamma(const double nu, const double gamma)
 } // Status: Checked. OK.
 
 // Ref: `dtheta_dtau.m`
-double dYJinv_dtau(const double nu, const double gamma)
+inline double dYJinv_dtau(const double nu, const double gamma)
 {
     return dYJinv_dgamma(nu, gamma) * dgm_dtau_gm(gamma);
 } // Status: Checked. OK.
 
-arma::mat dYJinv_dtau(
+inline arma::mat dYJinv_dtau(
     const arma::vec &nu, // m x 1
     const arma::vec &gamma)
 { // m x 1
@@ -395,10 +392,10 @@ arma::mat dYJinv_dtau(
 /*
 Appendix B.2 equation (ii)
 */
-arma::mat dYJinv_dB(
+inline arma::mat dYJinv_dB(
     const arma::vec &nu,    // m x 1
     const arma::vec &gamma, // m x 1
-    const arma::vec &xi) // k x 1
+    const arma::vec &xi)    // k x 1
 { // k x 1
 
     const unsigned int m = nu.n_elem;
@@ -415,7 +412,7 @@ arma::mat dYJinv_dB(
 Appendiex B.2 equation (iii)
 Ref: `dtheta_dBDelta.m`
 */
-arma::mat dYJinv_dD(
+inline arma::mat dYJinv_dD(
     const arma::vec &nu,    // m x 1
     const arma::vec &gamma, // m x 1
     const arma::vec &eps)
@@ -428,9 +425,7 @@ arma::mat dYJinv_dD(
     return dtheta_dd;
 } // Status: Checked. OK.
 
-
-
-arma::mat get_sigma_inv(
+inline arma::mat get_sigma_inv(
     const arma::mat &B, // m x k
     const arma::vec &d,
     const unsigned int k)
@@ -448,7 +443,7 @@ arma::mat get_sigma_inv(
 
 
 // Ref: `grad_theta_logq.m`
-arma::vec dlogq_dtheta(
+inline arma::vec dlogq_dtheta(
     const arma::mat &SigInv, // m x m
     const arma::vec &nu,     // m x 1
     const arma::vec &theta,  // m x 1
@@ -464,9 +459,7 @@ arma::vec dlogq_dtheta(
     return output;                                  // m x 1
 } // Status: Checked. OK.
 
-
-
-void rtheta(
+inline void rtheta(
     arma::vec &nu,
     arma::vec &theta,
     arma::vec &xi,          // k x 1
@@ -493,7 +486,7 @@ void rtheta(
 /**
  * Logarithm of the proposal density
 */
-double logq0(
+inline double logq0(
     const arma::vec &nu,        // m x 1
     const arma::vec &eta_tilde, // m x 1
     const arma::vec &gamma,     // m x 1

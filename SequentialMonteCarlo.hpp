@@ -12,7 +12,7 @@
 
 namespace SMC
 {
-    class Settings
+    class Settings : public Sys
     {
     public:
         Settings()
@@ -165,6 +165,11 @@ namespace SMC
 
         }
 
+        void update_W(const double &val)
+        {
+            W = val;
+        }
+
 
         unsigned int N, M, B; // number of particles for filtering
         double W = 0.01;
@@ -177,6 +182,9 @@ namespace SMC
     class SequentialMonteCarlo
     {
     public:
+        Dim dim;
+        Settings opts;
+        
         SequentialMonteCarlo(
             const Model &model, 
             const arma::vec &y_in, 
@@ -321,107 +329,132 @@ namespace SMC
         }
         
     /**
-     * @brief Propagate from now (t) to next (t + 1). Theta_now = Theta_stored.slice(t + B - 1), Theta_new = Theta_stored.slice(t + B)
+     * @brief Propagate from now theta[t] to theta[t + 1] following the evolution distribution. Theta_now = Theta_stored.slice(t + B - 1), Theta_new = Theta_stored.slice(t + B). Input: theta[t] (old theta at t), variance W[t] (true value or estimated value at time t), previous observation y[0:t], new observation theta[t + 1]. Output: theta[t + 1] (new theta at t + 1) and corresponding importance weights.
      * 
      * @param t Time from 0 to nT - 1
-     * @param W Wt is length nT + 1 or (nT + B)
-     * @param Theta_now 
+     * @param Wsqrt N x 1
+     * @param model 
      * @return arma::mat 
      */
-        void propagate(const unsigned int &t, const arma::vec &Wsqrt, const Model &model) // p x N
+        static arma::mat propagate(
+            const double &ynow, 
+            const arma::vec &Wsqrt, 
+            const arma::mat &Theta_now, // p x N
+            const Model &model,
+            const bool &positive_noise = false
+        )
         {
-            /*
-            Index of now/old: t or t + B - 1;
-            Index of new/next: t + 1 or t + B
-
-            t from 0 to (nT - 1)
-            */
-            arma::mat Theta_now = Theta_stored.slice(t + opts.B - 1); // If B = 1, it is t
-            arma::mat Theta_next = Theta_now; // For t + B.
-
-            /*
-                ------ Step 2.1 Propagate ------
-                */
-            // // theta_stored: p,N,B
-
+            arma::mat Theta_next = Theta_now; // For t + B
 
             for (unsigned int i = 0; i < Theta_now.n_cols; i++)
             {
                 arma::vec theta_now = Theta_now.col(i); // p x 1
-                // update_Gt(Gt, gain_code, trans_code, theta_old, y_old, rho);
-                arma::vec theta_next = Model::func_gt(model, theta_now, y.at(t));
-                // ynow (t): y[0 + B - 1], ..., y[nT - 1 + B - 1], from t = 0, ..., nT - 1
 
-
-                double omega_next = R::rnorm(0., Wsqrt.at(i));
-                if (t < dim.nP)
-                {
-                    theta_next.at(0) += std::abs(omega_next);
-                }
-                else
-                {
-                    theta_next.at(0) += omega_next;
-                }
+                arma::vec theta_next = StateSpace::func_state_propagate(
+                    model, theta_now, ynow, Wsqrt.at(i), positive_noise);
 
                 Theta_next.col(i) = theta_next;
-
-                double ft = Model::func_ft(model, t + 1, theta_next, y); // use y[t], ..., y[t + 1 - nelem]
-
-
-                lambda.at(i) = LinkFunc::ft2mu(ft, model.flink.name, model.dobs.par1);
-                weights.at(i) = ObsDist::loglike(
-                    y.at(t + 1),
-                    model.dobs.name,
-                    lambda.at(i), model.dobs.par2,
-                    false);
-                // ynext (t + 1): y[0 + 1 + B - 1], ..., y[nT - 1 + 1 + B - 1], for t = 0, ..., nT - 1
             }
 
-            Theta_stored.slice(t + opts.B) = Theta_next; // (t + 1) if B = 1.
-            return;
+            return Theta_next;
         } // func propagate
 
-
-
-        /**
-         * @brief 
-         * 
-         * @param t from 0 to nT - 1
-         * @return double 
-         */
-        arma::uvec resample(const unsigned int &t)
+        static arma::vec imp_weights_likelihood(
+            const unsigned int &t_next, // (t + 1)
+            const arma::mat &Theta_next, // p x N
+            const arma::vec &yall,
+            const Model &model
+        )
         {
+            unsigned int N = Theta_next.n_cols;
+            arma::vec weights(N, arma::fill::zeros);
+
+            for (unsigned int i = 0; i < N; i++)
+            {
+                arma::vec theta_next = Theta_next.col(i);
+                double ft = StateSpace::func_ft(model, t_next, theta_next, yall); // use y[t], ..., y[t + 1 - nelem]
+                double lambda = LinkFunc::ft2mu(ft, model.flink.name, model.dobs.par1); // conditional mean of the observations
+
+                weights.at(i) = ObsDist::loglike(
+                    yall.at(t_next),
+                    model.dobs.name,
+                    lambda, model.dobs.par2,
+                    false);
+            }
+
+            return weights;            
+        }
+
+        static arma::vec imp_weights_forecast(
+            const arma::mat &Theta_now,
+            const arma::vec &Wsqrt,
+            const unsigned int &tnow,
+            const arma::vec &y,
+            const Model &model)
+        {
+            unsigned int N = Theta_now.n_cols;
+            arma::vec weights(N, arma::fill::zeros);
+            for (unsigned int i = 0; i < N; i++)
+            {
+                // arma::vec theta_now = arma::vectorise(Theta_stored.slice(t).col(i));
+                // weights.at(i) = MVNorm::dmvnorm(theta_now, lba.mt.col(t), lba.Ct.slice(t));
+                arma::vec theta_next = StateSpace::func_gt(model, Theta_now.col(i), y.at(tnow)); // theta[t+1]
+                arma::mat Rt(model.dim.nP, model.dim.nP);
+                Rt.at(0, 0) = std::pow(Wsqrt.at(i), 2.);
+
+                double ft_next, qt_next;
+                arma::vec Ft_next;
+                LBA::func_prior_ft(ft_next, qt_next, Ft_next, tnow + 1, model, y, theta_next, Rt);
+                std::cout << "\nf[t+1] = " << ft_next << ", q[t+1] = " << qt_next << std::endl;
+                Ft_next.t().print("\n F[t+1]");
+                theta_next.t().print("\n theta[t+1]");
+
+                double alpha_next, beta_next;
+                LBA::func_alpha_beta(alpha_next, beta_next, model, ft_next, qt_next);
+
+                weights.at(i) = ObsDist::dforecast(
+                    y.at(tnow + 1),
+                    model.dobs.name,
+                    model.dobs.par2,
+                    alpha_next,
+                    beta_next);
+            }
+
+            return weights;
+        }
+
+        static arma::uvec get_resample_index( const arma::vec &weights_in)
+        {
+            unsigned int N = weights_in.n_elem;
+            arma::vec weights = weights_in; // N x 1
             double wsum = arma::accu(weights);
             bound_check(wsum, "smc_resample: wsum");
 
             double meff = 0.;
             bool resample = wsum > EPS;
-            arma::uvec resample_idx = arma::regspace<arma::uvec>(0, 1, opts.N - 1);
+            arma::uvec resample_idx = arma::regspace<arma::uvec>(0, 1, N - 1);
 
             if (resample)
             {
                 weights.for_each([&wsum](arma::vec::elem_type &val)
                                  { val /= wsum; });
-                meff = 1. / arma::dot(weights, weights);
-                resample_idx = sample(opts.N, opts.N, weights, true, true);
-
-                // new sample theta_next is t + B
-                for (unsigned int b = t + 1; b < t + opts.B + 1; b++)
-                {
-                    arma::mat tmp_old = Theta_stored.slice(b);
-                    arma::mat tmp_resampled = tmp_old.cols(resample_idx);
-                    Theta_stored.slice(b) = tmp_resampled.cols(resample_idx);
-                }
-            }
-            else
-            {
-                double N_ = static_cast<double>(opts.N);
-                weights.ones();
-                weights.for_each([&N_](arma::vec::elem_type &val)
-                                 { val /= N_; });
+                resample_idx = sample(N, N, weights, true, true);
             }
 
             return resample_idx;
+        }
+
+        void resample_theta(const unsigned int &t, const arma::uvec resample_idx)
+        {
+            // new sample theta_next is t + B
+            for (unsigned int b = t + 1; b < t + opts.B + 1; b++)
+            {
+                arma::mat tmp_old = Theta_stored.slice(b);
+                arma::mat tmp_resampled = tmp_old.cols(resample_idx);
+                Theta_stored.slice(b) = tmp_resampled.cols(resample_idx);
+            }
+
+            return;
         }
 
 
@@ -467,13 +500,13 @@ namespace SMC
         }
 
 
-        Dim dim;
-        Settings opts;
+        
         arma::vec y, Wt; // (nT + 1) x 1
         arma::vec weights, lambda; // N x 1
         
         arma::cube Theta_stored; // p x N x (nT + B)
         arma::mat psi_smooth; // (nT + B) x M
+
 
     }; // class Sequential Monte Carlo
 
@@ -496,6 +529,7 @@ namespace SMC
 
             _meff.set_size(dgtf_model.dim.nT);
             _meff.zeros();
+
             return;
         }
         
@@ -508,6 +542,7 @@ namespace SMC
             _meff.zeros();
             return;
         }
+
 
         static Rcpp::List default_settings()
         {
@@ -537,8 +572,19 @@ namespace SMC
                 arma::vec Wsqrt(opts.N, arma::fill::zeros);
                 Wsqrt.fill(std::sqrt(Wt.at(t + 1)) + EPS);
 
-                propagate(t, Wsqrt, model);
-                arma::uvec resample_idx = resample(t);
+                arma::mat Theta_now = Theta_stored.slice(t + opts.B - 1);
+
+                bool positive_noise = (t < Theta_now.n_rows) ? true : false;
+                arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
+                weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
+                arma::uvec resample_idx = get_resample_index(weights);
+
+                Theta_stored.slice(t + opts.B) = Theta_next.cols(resample_idx);
+
+                // propagate(t, Wsqrt, model);
+                // // arma::uvec resample_idx = resample(t);
+                // arma::uvec resample_idx = SequentialMonteCarlo::get_resample_index(weights);
+                // resample_theta(t, resample_idx);
             }
         }
 
@@ -598,8 +644,14 @@ namespace SMC
                 arma::vec Wsqrt(opts.N, arma::fill::zeros);
                 Wsqrt.fill(std::sqrt(Wt.at(t + 1)) + EPS);
 
-                propagate(t, Wsqrt, model);
-                arma::uvec resample_idx = resample(t);
+                arma::mat Theta_now = Theta_stored.slice(t + opts.B - 1);
+
+                bool positive_noise = (t < Theta_now.n_rows) ? true : false;
+                arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
+                weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
+                arma::uvec resample_idx = get_resample_index(weights);
+
+                Theta_stored.slice(t + opts.B) = Theta_next.cols(resample_idx);
             }
 
             if (opts.smoothing)
@@ -738,8 +790,10 @@ namespace SMC
 
                     if (t > std::min(0.1 * static_cast<double>(dim.nT), 20.))
                     {
+                        
                         W_stored.at(i, t + 1) = InverseGamma::sample(aw.at(i, t + 1), bw.at(i, t + 1));
                     }
+                    std::cout << W_stored.col(t + 1).t() << std::endl;
 
                     break;
                 }
@@ -766,34 +820,70 @@ namespace SMC
             return;
         }
 
+
         void infer(const Model &model)
         {
+            arma::vec Wsqrt(opts.N, arma::fill::ones);
+            Wsqrt.fill(std::sqrt(opts.W));
+
             for (unsigned int t = 0; t < dim.nT; t++)
             {
-                propagate(t, W_stored.col(t), model);
+                // propagate(t, Wsqrt, model); // step 1 (a)
+                // arma::uvec resample_idx = resample(t); // step 1 (b)
+                if (t > Theta_stored.n_rows)
+                {
+                    arma::mat Theta_now = Theta_stored.slice(t + opts.B - 1);
+                    weights = imp_weights_forecast(Theta_now, Wsqrt, t, y, model);
+                    arma::uvec resample_idx = get_resample_index(weights);
+                    Theta_stored.slice(t + opts.B - 1) = Theta_now.cols(resample_idx);
+                }
+
+                
+
+                arma::mat Theta_now = Theta_stored.slice(t + opts.B - 1);
+
+                bool positive_noise = (t < Theta_now.n_rows) ? true : false;
+                arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
+                weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
+                arma::uvec resample_idx = get_resample_index(weights);
+
+                Theta_stored.slice(t + opts.B) = Theta_next.cols(resample_idx);
 
                 if (infer_W)
                 {
-                    propagate_W(t, model);
+                    propagate_W(t, model); // step 1 (c)
                 }
                 else
                 {
-                    W_stored.col(t + 1).fill(opts.W);
+                    if (opts.use_discount)
+                    { // Use discount factor if W is not given
+                        arma::rowvec psi = Theta_stored.slice(t + opts.B - 1).row(0);
+                        double psi_var = arma::var(psi);
+                        double wtmp = SequentialMonteCarlo::discount_W(
+                            psi_var, opts.custom_discount_factor,
+                            opts.use_custom, opts.default_discount_factor);
+                        W_stored.col(t + 1).fill(wtmp);
+                    }
+                    else
+                    {
+                        W_stored.col(t + 1).fill(opts.W);
+                    }
                 }
 
-                arma::uvec resample_idx = resample(t);
+                Wsqrt = arma::sqrt(W_stored.col(t + 1));
 
-                if (infer_W) // resample W if it is inferred.
+                
+                if (infer_W)
                 {
-                    arma::vec atmp = aw.col(t + 1);
-                    aw.col(t + 1) = atmp.elem(resample_idx);
+                    
 
-                    arma::vec btmp = bw.col(t + 1);
-                    bw.col(t + 1) = btmp.elem(resample_idx);
-
-                    arma::vec wtmp = W_stored.col(t + 1);
-                    W_stored.col(t + 1) = wtmp.elem(resample_idx);
+                    resample_idx = get_resample_index(weights);
+                    arma::vec wnext = W_stored.col(t + 1);
+                    W_stored.col(t + 1) = wnext.elem(resample_idx);
+                    // std::cout << W_stored.col(t + 1).t() << std::endl;
                 }
+                
+
             } // propagate and resample
 
             if (opts.smoothing)
@@ -833,7 +923,9 @@ namespace SMC
     
     private:
         bool infer_W;
-        arma::mat aw, bw, W_stored, W_smooth;
+        arma::mat aw, bw; // N x (nT + 1)
+        arma::mat W_stored; // N x (nT + 1)
+        arma::mat W_smooth; // M x (nT + 1)
         Dist W_prior;
 
         enum PriorW {

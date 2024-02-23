@@ -16,7 +16,9 @@ public:
         MCS,
         ParticleLearning,
         MCMC,
-        VariationBayes
+        VariationBayes,
+        HybridVariation,
+        MeanFieldVariation
     };
 
     enum Dist {
@@ -24,7 +26,12 @@ public:
         nbinomm,
         nbinomp,
         poisson,
-        gaussian
+        gaussian,
+        invgamma,
+        gamma,
+        halfcauchy,
+        uniform,
+        constant
     };
 
     enum Func {
@@ -40,12 +47,26 @@ public:
         iterative
     };
 
+    enum Param
+    {
+        W,
+        mu0, // par1 of dobs
+        delta, // par2 of dobs
+        kappa, // par1 of dlag - nbinom
+        r, // par2 of dlag - nbinom
+        mu, // par1 of dLag - lognorm
+        sd // par2 of dLag - lognorm
+    };
+
     static const std::map<std::string, Algo> algo_list;
     static const std::map<std::string, Dist> obs_list;
     static const std::map<std::string, Dist> lag_list;
     static const std::map<std::string, Transfer> trans_list;
     static const std::map<std::string, Func> link_list;
     static const std::map<std::string, Func> gain_list;
+    static const std::map<std::string, Dist> err_list;
+    static const std::map<std::string, Dist> W_prior_list;
+    static const std::map<std::string, Param> static_param_list;
 
     static unsigned int get_gain_code(const std::string &gain_func);
     static unsigned int get_obs_code(const std::string &obs_dist);
@@ -57,6 +78,7 @@ private:
     static std::map<std::string, Algo> map_algorithm()
     {
         std::map<std::string, Algo> ALGO_MAP;
+
         ALGO_MAP["lba"] = Algo::LinearBayes;
         ALGO_MAP["lbe"] = Algo::LinearBayes;
         ALGO_MAP["linearbayes"] = Algo::LinearBayes;
@@ -73,12 +95,18 @@ private:
 
         ALGO_MAP["mcmc"] = Algo::MCMC;
 
-        ALGO_MAP["variationbayes"] = Algo::VariationBayes;
-        ALGO_MAP["variation_bayes"] = Algo::VariationBayes;
-        ALGO_MAP["variationalbayes"] = Algo::VariationBayes;
-        ALGO_MAP["variational_bayes"] = Algo::VariationBayes;
-        ALGO_MAP["vb"] = Algo::VariationBayes;
-        ALGO_MAP["vba"] = Algo::VariationBayes;
+        ALGO_MAP["meanfieldvariation"] = Algo::MeanFieldVariation;
+        ALGO_MAP["mean_field_variation"] = Algo::MeanFieldVariation;
+        ALGO_MAP["mean-field-variation"] = Algo::MeanFieldVariation;
+        ALGO_MAP["meanfieldvb"] = Algo::MeanFieldVariation;
+        ALGO_MAP["vb"] = Algo::MeanFieldVariation;
+
+        ALGO_MAP["hybridvariation"] = Algo::HybridVariation;
+        ALGO_MAP["hybrid_variation"] = Algo::HybridVariation;
+        ALGO_MAP["hybrid-variation"] = Algo::HybridVariation;
+        ALGO_MAP["hybridvb"] = Algo::HybridVariation;
+        ALGO_MAP["hvb"] = Algo::HybridVariation;
+        ALGO_MAP["hva"] = Algo::HybridVariation;
 
         return ALGO_MAP;
     }
@@ -86,6 +114,7 @@ private:
     static std::map<std::string, Dist> map_lag_dist()
     {
         std::map<std::string, Dist> LAG_MAP;
+
         LAG_MAP["lognorm"] = Dist::lognorm;
         LAG_MAP["koyama"] = Dist::lognorm;
 
@@ -93,12 +122,18 @@ private:
 
         LAG_MAP["nbinomp"] = Dist::nbinomp;
         LAG_MAP["solow"] = Dist::nbinomp;
+
+        LAG_MAP["uniform"] = Dist::uniform;
+        LAG_MAP["flat"] = Dist::uniform;
+        LAG_MAP["identity"] = Dist::uniform;
+
         return LAG_MAP;
     }
 
     static std::map<std::string, Transfer> map_trans_func()
     {
         std::map<std::string, Transfer> TRANS_MAP;
+
         TRANS_MAP["sliding"] = Transfer::sliding;
         TRANS_MAP["slide"] = Transfer::sliding;
         TRANS_MAP["koyama"] = Transfer::sliding;
@@ -112,6 +147,7 @@ private:
     static std::map<std::string, Dist> map_obs_dist()
     {
         std::map<std::string, Dist> OBS_MAP;
+
         OBS_MAP["nbinom"] = Dist::nbinomm; // negative-binomial characterized by mean and location.
         OBS_MAP["nbinomm"] = Dist::nbinomm;
         OBS_MAP["nbinomp"] = Dist::nbinomp;
@@ -123,6 +159,7 @@ private:
     static std::map<std::string, Func> map_link_func()
     {
         std::map<std::string, Func> LINK_MAP;
+
         LINK_MAP["identity"] = Func::identity;
         LINK_MAP["exponential"] = Func::exponential;
         return LINK_MAP;
@@ -131,11 +168,55 @@ private:
     static std::map<std::string, Func> map_gain_func()
     {
         std::map<std::string, Func> GAIN_MAP;
+
         GAIN_MAP["ramp"] = Func::ramp;
         GAIN_MAP["exponential"] = Func::exponential;
         GAIN_MAP["identity"] = Func::identity;
         GAIN_MAP["softplus"] = Func::softplus;
         return GAIN_MAP;
+    }
+
+    static std::map<std::string, Dist> map_err_dist()
+    {
+        std::map<std::string, Dist> ERR_MAP;
+
+        ERR_MAP["gaussian"] = Dist::gaussian;
+        ERR_MAP["constant"] = Dist::constant;
+        return ERR_MAP;
+    }
+
+    static std::map<std::string, Dist> map_W_prior()
+    {
+        std::map<std::string, Dist> map;
+
+        map["invgamma"] = Dist::invgamma;
+        map["ig"] = Dist::invgamma;
+        map["inv-gamma"] = Dist::invgamma;
+        map["inv_gamma"] = Dist::invgamma;
+
+        map["gamma"] = Dist::gamma;
+
+        map["halfcauchy"] = Dist::halfcauchy;
+        map["half-cauchy"] = Dist::halfcauchy;
+        map["half_cauchy"] = Dist::halfcauchy;
+
+        return map;
+    }
+
+    static std::map<std::string, Param> map_static_param()
+    {
+        std::map<std::string, Param> map;
+
+        map["W"] = Param::W;
+        map["w"] = Param::W;
+        map["mu0"] = Param::mu0;
+        map["delta"] = Param::delta;
+        map["kappa"] = Param::kappa;
+        map["r"] = Param::r;
+        map["mu"] = Param::mu;
+        map["sd"] = Param::sd;
+
+        return map;
     }
 };
 
@@ -145,31 +226,11 @@ inline const std::map<std::string, AVAIL::Dist> AVAIL::lag_list = AVAIL::map_lag
 inline const std::map<std::string, AVAIL::Transfer> AVAIL::trans_list = AVAIL::map_trans_func();
 inline const std::map<std::string, AVAIL::Func> AVAIL::link_list = AVAIL::map_link_func();
 inline const std::map<std::string, AVAIL::Func> AVAIL::gain_list = AVAIL::map_gain_func();
+inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
 
-inline unsigned int AVAIL::get_gain_code(const std::string &gain_func)
-{
-    std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
-    unsigned int gain_code;
-    switch (gain_list[gain_func])
-    {
-    case AVAIL::Func::ramp:
-        gain_code = 0;
-        break;
-    case AVAIL::Func::exponential:
-        gain_code = 1;
-        break;
-    case AVAIL::Func::identity:
-        gain_code = 2;
-        break;
-    case AVAIL::Func::softplus:
-        gain_code = 3;
-        break;
-    default:
-        throw std::invalid_argument("gain_func: 'ramp', 'exponential'. 'identity', 'softplus'. ");
-    }
+inline const std::map<std::string, AVAIL::Dist> AVAIL::W_prior_list = AVAIL::map_W_prior();
+inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 
-    return gain_code;
-}
 
 inline unsigned int AVAIL::get_obs_code(const std::string &obs_dist)
 {
@@ -251,6 +312,31 @@ inline unsigned int AVAIL::get_lag_code(const std::string &lag_dist)
     }
 
     return lag_code;
+}
+
+inline unsigned int AVAIL::get_gain_code(const std::string &gain_func)
+{
+    std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+    unsigned int gain_code;
+    switch (gain_list[gain_func])
+    {
+    case AVAIL::Func::ramp:
+        gain_code = 0;
+        break;
+    case AVAIL::Func::exponential:
+        gain_code = 1;
+        break;
+    case AVAIL::Func::identity:
+        gain_code = 2;
+        break;
+    case AVAIL::Func::softplus:
+        gain_code = 3;
+        break;
+    default:
+        throw std::invalid_argument("gain_func: 'ramp', 'exponential'. 'identity', 'softplus'. ");
+    }
+
+    return gain_code;
 }
 
 class Dim
@@ -370,8 +456,74 @@ public:
 };
 
 
+struct Discount
+{
+    bool use_discount = false;
+    bool use_custom = false;
+    double custom_value = 0.95;
+    double default_value = 0.99;
+};
+
+/**
+ * @brief Define a two-parameter distributions.
+ *
+ * @param name
+ * @param par1
+ * @param par2
+ */
+class Dist
+{
+    // Dist() : name(_name) {}
+
+public:
+    std::string name = "undefined";
+    double par1 = 0.;
+    double par2 = 0.;
+    std::string &_name;
+    double &_par1;
+    double &_par2;
+
+
+    Dist() : _name(name), _par1(par1), _par2(par2)
+    {
+        name = "undefined";
+        par1 = 0.;
+        par2 = 0.;
+    }
+    Dist(const std::string &name_, const double &par1_, const double &par2_) : _name(name), _par1(par1), _par2(par2)
+    {
+        init(name_, par1_, par2_);
+    }
+
+
+    void init(const std::string &name_, const double &par1_, const double &par2_)
+    {
+        name = name_;
+        par1 = par1_;
+        par2 = par2_;
+        return;
+    }
+    // const std::string &name;
+    void update_par1(const double &par1_new)
+    {
+        par1 = par1_new;
+    }
+
+    void update_par2(const double &par2_new)
+    {
+        par2 = par2_new;
+    }
+
+    
+};
 
 
 
+
+struct Sys
+{
+    Discount discount_factor;
+    unsigned int nburnin, nthin, nsample, ntotal, nsmc, nbackward;
+};
 
 #endif

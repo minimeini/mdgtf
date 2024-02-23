@@ -135,14 +135,17 @@ public:
     {
         std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
         double density;
-        double ys = std::abs(y);
-        double lambda_s = std::max(lambda, EPS);
+        // double ys = std::abs(y);
+        // double lambda_s = std::max(lambda, EPS);
+        double ys = y;
+        double lambda_s = lambda;
 
         switch (obs_list[obs_dist])
         {
         case AVAIL::Dist::nbinomm:
         {
-            density = nbinomm::dnbinomm(ys, lambda_s, par2, return_log);
+            // density = nbinomm::dnbinomm(ys, lambda_s, par2, return_log);
+            density = R::Rf_dnbinom_mu(ys, par2, lambda_s, return_log);
             break;
         }
         case AVAIL::Dist::poisson:
@@ -162,6 +165,99 @@ public:
         bound_check(density, "ObsDist::loglike");
         return density;
     }
+
+    static double dloglike_dlambda(
+        const double &y,
+        const double &lambda,
+        const ObsDist &dobs
+    )
+    {
+        double deriv = 0.;
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        switch (obs_list[dobs.name])
+        {
+        case AVAIL::Dist::poisson:
+        {
+            deriv = y / lambda;
+            deriv -= 1.;
+            break;
+        }
+        case AVAIL::Dist::nbinomm:
+        {
+            deriv = y / lambda;
+            deriv -= (y + dobs.par2) / (lambda + dobs.par2);
+            break;
+        }
+        default:
+        {
+            break;
+        }
+        } // switch by obs type
+
+        bound_check(deriv, "dloglike_dlambda: deriv");
+        return deriv;
+    }
+
+    static double dforecast(
+        const double &ynext,
+        const std::string &obs_dist,
+        const double &obs_par2,
+        const double &alpha_next,
+        const double &beta_next,
+        const bool &return_log = true
+    )
+    {
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::string obs_name = tolower(obs_dist);
+        double logp_pred = 0.;
+
+        switch (obs_list[obs_name])
+        {
+        case AVAIL::Dist::poisson:
+        {
+            // One-step-aheading forecasting for Poisson observations follows a negative-binomial distribution.
+            double par1 = alpha_next; // Targeted number of successes.
+            double par2 = 1. / (beta_next + 1.); // Probability of failures.
+            logp_pred = nbinom::dnbinom(ynext, par2, par1);
+            break;
+        }
+        case AVAIL::Dist::nbinomm:
+        {
+            double c1 = R::lgammafn(ynext + obs_par2);
+            c1 -= R::lgammafn(obs_par2);
+            c1 -= R::lgammafn(ynext + 1.);
+
+            double c2 = R::lgammafn(alpha_next + beta_next);
+            c2 -= R::lgammafn(alpha_next);
+            c2 -= R::lgammafn(beta_next);
+
+            double c3 = R::lgammafn(alpha_next + ynext);
+            c3 += R::lgammafn(beta_next + obs_par2);
+            c3 -= R::lgammafn(alpha_next + ynext + beta_next + obs_par2);
+
+            logp_pred = c1 + c2 + c3;
+
+            break;
+        }
+        default:
+        {
+            break;
+        }
+        }
+
+        bound_check(logp_pred, "dforecast");
+
+        if (return_log)
+        {
+            return logp_pred;
+        }
+        else
+        {
+            return std::exp(logp_pred);
+        }
+    }
+
+
 
     
 };

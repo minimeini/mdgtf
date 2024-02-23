@@ -240,5 +240,20 @@ inline arma::mat inverse(
 	return mat_inv;
 }
 
+inline void set_seed(double seed)
+{
+	Rcpp::Environment base_env("package:base");
+	Rcpp::Function set_seed_r = base_env["set.seed"];
+	set_seed_r(std::floor(std::fabs(seed)));
+}
+
+inline arma::vec randdraw(double d, int n)
+{
+	set_seed(d); // Set a seed for R's RNG library
+	// Call Armadillo's RNG procedure that references R's RNG capabilities
+	// and change dispersion slightly.
+	arma::vec out = std::sqrt(std::fabs(d)) * arma::randn(n);
+	return out;
+}
 
 #endif

@@ -11,6 +11,8 @@
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
+
+
 /**
  * @brief Define a dynamic generalized transfer function (DGTF) model
  *
@@ -25,6 +27,12 @@
 class Model
 {
 public:
+    Dim &dim;
+    ObsDist &dobs;
+    TransFunc &transfer;
+    LinkFunc &flink;
+    ErrDist &derr;
+
     Model() : dim(_dim), dobs(_dobs), transfer(_transfer), flink(_flink), derr(_derr)
     {
         _dobs.init_default();
@@ -44,6 +52,7 @@ public:
         const std::string &link_func = "identity",
         const std::string &gain_func = "softplus",
         const std::string &lag_dist = "lognorm",
+        const std::string &err_dist = "gaussian",
         const Rcpp::NumericVector &obs_param = Rcpp::NumericVector::create(0., 30.),
         const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R),
         const Rcpp::NumericVector &err_param = Rcpp::NumericVector::create(0.01, 0.), // (W, w[0])
@@ -58,11 +67,7 @@ public:
         return;
     }
 
-    const Dim &dim;
-    ObsDist &dobs;
-    TransFunc &transfer;
-    LinkFunc &flink;
-    const ErrDist &derr;
+    
 
 
     void update_dobs(const double &value, const unsigned int &iloc)
@@ -99,12 +104,15 @@ public:
 
 
     /**
-     * @brief Simulate from the DGTF model from the scratch.
+     * @brief Simulate from the DGTF model from the scratch using the transfer function form.
      * 
      * @return arma::vec 
      */
     arma::vec simulate(const double &y0 = 0.)
     {
+        lambda.set_size(_dim.nT + 1);
+        lambda.zeros();
+
         // Sample psi[t].
         _derr.sample(_dim.nT, true);
         _transfer.fgain.update_psi(_derr.psi);
@@ -123,12 +131,15 @@ public:
         for (unsigned int t = 1; t < _dim.nT + 1; t++)
         {
             double ft = _transfer.transfer_sliding(t, y); // Checked. OK.
-            double mu = _flink.ft2mu(ft); // Checked. OK.
+            double mu = LinkFunc::ft2mu(ft, _flink.name, _dobs.par1);
+            lambda.at(t) = mu;
             y.at(t) = _dobs.sample(mu); // Checked. OK.
         }
 
         return y; // Checked. OK.
     }
+
+    arma::vec lambda;
 
     static arma::vec simulate(
         const arma::vec &psi, // (ntime + 1) x 1
@@ -158,14 +169,50 @@ public:
         return y; // Checked. OK.
     }
 
+    arma::vec wt2lambda(const arma::vec &y, const arma::vec &wt) // checked. ok.
+    {
+        arma::vec psi = arma::cumsum(wt);
+        _transfer.fgain.update_psi(psi);
+        _transfer.fgain.psi2hpsi<arma::vec>();
+        
+        arma::vec ft(psi.n_elem, arma::fill::zeros);
+        arma::vec lambda = ft;
+        for (unsigned int t = 1; t <= dim.nT; t++)
+        {
+            ft.at(t) = _transfer.func_ft(t, y, ft);
+            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), _flink.name, _dobs.par1);
+        }
 
+        return lambda;
+    }
+
+private:
+    ObsDist _dobs; // Observation distribution
+    TransFunc _transfer;
+    LinkFunc _flink;
+    ErrDist _derr;
+    Dim _dim;
+    double _y0 = 0.;
+    double _mu0 = 1.;
+
+    
+
+};
+
+/**
+ * @brief State space (DLM) form of the model.
+ *
+ */
+class StateSpace
+{
+public:
     /**
-     * @brief State evolution equation for the DLM form model
-     * 
-     * @param model 
-     * @param theta_cur 
-     * @param ycur 
-     * @return arma::vec 
+     * @brief Expected state evolution equation for the DLM form model. Expectation of theta[t + 1] = g(theta[t]).
+     *
+     * @param model
+     * @param theta_cur
+     * @param ycur
+     * @return arma::vec
      */
     static arma::vec func_gt( // Checked. OK.
         const Model &model,
@@ -203,6 +250,26 @@ public:
         return theta_next;
     }
 
+    static arma::vec func_state_propagate(
+        const Model &model,
+        const arma::vec &theta_now,
+        const double &ynow,
+        const double &Wsqrt,
+        const bool &positive_noise = false)
+    {
+        arma::vec theta_next = func_gt(model, theta_now, ynow);
+        double omega_next = R::rnorm(0., Wsqrt); // [Input] - Wsqrt
+        if (positive_noise)                      // t < Theta_now.n_rows
+        {
+            theta_next.at(0) += std::abs(omega_next);
+        }
+        else
+        {
+            theta_next.at(0) += omega_next;
+        }
+        return theta_next;
+    }
+
     /**
      * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
      *
@@ -214,7 +281,7 @@ public:
      */
     static double func_ft(
         const Model &model,
-        const int &t,      // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
+        const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
     )
@@ -223,7 +290,7 @@ public:
         if (model.transfer.trans_list[model.transfer.name] == AVAIL::sliding)
         {
             int nelem = std::min(t, (int)model.dim.nL); // min(t,nL)
-            
+
             arma::vec yold(model.dim.nL, arma::fill::zeros);
             if (nelem > 1)
             {
@@ -233,9 +300,8 @@ public:
             {
                 yold.at(model.dim.nL - 1) = yall.at(t - 1);
             }
-            
-            
-            yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
+
+            yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
             arma::vec ft_vec = model.transfer.dlag.Fphi;
 
@@ -254,15 +320,285 @@ public:
         return ft_cur;
     }
 
-private:
-    ObsDist _dobs; // Observation distribution
-    TransFunc _transfer;
-    LinkFunc _flink;
-    ErrDist _derr;
-    Dim _dim;
-    double _y0 = 0.;
-    double _mu0 = 1.;
+// private:
+//     arma::vec theta; // nP x 1
+//     arma::mat theta_series; // nP x (nT + 1)
+//     arma::vec theta_init;
 
+//     arma::vec psi; // (nT + 1) x 1
+
+//     Model model;
 };
+
+class ApproxDisturbance
+{
+public:
+    ApproxDisturbance()
+    {
+        nT = 200;
+        gain_func = "softplus";
+
+        Fn.set_size(nT, nT); Fn.zeros();
+        f0.set_size(nT); f0.zeros();
+
+        Fphi.set_size(nT + 1);
+        Fphi.zeros();
+
+        psi = Fphi;
+        hpsi = psi;
+        dhpsi = psi;
+
+        return;
+    }
+
+    ApproxDisturbance(const unsigned int &ntime, const std::string &gain_func_name = "softplus")
+    {
+        nT = ntime;
+        gain_func = gain_func_name;
+
+        Fn.set_size(nT, nT); Fn.zeros();
+        f0.set_size(nT); f0.zeros();
+
+        Fphi.set_size(nT + 1);
+        Fphi.zeros();
+
+        wt = Fphi;
+        psi = Fphi;
+        hpsi = psi;
+        dhpsi = psi;
+    }
+
+    void set_Fphi(const LagDist &dlag, const unsigned int &nlag)
+    {
+        Fphi.zeros();
+        arma::vec tmp = LagDist::get_Fphi(nT, dlag.name, dlag.par1, dlag.par2);
+        if (nlag < nT)
+        {
+            tmp.subvec(nlag, nT - 1).zeros();
+        }
+        Fphi.tail(nT) = tmp;
+    }
+
+    void set_psi(const arma::vec &psi_in)
+    {
+        psi = psi_in;
+        hpsi = GainFunc::psi2hpsi(psi, gain_func);
+        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
+    }
+
+    void set_wt(const arma::vec &wt_in)
+    {
+        wt = wt_in;
+        psi = arma::cumsum(psi);
+        hpsi = GainFunc::psi2hpsi(psi, gain_func);
+        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
+    }
+
+    arma::vec getFphi(){return Fphi;}
+    arma::mat get_Fn(){return Fn;}
+    arma::vec get_f0(){return f0;}
+    arma::vec get_psi(){return psi;}
+    arma::vec get_hpsi(){return hpsi;}
+    arma::vec get_dhpsi(){return dhpsi;}
+
+    void update_by_psi(const arma::vec &y, const arma::vec &psi)
+    {
+        hpsi = GainFunc::psi2hpsi(psi, gain_func);
+        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
+        update_f0(y);
+        update_Fn(y);
+    }
+
+    void update_by_wt(const arma::vec &y, const arma::vec &wt)
+    {
+        psi = arma::cumsum(wt);
+        hpsi = GainFunc::psi2hpsi(psi, gain_func);
+        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
+        update_f0(y);
+        update_Fn(y);
+    }
+
+    /**
+     * @brief Need to run `set_psi` before using this function. Fphi must be initialized.
+     * 
+     * @param t 
+     * @param y 
+     * @return arma::vec 
+     */
+    arma::vec get_increment_matrix_byrow( // Checked. OK.
+        const unsigned int &t, // t = 1, ..., nT
+        const arma::vec &y     // (nT + 1) X 1, y[0], y[1], ..., y[nT], only use the past values before t
+        )
+    {
+        arma::vec phi = Fphi.subvec(1, t);
+        // t x 1, phi[1], ..., phi[nlag], phi[nlag + 1], ..., phi[t]
+        //      = phi[1], ..., phi[nlag],       0,       ..., 0 (at time t)
+        arma::vec yt = y.subvec(0, t - 1);        // y[0], y[1], ..., y[t-1]
+        arma::vec dhpsi_tmp = dhpsi.subvec(1, t); // t x 1, h'(psi[1]), ..., h'(psi[t])
+
+        arma::vec increment_row = arma::reverse(yt % dhpsi_tmp); // t x 1
+        increment_row = increment_row % phi;
+        return increment_row;
+    }
+
+    void update_Fn( // Checked. OK.
+        const arma::vec &y   // (nT + 1) x 1, y[0], ..., y[nT - 1], y[nT], only use the past values before each t and y[nT] is not used
+        )
+    {
+        Fn.zeros();
+        for (unsigned int t = 1; t <= nT; t++)
+        {
+            arma::vec Fnt = get_increment_matrix_byrow(t, y); // t x 1
+            Fnt = arma::cumsum(Fnt);
+            Fnt = arma::reverse(Fnt);
+
+            Fn.submat(t - 1, 0, t - 1, t - 1) = Fnt.t();
+        }
+
+        bound_check<arma::mat>(Fn, "get_Fn: Fn");
+        return;
+    }
+
+    void update_f0( // Checked. OK.
+        const arma::vec &y   // (nT + 1) x 1, only use the past values before each t
+        )
+    {
+        f0.zeros();
+        arma::vec h0 = hpsi - dhpsi % psi; // (nT + 1) x 1, h0[0] = 0
+
+        for (unsigned int t = 1; t <= nT; t++)
+        {
+            arma::vec F0t = get_increment_matrix_byrow(t, y);
+            double f0t = arma::accu(F0t);
+
+            f0.at(t - 1) = f0t;
+        }
+
+        f0.at(0) = (f0.at(0) < EPS8) ? EPS8 : f0.at(0);
+        bound_check<arma::vec>(f0, "get_f0: f0");
+        return;
+    }
+
+    /**
+     * @brief Get the regressor eta[1], ..., eta[nT]. If mu = 0, it is equal to only the transfer effect, f[1], ..., f[nT]. Must set Fphi before using this function.
+     *
+     * @param wt
+     * @param y (nT + 1) x 1, only use the past values before each t
+     * @return arma::vec, (f[1], ..., f[nT])
+     */
+    arma::vec get_eta_approx(const double &mu0 = 0.)
+    {
+        arma::vec ft = mu0 + f0 + Fn * wt.tail(nT); // nT x 1
+        bound_check(ft, "func_eta_approx: ft");
+        return ft;
+    }
+
+    static arma::vec func_Vt_approx( // Checked. OK.
+        const arma::vec lambda, // (nT + 1) x 1
+        const ObsDist &obs_dist,
+        const std::string &link_func)
+    {
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        arma::vec Vt = lambda;
+
+        switch (obs_list[obs_dist.name])
+        {
+        case AVAIL::Dist::poisson:
+        {
+            switch (link_list[tolower(link_func)])
+            {
+            case AVAIL::Func::identity:
+            {
+                Vt = lambda;
+                break;
+            }
+            case AVAIL::Func::exponential:
+            {
+                // Vt = 1 / lambda = exp( - log(lambda) )
+                Vt = -arma::log(arma::abs(lambda) + EPS);
+                Vt = arma::exp(Vt);
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            }      // switch by link
+            break; // Done case poisson
+        }
+        case AVAIL::Dist::nbinomm:
+        {
+            switch (link_list[tolower(link_func)])
+            {
+            case AVAIL::Func::identity:
+            {
+                Vt = lambda % (lambda + obs_dist.par2);
+                Vt = Vt / obs_dist.par2;
+                break;
+            }
+            case AVAIL::Func::exponential:
+            {
+                arma::vec nom = (lambda + obs_dist.par2);
+                arma::vec denom = obs_dist.par2 * lambda;
+                Vt = nom / denom;
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            }      // switch by link
+            break; // case nbinom
+        }
+        default:
+        {
+        }
+        } // switch by observation distribution.
+
+        bound_check(Vt, "func_Vt_approx: Vt", true, true);
+        Vt.elem(arma::find(Vt < EPS8)).fill(EPS8);
+        return Vt;
+    }
+
+    static arma::vec func_yhat(
+        const arma::vec &y,
+        const std::string &link_func)
+    {
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        arma::vec yhat;
+
+        switch (link_list[tolower(link_func)])
+        {
+        case AVAIL::Func::identity:
+        {
+            yhat = y;
+            break;
+        }
+        case AVAIL::Func::exponential:
+        {
+            yhat = arma::log(arma::abs(y) + EPS);
+            break;
+        }
+        default:
+        {
+            break;
+        }
+        } // switch by link
+
+        bound_check(yhat, "func_yhat");
+        return yhat;
+    }
+
+private:
+    unsigned int nT = 200;
+    std::string gain_func = "softplus";
+
+    arma::mat Fn;
+    arma::vec f0;
+    arma::vec Fphi;
+    arma::vec wt, psi, hpsi, dhpsi;
+};
+
 
 #endif
