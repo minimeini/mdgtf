@@ -318,6 +318,18 @@ namespace LBA
         return;
     }
 
+    static arma::vec func_At(
+        const arma::mat &Rt,
+        const arma::vec &Ft,
+        const double &qt)
+    {
+        arma::vec At = Rt * Ft;
+        At.for_each([&qt](arma::vec::elem_type &val)
+                    { val /= qt; });
+
+        bound_check<arma::vec>(At, "func_At: At");
+        return At;
+    }
 
     static arma::vec func_mt(
         const arma::vec &at,
@@ -424,6 +436,8 @@ namespace LBA
             double _ft = 0.;
             _ft_prior_mean = _ft;
             _ft_prior_var = _ft;
+            _ft_post_mean = _ft;
+            _ft_post_var = _ft;
             _alphat = 0.01;
             _betat = 0.01;
 
@@ -446,8 +460,6 @@ namespace LBA
             _at.zeros();
             _mt = _at;
             _atilde_t = _at;
-            _ft_post_mean = _at;
-            _ft_post_var = _at;
             // set m[0]
 
             _Rt.set_size(_nP, _nP, _nT + 1);
@@ -512,12 +524,12 @@ namespace LBA
                     _alpha_t.at(t) = _alphat;
                     _beta_t.at(t) = _betat;
 
-                    _At = Rt.slice(t) * _Ft / _ft_prior_var;
+                    _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
 
-                    func_posterior_ft(_ft_post_mean.at(t), _ft_post_var.at(t), _model, _alphat, _betat);
+                    func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
 
-                    _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean.at(t));
-                    _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var.at(t));
+                    _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
+                    _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
                 }
 
                 if (do_smoothing)
@@ -533,11 +545,7 @@ namespace LBA
 
         arma::mat fit_stats()
         {
-            /**
-             * theta[t] | y[0:t] ~ (m[t], C[t])
-             * Fitted values of y: lambda[t] = E( y[t] | Dt ) = yhat[t]
-             * 
-             */
+            
         }
         
 
@@ -556,12 +564,12 @@ namespace LBA
             _alpha_t.at(t) = _alphat;
             _beta_t.at(t) = _betat;
 
-            _At = Rt.slice(t) * _Ft / _ft_prior_var;
+            _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
 
-            func_posterior_ft(_ft_post_mean.at(t), _ft_post_var.at(t), _model, _alphat, _betat);
+            func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
 
-            _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean.at(t));
-            _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var.at(t));
+            _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
+            _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
         }
 
 
@@ -600,12 +608,12 @@ namespace LBA
                 _alpha_t.at(t) = _alphat;
                 _beta_t.at(t) = _betat;
 
-                _At = Rt.slice(t) * _Ft / _ft_prior_var;
+                _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
 
-                func_posterior_ft(_ft_post_mean.at(t), _ft_post_var.at(t), _model, _alphat, _betat);
+                func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
 
-                _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean.at(t));
-                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var.at(t));
+                _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
+                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
             }
 
             return;
@@ -693,7 +701,6 @@ namespace LBA
             bound_check<arma::vec>(_psi_var, "smoother: _psi_var");
         }
 
-
         void init(const Rcpp::List &opts_in)
         {
             opts = opts_in;
@@ -752,11 +759,6 @@ namespace LBA
             output["psi"] = Rcpp::wrap(psi);
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
-            output["ft_post_mean"] = Rcpp::wrap(_ft_post_mean);
-            output["ft_post_var"] = Rcpp::wrap(_ft_post_var);
-            output["mt"] = Rcpp::wrap(_mt);
-            output["Ct"] = Rcpp::wrap(_Ct);
-
             return output;
         }
     
@@ -778,7 +780,7 @@ namespace LBA
 
         arma::vec _psi_mean; // (nT + 1) x 1
         arma::vec _psi_var; // (nT + 1) x 1
-        arma::vec _alpha_t, _beta_t, _ft_post_mean, _ft_post_var; // (nT + 1) x 1
+        arma::vec _alpha_t, _beta_t; // (nT + 1) x 1
 
         arma::vec _Ft, _At; // nP x 1
         arma::mat _Gt; // nP x nP
