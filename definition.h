@@ -74,6 +74,12 @@ public:
     static unsigned int get_trans_code(const std::string &lag_dist);
     static unsigned int get_lag_code(const std::string &lag_dist);
 
+    static std::string get_gain_name(const unsigned int &code);
+    static std::string get_obs_name(const unsigned int &code);
+    static std::string get_link_name(const unsigned int &code);
+    static std::string get_trans_name(const unsigned int &code);
+    static std::string get_lag_name(const unsigned int &code);
+
 private:
     static std::map<std::string, Algo> map_algorithm()
     {
@@ -255,6 +261,28 @@ inline unsigned int AVAIL::get_obs_code(const std::string &obs_dist)
     return obs_code;
 }
 
+inline std::string AVAIL::get_obs_name(const unsigned int &obs_code)
+{
+    std::string obs_dist;
+    switch (obs_code)
+    {
+    case 0:
+        obs_dist = "nbinom";
+        break;
+    case 1:
+        obs_dist = "poisson";
+        break;
+    case 2:
+        obs_dist = "nbinomp";
+    case 3:
+        obs_dist = "gaussian";
+    default:
+        throw std::invalid_argument("obs_dist: 'nbinom', 'poisson', 'nbinom_p', 'gaussian' ");
+        break;
+    }
+    return obs_dist;
+}
+
 inline unsigned int AVAIL::get_link_code(const std::string &link_func)
 {
     std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
@@ -272,6 +300,24 @@ inline unsigned int AVAIL::get_link_code(const std::string &link_func)
     }
 
     return link_code;
+}
+
+inline std::string AVAIL::get_link_name(const unsigned int &link_code)
+{
+    std::string link_func;
+    switch (link_code)
+    {
+    case 0:
+        link_func = "identity";
+        break;
+    case 1:
+        link_func = "exponential";
+    default:
+        throw std::invalid_argument("link_func: 'identity', 'exponential'. ");
+        break;
+    }
+
+    return link_func;
 }
 
 inline unsigned int AVAIL::get_trans_code(const std::string &lag_dist)
@@ -292,6 +338,45 @@ inline unsigned int AVAIL::get_trans_code(const std::string &lag_dist)
     }
 
     return trans_code;
+}
+
+
+inline std::string AVAIL::get_lag_name(const unsigned int &trans_code)
+{
+    std::string name;
+    switch (trans_code)
+    {
+    case 1:
+        name = "lognorm";
+        break;
+    case 2:
+        name = "nbinom";
+        break;
+    default:
+        throw std::invalid_argument("trans_func: 'sliding', 'iterative'. ");
+        break;
+    }
+
+    return name;
+}
+
+inline std::string AVAIL::get_trans_name(const unsigned int &code)
+{
+    std::string name;
+    switch (code)
+    {
+    case 1:
+        name = "sliding";
+        break;
+    case 2:
+        name = "sliding";
+        break;
+    default:
+        throw std::invalid_argument("trans_func: 'sliding', 'iterative'. ");
+        break;
+    }
+
+    return name;
 }
 
 inline unsigned int AVAIL::get_lag_code(const std::string &lag_dist)
@@ -337,6 +422,31 @@ inline unsigned int AVAIL::get_gain_code(const std::string &gain_func)
     }
 
     return gain_code;
+}
+
+inline std::string AVAIL::get_gain_name(const unsigned int &code)
+{
+    std::string name;
+    switch (code)
+    {
+    case 0:
+        name = "ramp";
+        break;
+    case 1:
+        name = "exponential";
+        break;
+    case 2:
+        name = "identity";
+        break;
+    case 3:
+        name = "softplus";
+        break;
+    default:
+        throw std::invalid_argument("trans_func: 'sliding', 'iterative'. ");
+        break;
+    }
+
+    return name;
 }
 
 class Dim

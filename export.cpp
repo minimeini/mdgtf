@@ -167,6 +167,7 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     {
     case AVAIL::Algo::LinearBayes:
     {
+        opts =  LBA::LinearBayes::default_settings();
         break;
     }
     case AVAIL::Algo::MCS:
@@ -247,6 +248,43 @@ Rcpp::List dgtf_default_model()
     settings["param"] = param;
 
     return settings;
+}
+
+//' @export
+// [[Rcpp::export]]
+arma::uvec dgtf_model_code(const Rcpp::List model)
+{
+    Rcpp::List opts = model;
+    std::string obs_dist, link_func, lag_dist, gain_func, err_dist;
+    if (opts.containsElementNamed("obs_dist"))
+    {
+        obs_dist = Rcpp::as<std::string>(opts["obs_dist"]);
+    }
+    if (opts.containsElementNamed("link_func"))
+    {
+        link_func = Rcpp::as<std::string>(opts["link_func"]);
+    }
+    if (opts.containsElementNamed("lag_dist"))
+    {
+        lag_dist = Rcpp::as<std::string>(opts["lag_dist"]);
+    }
+    if (opts.containsElementNamed("gain_func"))
+    {
+        gain_func = Rcpp::as<std::string>(opts["gain_func"]);
+    }
+    if (opts.containsElementNamed("err_dist"))
+    {
+        err_dist = Rcpp::as<std::string>(opts["err_dist"]);
+    }
+
+    const unsigned int obs_code = AVAIL::get_obs_code(obs_dist);
+    const unsigned int link_code = AVAIL::get_link_code(link_func);
+    const unsigned int trans_code = AVAIL::get_trans_code(lag_dist);
+    const unsigned int gain_code = AVAIL::get_gain_code(gain_func);
+    const unsigned int err_code = 0;
+
+    arma::uvec model_code = {obs_code, link_code, trans_code, gain_code, err_code};
+    return model_code;
 }
 
 //' @export
@@ -363,25 +401,11 @@ Rcpp::List dgtf_infer(
     case AVAIL::Algo::LinearBayes:
     {
         LBA::LinearBayes linear_bayes(model, y);
+        linear_bayes.init(method_settings);
         linear_bayes.filter();
         linear_bayes.smoother();
+        output = linear_bayes.get_output();
 
-        if (summarize)
-        {
-            psi = LBA::get_psi(linear_bayes.atilde, linear_bayes.Rtilde);
-            arma::mat psi_filter = LBA::get_psi(linear_bayes.mt, linear_bayes.Ct);
-            output["psi_filter"] = Rcpp::wrap(psi_filter);
-            output["psi"] = Rcpp::wrap(psi);
-        }
-        else
-        {
-            output["at"] = Rcpp::wrap(linear_bayes.at);
-            output["Rt"] = Rcpp::wrap(linear_bayes.Rt);
-            output["mt"] = Rcpp::wrap(linear_bayes.mt);
-            output["Ct"] = Rcpp::wrap(linear_bayes.Ct);
-            output["atilde"] = Rcpp::wrap(linear_bayes.atilde);
-            output["Rtilde"] = Rcpp::wrap(linear_bayes.Rtilde);
-        }
         break;
     } // case Linear Bayes
     case AVAIL::Algo::MCS:

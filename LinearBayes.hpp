@@ -102,16 +102,39 @@ namespace LBA
         const Model &model,
         const unsigned int &t,      // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall       // y[0], y[1], ..., y[nT]
+        const arma::vec &yall,       // y[0], y[1], ..., y[nT]
+        const bool &fill_zero = true
     )
     {
         arma::vec Ft_cur = model.transfer.F0;
         if (model.transfer.trans_list[model.transfer.name] == AVAIL::sliding)
         {
-            unsigned int nelem = std::min(t, model.dim.nL); // min(t,nL)
+            // unsigned int nelem = std::min(t, model.dim.nL); // min(t,nL)
+            int nstart = std::max((int) 0, (int) (t - model.dim.nL));
+            unsigned int nend = std::max(model.dim.nL - 1, t - 1);
+            unsigned int nelem = nend - (unsigned int) nstart + 1;
+
             arma::vec yold(model.dim.nL, arma::fill::zeros);
-            yold.head(nelem) = yall.subvec(t - nelem, t - 1); // y[t - min(t,nL)], ..., y[t-1]
-            yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
+            yold.tail(nelem) = yall.subvec((unsigned int) nstart, nend);
+            // yold.head(nelem) = yall.subvec(t - nelem, t - 1); // y[t - min(t,nL)], ..., y[t-1], 0, ..., 0 => 
+            // yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
+            // arma::vec ytmp = yall.subvec(t - nelem, t - 1);
+
+            // if (nelem > 1)
+            // {
+            //     yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
+            // }
+            // else
+            // {
+            //     yold.at(model.dim.nL - 1) = yall.at(t - 1);
+            // }
+
+            if (fill_zero)
+            {
+                yold.elem(arma::find(yold <= EPS)).fill(0.01 / model.dim.nL);
+            }
+            
+            yold = arma::reverse(yold);
 
             arma::vec dhpsi_cur = GainFunc::psi2dhpsi(theta_cur, model.transfer.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             Ft_cur = yold % dhpsi_cur;
@@ -142,10 +165,11 @@ namespace LBA
         const Model &model,
         const arma::vec &yall,
         const arma::vec &at,
-        const arma::mat &Rt)
+        const arma::mat &Rt,
+        const bool &fill_zero = true)
     {
         mean_ft = StateSpace::func_ft(model, t, at, yall);
-        _Ft = func_Ft(model, t, at, yall);
+        _Ft = func_Ft(model, t, at, yall, fill_zero);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
     }
@@ -294,18 +318,6 @@ namespace LBA
         return;
     }
 
-    static arma::vec func_At(
-        const arma::mat &Rt,
-        const arma::vec &Ft,
-        const double &qt)
-    {
-        arma::vec At = Rt * Ft;
-        At.for_each([&qt](arma::vec::elem_type &val)
-                    { val /= qt; });
-
-        bound_check<arma::vec>(At, "func_At: At");
-        return At;
-    }
 
     static arma::vec func_mt(
         const arma::vec &at,
@@ -346,6 +358,14 @@ namespace LBA
     class LinearBayes
     {
     public:
+        const arma::mat &at;
+        const arma::cube &Rt;
+        const arma::mat &mt;
+        const arma::cube &Ct;
+        const arma::mat &atilde;
+        const arma::cube &Rtilde;
+        const arma::vec &alpha_t;
+        const arma::vec &beta_t;
         // LinearBayes() : at(_at), Rt(_Rt), mt(_mt), Ct(_Ct)
         // {
         //     Model model_;
@@ -404,8 +424,6 @@ namespace LBA
             double _ft = 0.;
             _ft_prior_mean = _ft;
             _ft_prior_var = _ft;
-            _ft_post_mean = _ft;
-            _ft_post_var = _ft;
             _alphat = 0.01;
             _betat = 0.01;
 
@@ -428,6 +446,8 @@ namespace LBA
             _at.zeros();
             _mt = _at;
             _atilde_t = _at;
+            _ft_post_mean = _at;
+            _ft_post_var = _at;
             // set m[0]
 
             _Rt.set_size(_nP, _nP, _nT + 1);
@@ -447,21 +467,127 @@ namespace LBA
             return;
         }
 
-        const arma::mat &at;
-        const arma::cube &Rt;
-        const arma::mat &mt;
-        const arma::cube &Ct;
-        const arma::mat &atilde;
-        const arma::cube &Rtilde;
-        const arma::vec &alpha_t;
-        const arma::vec &beta_t;
+        arma::mat optimal_discount_factor(
+            const double &from, 
+            const double &to, 
+            const double &delta = 0.01, 
+            const bool do_smoothing = true)
+        {
+            bool use_discount_old = _use_discount;
+            _use_discount = true;
+
+            double discount_old = _discount_factor;
+
+
+            if (to > 1 || from < 0)
+            {
+                throw std::invalid_argument("Discount factor range is (0, 1)");
+            }
+            arma::vec delta_grid = arma::regspace(from, delta, to);
+            unsigned int nelem = delta_grid.n_elem;
+            arma::mat stats_forecast(nelem, _model.dim.nT, arma::fill::zeros);
+
+            for (unsigned int i = 0; i < nelem; i ++)
+            {
+                _discount_factor = delta_grid.at(i);
+
+                filter_single_iter(1);
+
+                for (unsigned int t = 2; t < _model.dim.nT; t++)
+                {
+                    _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                    _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+                    _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
+
+                    func_prior_ft(
+                        _ft_prior_mean, _ft_prior_var, _Ft,
+                        t, _model, _y,
+                        _at.col(t), _Rt.slice(t), _fill_zero);
+                    
+                    func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), false);
+                    stats_forecast.at(i, t) = ObsDist::dforecast(_y.at(t), _model.dobs.name, _model.dobs.par2, _alphat, _betat, false);
+
+                    func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), true);
+
+                    _alpha_t.at(t) = _alphat;
+                    _beta_t.at(t) = _betat;
+
+                    _At = Rt.slice(t) * _Ft / _ft_prior_var;
+
+                    func_posterior_ft(_ft_post_mean.at(t), _ft_post_var.at(t), _model, _alphat, _betat);
+
+                    _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean.at(t));
+                    _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var.at(t));
+                }
+
+                if (do_smoothing)
+                {
+                    smoother();
+                }
+
+
+            }
+
+        }
+
+
+        arma::mat fit_stats()
+        {
+            /**
+             * theta[t] | y[0:t] ~ (m[t], C[t])
+             * Fitted values of y: lambda[t] = E( y[t] | Dt ) = yhat[t]
+             * 
+             */
+        }
+        
+
+        void filter_single_iter(const unsigned int &t)
+        {
+            _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+            _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+            _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
+
+            func_prior_ft(
+                _ft_prior_mean, _ft_prior_var, _Ft,
+                t, _model, _y,
+                _at.col(t), _Rt.slice(t), _fill_zero);
+
+            func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), true);
+            _alpha_t.at(t) = _alphat;
+            _beta_t.at(t) = _betat;
+
+            _At = Rt.slice(t) * _Ft / _ft_prior_var;
+
+            func_posterior_ft(_ft_post_mean.at(t), _ft_post_var.at(t), _model, _alphat, _betat);
+
+            _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean.at(t));
+            _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var.at(t));
+        }
 
 
         void filter()
         {
-            for (unsigned int t = 1; t <= _model.dim.nT; t++)
+            unsigned int tstart = 1;
+            if (_do_reference_analysis && (_model.dim.nL < _model.dim.nT))
             {
-                _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1));
+                filter_single_iter(1);
+                for (unsigned int t = 2; t <= _model.dim.nL; t++)
+                {
+                    _at.col(t) = _at.col(1);
+                    _Rt.slice(t) = _Rt.slice(1);
+                    _mt.col(t) = _mt.col(1);
+                    _Ct.slice(t) = _Ct.slice(1);
+                    _alpha_t.at(t) = _alpha_t.at(1);
+                    _beta_t.at(t) = _beta_t.at(1);
+                }
+                tstart = _model.dim.nL + 1;
+            }
+
+
+            for (unsigned int t = tstart; t <= _model.dim.nT; t++)
+            {
+                // filter_single_iter(t);
+                _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 
@@ -474,12 +600,12 @@ namespace LBA
                 _alpha_t.at(t) = _alphat;
                 _beta_t.at(t) = _betat;
 
-                _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
+                _At = Rt.slice(t) * _Ft / _ft_prior_var;
 
-                func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
+                func_posterior_ft(_ft_post_mean.at(t), _ft_post_var.at(t), _model, _alphat, _betat);
 
-                _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
-                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
+                _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean.at(t));
+                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var.at(t));
             }
 
             return;
@@ -566,14 +692,85 @@ namespace LBA
             bound_check<arma::vec>(_psi_mean, "smoother: _psi_mean");
             bound_check<arma::vec>(_psi_var, "smoother: _psi_var");
         }
+
+
+        void init(const Rcpp::List &opts_in)
+        {
+            opts = opts_in;
+            _W = 0.01;
+            if (opts.containsElementNamed("W"))
+            {
+                _W = Rcpp::as<double>(opts["W"]);
+            }
+
+            _use_discount = false;
+            if (opts.containsElementNamed("use_discount"))
+            {
+                _use_discount = Rcpp::as<bool>(opts["use_discount"]);
+            }
+
+            _discount_factor = 0.95;
+            if (opts.containsElementNamed("custom_discount_factor"))
+            {
+                _discount_factor = Rcpp::as<double>(opts["custom_discount_factor"]);
+            }
+
+            _do_reference_analysis = false;
+            if (opts.containsElementNamed("do_reference_analysis"))
+            {
+                _do_reference_analysis = Rcpp::as<bool>(opts["do_reference_analysis"]);
+            }
+
+            _fill_zero = true;
+            if (opts.containsElementNamed("fill_zero"))
+            {
+                _fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
+            }
+        }
+
+        static Rcpp::List default_settings()
+        {
+            Rcpp::List opts;
+
+            opts["W"] = 0.01;
+            opts["use_discount"] = false;
+            opts["use_custom"] = false;
+            opts["custom_discount_factor"] = 0.95;
+            opts["do_smoothing"] =  true;
+            opts["do_reference_analysis"] = false;
+            opts["fill_zero"] = true;
+
+            return opts;
+        }
+
+        Rcpp::List get_output()
+        {
+            Rcpp::List output;
+            output["opts"] = opts;
+            arma::mat psi = get_psi(_atilde_t, _Rtilde_t);
+            arma::mat psi_filter = get_psi(_mt, _Ct);
+            output["psi"] = Rcpp::wrap(psi);
+            output["psi_filter"] = Rcpp::wrap(psi_filter);
+
+            output["ft_post_mean"] = Rcpp::wrap(_ft_post_mean);
+            output["ft_post_var"] = Rcpp::wrap(_ft_post_var);
+            output["mt"] = Rcpp::wrap(_mt);
+            output["Ct"] = Rcpp::wrap(_Ct);
+
+            return output;
+        }
     
     private:
         const Model &_model;
+        Rcpp::List opts;
         arma::vec _y;
 
         double _W = 0.01;
         double _discount_factor = 0.95;
+
         bool _use_discount = false;
+        bool _do_reference_analysis = false;
+        bool _fill_zero = true;
 
         arma::mat _mt, _at, _atilde_t; // nP x (nT + 1)
         arma::cube _Ct, _Rt, _Rtilde_t; // nP x nP x (nT + 1)
@@ -581,7 +778,7 @@ namespace LBA
 
         arma::vec _psi_mean; // (nT + 1) x 1
         arma::vec _psi_var; // (nT + 1) x 1
-        arma::vec _alpha_t, _beta_t; // (nT + 1) x 1
+        arma::vec _alpha_t, _beta_t, _ft_post_mean, _ft_post_var; // (nT + 1) x 1
 
         arma::vec _Ft, _At; // nP x 1
         arma::mat _Gt; // nP x nP

@@ -10,7 +10,9 @@
 #include <nlopt.h>
 #include "nloptrAPI.h"
 #include "model_utils.h"
-
+#include "Model.hpp"
+#include "TransFunc.hpp"
+#include "LinearBayes.hpp"
 
 
 
@@ -91,6 +93,7 @@ void forwardFilter(
 	arma::vec &alphat,		// (n+1) x 1
 	arma::vec &betat,		// (n+1) x 1
 	const arma::vec &Y,		// (n+1) x 1, the observation (scalar), n: num of obs
+	const Model &model,
 	const unsigned int &nt, // number of observations
 	const unsigned int &p,	// dimension of the state space
 	const arma::vec &obs_par,

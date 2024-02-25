@@ -169,6 +169,18 @@ public:
         return y; // Checked. OK.
     }
 
+    arma::vec forecast(
+        const arma::mat &psi, // (nT + 1) x nsample
+        const unsigned int &nstep = 1,
+        const unsigned int &nrep = 1
+    )
+    {
+        const unsigned int nsample = psi.n_cols;
+        arma::cube ynew(nstep, nrep, nsample);
+        arma::vec psi_new = ErrDist::sample(nstep, _derr.par1, _derr.par2, true, _derr.name); // nstep x 1
+
+    }
+
     arma::vec wt2lambda(const arma::vec &y, const arma::vec &wt) // checked. ok.
     {
         arma::vec psi = arma::cumsum(wt);
@@ -316,7 +328,8 @@ public:
             ft_cur = theta_cur.at(1);
         }
 
-        bound_check(ft_cur, "func_ft: ft_cur");
+
+        bound_check(ft_cur, "func_ft: ft_cur", false, true);
         return ft_cur;
     }
 

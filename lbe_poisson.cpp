@@ -1,5 +1,5 @@
 #include "lbe_poisson.h"
-#include "TransFunc.hpp"
+
 
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp11)]]
@@ -110,7 +110,6 @@ void update_Rt(
 	const double &delta)
 { // discount factor
 
-	const unsigned int p = Rt.n_cols;
 	Rt = Gt * Ct * Gt.t();
 	if (use_discount) {
 		// We should not use component discounting because Gt is not block-diagonal.
@@ -170,6 +169,7 @@ void forwardFilter(
 	arma::vec &alphat,		// (n+1) x 1
 	arma::vec &betat,		// (n+1) x 1
 	const arma::vec &Y,		// (n+1) x 1, the observation (scalar), n: num of obs
+	const Model &model,
 	const unsigned int &nt, // number of observations
 	const unsigned int &p,	// dimension of the state space
 	const arma::vec &obs_par,
@@ -213,177 +213,217 @@ void forwardFilter(
     arma::vec hpsi(p);
 	arma::vec hph(p);
 
-	/*
-	------ Reference Analysis ------
-	*/
-	if ( truncated )
-	{
-		at.col(1) = update_at(
-			Gt.slice(1), mt.col(0), Y.at(0),
-			lag_par, gain_code, nlag, truncated); // p x 1
+	// /*
+	// ------ Reference Analysis ------
+	// */
+	// if ( truncated )
+	// {
+	// 	// at.col(1) = update_at(
+	// 	// 	Gt.slice(1), mt.col(0), Y.at(0),
+	// 	// 	lag_par, gain_code, nlag, truncated); // p x 1
+	// 	at.col(1) = StateSpace::func_gt(model, mt.col(0), Y.at(0));
+	// 	Gt.slice(1) = LBA::func_Gt(model, mt.col(0), Y.at(0));
+		
+	// 	Rt.slice(1) = LBA::func_Rt(Gt.slice(1), Ct.slice(0), W, use_discount, delta_discount);
 
-		update_Gt(
-			Gt.slice(1), mt.col(0), Y.at(0), 
-			lag_par, gain_code, trans_code, 
-			nlag, truncated);
-		update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(1), use_discount, W, delta_discount);
+	// 	// update_Gt(
+	// 	// 	Gt.slice(1), mt.col(0), Y.at(0), 
+	// 	// 	lag_par, gain_code, trans_code, 
+	// 	// 	nlag, truncated);
+	// 	// update_Rt(Rt.slice(1), Ct.slice(0), Gt.slice(1), use_discount, W, delta_discount);
+	// 	// try
+	// 	// {
+	// 		LBA::func_prior_ft(
+	// 			ft, Qt, Ft, 1, model, Y, at.col(1), Rt.slice(1), true);
+	// 	// }
+	// 	// catch(const std::exception& e)
+	// 	// {
+	// 	// 	std::cerr << e.what() << 'init prior ft.\n';
+	// 	// }
+		
 
-		update_Ft_truncated(Ft, Fy, 1, Y, Fphi, nlag, truncated);
+	// 	// update_Ft_truncated(Ft, Fy, 1, Y, Fphi, nlag, truncated);
 
-		hpsi = psi2hpsi(at.col(1), gain_code);
-		hph = hpsi_deriv(at.col(1), gain_code);
+	// 	hpsi = psi2hpsi(at.col(1), gain_code);
+	// 	hph = hpsi_deriv(at.col(1), gain_code);
 
-		ft = arma::accu(Ft % hpsi);
-		Ft = Ft % hph;
-		Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
+	// 	ft = arma::accu(Ft % hpsi);
 
-		bound_check(Qt, "forwardFilter: Qt", true, false);
+	// 	ft = StateSpace::func_ft(model, 1, at.col(1), Y);
 
-		/*
-		------ Moment Matching ------
-		Depends on specific link function
-		*/
-		phi = mu0 + ft; // regression on link function
-		if (link_code == 0 && obs_code == 1) {
-			// Poisson DLM with Identity Link
-			betat.at(1) = phi / Qt;
-			alphat.at(1) = phi * betat.at(1);
-			Qt_ast = (alphat.at(1) + Y.at(0)) / (betat.at(1) + 1.) / (betat.at(1) + 1.);
-			ft_ast = Qt_ast * (betat.at(1)+1.) - mu0;
+	// 	Ft = Ft % hph;
+	// 	Qt = arma::as_scalar(Ft.t() * Rt.slice(1) * Ft);
 
-		} else if (link_code == 0 && obs_code == 0) {
-			// Negative-binomial DLM with Identity Link
-			betat.at(1) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
-			alphat.at(1) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(1)-1.));
-			ft_ast = delta_nb * (alphat.at(1) + Y.at(0)) / (betat.at(1) + delta_nb - 1.) - mu0;
-			Qt_ast = (ft_ast + mu0) * delta_nb * (alphat.at(1) + Y.at(0) + betat.at(1) + delta_nb - 1.) / (betat.at(1) + delta_nb - 1.) / (betat.at(1) + delta_nb - 2.);
-		} else if (link_code == 1 && obs_code == 1) {
-			// Poisson DLM with Exponential Link
-			alphat.at(1) = optimize_trigamma(Qt);
-			betat.at(1) = std::exp(R::digamma(alphat.at(1)) - mu0 - ft);
-			ft_ast = R::digamma(alphat.at(1) + Y.at(0)) - std::log(betat.at(1) + 1.) - mu0;
-			Qt_ast = R::trigamma(alphat.at(1) + Y.at(0));
-		} else {
-			 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
-		}
+	// 	bound_check(Qt, "forwardFilter: Qt", true, false);
 
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = std::abs(ft_ast - ft);
-		At = Rt.slice(1) * Ft / Qt; // p x 1
+	// 	/*
+	// 	------ Moment Matching ------
+	// 	Depends on specific link function
+	// 	*/
+	// 	LBA::func_alpha_beta(alphat.at(1), betat.at(1), model, ft, Qt, Y.at(1), true);
+	// 	At = LBA::func_At(Rt.slice(1), Ft, ft);
 
-		arma::vec mnew = at.col(1) + At * et;
-		mt.col(1) = mnew;
+	// 	LBA::func_posterior_ft(ft_ast, Qt_ast, model, alphat.at(1), betat.at(1));
 
-		arma::mat cnew = Rt.slice(1) - At * (Qt - Qt_ast) * At.t();
-		if (cnew.is_zero())
-		{
-			throw std::invalid_argument("C[1] is zero");
-		}
-		Ct.slice(1) = cnew;
+	// 	// phi = mu0 + ft; // regression on link function
+	// 	// if (link_code == 0 && obs_code == 1) {
+	// 	// 	// Poisson DLM with Identity Link
+	// 	// 	betat.at(1) = phi / Qt;
+	// 	// 	alphat.at(1) = phi * betat.at(1);
+	// 	// 	Qt_ast = (alphat.at(1) + Y.at(0)) / (betat.at(1) + 1.) / (betat.at(1) + 1.);
+	// 	// 	ft_ast = Qt_ast * (betat.at(1)+1.) - mu0;
+
+	// 	// } else if (link_code == 0 && obs_code == 0) {
+	// 	// 	// Negative-binomial DLM with Identity Link
+	// 	// 	betat.at(1) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
+	// 	// 	alphat.at(1) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(1)-1.));
+	// 	// 	ft_ast = delta_nb * (alphat.at(1) + Y.at(0)) / (betat.at(1) + delta_nb - 1.) - mu0;
+	// 	// 	Qt_ast = (ft_ast + mu0) * delta_nb * (alphat.at(1) + Y.at(0) + betat.at(1) + delta_nb - 1.) / (betat.at(1) + delta_nb - 1.) / (betat.at(1) + delta_nb - 2.);
+	// 	// } else if (link_code == 1 && obs_code == 1) {
+	// 	// 	// Poisson DLM with Exponential Link
+	// 	// 	alphat.at(1) = optimize_trigamma(Qt);
+	// 	// 	betat.at(1) = std::exp(R::digamma(alphat.at(1)) - mu0 - ft);
+	// 	// 	ft_ast = R::digamma(alphat.at(1) + Y.at(0)) - std::log(betat.at(1) + 1.) - mu0;
+	// 	// 	Qt_ast = R::trigamma(alphat.at(1) + Y.at(0));
+	// 	// } else {
+	// 	// 	 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
+	// 	// }
+
+	// 	// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
+	// 	et = std::abs(ft_ast - ft);
+	// 	At = Rt.slice(1) * Ft / Qt; // p x 1
+
+	// 	arma::vec mnew = at.col(1) + At * et;
+	// 	mt.col(1) = mnew;
+
+	// 	arma::mat cnew = Rt.slice(1) - At * (Qt - Qt_ast) * At.t();
+	// 	if (cnew.is_zero())
+	// 	{
+	// 		throw std::invalid_argument("C[1] is zero");
+	// 	}
+	// 	Ct.slice(1) = cnew;
 
 
 		
-		if (nlag > 1) {
-			for (unsigned int t=2; t<=nlag; t++) {
-        		at.col(t) = at.col(1);
-        		Rt.slice(t) = Rt.slice(1);
-        		mt.col(t) = mt.col(1);
-        		Ct.slice(t) = Ct.slice(1);
-				alphat.at(t) = alphat.at(1);
-				betat.at(t) = betat.at(1);
-    		}
-		}
-	}
+	// 	if (nlag > 1) {
+	// 		for (unsigned int t=2; t<=nlag; t++) {
+    //     		at.col(t) = at.col(1);
+    //     		Rt.slice(t) = Rt.slice(1);
+    //     		mt.col(t) = mt.col(1);
+    //     		Ct.slice(t) = Ct.slice(1);
+	// 			alphat.at(t) = alphat.at(1);
+	// 			betat.at(t) = betat.at(1);
+    // 		}
+	// 	}
+	// }
 
 	/*
 	------ Reference Analysis for Koyama's Transfer Kernel ------
 	*/
 	unsigned int tstart = 1;
-	if (nlag < nt) {tstart = nlag + 1;}
+	// if (nlag < nt) {tstart = nlag + 1;}
 
 	for (unsigned int t=tstart; t<=nt; t++) {
 		R_CheckUserInterrupt();
 
 		// Prior at time t: theta[t] | D[t-1] ~ (at, Rt)
 		// Linear approximation is implemented if the state equation is nonlinear
-		at.col(t) = update_at(
-			Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
-			lag_par, gain_code, nlag, truncated); // p x 1
-		update_Gt(
-			Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
-			lag_par, gain_code, trans_code,
-			nlag, truncated);
-		update_Rt(Rt.slice(t), Ct.slice(t - 1), Gt.slice(t), use_discount, W, delta_discount);
+		// at.col(t) = update_at(
+		// 	Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
+		// 	lag_par, gain_code, nlag, truncated); // p x 1
+		at.col(t) = StateSpace::func_gt(model, mt.col(t - 1), Y.at(t - 1));
+		Gt.slice(t) = LBA::func_Gt(model, mt.col(t-1), Y.at(t-1));
 
-		
+		// update_Gt(
+		// 	Gt.slice(t), mt.col(t - 1), Y.at(t - 1),
+		// 	lag_par, gain_code, trans_code,
+		// 	nlag, truncated);
+		// update_Rt(Rt.slice(t), Ct.slice(t - 1), Gt.slice(t), use_discount, W, delta_discount);
+		Rt.slice(t) = LBA::func_Rt(Gt.slice(t), Ct.slice(t - 1), W, use_discount, delta_discount);
+		LBA::func_prior_ft(ft, Qt, Ft, t, model, Y, at.col(t), Rt.slice(t), true);
 
 		// One-step ahead forecast: Y[t]|D[t-1] ~ N(ft, Qt)
-        if (truncated) { // truncated
-			update_Ft_truncated(Ft, Fy, t, Y, Fphi, nlag, truncated);
-			hpsi = psi2hpsi(at.col(t),gain_code);
-			hph = hpsi_deriv(at.col(t),gain_code);
+        // if (truncated) { // truncated
+		// 	update_Ft_truncated(Ft, Fy, t, Y, Fphi, nlag, truncated);
+		
+			
+		// 	hpsi = psi2hpsi(at.col(t),gain_code);
+		// 	hph = hpsi_deriv(at.col(t), gain_code);
+		// 	ft = StateSpace::func_ft(model, t, at.col(t), Y);
 
-			ft = arma::accu(Ft % hpsi);
-			Ft = Ft % hph;
-			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-		} else { // Vanilla, Koyck, Solow
-			// no truncations
-			ft = arma::as_scalar(Ft.t() * at.col(t));
-			Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
-		}
+		// 	std::cout << "\n0\n";
+		// 	Ft = LBA::func_Ft(model, t, at.col(t), Y);
+		// 	// Ft = Ft % hph;
+		// 	Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+
+			
+		// } else { // Vanilla, Koyck, Solow
+		// 	// no truncations
+		// 	ft = arma::as_scalar(Ft.t() * at.col(t));
+		// 	Qt = arma::as_scalar(Ft.t() * Rt.slice(t) * Ft);
+		// }
 
 		ft = std::max(ft,EPS);
 		bound_check(Qt,"ForwardFilter: Qt",true);
 
+
+		LBA::func_alpha_beta(alphat.at(t), betat.at(t), model, ft, Qt, Y.at(t), true);
+		At = Rt.slice(t) * Ft / Qt;
+
+		LBA::func_posterior_ft(ft_ast, Qt_ast, model, alphat.at(t), betat.at(t));
 		/*
 		------ Moment Matching ------
 		Depends on specific link function
 		*/
-		phi = mu0 + ft; // regression on link function
-		if (link_code == 0 && obs_code == 1) {
-			// Poisson DLM with Identity Link
-			betat.at(t) = phi / Qt;
-			alphat.at(t) = phi * betat.at(t);
-			Qt_ast = (alphat.at(t) + Y.at(t)) / (betat.at(t) + 1.) / (betat.at(t) + 1.);
-			ft_ast = Qt_ast * (betat.at(t)+1.) - mu0;
+		// phi = mu0 + ft; // regression on link function
+		// if (link_code == 0 && obs_code == 1) {
+		// 	// Poisson DLM with Identity Link
+		// 	betat.at(t) = phi / Qt;
+		// 	alphat.at(t) = phi * betat.at(t);
+		// 	Qt_ast = (alphat.at(t) + Y.at(t)) / (betat.at(t) + 1.) / (betat.at(t) + 1.);
+		// 	ft_ast = Qt_ast * (betat.at(t)+1.) - mu0;
 
-		} else if (link_code == 0 && obs_code == 0) {
-			// Negative-binomial DLM with Identity Link
+		// } else if (link_code == 0 && obs_code == 0) {
+		// 	// Negative-binomial DLM with Identity Link
 
-			betat.at(t) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
-			alphat.at(t) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(t)-1.));
-			ft_ast = delta_nb * (alphat.at(t) + Y.at(t)) / (betat.at(t) + delta_nb - 1.) - mu0;
-			Qt_ast = (ft_ast + mu0) * delta_nb * (alphat.at(t) + Y.at(t) + betat.at(t) + delta_nb - 1.) / (betat.at(t) + delta_nb - 1.) / (betat.at(t) + delta_nb - 2.);
-		} else if (link_code == 1 && obs_code == 1) {
-			// Poisson DLM with Exponential Link
-			alphat.at(t) = optimize_trigamma(Qt);
-			betat.at(t) = std::exp(R::digamma(alphat.at(t)) - phi);
-			ft_ast = R::digamma(alphat.at(t) + Y.at(t)) - std::log(betat.at(t) + 1.) - mu0;
-			Qt_ast = R::trigamma(alphat.at(t) + Y.at(t));
-		} else {
-			 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
-		}
+		// 	betat.at(t) = std::exp(std::log(phi)+std::log(phi+delta_nb)-std::log(Qt))+2.;
+		// 	alphat.at(t) = std::exp(std::log(phi)-std::log(delta_nb)+std::log(betat.at(t)-1.));
+		// 	ft_ast = delta_nb * (alphat.at(t) + Y.at(t)) / (betat.at(t) + delta_nb - 1.) - mu0;
+		// 	Qt_ast = (ft_ast + mu0) * delta_nb * (alphat.at(t) + Y.at(t) + betat.at(t) + delta_nb - 1.) / (betat.at(t) + delta_nb - 1.) / (betat.at(t) + delta_nb - 2.);
+		// } else if (link_code == 1 && obs_code == 1) {
+		// 	// Poisson DLM with Exponential Link
+		// 	alphat.at(t) = optimize_trigamma(Qt);
+		// 	betat.at(t) = std::exp(R::digamma(alphat.at(t)) - phi);
+		// 	ft_ast = R::digamma(alphat.at(t) + Y.at(t)) - std::log(betat.at(t) + 1.) - mu0;
+		// 	Qt_ast = R::trigamma(alphat.at(t) + Y.at(t));
+		// } else {
+		// 	 throw std::invalid_argument("This combination of likelihood and link function is not supported yet.");
+		// }
 
-		ft_ast = std::max(ft_ast,EPS);
-		bound_check(Qt_ast, "ForwardFilter: Qt_ast", true);
+		// ft_ast = std::max(ft_ast,EPS);
+		// bound_check(Qt_ast, "ForwardFilter: Qt_ast", true);
 		
 		
 
-		// Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
-		et = ft_ast - ft;
-		At = Rt.slice(t) * Ft / Qt; // p x 1
-
-		arma::vec mnew = at.col(t) + At * et;
-		double mtmp = mnew.at(1);
-		if (trans_code != 1)
-		{
-			mnew.at(1) = std::max(mtmp, EPS);
-		}
+		// // Posterior at time t: theta[t] | D[t] ~ N(mt, Ct)
+		// et = ft_ast - ft;
+		// // At = Rt.slice(t) * Ft / Qt; // p x 1
 
 
-		mt.col(t) = mnew;
-		arma::mat cnew = Rt.slice(t) - At * (Qt - Qt_ast) * At.t();
-		Ct.slice(t) = cnew;
+		// arma::vec mnew = at.col(t) + At * et;
+		// double mtmp = mnew.at(1);
+		// if (trans_code != 1)
+		// {
+		// 	mnew.at(1) = std::max(mtmp, EPS);
+		// }
+
+		mt.col(t) = LBA::func_mt(at.col(t), At, ft, ft_ast);
+		Ct.slice(t) = LBA::func_Ct(Rt.slice(t), At, Qt, Qt_ast);
+
+
+		// mt.col(t) = mnew;
+		// arma::mat cnew = Rt.slice(t) - At * (Qt - Qt_ast) * At.t();
+		// Ct.slice(t) = cnew;
 
 		// Rcout << "\rFiltering: " << t << "/" << n;
 	}
@@ -629,6 +669,19 @@ Rcpp::List lbe_poisson(
     const unsigned int gain_code = model_code.at(3); // Exponential, Softplus, logistic, ...
     const unsigned int err_code = model_code.at(4); // normal, laplace, ...
 
+	Dim dim(nlag_in, p, truncated, n);
+	std::string obs_dist = AVAIL::get_obs_name(obs_code);
+	std::string link_func = AVAIL::get_link_name(link_code);
+	std::string trans_func = AVAIL::get_trans_name(trans_code);
+	std::string lag_dist = AVAIL::get_lag_name(trans_code);
+	std::string gain_func = AVAIL::get_gain_name(gain_code);
+	std::string err_dist = "gaussian";
+	Rcpp::NumericVector err_param = {W, 0.};
+	Model model(
+		dim, obs_dist, link_func, 
+		gain_func, lag_dist, err_dist, 
+		obs_par_in, lag_par_in, err_param, trans_func);
+
 
 	arma::vec Ypad(npad,arma::fill::zeros); // (n+1) x 1
 	Ypad.tail(n) = Y; // **
@@ -665,7 +718,7 @@ Rcpp::List lbe_poisson(
 
 	forwardFilter(
 		mt, at, Ct, Rt, Gt, alphat, betat,
-		Ypad, n, p, obs_par, lag_par, W, 
+		Ypad, model, n, p, obs_par, lag_par, W, 
 		obs_code, link_code, trans_code, gain_code,
 		nlag, delta_discount, truncated, use_discount);
 	arma::vec Wt = (1. - delta_discount) * arma::vectorise(Rt.tube(0, 0));
