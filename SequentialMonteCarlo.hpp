@@ -463,19 +463,24 @@ namespace SMC
             {
                 if (use_discount)
                 { // Use discount factor if W is not given
+                    bool use_custom_val = (use_custom && t > B) ? true : false;
+
                     Wt.at(t + 1) = SequentialMonteCarlo::discount_W(
-                        Theta_stored.slice(t + B - 1), 
+                        Theta_stored.slice(t + B - 1),
                         custom_discount_factor,
-                        use_custom, default_discount_factor);
+                        use_custom_val, 
+                        default_discount_factor);
                 }
                 else
                 {
                     Wt.at(t + 1) = W;
                 }
 
-                bound_check(Wt.at(t + 1), "SMC::propagate: Wt", true, true);
                 arma::vec Wsqrt(N, arma::fill::zeros);
                 Wsqrt.fill(std::sqrt(Wt.at(t + 1)) + EPS);
+                bound_check<arma::vec>(Wsqrt, "SMC::propagate: Wt");
+                
+                
 
                 arma::mat Theta_now = Theta_stored.slice(t + B - 1);
 
@@ -502,6 +507,9 @@ namespace SMC
                     Wsqrt.fill(Wsd);
 
                     arma::uvec smooth_idx = smooth(t, Wsqrt);
+                    arma::mat theta_next = Theta_stored.slice(t - 1);
+                    theta_next = theta_next.cols(smooth_idx); // p x M
+                    psi_smooth.row(t - 1) = theta_next.row(0); // 1 x M
                 }
             }
 
