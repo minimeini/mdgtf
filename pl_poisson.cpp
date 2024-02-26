@@ -783,6 +783,19 @@ Rcpp::List pl_poisson(
         p = (unsigned int) lag_par[1] + 1;
     }
 
+    Dim dim(nlag_in, p, truncated, nt);
+    std::string obs_dist = AVAIL::get_obs_name(obs_code);
+    std::string link_func = AVAIL::get_link_name(link_code);
+    std::string trans_func = AVAIL::get_trans_name(trans_code);
+    std::string lag_dist = AVAIL::get_lag_name(trans_code);
+    std::string gain_func = AVAIL::get_gain_name(gain_code);
+    std::string err_dist = "gaussian";
+    Rcpp::NumericVector err_param = {W_par[0], 0.};
+    Model model(
+        dim, obs_dist, link_func,
+        gain_func, lag_dist, err_dist,
+        obs_par_in, lag_par_in, err_param, trans_func);
+
     arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p,trans_code);
 
@@ -821,56 +834,67 @@ Rcpp::List pl_poisson(
     arma::vec Meff(nt, arma::fill::zeros);
     // Effective sample size (Ref: Lin, 1996; Prado, 2021, page 196)
     arma::uvec resample_status(nt, arma::fill::zeros);
+    
 
     for (unsigned int t = 0; t < nt; t++)
     {
         R_CheckUserInterrupt();
 
+        arma::mat Theta_old = theta_stored.slice(t); // p x N
+        arma::vec Wsqrt = arma::sqrt(Wt.col(t));
+
+        if (t > theta_stored.n_rows)
+        {
+            arma::vec weight = SMC::SequentialMonteCarlo::imp_weights_forecast(
+                Theta_old, Wsqrt, t, ypad, model);
+            arma::uvec resample_idx = SMC::SequentialMonteCarlo::get_resample_index(weight);
+
+            Theta_old = Theta_old.cols(resample_idx);
+            theta_stored.slice(t) = Theta_old;
+
+            Wsqrt = Wsqrt.elem(resample_idx);
+            arma::vec Wtmp = Wt.col(t);
+            Wt.col(t) = Wtmp.elem(resample_idx);
+
+        }
+
         /*
         Propagate
         */
-        arma::mat Theta_old = theta_stored.slice(t); // p x N
-        arma::vec mt = arma::median(Theta_old, 1);
-        update_Gt(
-            Gt, mt, ypad.at(t), lag_par, 
-            gain_code, trans_code, 
-            nlag, truncated);
+        
+        bool positive_noise = (t < Theta_old.n_rows) ? true : false;
+        arma::mat Theta_new = SMC::SequentialMonteCarlo::propagate(
+            ypad.at(t), Wsqrt, Theta_old, model, positive_noise);
+        theta_stored.slice(t + 1) = Theta_new;
+        arma::vec err = arma::vectorise(Theta_new.row(0) - Theta_old.row(0));
+        // arma::vec mt = arma::median(Theta_old, 1);
+        // update_Gt(
+        //     Gt, mt, ypad.at(t), lag_par, 
+        //     gain_code, trans_code, 
+        //     nlag, truncated);
 
-        for (unsigned int i = 0; i < N; i++)
-        {
-            // Propagate
-            arma::vec theta_old = Theta_old.col(i); // p x 1
-            arma::vec theta_new = update_at(
-                Gt, theta_old, ypad.at(t),
-                lag_par, gain_code, nlag, truncated);
+        // for (unsigned int i = 0; i < N; i++)
+        // {
+        //     // Propagate
+        //     arma::vec theta_old = Theta_old.col(i); // p x 1
+        //     arma::vec theta_new = update_at(
+        //         Gt, theta_old, ypad.at(t),
+        //         lag_par, gain_code, nlag, truncated);
 
-            double Wsqrt = std::sqrt(Wt.at(i, t));
-            double omega_new = R::rnorm(0., Wsqrt);
-            theta_new.at(0) += omega_new;
+        //     double Wsqrt = std::sqrt(Wt.at(i, t));
+        //     double omega_new = R::rnorm(0., Wsqrt);
+        //     theta_new.at(0) += omega_new;
 
-            theta_stored.slice(t + 1).col(i) = theta_new;
+        //     theta_stored.slice(t + 1).col(i) = theta_new;
 
-            if (W_selected) {
-                // infer evolution variance W
-                double err = theta_stored.at(0,i,t+1) - theta_stored.at(0,i,t);
-                double sse = std::pow(err,2.);
-                aw.at(i,t+1) = aw.at(i,t) + 0.5;
-                bw.at(i,t+1) = bw.at(i,t) + 0.5*sse;
-                if (t > std::min(0.1 * nt_,20.))
-                {
-                    Wt.at(i, t + 1) = 1. / R::rgamma(aw.at(i, t + 1), 1. / bw.at(i, t + 1));
-                }
-            } else {
-                Wt.at(i,t+1) = W_par[0];
-            }
-        }
 
-        if (W_selected && (t <= std::min(0.1 * nt_, 20.)))
-        {
-            double wtmp = arma::var(theta_stored.slice(t + 1).row(0));
-            wtmp *= 1./0.99 - 1.;
-            Wt.col(t + 1).fill(wtmp);
-        }
+        // }
+
+        
+
+
+        
+
 
         /*
         Resample
@@ -878,43 +902,44 @@ Rcpp::List pl_poisson(
         - a_sigma2, b_sigma2, a_tau2, b_tau2 (N x 2)
         - sigma2, tau2 (N x 2)
         */
-        if (truncated)
-        {
-            update_Ft(Ft, ypad, Fphi, t, p);
-        }
-        // Checked OK.
+        // if (truncated)
+        // {
+        //     update_Ft(Ft, ypad, Fphi, t, p);
+        // }
+        // // Checked OK.
 
-        // resample
-        arma::vec weight(N); // importance weight of each particle
-        arma::vec lambda(N);
-        for (unsigned int i = 0; i < N; i++)
-        {
-            arma::vec psi = theta_stored.slice(t + 1).col(i); // p x 1, theta[t]
+        // // resample
+        // arma::vec weight(N); // importance weight of each particle
+        // arma::vec lambda(N);
+        // for (unsigned int i = 0; i < N; i++)
+        // {
+        //     arma::vec psi = theta_stored.slice(t + 1).col(i); // p x 1, theta[t]
 
-            if (link_code == 1)
-            {
-                // Exponential link and identity gain
-                double tmp = arma::as_scalar(Ft.t() * psi);
-                lambda.at(i) = std::min(mu0 + tmp, UPBND);
-                double tmp2 = std::exp(lambda.at(i));
-                lambda.at(i) = tmp2;
-            }
-            else if (truncated)
-            {
-                // truncated
-                arma::vec hpsi = psi2hpsi(psi, gain_code);
-                lambda.at(i) = mu0 + arma::as_scalar(Ft.t() * hpsi);
-            }
-            else
-            {
-                // no truncation: Koyck or Solow with identity link and different gain functions
-                lambda.at(i) = mu0 + psi.at(1);
-            }
+        //     if (link_code == 1)
+        //     {
+        //         // Exponential link and identity gain
+        //         double tmp = arma::as_scalar(Ft.t() * psi);
+        //         lambda.at(i) = std::min(mu0 + tmp, UPBND);
+        //         double tmp2 = std::exp(lambda.at(i));
+        //         lambda.at(i) = tmp2;
+        //     }
+        //     else if (truncated)
+        //     {
+        //         // truncated
+        //         arma::vec hpsi = psi2hpsi(psi, gain_code);
+        //         lambda.at(i) = mu0 + arma::as_scalar(Ft.t() * hpsi);
+        //     }
+        //     else
+        //     {
+        //         // no truncation: Koyck or Solow with identity link and different gain functions
+        //         lambda.at(i) = mu0 + psi.at(1);
+        //     }
 
-            weight.at(i) = loglike_obs(
-                ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false);
-        }
-        // Checked. OK
+        //     weight.at(i) = loglike_obs(
+        //         ypad.at(t + 1), lambda.at(i), obs_code, delta_nb, false);
+        // }
+        // // Checked. OK
+        arma::vec weight = SMC::SequentialMonteCarlo::imp_weights_likelihood(t + 1, Theta_new, ypad, model);
 
         double wsum = arma::accu(weight);
         bool resample = false;
@@ -941,24 +966,54 @@ Rcpp::List pl_poisson(
 
         if (resample)
         {
-            Rcpp::NumericVector w_ = Rcpp::wrap(weight);
-            Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
-            arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
+            arma::uvec idx = SMC::SequentialMonteCarlo::get_resample_index(weight);
+            // Rcpp::NumericVector w_ = Rcpp::wrap(weight);
+            // Rcpp::IntegerVector idx_ = Rcpp::sample(N, N, true, w_);
+            // arma::uvec idx = Rcpp::as<arma::uvec>(idx_) - 1;
 
             arma::mat tttmp = theta_stored.slice(t + 1);
             theta_stored.slice(t + 1) = tttmp.cols(idx);
+            err = err.elem(idx);
 
-            arma::vec atmp = aw.col(t + 1);
-            aw.col(t + 1) = atmp.elem(idx);
+            // arma::vec atmp = aw.col(t + 1);
+            // aw.col(t + 1) = atmp.elem(idx);
 
-            arma::vec btmp = bw.col(t + 1);
-            bw.col(t + 1) = btmp.elem(idx);
+            // arma::vec btmp = bw.col(t + 1);
+            // bw.col(t + 1) = btmp.elem(idx);
 
-            arma::vec stmp = Wt.col(t + 1);
-            Wt.col(t + 1) = stmp.elem(idx);
+            // arma::vec stmp = Wt.col(t + 1);
+            // Wt.col(t + 1) = stmp.elem(idx);
         }
         weight.ones();
         resample_status.at(t) = resample;
+
+        if (W_selected)
+        {
+            double wtmp = arma::var(theta_stored.slice(t + 1).row(0));
+            wtmp *= 1. / 0.99 - 1.;
+
+            for (unsigned int i = 0; i < N; i++)
+            {
+                // double err = theta_stored.at(0, i, t + 1) - theta_stored.at(0, i, t);
+                double sse = std::pow(err.at(i), 2.);
+                aw.at(i, t + 1) = aw.at(i, t) + 0.5;
+                bw.at(i, t + 1) = bw.at(i, t) + 0.5 * sse;
+                if (t > std::min(0.1 * nt_, 20.))
+                {
+                    // Wt.at(i, t + 1) = 1. / R::rgamma(aw.at(i, t + 1), 1. / bw.at(i, t + 1));
+                    Wt.at(i, t + 1) = InverseGamma::sample(aw.at(i, t + 1), bw.at(i, t + 1));
+                }
+                else
+                {
+                    Wt.at(i, t + 1) = wtmp;
+                }
+            }
+            // SMC::PL::propagate_W(aw, bw, Wt, t, err, wtmp, "invgamma");
+        }
+        else
+        {
+            Wt.col(t + 1).fill(W_par[0]);
+        }
     }
 
     /*
@@ -966,8 +1021,11 @@ Rcpp::List pl_poisson(
     */
     double cnst = -0.5*std::log(2*arma::datum::pi);
     unsigned int N_smooth = std::min(1000., 0.1 * N_);
-    Rcpp::IntegerVector idx0_ = Rcpp::sample(N, N_smooth, false);
-    arma::uvec idx0 = Rcpp::as<arma::uvec>(idx0_) - 1;
+    // Rcpp::IntegerVector idx0_ = Rcpp::sample(N, N_smooth, false);
+    // arma::uvec idx0 = Rcpp::as<arma::uvec>(idx0_) - 1;
+
+    arma::vec weight = arma::ones<arma::vec>(N);
+    arma::uvec idx0 = sample(N, N_smooth, weight, true, true); // M x 1
 
     arma::mat psi_smooth(N_smooth, nt + 1);
     arma::vec ptmp = arma::vectorise(theta_stored.slice(nt).row(0));
@@ -993,13 +1051,13 @@ Rcpp::List pl_poisson(
         for (unsigned int t = nt; t > 1; t--)
         {
             arma::vec psi_filter0 = arma::vectorise(theta_stored.slice(t-1).row(0)); // N x 1
-            arma::vec psi_filter = psi_filter0.elem(idx0);
+            arma::vec psi_filter = psi_filter0.elem(idx0); // N_smooth x 1
 
             arma::vec Wt_filter0 = Wt.col(t-1);
-            arma::vec Wt_filter = Wt_filter0.elem(idx0);
+            arma::vec Wt_filter = Wt_filter0.elem(idx0); // N_smooth x 1
 
             for (unsigned int i=0; i<N_smooth; i++) {
-                arma::vec psi_diff = arma::vectorise(psi_smooth.at(i, t) - psi_filter); // N x 1
+                arma::vec psi_diff = arma::vectorise(psi_smooth.at(i, t) - psi_filter); // N_smooth x 1
                 arma::vec Winv = 1. / Wt_filter;
 
                 arma::vec tmp1 = 0.5 * arma::log(Winv);

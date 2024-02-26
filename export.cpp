@@ -413,106 +413,26 @@ Rcpp::List dgtf_infer(
         SMC::MCS mcs(model, y);
         mcs.init(method_settings);
         mcs.infer(model);
-        arma::mat psi_filter = mcs.get_psi_filter(); // (nT + 1) x M
+        output = mcs.get_output();
 
-        if (summarize)
-        {
-            arma::mat psi = arma::quantile(psi_filter, ci_prob, 1); // (nT + 1) x 3
-            output["psi"] = Rcpp::wrap(psi);
-        }
-        else
-        {
-            output["psi"] = Rcpp::wrap(psi_filter);
-        }
+        
         break;
     } // case MCS
     case AVAIL::Algo::FFBS:
     {
-        bool do_smoothing = Rcpp::as<bool>(method_settings["do_smoothing"]);
         SMC::FFBS ffbs(model, y);
         ffbs.init(method_settings);
         ffbs.infer(model);
-
-        if (do_smoothing)
-        {
-            arma::mat psi_filter = ffbs.get_psi_filter();
-            arma::mat psi_smooth = ffbs.get_psi_smooth();
-            if (summarize)
-            {
-                arma::mat psi_f = arma::quantile(psi_filter, ci_prob, 1);
-                arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-                output["psi_filter"] = Rcpp::wrap(psi_f);
-                output["psi"] = Rcpp::wrap(psi);
-            }
-            else
-            {
-                output["psi_filter"] = Rcpp::wrap(psi_filter);
-                output["psi"] = Rcpp::wrap(psi_smooth);
-            }
-        }
-        else
-        {
-            arma::mat psi = ffbs.get_psi_filter();
-            if (summarize)
-            {
-                arma::mat psi_f = arma::quantile(psi, ci_prob, 1);
-                output["psi"] = Rcpp::wrap(psi_f);
-            }
-            else
-            {
-                output["psi"] = Rcpp::wrap(psi);
-            }
-        }
+        output = ffbs.get_output();
         break;
     } // case FFBS
     case AVAIL::Algo::ParticleLearning:
     {
-        bool do_smoothing = Rcpp::as<bool>(method_settings["do_smoothing"]);
-        bool infer_W = Rcpp::as<bool>(method_settings["infer_W"]);
-        SMC::PL pl(model, y, method_settings);
+        SMC::PL pl(model, y);
+        pl.init(method_settings);
         pl.infer(model);
-
-        if (do_smoothing)
-        {
-            arma::mat psi_filter = pl.get_psi_filter();
-            arma::mat psi_smooth = pl.get_psi_smooth();
-            if (summarize)
-            {
-                arma::mat psi_f = arma::quantile(psi_filter, ci_prob, 1);
-                arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-                output["psi_filter"] = Rcpp::wrap(psi_f);
-                output["psi"] = Rcpp::wrap(psi);
-            }
-            else
-            {
-                output["psi_filter"] = Rcpp::wrap(psi_filter);
-                output["psi"] = Rcpp::wrap(psi_smooth);
-            }
-
-            if (infer_W)
-            {
-                output["W_filter"] = Rcpp::wrap(pl.get_W_filtered());
-                output["w"] = Rcpp::wrap(pl.get_W_smoothed());
-            }
-        }
-        else
-        {
-            arma::mat psi = pl.get_psi_filter();
-            if (summarize)
-            {
-                arma::mat psi_f = arma::quantile(psi, ci_prob, 1);
-                output["psi"] = Rcpp::wrap(psi_f);
-            }
-            else
-            {
-                output["psi"] = Rcpp::wrap(psi);
-            }
-
-            if (infer_W)
-            {
-                output["w"] = Rcpp::wrap(pl.get_W_filtered());
-            }
-        }
+        output = pl.get_output();
+        
         break;
     } // case particle learning
     case AVAIL::Algo::MCMC:
