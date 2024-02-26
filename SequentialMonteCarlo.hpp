@@ -390,8 +390,10 @@ namespace SMC
                     Wt.at(t + 1) = W;
                 }
 
+
                 arma::vec Wsqrt(N, arma::fill::zeros);
                 Wsqrt.fill(std::sqrt(Wt.at(t + 1)) + EPS);
+
 
                 bound_check<arma::vec>(Wsqrt, "SMC::propagate: Wsqrt", true, true);
                 
@@ -404,11 +406,15 @@ namespace SMC
                 arma::uvec resample_idx = get_resample_index(weights);
 
                 Theta_stored.slice(t + B) = Theta_next;
+
                 for (unsigned int b = t + 1; b < t + B + 1; b++)
                 {
-                    arma::mat theta_tmp = Theta_stored.slice(t + b);
-                    Theta_stored.slice(t + b) = theta_tmp.cols(resample_idx);
+                    arma::mat theta_tmp = Theta_stored.slice(b);
+                    Theta_stored.slice(b) = theta_tmp.cols(resample_idx);
+                    
                 }
+
+
 
                 // Theta_stored.slice(t + B) = Theta_next.cols(resample_idx);
 

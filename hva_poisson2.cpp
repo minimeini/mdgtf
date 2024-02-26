@@ -745,6 +745,14 @@ Rcpp::List hva_poisson(
     {
         throw std::invalid_argument("k cannot be greater than m, total number of unknowns.");
     }
+
+    // Dim dim(nlag_in, p, truncated, n);
+    Rcpp::NumericVector err_param = {W, 0.};
+    Model model(
+        dim, obs_dist, link_func,
+        gain_func, lag_dist, err_dist,
+        obs_par_in, lag_par_in, err_param, trans_func);
+    
     arma::vec rcomb(n, arma::fill::zeros);
     for (unsigned int l = 1; l <= n; l++)
     {
@@ -830,7 +838,7 @@ Rcpp::List hva_poisson(
 
         arma::vec psi_pad(n + 1, arma::fill::zeros);
         mcs_poisson(
-            psi_pad, pmarg_y, W_par.at(0), ypad, model_code,
+            psi_pad, pmarg_y, W_par.at(0), ypad, model, model_code,
             obs_par, lag_par, nlag,
             Blag, Nsmc, theta0_upbnd,
             delta_discount, truncated, use_discount);

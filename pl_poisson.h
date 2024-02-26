@@ -83,6 +83,7 @@ void mcs_poisson(
     arma::vec &pmarg_y, // n x 1, marginal likelihood of y
     double &W,
     const arma::vec &ypad,        // (n+1) x 1, the observed response
+    const Model &model,
     const arma::uvec &model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
     const arma::vec &obs_par,
     const arma::vec &lag_par, // init/true values of (mu, sg2) or (rho, L)
