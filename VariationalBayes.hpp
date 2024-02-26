@@ -1,4 +1,4 @@
-#ifndef _VARIATIONALBASE_HPP
+#ifndef _VARIATIONALBAYES_HPP
 #define _VARIATIONALBAYES_HPP
 
 #include <iostream>
@@ -1321,7 +1321,7 @@ namespace VB
                 rcomb.at(l - 1) = nbinom::binom((unsigned int)model.transfer.dlag.par2 - 2 + l, l - 1);
             }
 
-            SMC::MCS mcs(model, y, mcs_opts);
+            SMC::MCS mcs(model, y);
 
 
             for (unsigned int b = 0; b < opts.ntotal; b ++)
@@ -1329,7 +1329,7 @@ namespace VB
                 bool saveiter = b > opts.nburnin && ((b - opts.nburnin - 1) % opts.nthin == 0);
                 R_CheckUserInterrupt();
                 
-                mcs.opts.W = W.val;
+                mcs.W = W.val;
                 mcs.infer(model);
                 arma::mat psi_all = mcs.get_psi_filter(); // (nT + 1) x M
                 psi = arma::median(psi_all, 1);

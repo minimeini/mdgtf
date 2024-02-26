@@ -178,6 +178,7 @@ public:
         const unsigned int nsample = psi.n_cols;
         arma::cube ynew(nstep, nrep, nsample);
         arma::vec psi_new = ErrDist::sample(nstep, _derr.par1, _derr.par2, true, _derr.name); // nstep x 1
+        return psi_new;
 
     }
 

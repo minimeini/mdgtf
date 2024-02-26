@@ -2,6 +2,8 @@
 #define _PL_POISSON_H
 
 #include "lbe_poisson.h"
+#include "Model.hpp"
+#include "SequentialMonteCarlo.hpp"
 
 arma::vec update_Fy(
     const arma::vec &ypad,
@@ -37,7 +39,9 @@ void smc_propagate_bootstrap(
     arma::mat &Gt,
     const double &y_new,
     const double &y_old,        // (n+1) x 1, the observed response
+    const arma::vec &yall,
     const arma::mat &Theta_old, // p x N
+    const Model &model,
     const arma::vec &Ft,        // must be already updated if used
     const arma::uvec &model_code,
     const arma::vec &obs_par,

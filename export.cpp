@@ -162,7 +162,7 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::string method_name = tolower(method);
 
-    Rcpp::List opts = SMC::Settings::get_default();
+    Rcpp::List opts = SMC::SequentialMonteCarlo::default_settings();
     switch (algo_list[method_name])
     {
     case AVAIL::Algo::LinearBayes:
@@ -410,7 +410,8 @@ Rcpp::List dgtf_infer(
     } // case Linear Bayes
     case AVAIL::Algo::MCS:
     {
-        SMC::MCS mcs(model, y, method_settings);
+        SMC::MCS mcs(model, y);
+        mcs.init(method_settings);
         mcs.infer(model);
         arma::mat psi_filter = mcs.get_psi_filter(); // (nT + 1) x M
 
@@ -428,7 +429,8 @@ Rcpp::List dgtf_infer(
     case AVAIL::Algo::FFBS:
     {
         bool do_smoothing = Rcpp::as<bool>(method_settings["do_smoothing"]);
-        SMC::FFBS ffbs(model, y, method_settings);
+        SMC::FFBS ffbs(model, y);
+        ffbs.init(method_settings);
         ffbs.infer(model);
 
         if (do_smoothing)

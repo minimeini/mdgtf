@@ -1,4 +1,6 @@
 #include "pl_poisson.h"
+
+
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr)]]
@@ -68,27 +70,43 @@ Rcpp::List mcs_poisson(
     double mu0 = obs_par.at(0);
     double delta_nb = obs_par.at(1);
 
+    unsigned int nlag = nlag_in;
+    unsigned int p = nlag;
+    if (!truncated)
+    {
+        nlag = nt;
+        p = (unsigned int)lag_par.at(1) + 1;
+    }
+
     /* 
     Dimension of state space depends on type of transfer functions 
     - p: diemsnion of DLM state space
     - Ft: vector for the state-to-observation function
     - Gt: matrix for the state-to-state function
     */
-    const unsigned int obs_code = model_code.at(0);
-    const unsigned int link_code = model_code.at(1);
-    const unsigned int trans_code = model_code.at(2);
-    const unsigned int gain_code = model_code.at(3);
-    const unsigned int err_code = model_code.at(4);
+    const unsigned int obs_code = model_code.at(0);   // Poisson or negative binomial
+    const unsigned int link_code = model_code.at(1);  // identity or exponential
+    const unsigned int trans_code = model_code.at(2); // Koyck, Koyama, or Solow
+    const unsigned int gain_code = model_code.at(3);  // Exponential, Softplus, logistic, ...
+    const unsigned int err_code = model_code.at(4);   // normal, laplace, ...
 
+    Dim dim(nlag_in, p, truncated, nt);
+    std::string obs_dist = AVAIL::get_obs_name(obs_code);
+    std::string link_func = AVAIL::get_link_name(link_code);
+    std::string trans_func = AVAIL::get_trans_name(trans_code);
+    std::string lag_dist = AVAIL::get_lag_name(trans_code);
+    std::string gain_func = AVAIL::get_gain_name(gain_code);
+    std::string err_dist = "gaussian";
+    Rcpp::NumericVector err_param = {W, 0.};
+    Model model(
+        dim, obs_dist, link_func,
+        gain_func, lag_dist, err_dist,
+        obs_par_in, lag_par_in, err_param, trans_func);
 
-    unsigned int nlag = nlag_in;
-    unsigned int p = nlag;
-    if (!truncated)
-    {
-        nlag = nt;
-        p = (unsigned int) lag_par.at(1) + 1;
-    }
-    arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
+    
+    
+    // arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
+    arma::vec Fphi = LagDist::get_Fphi(dim.nL, lag_dist, lag_par.at(0), lag_par.at(1));
     arma::vec Ft = init_Ft(p, trans_code);
 
     arma::mat Gt;
@@ -131,11 +149,7 @@ Rcpp::List mcs_poisson(
             update_Ft(Ft, ypad, Fphi, t, p);
         }
 
-        bool use_custom_val = false;
-        if (t > B)
-        {
-            use_custom_val = true;
-        }
+        bool use_custom_val = (t > B) ? true : false;
         double y_old = ypad.at(t);
         arma::mat Theta_old = theta_stored.slice(t + B - 1); // p x N
 
@@ -146,7 +160,7 @@ Rcpp::List mcs_poisson(
 
         smc_propagate_bootstrap(
             Theta_new, weights, wt, Gt,
-            y_new, y_old, Theta_old, Ft, model_code,
+            y_new, y_old, ypad, Theta_old, model, Ft, model_code,
             obs_par, lag_par, p, t, nlag, N, delta_discount,
             truncated, use_discount, use_custom_val);
 
@@ -203,7 +217,9 @@ void smc_propagate_bootstrap(
     arma::mat &Gt,
     const double &y_new,
     const double &y_old,        // (n+1) x 1, the observed response
+    const arma::vec &yall,
     const arma::mat &Theta_old, // p x N
+    const Model &model,
     const arma::vec &Ft,        // must be already updated if used
     const arma::uvec &model_code,
     const arma::vec &obs_par,
@@ -231,25 +247,28 @@ void smc_propagate_bootstrap(
     // // theta_stored: p,N,B
     if (use_discount)
     { // Use discount factor if W is not given
-        arma::rowvec psi = Theta_old.row(0);
-        double tmp = arma::var(psi);
-        if (tmp > EPS)
-        {
-            wt = tmp;
-        }
-        else
-        {
-            wt = 1.;
-        }
-        // Wsqrt = std::sqrt(Wt.at(t));
-        if (use_custom_val)
-        {
-            wt *= 1. / delta_discount - 1.;
-        }
-        else
-        {
-            wt *= 1. / 0.99 - 1.;
-        }
+        // arma::rowvec psi = Theta_old.row(0);
+        // double tmp = arma::var(psi);
+        // if (tmp > EPS)
+        // {
+        //     wt = tmp;
+        // }
+        // else
+        // {
+        //     wt = 1.;
+        // }
+        // // Wsqrt = std::sqrt(Wt.at(t));
+        // if (use_custom_val)
+        // {
+        //     wt *= 1. / delta_discount - 1.;
+        // }
+        // else
+        // {
+        //     wt *= 1. / 0.99 - 1.;
+        // }
+
+        wt = SMC::SequentialMonteCarlo::discount_W(
+            Theta_old, delta_discount, use_custom_val, 0.99);
     }
     double Wsqrt = std::sqrt(wt) + EPS;
     if (wt < EPS)
@@ -257,68 +276,73 @@ void smc_propagate_bootstrap(
         throw std::invalid_argument("smc_propagate_bootstrap: variance wt closed to 0.");
     }
 
-    for (unsigned int i = 0; i < N; i++)
-    {
-        arma::vec theta_old = Theta_old.col(i); // p x 1
-        // update_Gt(Gt, gain_code, trans_code, theta_old, y_old, rho);
-        arma::mat theta_new = update_at(
-            Gt, theta_old, y_old, lag_par, gain_code, nlag, truncated);
+    bool positive_noise = (t < Theta_old.n_rows) ? true : false;
+    Theta_new = SMC::SequentialMonteCarlo::propagate(
+        y_old, Wsqrt, Theta_old, model, positive_noise);
+    // for (unsigned int i = 0; i < N; i++)
+    // {
+    //     arma::vec theta_old = Theta_old.col(i); // p x 1
+    //     // update_Gt(Gt, gain_code, trans_code, theta_old, y_old, rho);
+    //     arma::mat theta_new = update_at(
+    //         Gt, theta_old, y_old, lag_par, gain_code, nlag, truncated);
 
-        double omega_new = R::rnorm(0., Wsqrt);
-        if (t < p)
-        {
-            theta_new.at(0) += std::abs(omega_new);
-        }
-        else
-        {
-            theta_new.at(0) += omega_new;
-        }
+    //     double omega_new = R::rnorm(0., Wsqrt);
+    //     if (t < p)
+    //     {
+    //         theta_new.at(0) += std::abs(omega_new);
+    //     }
+    //     else
+    //     {
+    //         theta_new.at(0) += omega_new;
+    //     }
 
         
-        Theta_new.col(i) = theta_new;
-    }
+    //     Theta_new.col(i) = theta_new;
+    // }
 
 
     /*
     ------ Step 2.2 Importance weights ------
     */
-    arma::vec lambda(N);
-    for (unsigned int i = 0; i < N; i++)
-    {
-        arma::vec theta = Theta_new.col(i); // p x 1
+    // arma::vec lambda(N);
+    // for (unsigned int i = 0; i < N; i++)
+    // {
+    //     arma::vec theta = Theta_new.col(i); // p x 1
 
-        // theta: p x N
-        // double lambda = 0.;
-        if (link_code == 1)
-        {
-            // Exponential link and identity gain
-            double tmp = arma::as_scalar(Ft.t() * theta);
-            lambda.at(i) = std::exp(mu0 + tmp);
-        }
-        else
-        {
-            double ft;
-            if (truncated)
-            {
-                arma::vec hpsi = psi2hpsi(theta, gain_code);
-                ft = arma::as_scalar(Ft.t() * hpsi);
-                // lambda.at(i) = mu0 + ft;
-            }
-            else
-            {
-                ft = theta.at(1);
-                // Koyck or Solow with identity link and different gain functions
-                // lambda.at(i) = mu0 + theta.at(1);
-            }
+    //     // theta: p x N
+    //     // double lambda = 0.;
+    //     if (link_code == 1)
+    //     {
+    //         // Exponential link and identity gain
+    //         double tmp = arma::as_scalar(Ft.t() * theta);
+    //         lambda.at(i) = std::exp(mu0 + tmp);
+    //     }
+    //     else
+    //     {
+    //         double ft;
+    //         if (truncated)
+    //         {
+    //             arma::vec hpsi = psi2hpsi(theta, gain_code);
+    //             ft = arma::as_scalar(Ft.t() * hpsi);
+    //             // lambda.at(i) = mu0 + ft;
+    //         }
+    //         else
+    //         {
+    //             ft = theta.at(1);
+    //             // Koyck or Solow with identity link and different gain functions
+    //             // lambda.at(i) = mu0 + theta.at(1);
+    //         }
 
-            bound_check(ft,"smc_propagate_bootstrap: ft",false,true);
-            lambda.at(i) = mu0 + std::abs(ft);
-        }
+    //         bound_check(ft,"smc_propagate_bootstrap: ft",false,true);
+    //         lambda.at(i) = mu0 + std::abs(ft);
+    //     }
 
 
-        double ws = loglike_obs(y_new, lambda.at(i), obs_code, delta_nb, false);
-        weights.at(i) = ws;
-    }
+    //     double ws = loglike_obs(y_new, lambda.at(i), obs_code, delta_nb, false);
+    //     weights.at(i) = ws;
+    // }
+
+    weights = SMC::SequentialMonteCarlo::imp_weights_likelihood(t + 1, Theta_new, yall, model);
 
 
     return;
@@ -344,11 +368,13 @@ void smc_resample(
     arma::uvec idx;
     if (resample)
     {
-        resample = true;
-        weights.for_each([&wsum](arma::vec::elem_type &val)
-                         { val /= wsum; });
-        meff = 1. / arma::dot(weights, weights);
-        idx = sample(N, N, weights, true, true);
+        // resample = true;
+        // weights.for_each([&wsum](arma::vec::elem_type &val)
+        //                  { val /= wsum; });
+        // meff = 1. / arma::dot(weights, weights);
+        // idx = sample(N, N, weights, true, true);
+
+        idx = SMC::SequentialMonteCarlo::get_resample_index(weights);
 
         for (unsigned int b = t + 1; b < t + B + 1; b++)
         {
@@ -417,6 +443,20 @@ Rcpp::List ffbs_poisson(
         nlag = nt;
         p = par2 + 1;
     }
+
+    Dim dim(nlag_in, p, truncated, nt);
+    std::string obs_dist = AVAIL::get_obs_name(obs_code);
+    std::string link_func = AVAIL::get_link_name(link_code);
+    std::string trans_func = AVAIL::get_trans_name(trans_code);
+    std::string lag_dist = AVAIL::get_lag_name(trans_code);
+    std::string gain_func = AVAIL::get_gain_name(gain_code);
+    std::string err_dist = "gaussian";
+    Rcpp::NumericVector err_param = {W_par[0], 0.};
+    Model model(
+        dim, obs_dist, link_func,
+        gain_func, lag_dist, err_dist,
+        obs_par_in, lag_par_in, err_param, trans_func);
+    
     arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p, trans_code);
     
@@ -477,7 +517,7 @@ Rcpp::List ffbs_poisson(
 
         smc_propagate_bootstrap(
             Theta_new, weights, wt, Gt,
-            y_new, y_old, Theta_old, Ft, model_code,
+            y_new, y_old, ypad, Theta_old, model, Ft, model_code,
             obs_par, lag_par, p, t, nlag, N, delta_discount,
             truncated, use_discount, use_custom_val);
 
@@ -585,6 +625,7 @@ void mcs_poisson(
     arma::vec &pmarg_y, // n x 1, marginal likelihood of y
     double &W,
     const arma::vec &ypad,        // (n+1) x 1, the observed response
+    const Model &model,
     const arma::uvec &model_code, // (obs_code,link_code,transfer_code,gain_code,err_code)
     const arma::vec &obs_par,
     const arma::vec &lag_par, // init/true values of (mu, sg2) or (rho, L)
@@ -616,6 +657,8 @@ void mcs_poisson(
         nlag = nt;
         p = (unsigned int) lag_par[1] + 1;
     }
+
+    
     arma::vec Fphi = get_Fphi(nlag, lag_par, trans_code);
     arma::vec Ft = init_Ft(p, trans_code);
 
@@ -660,7 +703,7 @@ void mcs_poisson(
 
         smc_propagate_bootstrap(
             Theta_new, weights, wt, Gt,
-            y_new, y_old, Theta_old, Ft, model_code,
+            y_new, y_old, ypad, Theta_old, model, Ft, model_code,
             obs_par, lag_par, p, t, nlag, N, delta_discount,
             truncated, use_discount, use_custom_val);
 

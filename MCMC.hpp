@@ -72,7 +72,7 @@ namespace MCMC
                 // Btmp = std::min(Btmp, 10.);
 
                 double wt_new = R::rnorm(wt_old, Btmp); // Sample from MH proposal
-                bound_check(wt_new, "Posterior::update_wt: wt_new");
+                // bound_check(wt_new, "Posterior::update_wt: wt_new");
                 /*
                 Metropolis-Hastings
                 */
