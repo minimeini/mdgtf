@@ -125,22 +125,23 @@ public:
         return hpsi;
     }
 
-    template <typename T>
     void psi2hpsi()
     {
-        T hpsi = psi; 
+        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        
+        _hpsi = _psi; 
 
-        switch (gain_list[name])
+        switch (gain_list[_name])
         {
         case AVAIL::Func::ramp:
         {
-            hpsi.elem(arma::find(hpsi < EPS)).fill(EPS);
+            _hpsi.elem(arma::find(_hpsi < EPS)).fill(EPS);
         }
         break;
         case AVAIL::Func::exponential:
         {
-            hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
-            hpsi = arma::exp(hpsi);
+            _hpsi.elem(arma::find(_hpsi > UPBND)).fill(UPBND);
+            _hpsi = arma::exp(_hpsi);
         }
         break;
         case AVAIL::Func::identity:
@@ -150,9 +151,9 @@ public:
         break;
         case AVAIL::Func::softplus:
         {
-            hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
-            T hpsi_tmp = arma::exp(hpsi);
-            hpsi = arma::log(1. + hpsi_tmp);
+            _hpsi.elem(arma::find(_hpsi > UPBND)).fill(UPBND);
+            arma::vec hpsi_tmp = arma::exp(_hpsi);
+            _hpsi = arma::log(1. + hpsi_tmp);
         }
         break;
         default:
@@ -162,7 +163,7 @@ public:
         break;
         }
 
-        bound_check<T>(hpsi, "psi2hpsi");
+        bound_check<arma::vec>(_hpsi, "psi2hpsi");
 
         return;
     }

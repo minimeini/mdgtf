@@ -67,6 +67,238 @@ public:
         return;
     }
 
+
+    Model(const Rcpp::List &settings)  : dim(_dim), dobs(_dobs), transfer(_transfer), flink(_flink), derr(_derr)
+    {
+        init(settings);
+    }
+
+    void init(const Rcpp::List &settings)
+    {
+        Rcpp::List model_settings = settings["model"];
+        std::string obs_dist, link_func, trans_func, gain_func, lag_dist, err_dist;
+        init_model(
+            obs_dist, link_func, trans_func,
+            gain_func, lag_dist, err_dist,
+            model_settings);
+
+        Rcpp::List dim_settings = settings["dim"];
+        unsigned int nlag, ntime;
+        bool truncated;
+        init_dim(nlag, ntime, truncated, dim_settings);
+
+        Rcpp::List param_settings = settings["param"];
+        Rcpp::NumericVector lag_param, obs_param, err_param;
+        init_param(obs_param, lag_param, err_param, param_settings);
+
+        _dim.init(ntime, nlag, lag_param[1]);
+        _dobs.init(obs_dist, obs_param[0], obs_param[1]);
+        _flink.init(link_func, obs_param[0]);
+        _transfer.init(_dim, trans_func, gain_func, lag_dist, lag_param);
+        _derr.init("gaussian", err_param[0], err_param[1]);
+
+        return;
+    }
+
+    void init_model(
+        std::string &obs_dist,
+        std::string &link_func,
+        std::string &trans_func,
+        std::string &gain_func,
+        std::string &lag_dist,
+        std::string &err_dist,
+        const Rcpp::List &model_settings)
+    {
+        Rcpp::List model = model_settings;
+        if (model.containsElementNamed("obs_dist"))
+        {
+            obs_dist = tolower(Rcpp::as<std::string>(model["obs_dist"]));
+        }
+        else
+        {
+            obs_dist = "nbinom";
+        }
+
+        if (model.containsElementNamed("link_func"))
+        {
+            link_func = tolower(Rcpp::as<std::string>(model["link_func"]));
+        }
+        else
+        {
+            link_func = "identity";
+        }
+
+        if (model.containsElementNamed("trans_func"))
+        {
+            trans_func = tolower(Rcpp::as<std::string>(model["trans_func"]));
+        }
+        else
+        {
+            trans_func = "sliding";
+        }
+
+        if (model.containsElementNamed("gain_func"))
+        {
+            gain_func = tolower(Rcpp::as<std::string>(model["gain_func"]));
+        }
+        else
+        {
+            gain_func = "softplus";
+        }
+
+        if (model.containsElementNamed("lag_dist"))
+        {
+            lag_dist = tolower(Rcpp::as<std::string>(model["lag_dist"]));
+        }
+        else
+        {
+            lag_dist = "lognorm";
+        }
+
+        if (model.containsElementNamed("err_dist"))
+        {
+            err_dist = tolower(Rcpp::as<std::string>(model["err_dist"]));
+        }
+        else
+        {
+            err_dist = "gaussian";
+        }
+    }
+
+    void init_dim(
+        unsigned int &nlag,
+        unsigned int &ntime,
+        bool &truncated,
+        const Rcpp::List &dim_settings)
+    {
+        Rcpp::List dm = dim_settings;
+
+        if (dm.containsElementNamed("nlag"))
+        {
+            nlag = Rcpp::as<unsigned int>(dm["nlag"]);
+        }
+        else
+        {
+            nlag = 10;
+        }
+
+        if (dm.containsElementNamed("ntime"))
+        {
+            ntime = Rcpp::as<unsigned int>(dm["ntime"]);
+        }
+        else
+        {
+            ntime = 200;
+        }
+
+        if (nlag >= ntime)
+        {
+            nlag = ntime;
+            truncated = false;
+        }
+        else if (dm.containsElementNamed("truncated"))
+        {
+            truncated = Rcpp::as<bool>(dm["truncated"]);
+        }
+        else
+        {
+            truncated = true;
+        }
+        return;
+    }
+
+    void init_param(
+        Rcpp::NumericVector &obs,
+        Rcpp::NumericVector &lag,
+        Rcpp::NumericVector &err,
+        const Rcpp::List &param_settings)
+    {
+        Rcpp::List param = param_settings;
+        if (param.containsElementNamed("obs"))
+        {
+            obs = Rcpp::as<Rcpp::NumericVector>(param["obs"]);
+        }
+        else
+        {
+            obs = Rcpp::NumericVector::create(0., 30.);
+        }
+
+        if (param.containsElementNamed("lag"))
+        {
+            lag = Rcpp::as<Rcpp::NumericVector>(param["lag"]);
+        }
+        else
+        {
+            lag = Rcpp::NumericVector::create(1.4, 0.3);
+        }
+
+        if (param.containsElementNamed("err"))
+        {
+            err = Rcpp::as<Rcpp::NumericVector>(param["err"]);
+        }
+        else
+        {
+            err = Rcpp::NumericVector::create(0.01, 0.);
+        }
+    }
+
+
+    Rcpp::List info()
+    {
+        Rcpp::List model;
+        model["obs_dist"] = _dobs.name;
+        model["link_func"] = _flink.name;
+        model["trans_func"] = _transfer.name;
+        model["gain_func"] = _transfer.fgain.name;
+        model["lag_dist"] = _transfer.dlag.name;
+        model["err_dist"] = _derr.name;
+
+        Rcpp::List param;
+        param["obs"] = Rcpp::NumericVector::create(_dobs.par1, _dobs.par2);
+        param["lag"] = Rcpp::NumericVector::create(_transfer.dlag.par1, _transfer.dlag.par2);
+        param["err"] = Rcpp::NumericVector::create(_derr.par1, _derr.par2);
+
+        Rcpp::List dm;
+        dm["nlag"] = _dim.nL;
+        dm["ntime"] = _dim.nT;
+        dm["truncated"] = _dim.truncated;
+
+        Rcpp::List out;
+        out["model"] = model;
+        out["param"] = param;
+        out["dim"] = dm;
+
+        return out;
+    }
+
+    static Rcpp::List default_settings()
+    {
+        Rcpp::List model_settings;
+        model_settings["obs_dist"] = "nbinom";
+        model_settings["link_func"] = "identity";
+        model_settings["trans_func"] = "sliding";
+        model_settings["gain_func"] = "softplus";
+        model_settings["lag_dist"] = "lognorm";
+        model_settings["err_dist"] = "gaussian";
+
+        Rcpp::List param_settings;
+        param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
+        param_settings["lag"] = Rcpp::NumericVector::create(1.4, 0.3);
+        param_settings["err"] = Rcpp::NumericVector::create(0.01, 0.);
+
+        Rcpp::List dim_settings;
+        dim_settings["nlag"] = 10;
+        dim_settings["ntime"] = 200;
+        dim_settings["truncated"] = true;
+
+        Rcpp::List settings;
+        settings["model"] = model_settings;
+        settings["param"] = param_settings;
+        settings["dim"] = dim_settings;
+
+        return settings;
+    }
+
     
 
 
@@ -182,11 +414,13 @@ public:
 
     }
 
-    arma::vec wt2lambda(const arma::vec &y, const arma::vec &wt) // checked. ok.
+    arma::vec wt2lambda(
+        const arma::vec &y, // (nT + 1) x 1
+        const arma::vec &wt) // (nT + 1) x 1, checked. ok.
     {
         arma::vec psi = arma::cumsum(wt);
         _transfer.fgain.update_psi(psi);
-        _transfer.fgain.psi2hpsi<arma::vec>();
+        _transfer.fgain.psi2hpsi();
         
         arma::vec ft(psi.n_elem, arma::fill::zeros);
         arma::vec lambda = ft;
@@ -195,6 +429,7 @@ public:
             ft.at(t) = _transfer.func_ft(t, y, ft);
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), _flink.name, _dobs.par1);
         }
+
 
         return lambda;
     }

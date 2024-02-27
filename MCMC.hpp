@@ -16,20 +16,16 @@ namespace MCMC
     class Posterior
     {
     public:
-        static void update_wt( // Checked. Consist with `mcmc_disturbance_poisson.cpp`.
+        static void update_wt( // Checked. OK.
             arma::vec &wt, // (nT + 1) x 1
             arma::vec &wt_accept,
-            arma::vec &Bs,
-            arma::vec &logp,
+            ApproxDisturbance &approx_dlm, 
             const arma::vec &y,         // (nT + 1) x 1
             Model &model,
             const Dist &w0_prior,
             const double &mh_sd = 0.1)
         {
-            ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
-            approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
             arma::vec ft(model.dim.nT + 1, arma::fill::zeros);
-
             double prior_sd = std::sqrt(w0_prior.par2);
 
             for (unsigned int t = 1; t <= model.dim.nT; t++)
@@ -51,23 +47,23 @@ namespace MCMC
                 /*
                 Metropolis-Hastings
                 */
-                // approx_dlm.update_by_wt(y, wt);
-                // arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1); // nT x 1, f0, Fn and psi is updated
-                // arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.); // nT x 1
-                // arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
-                //     lambda, model.dobs, model.flink.name); // nT x 1
+                approx_dlm.update_by_wt(y, wt);
+                arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1); // nT x 1, f0, Fn and psi is updated
+                arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.); // nT x 1
+                arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
+                    lambda, model.dobs, model.flink.name); // nT x 1
 
-                // arma::mat Fn = approx_dlm.get_Fn(); // nT x nT
-                // arma::vec Fnt = Fn.col(t - 1);
-                // arma::vec Fnt2 = Fnt % Fnt;
+                arma::mat Fn = approx_dlm.get_Fn(); // nT x nT
+                arma::vec Fnt = Fn.col(t - 1);
+                arma::vec Fnt2 = Fnt % Fnt;
 
-                // arma::vec tmp = Fnt2 / Vt_hat;
-                // double mh_prec = arma::accu(tmp);
-                // // mh_prec = std::abs(mh_prec) + 1. / w0_prior.par2 + EPS;
+                arma::vec tmp = Fnt2 / Vt_hat;
+                double mh_prec = arma::accu(tmp);
+                // mh_prec = std::abs(mh_prec) + 1. / w0_prior.par2 + EPS;
 
-                // Bs.at(t) = 1. / mh_prec;
-                // double Btmp = std::sqrt(Bs.at(t));
-                double Btmp = prior_sd;
+                double Bs = 1. / mh_prec;
+                double Btmp = std::sqrt(Bs);
+                // double Btmp = prior_sd;
                 Btmp *= mh_sd;
                 // Btmp = std::min(Btmp, 10.);
 
@@ -107,11 +103,10 @@ namespace MCMC
                     wt.at(t) = wt_old;
                 }
 
-                logp.at(t) = logps;
             }
         } // func update_wt
 
-        static double update_W(
+        static double update_W( // Checked. OK.
             double &W_accept,
             const double &W_old,
             const arma::vec &wt,
@@ -120,6 +115,7 @@ namespace MCMC
         {
             double W = W_old;
             double res = arma::accu(arma::pow(wt.tail(wt.n_elem - 2), 2.));
+
             // double bw_prior = prior_params.at(1); // eta_prior_val.at(1, 0)
             std::map<std::string, AVAIL::Dist> W_prior_list = AVAIL::W_prior_list;
 
@@ -218,47 +214,22 @@ namespace MCMC
     class Disturbance
     {
     public:
-        Disturbance(){init_default();}
-        Disturbance(const Rcpp::List &opts, const Dim &dim){ init(opts, dim); }
-
-        void init_default()
+        Disturbance()
         {
-            double mh_sd = 0.1;
-            unsigned int nburnin = 100;
-            unsigned int nthin = 1;
-            unsigned int nsample = 100;
-            ntotal = nburnin + nthin * nsample + 1;
-
-            W_prior.init("invgamma", 0.01, 0.01);
-
-            bool infer_wt = true;
-            bool infer_W = false;
-            bool infer_mu0 = false;
-
             dim.init_default();
-            w0_prior.init("gaussian", 0., 0.1);
-            wt_accept.set_size(dim.nT + 1);
-            wt_accept.zeros();
-            wt = arma::randn(dim.nT + 1) * 0.01;
-            wt.at(0) = 0.;
-            for (unsigned int t = 1; t <= dim.nP; t++)
-            {
-                wt.at(t) = std::abs(wt.at(t));
-            }
-            bound_check(wt, "Disturbance::init_default");
+            y.set_size(dim.nT + 1);
+            y.zeros();
+        }
 
-
-            wt_stored.set_size(dim.nT + 1, nsample);
-
-            W = 0.01;
-            W_stored.set_size(nsample);
-
-            mu0 = 0.;
-            mu0_stored.set_size(nsample);
+        Disturbance(const Model &model, const arma::vec &y_in)
+        {
+            dim = model.dim;
+            y = y_in;
 
         }
 
-        void init(const Rcpp::List &mcmc_settings, const Dim &dim_in)
+
+        void init(const Rcpp::List &mcmc_settings)
         {
             Rcpp::List opts = mcmc_settings;
 
@@ -290,184 +261,121 @@ namespace MCMC
 
             ntotal = nburnin + nthin * nsample + 1;
 
-            infer_wt = true;
-            wt = arma::randn(dim.nT + 1) * 0.01;
-            wt.at(0) = 0.;
-            for (unsigned int t = 1; t <= dim.nP; t++)
-            {
-                wt.at(t) = std::abs(wt.at(t));
-            }
-
-            wt_stored.set_size(dim.nT + 1, nsample);
-
-            wt_accept.set_size(dim.nT + 1);
-            wt_accept.zeros();
-
-            w0_prior.update_par1(0.01);
-            w0_prior.update_par2(0.01);
-
-            bound_check(wt, "Disturbance::init");
-
-            if (opts.containsElementNamed("infer_wt"))
-            {
-                infer_wt = Rcpp::as<bool>(opts["infer_wt"]);
-            }
-
-            if (opts.containsElementNamed("wt"))
-            {
-                Rcpp::List wt_opts = Rcpp::as<Rcpp::List>(opts["wt"]);
-                init_wt(wt_opts);
-            }
-
-
             W = 0.01;
-            infer_W = false;
+            infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
+            W_stored.set_size(nsample);
             if (opts.containsElementNamed("W"))
             {
                 Rcpp::List Wopts = Rcpp::as<Rcpp::List>(opts["W"]);
-                init_W(Wopts);
+                init_param(infer_W, W, W_prior, Wopts);
             }
-            W_stored.set_size(nsample);
-
-            dim = dim_in;
-
 
             mu0 = 0.;
             mu0_stored.set_size(nsample);
             infer_mu0 = false;
-            if (opts.containsElementNamed("infer_mu0"))
+            if (opts.containsElementNamed("mu0"))
             {
-                infer_mu0 = Rcpp::as<bool>(opts["infer_mu0"]);
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
+                init_param(infer_mu0, mu0, mu0_prior, param_opts);
             }
 
+            wt = arma::randn(dim.nT + 1) * 0.01;
+            wt.at(0) = 0.;
+            wt.subvec(1, dim.nP) = arma::abs(wt.subvec(1, dim.nP));
+            bound_check(wt, "Disturbance::init");
+
+            wt_stored.set_size(dim.nT + 1, nsample);
+            wt_accept.set_size(dim.nT + 1);
+            wt_accept.zeros();
+
+            w0_prior.init("gaussian", 0., W);
+
+
+            double nw = W_prior.par1;
+            double nSw = W_prior.par1 * W_prior.par2;
+            double nw_new = nw + (double)wt.n_elem - 2.;
+            W_prior.init(W_prior.name, nw_new, nSw);
 
             return;
         }
 
 
-        void init_W(const Rcpp::List &W_settings)
+        static void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List &opts)
         {
-            Rcpp::List Wopts = W_settings;
-            if (Wopts.containsElementNamed("prior"))
+            Rcpp::List param_opts = opts;
+
+            if (param_opts.containsElementNamed("infer"))
             {
-                Rcpp::NumericVector para = Rcpp::as<Rcpp::NumericVector>(Wopts["prior"]);
-                W_prior.update_par1(para[0]);
-                W_prior.update_par2(para[1]);
-            }
-            else
-            {
-                W_prior.update_par1(0.01);
-                W_prior.update_par2(0.01);
+                infer = Rcpp::as<bool>(param_opts["infer"]);
             }
 
-            if (Wopts.containsElementNamed("init"))
+            if (param_opts.containsElementNamed("init"))
             {
-                W = Rcpp::as<double>(Wopts["init"]);
-            }
-            else
-            {
-                W = 0.01;
+                init = Rcpp::as<double>(param_opts["init"]);
             }
 
-            if (Wopts.containsElementNamed("infer"))
+            std::string prior_name = "invgamma";
+            if (param_opts.containsElementNamed("prior_name"))
             {
-                infer_W = Rcpp::as<bool>(Wopts["infer"]);
-            }
-            else
-            {
-                infer_W = false;
+                prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
             }
 
-            if (Wopts.containsElementNamed("type"))
+
+            Rcpp::NumericVector param = {0.01, 0.01};
+            if (param_opts.containsElementNamed("prior_param"))
             {
-                std::string prior_name = Rcpp::as<std::string>(Wopts["type"]);
-                W_prior.init(prior_name, W_prior.par1, W_prior.par2);
+                param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
             }
-            else
-            {
-                W_prior.init("invgamma", W_prior.par1, W_prior.par2);
-            }
+
+            prior.init(prior_name, param[0], param[1]);
         }
 
-        void init_wt(const Rcpp::List &wt_settings)
-        {
-            wt = arma::randn(dim.nT + 1) * 0.01;
-            for (unsigned int t = 1; t <= dim.nP; t++)
-            {
-                wt.at(t) = std::abs(wt.at(t));
-            }
-            wt_stored.set_size(dim.nT + 1, nsample);
-            wt_accept.set_size(dim.nT + 1);
-            wt_accept.zeros();
-
-            Rcpp::List opts = wt_settings;
-            w0_prior.init("gaussian", 0., 0.01);
-            if (opts.containsElementNamed("prior"))
-            {
-                Rcpp::NumericVector para = Rcpp::as<Rcpp::NumericVector>(opts["prior"]);
-                w0_prior.update_par1(para[0]);
-                w0_prior.update_par2(para[1]);
-            }
-
-            wt.at(0) = 0.;
-            if (opts.containsElementNamed("init"))
-            {
-                wt.at(0) = Rcpp::as<double>(opts["init"]);
-            }
-
-            infer_wt = true;
-            if (opts.containsElementNamed("infer"))
-            {
-                infer_wt = Rcpp::as<bool>(opts["infer"]);
-            }
-
-
-            bound_check(wt, "Disturbance::init_wt");
-        }
 
         static Rcpp::List default_settings()
         {    
             Rcpp::List Wopts;
-            Wopts["infer"] = false;
+            Wopts["infer"] = true;
             Wopts["init"] = 0.01;
-            Wopts["prior"] = Rcpp::NumericVector::create(0.01, 0.01);
-            Wopts["type"] = "invgamma";
+            Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
+            Wopts["prior_name"] = "invgamma";
 
-            Rcpp::List wt_opts;
-            wt_opts["infer"] = true;
-            wt_opts["init"] = 0.;
-            wt_opts["prior"] = Rcpp::NumericVector::create(0., 1.);
+            Rcpp::List mu0_opts;
+            mu0_opts["infer"] = false;
+            mu0_opts["init"] = 0.;
 
             Rcpp::List opts;
             opts["W"] = Wopts;
-            opts["wt"] = wt_opts;
+            opts["mu0"] = mu0_opts;
             
             opts["mh_sd"] = 0.1;
             opts["nburnin"] = 100;
             opts["nthin"] = 1;
             opts["nsample"] = 100;
-            opts["infer_wt"] = true;
-            opts["infer_W"] = false;
 
             return opts;
         }
 
-        void save(bool &saveiter, unsigned int &idx_run, const unsigned int &b)
+        Rcpp::List get_output()
         {
-            saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
-            saveiter = saveiter || b == (ntotal - 1);
+            Rcpp::List output;
+            output["wt"] = Rcpp::wrap(wt_stored); // (nT + 1) x nsample
 
-            if (b == (ntotal - 1))
-            {
-                idx_run = nsample - 1;
-            }
-            else
-            {
-                idx_run = (b - nburnin - 1) / nthin;
-            }
+            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            arma::vec qprob = {0.025, 0.5, 0.975};
+            arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1); // (nT + 1) x 3
+            output["psi"] = Rcpp::wrap(psi_quantile);
+            output["wt_accept"] = Rcpp::wrap(wt_accept / ntotal);
 
-            return;
+            output["infer_W"] = infer_W;
+            output["W"] = Rcpp::wrap(W_stored);
+
+            output["infer_mu0"] = infer_mu0;
+            output["mu0"] = Rcpp::wrap(mu0_stored);
+
+            output["model"] = model_info;
+
+            return output;
         }
 
         void infer(
@@ -475,30 +383,31 @@ namespace MCMC
             const arma::vec &y // (nT + 1) x 1
             )
         {
-            LBA::LinearBayes linear_bayes(model, y);
-            linear_bayes.filter();
-            linear_bayes.smoother();
-            arma::mat psi_tmp = LBA::get_psi(linear_bayes.atilde, linear_bayes.Rtilde);
-            arma::vec wt_init = arma::diff(psi_tmp.col(1));
-            wt.tail(wt_init.n_elem) = wt_init;
+            model_info = model.info();
 
-            mu0 = model.dobs.par1;
-            // W = 0.01;
-            w0_prior.update_par2(W);
+            // LBA::LinearBayes linear_bayes(model, y);
+            // linear_bayes.filter();
+            // linear_bayes.smoother();
+            // arma::mat psi_tmp = LBA::get_psi(linear_bayes.atilde, linear_bayes.Rtilde);
+            // arma::vec wt_init = arma::diff(psi_tmp.col(1));
+
+            // wt.tail(wt_init.n_elem) = wt_init;
+
+            ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
+            approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 R_CheckUserInterrupt();
 
-                arma::vec Bs(dim.nT + 1, arma::fill::zeros);
-                arma::vec logp(dim.nT + 1, arma::fill::zeros);
-                Posterior::update_wt(wt, wt_accept, Bs, logp, y, model, w0_prior, mh_sd);
+                Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, mh_sd);
 
                 if (infer_W)
                 {
                     double W_old = W;
                     W = Posterior::update_W(W_accept, W_old, wt, W_prior, mh_sd);
                     w0_prior.update_par2(W);
+                    model.derr.update_par1(W);
                 }
 
                 if (infer_mu0)
@@ -509,17 +418,24 @@ namespace MCMC
                     model.dobs.update_par1(mu0);
                 }
 
-
-                bool saveiter = false;
-                unsigned int idx_run = 0;
-                save(saveiter, idx_run, b);
-                
-                if (saveiter)
+                bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
+                if (saveiter || b == (ntotal - 1))
                 {
+                    unsigned int idx_run;
+                    if (saveiter)
+                    {
+                        idx_run = (b - nburnin - 1) / nthin;
+                    }
+                    else
+                    {
+                        idx_run = nsample - 1;
+                    }
+
                     wt_stored.col(idx_run) = wt;
                     W_stored.at(idx_run) = W;
                     mu0_stored.at(idx_run) = mu0;
                 }
+
 
                 Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
             } // end a single iteration
@@ -528,25 +444,7 @@ namespace MCMC
             return;
         }
 
-        Rcpp::List get_output()
-        {
-            Rcpp::List output;
-            output["wt_stored"] = Rcpp::wrap(wt_stored); // (nT + 1) x nsample
-
-            arma::mat psi_stored = arma::cumsum(wt_stored, 1); // (nT + 1) x nsample
-            arma::vec qprob = {0.025, 0.5, 0.975};
-            arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1); // (nT + 1) x 3
-            output["psi"] = Rcpp::wrap(psi_quantile);
-            output["wt_accept"] = Rcpp::wrap(wt_accept / ntotal);
-
-            output["infer_W"] = infer_W;
-            output["W_stored"] = Rcpp::wrap(W_stored);
-
-            output["infer_mu0"] = infer_mu0;
-            output["mu0_stored"] = Rcpp::wrap(mu0_stored);
-
-            return output;
-        }
+        
 
     private:
         double mh_sd = 0.1;
@@ -555,15 +453,17 @@ namespace MCMC
         unsigned int nsample = 100;
         unsigned int ntotal = 200;
 
+        Rcpp::List model_info;
+
         Dim dim;
+        arma::vec y;
 
         Dist w0_prior;
-        bool infer_wt = true;
         arma::vec wt;
-        arma::vec wt_accept;
-        arma::mat wt_stored;
+        arma::vec wt_accept; // nsample x 1
+        arma::mat wt_stored; // (nT + 1) x nsample
 
-        
+        Dist mu0_prior;
         bool infer_mu0 = false;
         double mu0 = 0.;
         arma::vec mu0_stored;

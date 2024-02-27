@@ -201,53 +201,11 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     return opts;
 }
 
-Rcpp::List get_default_model_settings()
-{
-    Rcpp::List model_settings;
-    model_settings["obs_dist"] = "nbinom";
-    model_settings["link_func"] = "identity";
-    model_settings["trans_func"] = "sliding";
-    model_settings["gain_func"] = "softplus";
-    model_settings["lag_dist"] = "lognorm";
-    model_settings["err_dist"] = "gaussian";
-
-    return model_settings;
-}
-
-Rcpp::List get_default_dimensions()
-{
-    Rcpp::List dim_settings;
-    dim_settings["nlag"] = 10;
-    dim_settings["ntime"] = 200;
-    dim_settings["truncated"] = true;
-
-    return dim_settings;
-}
-
-Rcpp::List get_default_params()
-{
-    Rcpp::List param_settings;
-    param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
-    param_settings["lag"] = Rcpp::NumericVector::create(1.4, 0.3);
-    param_settings["err"] = Rcpp::NumericVector::create(0.01, 0.);
-
-    return param_settings;
-}
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::List dgtf_default_model()
 {
-    Rcpp::List settings;
-    Rcpp::List model = get_default_model_settings();
-    Rcpp::List dim = get_default_dimensions();
-    Rcpp::List param = get_default_params();
-
-    settings["model"] = model;
-    settings["dim"] = dim;
-    settings["param"] = param;
-
-    return settings;
+    return Model::default_settings();
 }
 
 //' @export
@@ -437,7 +395,8 @@ Rcpp::List dgtf_infer(
     } // case particle learning
     case AVAIL::Algo::MCMC:
     {
-        MCMC::Disturbance mcmc(method_settings, model.dim);
+        MCMC::Disturbance mcmc(model, y);
+        mcmc.init(method_settings);
         mcmc.infer(model, y);
         output = mcmc.get_output();
         break;

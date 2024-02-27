@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <RcppArmadillo.h>
 #include "model_utils.h"
+#include "MCMC.hpp"
 
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
@@ -256,6 +257,7 @@ inline arma::vec get_Vt_hat(
 }
 
 inline double proposal_mh_var(
+	const ApproxDisturbance &approx_dlm,
 	const arma::vec &y, // n x 1
 	const arma::vec &Vt_hat,
 	const arma::mat &Fn_hat, // n x n
@@ -308,6 +310,7 @@ inline double loglike_obs(
 		lambda = lambda_core;
 	}
 
+
 	// double logpost = R::dnorm4(wt.at(sidx), aw, Rw_sqrt, true);
 	double logpost = 0.;
 	for (unsigned int t = sidx; t < n; t++)
@@ -331,6 +334,8 @@ inline void update_wt(
 	arma::vec &wt_accept,
 	arma::vec &Bs,
 	arma::vec &logp,
+	ApproxDisturbance &approx_dlm,
+	Model &model,
 	const arma::vec &y,			// nobs x 1
 	const arma::vec &Fphi_pad,	// (nobs + 1)
 	const arma::vec &lag_par,	// (L_order, rho) or (mu, sg2)
@@ -348,28 +353,74 @@ inline void update_wt(
 	double mu_wt = prior_par[0];
 	double sg_wt = std::sqrt(prior_par[1]);
 
+
 	arma::vec seeds = arma::regspace(1, 1, nobs);
 	seeds = seeds + 100;
+
+	arma::vec ypad(nobs + 1, arma::fill::zeros);
+	ypad.tail(y.n_elem) = y;
 
 	
 	for (unsigned int s = 0; s < nobs; s++)
 	{
+		R_CheckUserInterrupt();
 
-		arma::mat Fn_hat(nobs,nobs,arma::fill::zeros);
-		arma::vec Vt_hat = get_Vt_hat(
-			Fn_hat, y, wt, Fphi_pad,
-			gain_code, link_code, obs_code, obs_par);
+		// arma::mat Fn_hat(nobs,nobs,arma::fill::zeros);
+		// arma::vec Vt_hat = get_Vt_hat(
+		// 	Fn_hat, y, wt, Fphi_pad,
+		// 	gain_code, link_code, obs_code, obs_par);
+		
 
 		// logp_old
 		double wt_old = wt.at(s);
+		arma::vec wt_pad(nobs + 1, arma::fill::zeros);
+		wt_pad.tail(wt.n_elem) = wt;
 
-		double logp_old = loglike_obs(
-			y, wt, s,
-			gain_code, trans_code, link_code, obs_code, 
-			obs_par, lag_par, nlag, truncated);
+		// {
+		// 	double logp_old = loglike_obs(
+		// 		y, wt, s,
+		// 		gain_code, trans_code, link_code, obs_code,
+		// 		obs_par, lag_par, nlag, truncated);
+		// 	logp_old += R::dnorm4(wt_old, mu_wt, sg_wt, true);
+
+		// }
+
+		arma::vec lam = model.wt2lambda(ypad, wt_pad); // Checked. OK.
+		double logp_old = 0.;
+		for (unsigned int i = (s + 1); i <= model.dim.nT; i++)
+		{
+			logp_old += ObsDist::loglike(ypad.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+		} // Checked. OK.
+
 		logp_old += R::dnorm4(wt_old, mu_wt, sg_wt, true);
 
-		Bs.at(s) = proposal_mh_var(y, Vt_hat, Fn_hat, s);
+
+		
+		approx_dlm.update_by_wt(y, wt_pad);
+
+		arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1);
+		arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.);
+		arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
+			lambda, model.dobs, model.flink.name
+		);
+
+		arma::mat Fn = approx_dlm.get_Fn(); // nT x nT
+		arma::vec Fnt = Fn.col(s);
+		arma::vec Fnt2 = Fnt % Fnt;
+
+		arma::vec tmp = Fnt2 / Vt_hat;
+		double mh_prec = arma::accu(tmp);
+		// mh_prec = std::abs(mh_prec) + 1. / w0_prior.par2 + EPS;
+
+		Bs.at(s) = 1. / mh_prec;
+
+		// arma::vec Fnt = Fn_hat.col(s);
+		// arma::vec Fnt2 = Fnt % Fnt;
+		// arma::vec tmp = Fnt2 / Vt_hat;
+		// double mh_prec = arma::accu(tmp);
+		// Bs.at(s) = 1. / mh_prec;
+
+		// Bs.at(s) = proposal_mh_var(approx_dlm, y, Vt_hat, Fn_hat, s);
 
 		double Btmp = std::sqrt(Bs.at(s));
 		Btmp *= mh_sd;
@@ -377,12 +428,22 @@ inline void update_wt(
 
 		double wt_new = R::rnorm(wt_old, Btmp);
 
-		
 		wt.at(s) = wt_new;
-		double logp_new = loglike_obs(
-			y, wt, s,
-			gain_code, trans_code, link_code, obs_code,
-			obs_par, lag_par, nlag, truncated);			   // likelihood
+		wt_pad.tail(wt.n_elem) = wt;
+
+		// double logp_new = loglike_obs(
+		// 	y, wt, s,
+		// 	gain_code, trans_code, link_code, obs_code,
+		// 	obs_par, lag_par, nlag, truncated);			   // likelihood
+		// logp_new += R::dnorm4(wt_new, mu_wt, sg_wt, true); // prior
+
+		lam = model.wt2lambda(ypad, wt_pad); // Checked. OK.
+		double logp_new = 0.;
+		for (unsigned int i = (s + 1); i <= model.dim.nT; i++)
+		{
+			logp_new += ObsDist::loglike(ypad.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+		} // Checked. OK.
+
 		logp_new += R::dnorm4(wt_new, mu_wt, sg_wt, true); // prior
 
 		double logratio = logp_new - logp_old;
@@ -516,252 +577,288 @@ inline void update_mu0(
 
 
 
-// /*
-// MCMC disturbance sampler for different transfer kernels, link functions, and reproduction number functions.
+/*
+MCMC disturbance sampler for different transfer kernels, link functions, and reproduction number functions.
 
-// Unknown Parameters
-// 	- local parameters: psi[1:n]
-// 	- global parameters `eta`: W, mu0, rho, M,th0, psi0
-// */
-// //' @export
-// // [[Rcpp::export]]
-// Rcpp::List mcmc_disturbance_pois(
-// 	const arma::vec &y, // n x 1, the observed response
-// 	const arma::uvec &model_code,
-// 	const Rcpp::IntegerVector &eta_select = Rcpp::IntegerVector::create(1, 0, 0),		 // W, mu0, rho
-// 	const Rcpp::NumericVector &W_par_in = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (Winit/Wtrue,WpriorType,par1,par2)
-// 	const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6),
-// 	const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0.,30.),
-// 	const unsigned int &nlag_in = 20,
-// 	const Rcpp::NumericVector &mh_var = Rcpp::NumericVector::create(1., 1.),			 // mh and discount factor for wt
-// 	const unsigned int &nburnin = 0,
-// 	const unsigned int &nthin = 1,
-// 	const unsigned int &nsample = 1,
-// 	const bool &truncated = true)
-// { // n x 1
+Unknown Parameters
+	- local parameters: psi[1:n]
+	- global parameters `eta`: W, mu0, rho, M,th0, psi0
+*/
+//' @export
+// [[Rcpp::export]]
+Rcpp::List mcmc_disturbance_pois(
+	const arma::vec &y, // n x 1, the observed response
+	const arma::uvec &model_code,
+	const Rcpp::IntegerVector &eta_select = Rcpp::IntegerVector::create(1, 0, 0),		 // W, mu0, rho
+	const Rcpp::NumericVector &W_par_in = Rcpp::NumericVector::create(0.01, 2, 0.01, 0.01), // (Winit/Wtrue,WpriorType,par1,par2)
+	const Rcpp::NumericVector &lag_par_in = Rcpp::NumericVector::create(0.5, 6),
+	const Rcpp::NumericVector &obs_par_in = Rcpp::NumericVector::create(0.,30.),
+	const unsigned int &nlag_in = 20,
+	const Rcpp::NumericVector &mh_var = Rcpp::NumericVector::create(1., 1.),			 // mh and discount factor for wt
+	const unsigned int &nburnin = 0,
+	const unsigned int &nthin = 1,
+	const unsigned int &nsample = 1,
+	const bool &truncated = true)
+{ // n x 1
 
-// 	unsigned int obs_code, link_code, trans_code, gain_code, err_code;
-// 	get_model_code(obs_code, link_code, trans_code, gain_code, err_code, model_code);
+	unsigned int obs_code, link_code, trans_code, gain_code, err_code;
+	get_model_code(obs_code, link_code, trans_code, gain_code, err_code, model_code);
 
-// 	arma::vec W_par(W_par_in.begin(), W_par_in.length());
-// 	arma::vec lag_par(lag_par_in.begin(), lag_par_in.length());
-// 	arma::vec obs_par(obs_par_in.begin(), obs_par_in.length());
+	arma::vec W_par(W_par_in.begin(), W_par_in.length());
+	arma::vec lag_par(lag_par_in.begin(), lag_par_in.length());
+	arma::vec obs_par(obs_par_in.begin(), obs_par_in.length());
 
-// 	const unsigned int n = y.n_elem;
-// 	const unsigned int ntotal = nburnin + nthin * nsample + 1;
+	const unsigned int n = y.n_elem;
+	const unsigned int ntotal = nburnin + nthin * nsample + 1;
 
-// 	const bool W_selected = std::abs(eta_select[0] - 1.) < EPS8;
-// 	const bool mu0_selected = std::abs(eta_select[1] - 1.) < EPS8;
+	arma::vec ypad(n + 1, arma::fill::zeros);
+	ypad.tail(y.n_elem) = y;
 
-// 	arma::vec mh_sd(mh_var.begin(), mh_var.length());
-// 	mh_sd.for_each([](arma::vec::elem_type &val)
-// 				   { val = std::sqrt(val); });
+	const bool W_selected = std::abs(eta_select[0] - 1.) < EPS8;
+	const bool mu0_selected = std::abs(eta_select[1] - 1.) < EPS8;
 
-// 	// Global Parameter
-// 	// eta = (W, mu0, rho)
+	arma::vec mh_sd(mh_var.begin(), mh_var.length());
+	mh_sd.for_each([](arma::vec::elem_type &val)
+				   { val = std::sqrt(val); });
+
+	// Global Parameter
+	// eta = (W, mu0, rho)
 	
 
-// 	double mu0 = obs_par.at(0);
-// 	double delta_nb = obs_par.at(1);
+	double mu0 = obs_par.at(0);
+	double delta_nb = obs_par.at(1);
 
-// 	unsigned int nlag = nlag_in;
-// 	unsigned int p = nlag;
-// 	if (!truncated)
-// 	{
-// 		nlag = n;
-// 		p = (unsigned int) lag_par.at(1) + 1;
-// 	}
+	unsigned int nlag = nlag_in;
+	unsigned int p = nlag;
+	if (!truncated)
+	{
+		nlag = n;
+		p = (unsigned int) lag_par.at(1) + 1;
+	}
 
-// 	double W = W_par.at(0);
-// 	const unsigned int W_prior_type = (unsigned int) W_par.at(1);
-// 	arma::vec wt_par = {0., W};
-// 	switch (W_prior_type)
-// 	{
-// 	case 0: // Gamma(aw=shape, bw=rate)
-// 	{
-// 		double aw_new = W_par.at(2) - 0.5 * ((double)n - 1.);
-// 		double bw_prior = W_par.at(3);
-// 		W_par.at(2) = aw_new;
-// 		W_par.at(3) = bw_prior;
-// 	}
-// 	break;
-// 	case 1: // Half-Cauchy(aw=location==0, bw=scale)
-// 	{
-// 		throw std::invalid_argument("Half-cauchy prior for W is not implemented yet.");
-// 	}
-// 	break;
-// 	case 2: // Inverse-Gamma(nw=shape, nSw=rate)
-// 	{
-// 		double nw = W_par.at(2);
-// 		double nSw = W_par.at(2) * W_par.at(3);
-// 		double nw_new = nw + (double)n - 1.;
-// 		W_par.at(2) = nw_new;
-// 		W_par.at(3) = nSw;
-// 	}
-// 	break;
-// 	default:
-// 	break;
-// 	}
+	Dim dim(nlag_in, p, truncated, n);
+	std::string obs_dist = AVAIL::get_obs_name(obs_code);
+	std::string link_func = AVAIL::get_link_name(link_code);
+	std::string trans_func = AVAIL::get_trans_name(trans_code);
+	std::string lag_dist = AVAIL::get_lag_name(trans_code);
+	std::string gain_func = AVAIL::get_gain_name(gain_code);
+	std::string err_dist = "gaussian";
+	Rcpp::NumericVector err_param = {W_par.at(0), 0.};
+	Model model(
+		dim, obs_dist, link_func,
+		gain_func, lag_dist, err_dist,
+		obs_par_in, lag_par_in, err_param, trans_func);
+	
+	ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
+	approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
+
+	Dist w0_prior("gaussian", 0., W_par.at(0));
+
+	double W = W_par.at(0);
+	Dist W_prior("invgamma", W_par.at(2), W_par.at(3));
+	const unsigned int W_prior_type = (unsigned int) W_par.at(1);
+	arma::vec wt_par = {0., W};
+	switch (W_prior_type)
+	{
+	case 0: // Gamma(aw=shape, bw=rate)
+	{
+		double aw_new = W_par.at(2) - 0.5 * ((double)n - 1.);
+		double bw_prior = W_par.at(3);
+		W_par.at(2) = aw_new;
+		W_par.at(3) = bw_prior;
+		W_prior.init("gamma", W_par.at(2), W_par.at(3));
+	}
+	break;
+	case 1: // Half-Cauchy(aw=location==0, bw=scale)
+	{
+		throw std::invalid_argument("Half-cauchy prior for W is not implemented yet.");
+	}
+	break;
+	case 2: // Inverse-Gamma(nw=shape, nSw=rate)
+	{
+		double nw = W_par.at(2);
+		double nSw = W_par.at(2) * W_par.at(3);
+		double nw_new = nw + (double)n - 1.;
+		W_par.at(2) = nw_new;
+		W_par.at(3) = nSw;
+
+		W_prior.init("invgamma", W_par.at(2), W_par.at(3));
+	}
+	break;
+	default:
+	break;
+	}
 	
 
-// 	arma::vec wt = arma::randn(n) * 0.01;
-// 	for (unsigned int t = 0; t < p; t++)
-// 	{
-// 		wt.at(t) = std::abs(wt.at(t));
-// 	}
+	arma::vec wt = arma::randn(n) * 0.01;
+	for (unsigned int t = 0; t < p; t++)
+	{
+		wt.at(t) = std::abs(wt.at(t));
+	}
+
+	arma::vec wt_pad(n + 1, arma::fill::zeros);
+	wt_pad.tail(wt.n_elem) = wt;
 	
 
-// 	arma::vec param_accept(3,arma::fill::zeros);
-// 	arma::mat param_stored(nsample, 3, arma::fill::zeros);
-// 	arma::mat logp2_stored(3, nsample, arma::fill::zeros);
+	arma::vec param_accept(3,arma::fill::zeros);
+	arma::mat param_stored(nsample, 3, arma::fill::zeros);
+	arma::mat logp2_stored(3, nsample, arma::fill::zeros);
 
-// 	arma::vec wt_accept(n, arma::fill::zeros);
-// 	arma::mat wt_stored(n, nsample, arma::fill::zeros);
-// 	arma::mat Bs_stored(n, nsample, arma::fill::zeros);
-// 	arma::mat logp_stored(n, nsample, arma::fill::zeros);
+	arma::vec wt_accept(n, arma::fill::zeros); // n x 1
+	arma::mat wt_stored(n, nsample, arma::fill::zeros); // n x nsample
+	arma::mat Bs_stored(n, nsample, arma::fill::zeros); // n x nsample
+	arma::mat logp_stored(n, nsample, arma::fill::zeros); // n x nsample
 
-// 	const arma::vec Fphi_pad = get_Fphi_pad(trans_code, n, nlag, lag_par);
-// 	for (unsigned int b = 0; b < ntotal; b++)
-// 	{
-// 		R_CheckUserInterrupt();
+	const arma::vec Fphi_pad = get_Fphi_pad(trans_code, n, nlag, lag_par);
+	for (unsigned int b = 0; b < ntotal; b++)
+	{
+		R_CheckUserInterrupt();
 
-// 		// [OK] Update evolution/state disturbances/errors, denoted by wt.
-// 		arma::vec Bs(n, arma::fill::zeros);
-// 		arma::vec logp(n, arma::fill::zeros);
-// 		update_wt(
-// 			wt, wt_accept, Bs, logp,
-// 			y, Fphi_pad,
-// 			lag_par, obs_par, wt_par, // w[t] ~ N(0, W)
-// 			mh_sd.at(0), n, nlag,
-// 			gain_code, trans_code, link_code, obs_code, truncated);
+		// [OK] Update evolution/state disturbances/errors, denoted by wt.
+		arma::vec Bs(n, arma::fill::zeros);
+		arma::vec logp(n, arma::fill::zeros);
+		// update_wt(
+		// 	wt, wt_accept, Bs, logp, approx_dlm,
+		// 	model, y, Fphi_pad,
+		// 	lag_par, obs_par, wt_par, // w[t] ~ N(0, W)
+		// 	mh_sd.at(0), n, nlag,
+		// 	gain_code, trans_code, link_code, obs_code, truncated);
+		
+		MCMC::Posterior::update_wt(wt_pad, wt_accept, approx_dlm, ypad, model, w0_prior, mh_sd.at(0));
+		wt = wt_pad.tail(wt.n_elem);
 
-// 		// [OK] Update state/evolution error variance W
-// 		if (W_selected)
-// 		{
-// 			double W_old = W;
-// 			W = update_W(param_accept.at(0), W_old, wt, W_par, mh_sd.at(1), n);
-// 			W_par.at(0) = W;
-// 			wt_par.at(1) = W;
-// 		}
+		// [OK] Update state/evolution error variance W
+		if (W_selected)
+		{
+			double W_old = W;
+			// arma::vec W_par = {0.01, 2, W_prior.par1, W_prior.par2};
+			// W = update_W(param_accept.at(0), W_old, wt, W_par, mh_sd.at(1), n);
+			W = MCMC::Posterior::update_W(W_old, W, wt_pad, W_prior, mh_sd.at(1));
+			// W_par.at(0) = W;
+			// wt_par.at(1) = W;
+			w0_prior.update_par2(W);
+		}
 
 
-// 		double logp_mu0 = 0.;
-// 		if (mu0_selected)
-// 		{
-// 			update_mu0(
-// 				mu0, param_accept.at(1), logp_mu0, 
-// 				y, wt, Fphi_pad, 
-// 				lag_par, obs_par.at(1), mh_sd.at(1), nlag, 
-// 				gain_code, trans_code, link_code, obs_code, truncated);
+		double logp_mu0 = 0.;
+		if (mu0_selected)
+		{
+			update_mu0(
+				mu0, param_accept.at(1), logp_mu0, 
+				y, wt, Fphi_pad, 
+				lag_par, obs_par.at(1), mh_sd.at(1), nlag, 
+				gain_code, trans_code, link_code, obs_code, truncated);
 			
-// 			obs_par.at(0) = mu0;
-// 		}
+			obs_par.at(0) = mu0;
+		}
 
 
 
-// 		// // Update rho: the state/evolution coefficient
-// 		// if (rhoflag) {
-// 		// 	// if (std::abs(rho)<arma::datum::eps) {
-// 		// 	// 	rho += arma::datum::eps;
-// 		// 	// }
-// 		// 	xi_old = std::log(rho/(1.-rho));
-// 		// 	Et = E0tilde + Fx * vt;
-// 		// 	// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-// 		// 	lambda = arma::exp(Et);
-// 		// 	logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
-// 		// 	for (unsigned int t=0; t<n; t++) {
-// 		// 		logp_old += R::dpois(Y.at(t),lambda.at(t),true);
-// 		// 	}
+		// // Update rho: the state/evolution coefficient
+		// if (rhoflag) {
+		// 	// if (std::abs(rho)<arma::datum::eps) {
+		// 	// 	rho += arma::datum::eps;
+		// 	// }
+		// 	xi_old = std::log(rho/(1.-rho));
+		// 	Et = E0tilde + Fx * vt;
+		// 	// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+		// 	lambda = arma::exp(Et);
+		// 	logp_old = xi_old - 2.*std::log(std::exp(xi_old)+1.);
+		// 	for (unsigned int t=0; t<n; t++) {
+		// 		logp_old += R::dpois(Y.at(t),lambda.at(t),true);
+		// 	}
 
-// 		// 	xi_new = R::rnorm(xi_old,std::sqrt(Vxi));
-// 		// 	rho = 1./(1.+std::exp(-xi_new));
-// 		// 	Fx = update_Fx1(n,rho,X);
-// 		// 	E0tilde.at(0) = rho*E0;
-// 		// 	for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
-// 		// 		E0tilde.at(t) = rho*E0tilde.at(t-1);
-// 		// 	}
-// 		// 	Et = E0tilde + Fx * vt;
-// 		// 	// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
-// 		// 	lambda = arma::exp(Et);
-// 		// 	logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
-// 		// 	for (unsigned int t=0; t<n; t++) {
-// 		// 		logp_new += R::dpois(Y.at(t),lambda.at(t),true);
-// 		// 	}
+		// 	xi_new = R::rnorm(xi_old,std::sqrt(Vxi));
+		// 	rho = 1./(1.+std::exp(-xi_new));
+		// 	Fx = update_Fx1(n,rho,X);
+		// 	E0tilde.at(0) = rho*E0;
+		// 	for (unsigned int t=1; t<n; t++) { // TODO - CHECK HERE
+		// 		E0tilde.at(t) = rho*E0tilde.at(t-1);
+		// 	}
+		// 	Et = E0tilde + Fx * vt;
+		// 	// Et.elem(arma::find(Et>EBOUND)).fill(EBOUND);
+		// 	lambda = arma::exp(Et);
+		// 	logp_new = xi_new - 2.*std::log(std::exp(xi_new)+1.);
+		// 	for (unsigned int t=0; t<n; t++) {
+		// 		logp_new += R::dpois(Y.at(t),lambda.at(t),true);
+		// 	}
 
-// 		// 	logratio = std::min(0.,logp_new-logp_old);
-// 		// 	if (std::log(R::runif(0.,1.)) >= logratio) { // reject
-// 		// 		rho = 1./(1.+std::exp(-xi_old));
-// 		// 	} else {
-// 		// 		rho_accept += 1.;
-// 		// 	}
-// 		// 	rho_sq = rho * rho;
+		// 	logratio = std::min(0.,logp_new-logp_old);
+		// 	if (std::log(R::runif(0.,1.)) >= logratio) { // reject
+		// 		rho = 1./(1.+std::exp(-xi_old));
+		// 	} else {
+		// 		rho_accept += 1.;
+		// 	}
+		// 	rho_sq = rho * rho;
 
-// 		// 	if (!std::isfinite(rho)) {
-// 		// 		Rcout << "rho_new=" << rho << std::endl;
-// 		// 		stop("Non finite value for rho");
-// 		// 	}
-// 		// }
+		// 	if (!std::isfinite(rho)) {
+		// 		Rcout << "rho_new=" << rho << std::endl;
+		// 		stop("Non finite value for rho");
+		// 	}
+		// }
 
 
 
-// 		// store samples after burnin and thinning
-// 		bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
-// 		if (saveiter || b == (ntotal - 1))
-// 		{
-// 			unsigned int idx_run;
-// 			if (saveiter)
-// 			{
-// 				idx_run = (b - nburnin - 1) / nthin;
-// 			}
-// 			else
-// 			{
-// 				idx_run = nsample - 1;
-// 			}
+		// store samples after burnin and thinning
+		bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
+		if (saveiter || b == (ntotal - 1))
+		{
+			unsigned int idx_run;
+			if (saveiter)
+			{
+				idx_run = (b - nburnin - 1) / nthin;
+			}
+			else
+			{
+				idx_run = nsample - 1;
+			}
 
-// 			wt_stored.col(idx_run) = wt;
-// 			logp_stored.col(idx_run) = logp;
-// 			Bs_stored.col(idx_run) = Bs;
+			wt_stored.col(idx_run) = wt;
+			logp_stored.col(idx_run) = logp;
+			Bs_stored.col(idx_run) = Bs;
 
-// 			if (W_selected)
-// 			{
-// 				param_stored.at(idx_run, 0) = W;
-// 			}
+			if (W_selected)
+			{
+				param_stored.at(idx_run, 0) = W;
+			}
 
-// 			if (mu0_selected)
-// 			{
-// 				param_stored.at(idx_run, 1) = mu0;
-// 				logp2_stored.at(1, idx_run) = logp_mu0;
-// 			}
+			if (mu0_selected)
+			{
+				param_stored.at(idx_run, 1) = mu0;
+				logp2_stored.at(1, idx_run) = logp_mu0;
+			}
 
-// 			// rho_stored.at(idx_run) = rho;
-// 			// E0_stored.at(idx_run) = E0;
-// 		}
+			// rho_stored.at(idx_run) = rho;
+			// E0_stored.at(idx_run) = E0;
+		}
 
-// 		Rcout << "\rProgress: " << b << "/" << ntotal - 1;
-// 	}
+		Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+	}
 
-// 	Rcout << std::endl;
+	Rcout << std::endl;
 
-// 	Rcpp::List output;
-// 	output["wt"] = Rcpp::wrap(wt_stored); // n x nsample
+	Rcpp::List output;
+	output["wt"] = Rcpp::wrap(wt_stored); // n x nsample
 
-// 	arma::mat psi_stored(n + 1, nsample);
-// 	psi_stored.tail_rows(n) = arma::cumsum(wt_stored, 0);
+	arma::mat psi_stored(n + 1, nsample);
+	psi_stored.tail_rows(n) = arma::cumsum(wt_stored, 0);
 
-// 	arma::vec qProb = {0.025, 0.5, 0.975};
-// 	output["psi"] = Rcpp::wrap(arma::quantile(psi_stored, qProb, 1)); // (n+1) x 3
-// 	output["psi_all"] = Rcpp::wrap(psi_stored);
+	arma::vec qProb = {0.025, 0.5, 0.975};
+	output["psi"] = Rcpp::wrap(arma::quantile(psi_stored, qProb, 1)); // (n+1) x 3
+	output["psi_all"] = Rcpp::wrap(psi_stored);
 
-// 	wt_accept /= static_cast<double>(ntotal);
-// 	output["wt_accept"] = Rcpp::wrap(wt_accept);
-// 	output["logp"] = Rcpp::wrap(logp_stored);
-// 	output["Bs"] = Rcpp::wrap(Bs_stored);
+	wt_accept /= static_cast<double>(ntotal);
+	output["wt_accept"] = Rcpp::wrap(wt_accept);
+	output["logp"] = Rcpp::wrap(logp_stored);
+	output["Bs"] = Rcpp::wrap(Bs_stored);
 
-// 	output["params"] = Rcpp::wrap(param_stored);
-// 	output["logp2"] = Rcpp::wrap(logp2_stored);
+	output["params"] = Rcpp::wrap(param_stored);
+	output["logp2"] = Rcpp::wrap(logp2_stored);
 
-// 	param_accept.for_each([&ntotal](arma::vec::elem_type &val){ val /= (double) ntotal; });
-// 	output["param_accept"] = Rcpp::wrap(param_accept);
+	param_accept.for_each([&ntotal](arma::vec::elem_type &val){ val /= (double) ntotal; });
+	output["param_accept"] = Rcpp::wrap(param_accept);
 
-// 	return output;
-// }
+	output["model"] = model.info();
+
+	return output;
+}
