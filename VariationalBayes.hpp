@@ -13,347 +13,260 @@
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 
-class StaticParam
-{
-public:
-    StaticParam()
-    {
-        set_param(0., false);
-    }
-
-    StaticParam(
-        const double &init_,
-        const bool &infer_ = false)
-    {
-        set_param(init_, infer_);
-    }
-
-    double mh_accept = 0.;
-    double mh_sd = 1.;
-    double init = 0.;
-    double val = 0.;
-    bool infer = false;
-
-    Dist prior;
-    arma::vec stored;
-
-    void init_param(const Rcpp::List &param_opts)
-    {
-        Rcpp::List opts = param_opts;
-
-        double init = 0.01;
-        if (opts.containsElementNamed("init"))
-        {
-            init = Rcpp::as<double>(opts["init"]);
-        }
-
-        bool infer = false;
-        if (opts.containsElementNamed("infer"))
-        {
-            infer = Rcpp::as<double>(opts["infer"]);
-        }
-        set_param(init, infer);
-
-        if (opts.containsElementNamed("prior"))
-        {
-            Rcpp::NumericVector W_par = Rcpp::as<Rcpp::NumericVector>(opts["prior"]);
-            double par1 = W_par[0];
-            double par2 = W_par[1];
-            set_prior(prior.name, par1, par2);
-        }
-
-        if (opts.containsElementNamed("type"))
-        {
-            std::string type = Rcpp::as<std::string>(opts["type"]);
-            set_prior(type, prior.par1, prior.par2);
-        }
-    }
-
-    static Rcpp::List default_settings()
-    {
-        Rcpp::List opts;
-        opts["infer"] = false;
-        opts["init"] = 0.;
-        opts["type"] = "PriorDistribution";
-        opts["prior"] = Rcpp::NumericVector::create(0., 0.);
-
-        return opts;
-    }
-
-    void set_param(const double &init_in, const bool &infer_in = false)
-    {
-        init = init_in;
-        val = init_in;
-        infer = infer_in;
-    }
-
-    void set_prior(const std::string &name, const double &par1, const double &par2)
-    {
-        prior.init(name, par1, par2);
-        return;
-    }
-
-    void init_stored(const unsigned int &nsample)
-    {
-        stored.set_size(nsample);
-        stored.zeros();
-    }
-};
 
 namespace VB
 {
-
-    class Settings : public Sys
+    class VariationalBayes
     {
     public:
-        Settings()
+        unsigned int nsample = 1000;
+        unsigned int nthin = 2;
+        unsigned int nburnin = 1000;
+        unsigned int ntotal = 3001;
+
+        unsigned int N = 500; // number of SMC particles
+        unsigned int B = 1;
+
+        bool update_static = true;
+        unsigned int m = 1; // number of unknown static parameters
+        std::vector<std::string> param_selected = {"W"};
+
+        Dim dim;
+
+        arma::vec y;
+
+        arma::vec psi; // (nT + 1) x 1
+        arma::mat psi_stored; // (nT + 1) x nsample
+
+        bool infer_W = true;
+        bool infer_mu0 = false;
+        bool infer_delta = false;
+        bool infer_kappa = false;
+        bool infer_r = false;
+
+        double W = 0.01;
+        double mu0 = 0.;
+        double delta = 30;
+        double kappa = 0.4;
+        double r = 6;
+
+        Dist W_prior, mu0_prior, delta_prior, kappa_prior, r_prior;
+
+        arma::vec W_stored; // nsample x 1
+        arma::vec mu0_stored; // nsample x 1
+        arma::vec delta_stored; // nsample x 1
+        arma::vec kappa_stored; // nsample x 1
+        arma::vec r_stored; // nsample x 1
+
+        VariationalBayes()
         {
-            init_default();
+            dim.init_default();
+            psi.set_size(dim.nT + 1); 
+            psi.zeros();
+
+            y = psi;
+        };
+
+        VariationalBayes(const Model &model, const arma::vec y_in)
+        {
+            dim = model.dim;
+            y = y_in;
+
+            psi.set_size(dim.nT + 1);
+            psi.zeros();
         }
 
-        Settings(const Rcpp::List &opts_in)
+        void init(const Rcpp::List & vb_opts)
         {
-            init(opts_in);
-        }
+            Rcpp::List opts = vb_opts;
 
-        void init_default()
-        {
-            nburnin = 100;
-            nthin = 1;
-            nsample = 100;
-            ntotal = nburnin + nthin * nsample + 1;
-            nsmc = 100;
-            nbackward = 10;
-
-            double learning_rate = 0.01;
-            double eps_step_size = 1.e-6;
-
-            
-            infer_delta = false;
-            // delta.set_param(10, infer_delta);
-
-            infer_kappa = false;
-            // kappa.set_param(0.5, infer_kappa);
-
-            infer_W = true;
-            // W.set_param(0.01, infer_W);
-            // W.set_prior("invgamma", 0.01, 0.01);
-            // W.init_stored(nsample);
-
-            infer_mu0 = false;
-            // mu0.set_param(0., infer_mu0);
-            // mu0.set_prior("gaussian", 0., 10.);
-            // mu0.init_stored(nsample);
-
-            if (infer_W || infer_mu0 || infer_delta || infer_kappa)
-            {
-                update_static = true;
-            }
-            else
-            {
-                update_static = false;
-            }
-
-            params_selected = get_params_selected(infer_W, infer_mu0, infer_delta, infer_kappa);
-            m = params_selected.size();
-            k = m;
-
-            discount_factor.use_discount = false;
-            discount_factor.use_custom = false;
-            discount_factor.custom_value = 0.95;
-            discount_factor.default_value = 0.99;
-
-            // psi.set_size(dim.nT + 1);
-            // psi.zeros();
-            // psi_stored.set_size(dim.nT + 1, nsample);
-            // psi_stored.zeros();
-        }
-
-        void init(const Rcpp::List &opts_in)
-        {
-            Rcpp::List opts = opts_in;
-
-            infer_W = true;
-            if (opts.containsElementNamed("infer_W"))
-            {
-                infer_W = Rcpp::as<bool>(opts["infer_W"]);
-            }
-
-            infer_mu0 = true;
-            if (opts.containsElementNamed("infer_mu0"))
-            {
-                infer_mu0 = Rcpp::as<bool>(opts["infer_mu0"]);
-            }
-
-            infer_delta = false;
-            infer_kappa = false;
-
-            params_selected = get_params_selected(infer_W, infer_mu0, infer_delta, infer_kappa);
-            m = params_selected.size();
-
-            if (infer_W || infer_mu0 || infer_delta || infer_kappa)
-            {
-                update_static = true;
-            }
-            else
-            {
-                update_static = false;
-                m = 1;
-            }
-
-            k = m;
-            if (opts.containsElementNamed("k"))
-            {
-                int ktmp = Rcpp::as<int>(opts["k"]);
-                if (ktmp > 0 && ktmp <= m)
-                {
-                    k = (unsigned int)ktmp;
-                }
-            }
-
-            nburnin = 100;
-            if (opts.containsElementNamed("nburnin"))
-            {
-                nburnin = Rcpp::as<unsigned int>(opts["nburnin"]);
-            }
-
-            nthin = 1;
-            if (opts.containsElementNamed("nthin"))
-            {
-                nthin = Rcpp::as<unsigned int>(opts["nthin"]);
-            }
-
-            nsample = 100;
+            nsample = 1000;
             if (opts.containsElementNamed("nsample"))
             {
                 nsample = Rcpp::as<unsigned int>(opts["nsample"]);
             }
 
+            nthin = 1000;
+            if (opts.containsElementNamed("nthin"))
+            {
+                nthin = Rcpp::as<unsigned int>(opts["nthin"]);
+            }
+
+            nburnin = 1000;
+            if (opts.containsElementNamed("nburnin"))
+            {
+                nburnin = Rcpp::as<unsigned int>(opts["nburnin"]);
+            }
+
             ntotal = nburnin + nthin * nsample + 1;
-           
-            nsmc = 100;
+
+            N = 500;
             if (opts.containsElementNamed("num_particle"))
             {
-                nsmc = Rcpp::as<unsigned int>(opts["num_particle"]);
+                N = Rcpp::as<unsigned int>(opts["num_particle"]);
             }
 
-            nbackward = 10;
+            B = 1;
             if (opts.containsElementNamed("num_backward"))
             {
-                nbackward = Rcpp::as<unsigned int>(opts["num_backward"]);
+                B = Rcpp::as<unsigned int>(opts["num_backward"]);
             }
 
-            double learning_rate = 0.01;
-            if (opts.containsElementNamed("learning_rate"))
+            psi_stored.set_size(psi.n_elem, nsample);
+            psi_stored.zeros();
+
+            param_selected.clear();
+            m = 0;
+
+            W_stored.set_size(nsample);
+            W_stored.zeros();
+            infer_W = true;
+            W_prior.init("invgamma", 0.01, 0.01);
+            W = 0.01;
+            if (opts.containsElementNamed("W"))
             {
-                double tmp = Rcpp::as<unsigned int>(opts["learning_rate"]);
-                if (tmp > EPS) { learning_rate = tmp; }
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["W"]);
+                init_param(infer_W, W, W_prior, param_opts);
+            }
+            if (infer_W)
+            {
+                param_selected.push_back("W");
+                m += 1;
             }
 
-            double eps_step_size = 1.e-6;
-            if (opts.containsElementNamed("eps_step_size"))
+            mu0_stored = W_stored;
+            infer_mu0 = false;
+            mu0_prior.init("gaussian", 0., 10.);
+            mu0 = 0.;
+            if (opts.containsElementNamed("mu0"))
             {
-                double tmp = Rcpp::as<unsigned int>(opts["eps_step_size"]);
-                if (tmp > EPS) { eps_step_size = tmp; }
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
+                init_param(infer_mu0, mu0, mu0_prior, param_opts);
+            }
+            if (infer_mu0)
+            {
+                param_selected.push_back("mu0");
+                m += 1;
             }
 
-            discount_factor.use_discount = false;
-            discount_factor.use_custom = false;
-            discount_factor.custom_value = 0.95;
-            discount_factor.default_value = 0.99;
-            if (opts.containsElementNamed("discount_factor"))
+            delta_stored = W_stored;
+            infer_delta = false;
+            delta_prior.init("gaussian", 0., 10.);
+            delta = 30.;
+            if (opts.containsElementNamed("delta"))
             {
-                Rcpp::List discount_opts = Rcpp::as<Rcpp::List>(opts["discount_factor"]);
-                if (discount_opts.containsElementNamed("use_discount"))
-                {
-                    discount_factor.use_discount = Rcpp::as<bool>(discount_opts["use_discount"]);
-                }
-                if (discount_opts.containsElementNamed("use_custom"))
-                {
-                    discount_factor.use_custom = Rcpp::as<bool>(discount_opts["use_custom"]);
-                }
-                if (discount_opts.containsElementNamed("custom_value"))
-                {
-                    discount_factor.custom_value = Rcpp::as<double>(discount_opts["custom_value"]);
-                }
-                if (discount_opts.containsElementNamed("default_value"))
-                {
-                    discount_factor.default_value = Rcpp::as<double>(discount_opts["default_value"]);
-                }
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["delta"]);
+                init_param(infer_delta, delta, delta_prior, param_opts);
             }
+            if (infer_delta)
+            {
+                param_selected.push_back("delta");
+                m += 1;
+            }
+
+            kappa_stored = W_stored;
+            infer_kappa = false;
+            kappa_prior.init("beta", 1., 1.);
+            kappa = 0.4;
+            if (opts.containsElementNamed("kappa"))
+            {
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["kappa"]);
+                init_param(infer_kappa, kappa, kappa_prior, param_opts);
+            }
+            if (infer_kappa)
+            {
+                param_selected.push_back("kappa");
+                m += 1;
+            }
+
+            r_stored = W_stored;
+            infer_r = false;
+            r_prior.init("nbinom", 1., 1.);
+            r = 6;
+            if (opts.containsElementNamed("r"))
+            {
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["r"]);
+                init_param(infer_r, r, r_prior, param_opts);
+            }
+            if (infer_r)
+            {
+                param_selected.push_back("r");
+                m += 1;
+            }
+
+            update_static = false;
+            if (m > 0) { update_static = true; }
         }
 
-        static Rcpp::List get_default()
+        static void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List &param_opts)
         {
+            if (param_opts.containsElementNamed("infer"))
+            {
+                infer = Rcpp::as<bool>(param_opts["infer"]);
+            }
+
+            if (param_opts.containsElementNamed("init"))
+            {
+                init = Rcpp::as<double>(param_opts["init"]);
+            }
+
+            std::string prior_name = "invgamma";
+            if (param_opts.containsElementNamed("prior_name"))
+            {
+                prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
+            }
+
+            Rcpp::NumericVector prior_param = {0.01, 0.01};
+            if (param_opts.containsElementNamed("prior_param"))
+            {
+                prior_param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
+            }
+
+            prior.init(prior_name, prior_param[0], prior_param[1]);
+
+            return;
+        }
+
+        static Rcpp::List default_settings()
+        {
+            Rcpp::List W_opts;
+            W_opts["infer"] = true;
+            W_opts["init"] = 0.01;
+            W_opts["prior_name"] = "invgamma";
+            W_opts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
+
+            Rcpp::List mu0_opts;
+            mu0_opts["infer"] = false;
+            mu0_opts["init"] = 0.;
+
+            Rcpp::List delta_opts;
+            delta_opts["infer"] = false;
+            delta_opts["init"] = 0.;
+
+            Rcpp::List kappa_opts;
+            kappa_opts["infer"] = false;
+            kappa_opts["init"] = 0.4;
+
+            Rcpp::List r_opts;
+            r_opts["infer"] = false;
+            r_opts["init"] = 6.;
+
             Rcpp::List opts;
-            opts["infer_W"] = true;
-            opts["infer_mu0"] = false;
-            opts["infer_delta"] = false;
-            opts["infer_kappa"] = false;
-            
+            opts["nsample"] = 1000;
+            opts["nthin"] = 1;
+            opts["nburnin"] = 1000;
 
-            Rcpp::List discount_opts;
-            discount_opts["use_discount"] = false;
-            discount_opts["use_custom"] = false;
-            discount_opts["custom_value"] = 0.95;
-            discount_opts["default_value"] = 0.99;
+            opts["num_particle"] = 500;
+            opts["num_backward"] = 1;
 
-            
-            opts["nburnin"] = (int)100;
-            opts["nthin"] = (int)1;
-            opts["nsample"] = (int)100;
-            opts["num_particle"] = (int)100;
-            opts["num_backward"] = (int)10;
-            opts["k"] = (int)0;
-
-            opts["learning_rate"] = 0.01;
-            opts["eps_step_size"] = 1.e-6;
-
-            opts["discount_factor"] = discount_opts;
+            opts["W"] = W_opts;
+            opts["mu0"] = mu0_opts;
+            opts["delta"] = delta_opts;
+            opts["kappa"] = kappa_opts;
+            opts["r"] = r_opts;
 
             return opts;
         }
-
-        bool update_static = true;
-        std::vector<std::string> params_selected = {"W"};
-        unsigned int m = 1;
-        unsigned int k = 1;
-        double learning_rate = 0.01;
-        double eps_step_size = 1.e-6;
-        bool infer_W = true;
-        bool infer_mu0 = false;
-        bool infer_delta = false;
-        bool infer_kappa = false;
-
-        // StaticParam W, mu0, delta, kappa; 
-        // arma::vec psi;
-        // arma::mat psi_stored;
-
-    private:
-
-        static std::vector<std::string> get_params_selected(
-            const bool &W = true,
-            const bool &mu0 = false,
-            const bool &delta = false,
-            const bool &kappa = false,
-            const bool &r = false,
-            const bool &mu = false, 
-            const bool &sd = false
-        )
-        {
-            std::vector<std::string> params_selected;
-
-            if (W) { params_selected.push_back("W"); }
-            if (mu0) { params_selected.push_back("mu0"); }
-            if (delta) { params_selected.push_back("delta"); }
-            if (kappa) { params_selected.push_back("kappa"); }
-            if (r) { params_selected.push_back("r"); }
-            if (mu) { params_selected.push_back("mu"); }
-            if (sd) { params_selected.push_back("sd"); }
-
-            return params_selected;
-        }
-
     };
     /**
      * @brief Gradient ascent.
@@ -467,130 +380,78 @@ namespace VB
     };
 
 
-    class Hybrid
+    class Hybrid : public VariationalBayes
     {
     public:
-        Hybrid(){ init_default(); }
 
-        Hybrid(const Rcpp::List &opts_in, const Dim &dim_in){ init(opts_in, dim_in); }
-
-        void init_default()
+        Hybrid(const Model &model, const arma::vec &y_in) : VariationalBayes(model, y_in)
         {
-
-            dim.init_default();
-            opts.init_default();
-
-            W.set_param(0.01, opts.infer_W);
-            W.set_prior("invgamma", 0.01, 0.01);
-            W.init_stored(opts.nsample);
-
-            mu0.set_param(0., opts.infer_mu0);
-            mu0.set_prior("gaussian", 0., 10.);
-            mu0.init_stored(opts.nsample);
-
-            kappa.init_stored(opts.nsample);
-            r.init_stored(opts.nsample);
-
+            dim = model.dim;
             psi.set_size(dim.nT + 1);
             psi.zeros();
-            psi_stored.set_size(dim.nT + 1, opts.nsample);
-            psi_stored.zeros();
+            y = y_in;
 
-            gamma.set_size(opts.m);
-            gamma.ones();
-            grad_tau.init(opts.m, opts.learning_rate, opts.eps_step_size);
-
-            mu.set_size(opts.m);
-            mu.zeros();
-            grad_mu.init(opts.m, opts.learning_rate, opts.eps_step_size);
-
-            B.set_size(opts.m, opts.k);
-            B.zeros();
-            grad_vecB.init(opts.m * opts.k, opts.learning_rate, opts.eps_step_size);
-
-            d.set_size(opts.m);
-            d.ones();
-            grad_d.init(opts.m, opts.learning_rate, opts.eps_step_size);
-
-            eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
-            eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
-
-            nu = tYJ(eta_tilde, gamma);
-
-            xi.set_size(opts.k);
-            xi.zeros();
-            eps = xi;
-
-            if (opts.m > 1)
-            {
-                B_uptri_idx = arma::trimatu_ind(arma::size(B), 1);
-            }
-            else
-            {
-                B_uptri_idx = {0};
-            }
+            m = 1;
+            k = 1;
+            learning_rate = 0.01;
+            eps_step_size = 1.e-6;
         }
 
-        void init(const Rcpp::List &hvb_opts, const Dim &dim_in)
+        Hybrid() : VariationalBayes() {}
+
+        void init(const Rcpp::List &hvb_opts)
         {
-            dim = dim_in;
-            Rcpp::List opts_in = hvb_opts;
+            Rcpp::List opts = hvb_opts;
+            VariationalBayes::init(opts);
 
-            opts.init(opts_in);
-            
-            W.set_param(0.01, opts.infer_W);
-            W.set_prior("invgamma", 0.01, 0.01);
-            W.init_stored(opts.nsample);
-            if (opts_in.containsElementNamed("W"))
+
+            learning_rate = 0.01;
+            if (opts.containsElementNamed("learning_rate"))
             {
-                Rcpp::List opts_W = Rcpp::as<Rcpp::List>(opts_in["W"]);
-                W.init_param(opts_W);
+                learning_rate = Rcpp::as<double>(opts["learning_rate"]);
             }
 
-            mu0.set_param(0., opts.infer_mu0);
-            mu0.set_prior("gaussian", 0., 1.);
-            mu0.init_stored(opts.nsample);
-            if (opts_in.containsElementNamed("mu0"))
+            eps_step_size = 1.e-6;
+            if (opts.containsElementNamed("eps_step_size"))
             {
-                Rcpp::List opts_mu0 = Rcpp::as<Rcpp::List>(opts_in["mu0"]);
-                mu0.init_param(opts_mu0);
+                eps_step_size = Rcpp::as<double>(opts["eps_step_size"]);
             }
 
-            kappa.init_stored(opts.nsample);
-            r.init_stored(opts.nsample);
-
-            psi.set_size(dim.nT + 1);
-            psi.zeros();
-            psi_stored.set_size(dim.nT + 1, opts.nsample);
-            psi_stored.zeros();
+            k = 1;
+            if (opts.containsElementNamed("k"))
+            {
+                k = Rcpp::as<unsigned int>(opts["k"]);
+            }
 
 
-            gamma.set_size(opts.m);
+            gamma.set_size(m);
             gamma.ones();
-            grad_tau.init(opts.m, opts.learning_rate, opts.eps_step_size);
+            grad_tau.init(m, learning_rate, eps_step_size);
 
-            mu.set_size(opts.m);
+            mu.set_size(m);
             mu.zeros();
-            grad_mu.init(opts.m, opts.learning_rate, opts.eps_step_size);
+            grad_mu.init(m, learning_rate, eps_step_size);
 
-            B.set_size(opts.m, opts.k);
+            B.set_size(m, k);
             B.zeros();
-            grad_vecB.init(opts.m * opts.k, opts.learning_rate, opts.eps_step_size);
+            grad_vecB.init(m * k, learning_rate, eps_step_size);
 
-            d.set_size(opts.m);
+            d.set_size(m);
             d.ones();
-            grad_d.init(opts.m, opts.learning_rate, opts.eps_step_size);
+            grad_d.init(m, learning_rate, eps_step_size);
 
-            eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
-            eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
+
+            eta = init_eta(param_selected, W, mu0, kappa, r, update_static); // Checked. OK.
+            eta_tilde = eta2tilde(eta, param_selected, W_prior.name);
+
 
             nu = tYJ(eta_tilde, gamma);
 
-            xi.set_size(opts.k);
+            xi.set_size(k);
             xi.zeros();
             eps = xi;
 
-            if (opts.m > 1)
+            if (m > 1)
             {
                 B_uptri_idx = arma::trimatu_ind(arma::size(B), 1);
             }
@@ -598,34 +459,33 @@ namespace VB
             {
                 B_uptri_idx = {0};
             }
+
+
+            if (opts.containsElementNamed("mcs"))
+            {
+                mcs_opts = Rcpp::as<Rcpp::List>(opts["mcs"]);
+            }
+            else
+            {
+                mcs_opts = SMC::MCS::default_settings();
+            }
+
+            mcs_opts["use_discount"] = false;
+            mcs_opts["W"] = W;
         }
 
 
         static Rcpp::List default_settings()
         {
-            Rcpp::List opts = Settings::get_default();
+            Rcpp::List opts = VariationalBayes::default_settings();
+            opts["learning_rate"] = 0.01;
+            opts["eps_step_size"] = 1.e-6;
+            opts["k"] = 1;
 
-            Rcpp::List W_opts;
-            W_opts["init"] = 0.01;
-            W_opts["type"] = "invgamma";
-            W_opts["prior"] = Rcpp::NumericVector::create(0.01, 0.01);
-
-            Rcpp::List mu0_opts;
-            mu0_opts["init"] = 0.;
-
-            Rcpp::List kappa_opts;
-            kappa_opts["init"] = 0.4;
-
-            Rcpp::List discount_opts;
-            discount_opts["use_discount"] = false;
-            discount_opts["use_custom"] = false;
-            discount_opts["custom_value"] = 0.95;
-            discount_opts["default_value"] = 0.99;
-
-
-            opts["W"] = W_opts;
-            opts["mu0"] = mu0_opts;
-            opts["kappa"] = kappa_opts;
+            Rcpp::List mcs_tmp = SMC::MCS::default_settings();
+            mcs_tmp["use_discount"] = false;
+            opts["mcs"] = mcs_tmp;
+            
 
             return opts;
         }
@@ -1179,10 +1039,10 @@ namespace VB
 
         static arma::vec init_eta( // Checked. OK.
             const std::vector<std::string> &params_selected,
-            const StaticParam &W,
-            const StaticParam &mu0,
-            const StaticParam &kappa,
-            const StaticParam &r,
+            const double &W,
+            const double &mu0,
+            const double &kappa,
+            const double &r,
             const bool &update_static)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
@@ -1199,22 +1059,22 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
-                    eta.at(i) = W.init;
+                    eta.at(i) = W;
                     break;
                 }
                 case AVAIL::Param::mu0:
                 {
-                    eta.at(i) = mu0.init;
+                    eta.at(i) = mu0;
                     break;
                 }
                 case AVAIL::Param::kappa:
                 {
-                    eta.at(i) = kappa.init;
+                    eta.at(i) = kappa;
                     break;
                 }
                 case AVAIL::Param::r:
                 {
-                    eta.at(i) = r.init;
+                    eta.at(i) = r;
                     break;
                 }
                 default:
@@ -1228,10 +1088,10 @@ namespace VB
         }
 
         static void update_params(
-            StaticParam &W,
-            StaticParam &mu0,
-            StaticParam &kappa,
-            StaticParam &r,
+            double &W,
+            double &mu0,
+            double &kappa,
+            double &r,
             Model &model,
             const std::vector<std::string> &params_selected,
             const arma::vec &eta
@@ -1245,28 +1105,28 @@ namespace VB
                 {
                 case AVAIL::Param::W: // W is selected
                 {
-                    W.val = val;
+                    W = val;
                     model.derr.update_par1(val);
                     bound_check(val, "update_params: W", true, true);
                 }
                 break;
                 case AVAIL::Param::mu0: // mu0 is selected
                 {
-                    mu0.val = val;
+                    mu0 = val;
                     model.dobs.update_par1(val);
                     bound_check(val, "update_params: mu0", false, true);
                 }
                 break;
                 case AVAIL::Param::kappa: // par 1 is selected
                 {
-                    kappa.val = val;
+                    kappa = val;
                     model.transfer.dlag.update_par1(val);
                     bound_check(val, "update_params: par1", true, true);
                 }
                 break;
                 case AVAIL::Param::r: // par 2 is selected
                 {
-                    r.val = val;
+                    r = val;
                     model.transfer.dlag.update_par2(val);
                     bound_check(val, "update_params: par2", true, true);
                 }
@@ -1281,36 +1141,24 @@ namespace VB
             return;
         }
 
-        void save(bool &saveiter, unsigned int &idx_run, const unsigned int &b)
-        {
-            saveiter = b > opts.nburnin && ((b - opts.nburnin - 1) % opts.nthin == 0);
-            saveiter = saveiter || b == (opts.ntotal - 1);
-
-            if (b == (opts.ntotal - 1))
-            {
-                idx_run = opts.nsample - 1;
-            }
-            else
-            {
-                idx_run = (b - opts.nburnin - 1) / opts.nthin;
-            }
-
-            return;
-        }
 
         void infer(const Model &model_in, const arma::vec &y)
         {
             Model model = model_in;
-            W.val = model.derr.par1;
-            mu0.val = model.dobs.par1;
-            kappa.val = model.transfer.dlag.par1;
-            r.val = model.transfer.dlag.par2;
+            W = model.derr.par1;
+            mu0 = model.dobs.par1;
+            kappa = model.transfer.dlag.par1;
+            r = model.transfer.dlag.par2;
 
-            Rcpp::List mcs_opts = SMC::MCS::default_settings();
-            mcs_opts["num_particle"]  = opts.nsmc;
-            mcs_opts["num_backward"] = model.dim.nL;
-            mcs_opts["W"] = W.val;
-            mcs_opts["use_discount"] = false;
+            // Rcpp::List mcs_opts = SMC::MCS::default_settings();
+            // mcs_opts["num_particle"]  = N;
+            // mcs_opts["num_backward"] = B;
+            // mcs_opts["W"] = W;
+            // mcs_opts["use_discount"] = false;
+
+            SMC::MCS mcs(model, y);
+            mcs.init(mcs_opts);
+
 
             // arma::vec eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
             // arma::vec eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
@@ -1321,18 +1169,17 @@ namespace VB
                 rcomb.at(l - 1) = nbinom::binom((unsigned int)model.transfer.dlag.par2 - 2 + l, l - 1);
             }
 
-            SMC::MCS mcs(model, y);
-
-
-            for (unsigned int b = 0; b < opts.ntotal; b ++)
+            
+            for (unsigned int b = 0; b < ntotal; b ++)
             {
-                bool saveiter = b > opts.nburnin && ((b - opts.nburnin - 1) % opts.nthin == 0);
+                bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 R_CheckUserInterrupt();
                 
-                mcs.W = W.val;
+                mcs.W = W;
                 mcs.infer(model);
                 arma::mat psi_all = mcs.get_psi_filter(); // (nT + 1) x M
                 psi = arma::median(psi_all, 1);
+
 
                 arma::vec ft  = psi;
                 ft.at(0) = 0.;
@@ -1346,29 +1193,27 @@ namespace VB
                 }
 
 
-                if (opts.update_static)
+                if (update_static)
                 {
                     arma::vec dlogJoint = dlogJoint_deta(
                         y, psi, ft, eta, 
-                        opts.params_selected,
-                        W.prior, model, rcomb); // Checked. OK.
+                        param_selected,
+                        W_prior, model, rcomb); // Checked. OK.
 
 
-                    arma::mat SigInv = get_sigma_inv(B, d, opts.k);
+                    arma::mat SigInv = get_sigma_inv(B, d, k);
                     arma::vec dlogq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu);
                     arma::vec ddiff = dlogJoint - dlogq;
 
-                    
 
                     arma::vec L_mu = dYJinv_dnu(nu, gamma) * ddiff;
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
 
-                    
-                    if (opts.m > 1)
+                    if (m > 1)
                     {
                         arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi);                  // m x mk
-                        arma::mat L_B = arma::reshape(dtheta_dB.t() * ddiff, opts.m, opts.k); // m x k
+                        arma::mat L_B = arma::reshape(dtheta_dB.t() * ddiff, m, k); // m x k
                         L_B.elem(B_uptri_idx).zeros();
                         arma::vec vecL_B = arma::vectorise(L_B); // mk x 1
                         grad_vecB.update_grad(vecL_B);
@@ -1386,7 +1231,6 @@ namespace VB
                     grad_d.update_grad(L_d);
                     d = d + grad_d.change;
 
-
                     // tau
                     arma::vec tau = gamma2tau(gamma);
                     arma::vec L_tau = dYJinv_dtau(nu, gamma) * ddiff;
@@ -1394,10 +1238,13 @@ namespace VB
                     tau = tau + grad_tau.change;
                     gamma = tau2gamma(tau);
 
-                    rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                    eta = tilde2eta(eta_tilde, opts.params_selected, W.prior.name);
 
-                    update_params(W, mu0, kappa, r, model, opts.params_selected, eta);
+                    rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
+                    eta = tilde2eta(eta_tilde, param_selected, W_prior.name);
+
+
+                    update_params(W, mu0, kappa, r, model, param_selected, eta);
+
                 }
 
                 // bool saveiter = false;
@@ -1408,28 +1255,28 @@ namespace VB
                     
                 // }
 
-                if (saveiter || b == (opts.ntotal - 1))
+                if (saveiter || b == (ntotal - 1))
                 {
                     unsigned int idx_run;
                     if (saveiter)
                     {
-                        idx_run = (b - opts.nburnin - 1) / opts.nthin;
+                        idx_run = (b - nburnin - 1) / nthin;
                     }
                     else
                     {
-                        idx_run = opts.nsample - 1;
+                        idx_run = nsample - 1;
                     }
 
                     psi_stored.col(idx_run) = psi;
-                    W.stored.at(idx_run);
-                    mu0.stored.at(idx_run);
-                    kappa.stored.at(idx_run);
-                    r.stored.at(idx_run);
+                    W_stored.at(idx_run) = W;
+                    mu0_stored.at(idx_run) = mu0;
+                    kappa_stored.at(idx_run) = kappa;
+                    r_stored.at(idx_run) = r;
                 }
 
                 
 
-                Rcpp::Rcout << "\rProgress: " << b << "/" << opts.ntotal - 1;
+                Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
 
             } // HVB loop
 
@@ -1444,21 +1291,39 @@ namespace VB
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1);
             output["psi"] = Rcpp::wrap(psi_quantile);
 
-            output["W"] = Rcpp::wrap(W.stored);
-            output["mu0"] = Rcpp::wrap(mu0.stored);
-            output["kappa"] = Rcpp::wrap(kappa.stored);
-            output["r"] = Rcpp::wrap(r.stored);
+            if (infer_W)
+            {
+                output["W"] = Rcpp::wrap(W_stored);
+            }
+
+            if (infer_mu0)
+            {
+                output["mu0"] = Rcpp::wrap(mu0_stored);
+            }
+
+            if (infer_kappa)
+            {
+                output["kappa"] = Rcpp::wrap(kappa_stored);
+            }
+
+            if (infer_r)
+            {
+                output["r"] = Rcpp::wrap(r_stored);
+            }
+
+            output["mcs"] = mcs_opts;
+
             return output;
         }
     
     private:
-        Settings opts;
-        Dim dim;
+        double learning_rate = 0.01;
+        double eps_step_size = 1.e-6;
+        unsigned int k = 1; // rank of unknown static parameters.
 
-        arma::vec psi;
-        arma::mat psi_stored;
+        Rcpp::List mcs_opts;
 
-        StaticParam W, mu0, delta, kappa, r;
+        // StaticParam W, mu0, delta, kappa, r;
         HybridParams grad_mu, grad_vecB, grad_d, grad_tau;
         arma::vec mu, d, gamma, nu, eps, eta, eta_tilde; // m x 1
         arma::vec xi; // k x 1

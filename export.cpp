@@ -444,7 +444,8 @@ Rcpp::List dgtf_infer(
     }
     case AVAIL::Algo::HybridVariation:
     {
-        VB::Hybrid hvb(method_settings, model.dim);
+        VB::Hybrid hvb(model, y);
+        hvb.init(method_settings);
         hvb.infer(model, y);
         output = hvb.get_output();
         break;

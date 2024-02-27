@@ -718,6 +718,13 @@ Rcpp::List hva_poisson(
     const unsigned int err_code = 0;
 
     arma::uvec model_code = {obs_code, link_code, trans_code, gain_code, err_code};
+    Rcpp::List mcs_opts = SMC::MCS::default_settings();
+    mcs_opts["num_particle"] = Nsmc;
+    mcs_opts["num_backward"] = nlag_in;
+    mcs_opts["W"] = W_par.at(0);
+    mcs_opts["use_discount"] = false;
+
+    std::vector<std::string> param_selected = {"W"};
 
     unsigned int W_prior_type = W_par.at(1);
 
@@ -752,6 +759,8 @@ Rcpp::List hva_poisson(
         dim, obs_dist, link_func,
         gain_func, lag_dist, err_dist,
         obs_par_in, lag_par_in, err_param, trans_func);
+
+    Dist W_prior("invgamma", 0.01, 0.01);
     
     arma::vec rcomb(n, arma::fill::zeros);
     for (unsigned int l = 1; l <= n; l++)
@@ -764,13 +773,17 @@ Rcpp::List hva_poisson(
     C0 *= std::pow(theta0_upbnd * 0.5, 2.);
 
     arma::uvec idx_select(m); // m x 1
-    arma::vec eta(m, arma::fill::zeros);
-    init_eta(
-        idx_select, eta, eta_select,
-        obs_par, lag_par, W_par, update_static);
+    // arma::vec eta(m, arma::fill::zeros);
+    // init_eta(
+    //     idx_select, eta, eta_select,
+    //     obs_par, lag_par, W_par, update_static);
+    double kappa = 0.4;
+    double r = 6;
+    arma::vec eta = VB::Hybrid::init_eta(param_selected, W, mu0, kappa, r, update_static);
 
-    arma::vec eta_tilde(m, arma::fill::zeros); // unknown part of eta which is also transformed to the real line
-    eta2tilde(eta_tilde, eta, idx_select, W_prior_type);
+    // arma::vec eta_tilde(m, arma::fill::zeros); // unknown part of eta which is also transformed to the real line
+    // eta2tilde(eta_tilde, eta, idx_select, W_prior_type);
+    arma::vec eta_tilde = VB::Hybrid::eta2tilde(eta, param_selected, W_prior.name);
 
     arma::vec gamma(m, arma::fill::ones);
     arma::vec nu = tYJ(eta_tilde, gamma); // m x 1, Yeo-Johnson transform of eta_tilde
@@ -818,38 +831,53 @@ Rcpp::List hva_poisson(
         B_uptri_idx = {0};
     }
 
+    VB::HybridParams grad_mu(m, learn_rate, eps_step);
+    VB::HybridParams grad_vecB(m * k, learn_rate, eps_step);
+    VB::HybridParams grad_d(m, learn_rate, eps_step);
+    VB::HybridParams grad_tau(m, learn_rate, eps_step);
+
+    SMC::MCS mcs(model, ypad);
+    mcs.init(mcs_opts);
     bool saveiter;
     for (unsigned int s = 0; s < ntotal; s++)
     {
         R_CheckUserInterrupt();
         saveiter = s > nburnin && ((s - nburnin - 1) % nthin == 0);
 
+        
+        // mcs_opts["W"] = W_par.at(0);
+        // mcs.init(mcs_opts);
+        mcs.W = W;
+        mcs.infer(model);
+        arma::mat psi_all = mcs.get_psi_filter();
+        arma::vec psi_pad = arma::median(psi_all, 1);
+
         /*
         Step 2. Sample state parameters via posterior
             - psi: (n+1) x 1 gain factor
             - eta = (W,mu0,rho,M)
         */
-        arma::vec pmarg_y(n, arma::fill::zeros);
-        bool use_discount = false;
-        if (eta_select.at(0) == 0 || s == 0)
-        {
-            use_discount = true;
-        }
+        // arma::vec pmarg_y(n, arma::fill::zeros);
+        // bool use_discount = false;
+        // if (eta_select.at(0) == 0 || s == 0)
+        // {
+        //     use_discount = true;
+        // }
 
-        arma::vec psi_pad(n + 1, arma::fill::zeros);
-        mcs_poisson(
-            psi_pad, pmarg_y, W_par.at(0), ypad, model, model_code,
-            obs_par, lag_par, nlag,
-            Blag, Nsmc, theta0_upbnd,
-            delta_discount, truncated, use_discount);
+        // arma::vec psi_pad(n + 1, arma::fill::zeros);
+        // mcs_poisson(
+        //     psi_pad, pmarg_y, W_par.at(0), ypad, model, model_code,
+        //     obs_par, lag_par, nlag,
+        //     Blag, Nsmc, theta0_upbnd,
+        //     delta_discount, truncated, use_discount);
 
-        // arma::vec hpsi_pad = GainFunc::psi2hpsi(psi_pad, gain_func); // (n+1) x 1
-        // arma::vec theta(n,arma::fill::zeros);
-        // hpsi2theta(
-        //     theta, hpsi_pad, ypad, lag_par,
-        //     trans_code, nlag, truncated); // theta
-        // arma::vec theta_pad(n+1,arma::fill::zeros);
-        // theta_pad.tail(n) = theta;
+        // // arma::vec hpsi_pad = GainFunc::psi2hpsi(psi_pad, gain_func); // (n+1) x 1
+        // // arma::vec theta(n,arma::fill::zeros);
+        // // hpsi2theta(
+        // //     theta, hpsi_pad, ypad, lag_par,
+        // //     trans_code, nlag, truncated); // theta
+        // // arma::vec theta_pad(n+1,arma::fill::zeros);
+        // // theta_pad.tail(n) = theta;
 
         arma::vec theta_pad(dim.nT + 1, arma::fill::zeros);
         for (unsigned int t = 1; t < dim.nT + 1; t++)
@@ -864,10 +892,9 @@ Rcpp::List hva_poisson(
             /*
             Step 3. Compute gradient of the log variational distribution (Model Dependent)
             */
-            arma::vec delta_logJoint = dlogJoint_deta(
+            arma::vec delta_logJoint = VB::Hybrid::dlogJoint_deta(
                 ypad, psi_pad, theta_pad,
-                eta, idx_select, W_par, lag_par,
-                rcomb, delta_nb, obs_code, gain_code); // m x 1
+                eta, param_selected, W_prior, model, rcomb); // m x 1
 
             arma::mat SigInv = get_sigma_inv(B, d, k);                             // m x m
             arma::vec delta_logq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu); // m x 1
@@ -879,10 +906,13 @@ Rcpp::List hva_poisson(
 
             // mu
             arma::vec L_mu = dYJinv_dnu(nu, gamma) * delta_diff; // m x 1
-            arma::vec mu_change = update_vb_param(
-                curEg2_mu, curEdelta2_mu,
-                L_mu, learn_rate, eps_step);
-            mu = mu + mu_change;
+            grad_mu.update_grad(L_mu);
+            mu = mu + grad_mu.change;
+
+            // arma::vec mu_change = update_vb_param(
+            //     curEg2_mu, curEdelta2_mu,
+            //     L_mu, learn_rate, eps_step);
+            // mu = mu + mu_change;
 
             // B
             if (m > 1)
@@ -906,20 +936,19 @@ Rcpp::List hva_poisson(
 
             // d
             arma::vec L_d = dYJinv_dD(nu, gamma, eps) * delta_diff; // m x 1
-            arma::vec d_change = update_vb_param(
-                curEg2_d, curEdelta2_d,
-                L_d, learn_rate, eps_step);
-            d = d + d_change;
+            grad_d.update_grad(L_d);
+            d = d + grad_d.change;
+            // arma::vec d_change = update_vb_param(
+            //     curEg2_d, curEdelta2_d,
+            //     L_d, learn_rate, eps_step);
+            // d = d + d_change;
 
             // tau
             arma::vec tau = gamma2tau(gamma);
             arma::vec L_tau = dYJinv_dtau(nu, gamma) * delta_diff;
 
-            arma::vec tau_change = update_vb_param(
-                curEg2_tau, curEdelta2_tau,
-                L_tau, learn_rate, eps_step);
-
-            tau = tau + tau_change;
+            grad_tau.update_grad(L_tau);
+            tau = tau + grad_tau.change;
             gamma = tau2gamma(tau);
 
             bool valid_sample = false;
@@ -928,7 +957,8 @@ Rcpp::List hva_poisson(
                 try
                 {
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                    tilde2eta(eta, eta_tilde, idx_select, W_prior_type);
+                    eta = VB::Hybrid::tilde2eta(eta_tilde, param_selected, W_prior.name);
+                    // tilde2eta(eta, eta_tilde, idx_select, W_prior_type);
                     valid_sample = true;
                 }
                 catch (...)
@@ -937,7 +967,9 @@ Rcpp::List hva_poisson(
                 }
             }
 
-            update_params(obs_par, lag_par, W_par, idx_select, eta);
+            VB::Hybrid::update_params(W, mu0, kappa, r, model, param_selected, eta);
+
+            // update_params(obs_par, lag_par, W_par, idx_select, eta);
         }
 
         if (saveiter || s == (ntotal - 1))
@@ -957,9 +989,14 @@ Rcpp::List hva_poisson(
             // gamma_stored.col(s) = gamma;
             psi_stored.col(idx_run) = psi_pad;
 
-            W_stored.at(idx_run) = W_par.at(0);
-            mu0_stored.at(idx_run) = obs_par.at(0);
-            rho_stored.at(idx_run) = lag_par.at(0);
+            W_stored.at(idx_run) = W;
+            mu0_stored.at(idx_run) = mu0;
+            // kappa_stored.at(idx_run) = kappa;
+
+
+            // W_stored.at(idx_run) = W_par.at(0);
+            // mu0_stored.at(idx_run) = obs_par.at(0);
+            // rho_stored.at(idx_run) = lag_par.at(0);
         }
 
         Rcout << "\rProgress: " << s << "/" << ntotal - 1;
