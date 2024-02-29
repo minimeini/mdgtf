@@ -23,6 +23,7 @@ namespace VB
         unsigned int nthin = 2;
         unsigned int nburnin = 1000;
         unsigned int ntotal = 3001;
+        unsigned int nforecast = 0;
 
         unsigned int N = 500; // number of SMC particles
         unsigned int B = 1;
@@ -104,6 +105,12 @@ namespace VB
             if (opts.containsElementNamed("num_particle"))
             {
                 N = Rcpp::as<unsigned int>(opts["num_particle"]);
+            }
+
+            nforecast = 0;
+            if (opts.containsElementNamed("num_step_ahead_forecast"))
+            {
+                nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
             }
 
             B = 1;
@@ -258,6 +265,7 @@ namespace VB
 
             opts["num_particle"] = 500;
             opts["num_backward"] = 1;
+            opts["num_step_ahead_forecast"] = 0;
 
             opts["W"] = W_opts;
             opts["mu0"] = mu0_opts;
@@ -267,6 +275,26 @@ namespace VB
 
             return opts;
         }
+
+
+        Rcpp::List forecast(const Model &model)
+        {
+            Rcpp::List out = Model::forecast(y, psi_stored, W_stored, model, nforecast);
+            return out;
+        }
+
+
+        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
+        {
+            return Model::forecast_error(psi_stored, y, model, loss_func);
+        }
+
+        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
+        {
+            return Model::fitted_error(psi_stored, y, model, loss_func);
+        }
+
+        
     };
     /**
      * @brief Gradient ascent.
@@ -1142,7 +1170,7 @@ namespace VB
         }
 
 
-        void infer(const Model &model_in, const arma::vec &y)
+        void infer(const Model &model_in)
         {
             Model model = model_in;
             W = model.derr.par1;

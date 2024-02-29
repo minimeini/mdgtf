@@ -434,10 +434,10 @@ namespace LBA
             _nT = model.dim.nT;
 
             double _ft = 0.;
-            _ft_prior_mean = _ft;
-            _ft_prior_var = _ft;
-            _ft_post_mean = _ft;
-            _ft_post_var = _ft;
+            // _ft_prior_mean = _ft;
+            // _ft_prior_var = _ft;
+            // _ft_post_mean = _ft;
+            // _ft_post_var = _ft;
             _alphat = 0.01;
             _betat = 0.01;
 
@@ -449,6 +449,12 @@ namespace LBA
             _beta_t = _psi_mean;
             _alpha_t.at(0) = _alphat;
             _beta_t.at(0) = _betat;
+
+            _ft_prior_mean = _psi_mean;
+            _ft_prior_var = _psi_mean;
+            _ft_post_mean = _psi_mean;
+            _ft_post_var = _psi_mean;
+
 
             _At.set_size(_nP);
             _At.zeros();
@@ -511,25 +517,29 @@ namespace LBA
                     _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
                     _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 
+                    double ft_tmp, qt_tmp;
+                    
                     func_prior_ft(
-                        _ft_prior_mean, _ft_prior_var, _Ft,
+                        ft_tmp, qt_tmp, _Ft,
                         t, _model, _y,
                         _at.col(t), _Rt.slice(t), _fill_zero);
-                    
-                    func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), false);
+                                        
+                    func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), false);
                     stats_forecast.at(i, t) = ObsDist::dforecast(_y.at(t), _model.dobs.name, _model.dobs.par2, _alphat, _betat, false);
 
-                    func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), true);
+                    func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
 
                     _alpha_t.at(t) = _alphat;
                     _beta_t.at(t) = _betat;
 
-                    _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
+                    _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
 
-                    func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
+                    double ft_tmp2, qt_tmp2;
 
-                    _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
-                    _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
+                    func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+
+                    _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
+                    _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
                 }
 
                 if (do_smoothing)
@@ -540,14 +550,11 @@ namespace LBA
 
             }
 
+            return stats_forecast;
+
         }
 
 
-        arma::mat fit_stats()
-        {
-            
-        }
-        
 
         void filter_single_iter(const unsigned int &t)
         {
@@ -555,21 +562,29 @@ namespace LBA
             _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
             _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 
+            double ft_tmp = 0.;
+            double qt_tmp = 0.;
             func_prior_ft(
-                _ft_prior_mean, _ft_prior_var, _Ft,
+                ft_tmp, qt_tmp, _Ft,
                 t, _model, _y,
                 _at.col(t), _Rt.slice(t), _fill_zero);
+            _ft_prior_mean.at(t) = ft_tmp;
+            _ft_prior_var.at(t) = qt_tmp;
 
-            func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), true);
+            func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
             _alpha_t.at(t) = _alphat;
             _beta_t.at(t) = _betat;
 
-            _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
+            _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
 
-            func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
+            double ft_tmp2 = 0.;
+            double qt_tmp2 = 0.;
+            func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+            _ft_post_mean.at(t) = ft_tmp2;
+            _ft_post_var.at(t) = qt_tmp2;
 
-            _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
-            _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
+            _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
+            _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
         }
 
 
@@ -599,21 +614,29 @@ namespace LBA
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 
+                double ft_tmp = 0.;
+                double qt_tmp = 0.;
                 func_prior_ft(
-                    _ft_prior_mean, _ft_prior_var, _Ft,
+                    ft_tmp, qt_tmp, _Ft,
                     t, _model, _y,
-                    _at.col(t), _Rt.slice(t));
+                    _at.col(t), _Rt.slice(t), _fill_zero);
+                _ft_prior_mean.at(t) = ft_tmp;
+                _ft_prior_var.at(t) = qt_tmp;
 
-                func_alpha_beta(_alphat, _betat, _model, _ft_prior_mean, _ft_prior_var, _y.at(t), true);
+                func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
                 _alpha_t.at(t) = _alphat;
                 _beta_t.at(t) = _betat;
 
-                _At = func_At(_Rt.slice(t), _Ft, _ft_prior_var);
+                _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
 
-                func_posterior_ft(_ft_post_mean, _ft_post_var, _model, _alphat, _betat);
+                double ft_tmp2 = 0.;
+                double qt_tmp2 = 0.;
+                func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+                _ft_post_mean.at(t) = ft_tmp2;
+                _ft_post_var.at(t) = qt_tmp2;
 
-                _mt.col(t) = func_mt(_at.col(t), _At, _ft_prior_mean, _ft_post_mean);
-                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, _ft_prior_var, _ft_post_var);
+                _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
+                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
             }
 
             return;
@@ -701,6 +724,137 @@ namespace LBA
             bound_check<arma::vec>(_psi_var, "smoother: _psi_var");
         }
 
+
+        /**
+         * @brief Filtering fitted distribution: (y[t] | D[t]) ~ (ft post mean, ft post var); smoothing fitted distribution: y[t] | D[nT].
+         * 
+         * @return Rcpp::List 
+         */
+        Rcpp::List fitted_error(const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
+        {
+            /*
+            Filtering fitted distribution: (y[t] | D[t]) ~ (_ft_post_mean, _ft_post_var);
+            
+            */
+            arma::mat res_filter(_model.dim.nT + 1, nsample, arma::fill::zeros);
+            arma::mat yhat_filter(_model.dim.nT + 1, nsample, arma::fill::zeros);
+            for (unsigned int t = 1; t <= _model.dim.nT; t ++)
+            {
+                arma::vec yhat = _ft_post_mean.at(t) + std::sqrt(_ft_post_var.at(t)) * arma::randn(nsample);
+                arma::vec res = _y.at(t) - yhat;
+
+                yhat_filter.row(t) = yhat.t();
+                res_filter.row(t) = res.t();
+            }
+
+            arma::vec y_loss(_model.dim.nT + 1, arma::fill::zeros);
+            double y_loss_all = 0.;
+            std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+            switch (loss_list[tolower(loss_func)])
+            {
+            case AVAIL::L1: // mae
+            {
+                arma::mat ytmp = arma::abs(res_filter);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+                break;
+            }
+            case AVAIL::L2: // rmse
+            {
+                arma::mat ytmp = arma::square(res_filter);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+                y_loss = arma::sqrt(y_loss);
+                y_loss_all = std::sqrt(y_loss_all);
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            }
+
+            Rcpp::List out_filter;
+            out_filter["yhat"] = Rcpp::wrap(yhat_filter);
+            out_filter["residual"] = Rcpp::wrap(res_filter);
+
+            /*
+            Smoothing fitted distribution: (y[t] | D[nT]) = int (y[t] | theta[t]) (theta[t] | D[nT]) d theta[t], where (theta[t] | D[nT]) ~ (atilde[t], Rtilde[t])
+            */
+            arma::vec psi_mean = arma::vectorise(_atilde_t.row(0)); // (nT + 1) x 1
+            arma::vec psi_var = arma::vectorise(_Rtilde_t.tube(0, 0)); // (nT + 1) x 1
+            arma::vec psi_sd = arma::sqrt(psi_var);
+
+            arma::mat psi_sample(_model.dim.nT + 1, nsample, arma::fill::zeros);
+            for (unsigned int i = 0; i < nsample; i ++)
+            {
+                arma::vec psi_tmp = psi_mean + psi_sd * arma::randn(_model.dim.nT + 1); // (nT + 1) x 1
+                psi_sample.col(i) = psi_tmp;
+            }
+
+            Rcpp::List out_smooth = Model::fitted_error(psi_sample, _y, _model, loss_func);
+
+            Rcpp::List out;
+            out["filter"] = out_filter;
+            out["smooth"] = out_smooth;
+            return out;
+        }
+
+
+        /**
+         * @brief Forecasting distribution y[t + 1] | D[t] ~ (ft prior mean, ft prior var)
+         * 
+         * @return Rcpp::List 
+         */
+        Rcpp::List forecast_error(const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
+        {
+            arma::mat ycast(_model.dim.nT + 1, nsample, arma::fill::zeros);
+            arma::mat y_err_cast(_model.dim.nT, nsample, arma::fill::zeros);
+            for (unsigned int t = 2; t <= _model.dim.nT; t ++)
+            {
+                arma::vec ytmp = _ft_prior_mean.at(t) + std::sqrt(_ft_prior_var.at(t)) * arma::randn(nsample);
+                ycast.row(t) = ytmp.t();
+
+                y_err_cast.row(t) = _y.at(t) - ycast.row(t);
+            }
+
+            arma::vec y_loss(_model.dim.nT + 1, arma::fill::zeros);
+            double y_loss_all = 0;
+
+            std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+            switch (loss_list[tolower(loss_func)])
+            {
+            case AVAIL::L1: // mae
+            {
+                arma::mat ytmp = arma::abs(y_err_cast);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+                break;
+            }
+            case AVAIL::L2: // rmse
+            {
+                arma::mat ytmp = arma::square(y_err_cast);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+                y_loss = arma::sqrt(y_loss);
+                y_loss_all = std::sqrt(y_loss_all);
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            }
+
+            Rcpp::List out;
+            out["y_cast"] = Rcpp::wrap(ycast);
+            out["y"] = Rcpp::wrap(_y);
+            out["y_loss"] = Rcpp::wrap(y_loss);
+            out["y_loss_all"] = y_loss_all;
+
+            return out;
+        }
+
         void init(const Rcpp::List &opts_in)
         {
             opts = opts_in;
@@ -781,10 +935,15 @@ namespace LBA
         arma::vec _psi_mean; // (nT + 1) x 1
         arma::vec _psi_var; // (nT + 1) x 1
         arma::vec _alpha_t, _beta_t; // (nT + 1) x 1
+        arma::vec _ft_prior_mean; // (nT + 1) x 1, one-step-ahead forecasting distribution of y
+        arma::vec _ft_prior_var;  // (nT + 1) x 1, one-step-ahead forecasting distribution of y
+        arma::vec _ft_post_mean;  // (nT + 1) x 1, fitted distribution based on filtering states
+        arma::vec _ft_post_var; // (nT + 1) x 1, fitted distribution based on filtering states
 
         arma::vec _Ft, _At; // nP x 1
         arma::mat _Gt; // nP x nP
-        double _alphat, _betat, _ft, _ft_prior_mean, _ft_prior_var, _ft_post_mean, _ft_post_var;
+        double _alphat, _betat, _ft;
+        // , _ft_prior_mean, _ft_prior_var, _ft_post_mean, _ft_post_var;
     };
 }
 

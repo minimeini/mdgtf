@@ -12,6 +12,8 @@
 #include <nlopt.h>
 #include "LagDist.hpp"
 #include "GainFunc.hpp"
+#include "LinkFunc.hpp"
+
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo, nloptr)]]
 
@@ -496,6 +498,7 @@ public:
 
         return ft_now;
     }
+
 
 private:
     Dim _dim;

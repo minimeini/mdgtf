@@ -58,6 +58,12 @@ public:
         sd // par2 of dLag - lognorm
     };
 
+    enum Loss
+    {
+        L1,
+        L2
+    };
+
     static const std::map<std::string, Algo> algo_list;
     static const std::map<std::string, Dist> obs_list;
     static const std::map<std::string, Dist> lag_list;
@@ -67,6 +73,7 @@ public:
     static const std::map<std::string, Dist> err_list;
     static const std::map<std::string, Dist> W_prior_list;
     static const std::map<std::string, Param> static_param_list;
+    static const std::map<std::string, Loss> loss_list;
 
     static unsigned int get_gain_code(const std::string &gain_func);
     static unsigned int get_obs_code(const std::string &obs_dist);
@@ -224,7 +231,23 @@ private:
 
         return map;
     }
-};
+
+    static std::map<std::string, Loss> map_loss_func()
+    {
+        std::map<std::string, Loss> LOSS_MAP;
+
+        LOSS_MAP["l1"] = Loss::L1;
+        LOSS_MAP["absolute"] = Loss::L1;
+        LOSS_MAP["mae"] = Loss::L1;
+
+        LOSS_MAP["l2"] = Loss::L2;
+        LOSS_MAP["quadratic"] = Loss::L2;
+        LOSS_MAP["rmse"] = Loss::L2;
+        LOSS_MAP["mse"] = Loss::L2;
+
+        return LOSS_MAP;
+    }
+}; // class AVAIL
 
 inline const std::map<std::string, AVAIL::Algo> AVAIL::algo_list = AVAIL::map_algorithm();
 inline const std::map<std::string, AVAIL::Dist> AVAIL::obs_list = AVAIL::map_obs_dist();
@@ -236,6 +259,7 @@ inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err
 
 inline const std::map<std::string, AVAIL::Dist> AVAIL::W_prior_list = AVAIL::map_W_prior();
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
+inline const std::map<std::string, AVAIL::Loss> AVAIL::loss_list = AVAIL::map_loss_func();
 
 
 inline unsigned int AVAIL::get_obs_code(const std::string &obs_dist)

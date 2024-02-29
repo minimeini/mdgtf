@@ -261,6 +261,12 @@ namespace MCMC
 
             ntotal = nburnin + nthin * nsample + 1;
 
+            nforecast = 0;
+            if (opts.containsElementNamed("num_step_ahead_forecast"))
+            {
+                nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
+            }
+
             W = 0.01;
             infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
@@ -353,6 +359,8 @@ namespace MCMC
             opts["nthin"] = 1;
             opts["nsample"] = 100;
 
+            opts["num_step_ahead_forecast"] = 0;
+
             return opts;
         }
 
@@ -378,10 +386,29 @@ namespace MCMC
             return output;
         }
 
-        void infer(
-            Model &model, 
-            const arma::vec &y // (nT + 1) x 1
-            )
+        Rcpp::List forecast(const Model &model)
+        {
+            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            Rcpp::List out = Model::forecast(
+                y, psi_stored, W_stored, model, nforecast
+            );
+
+            return out;
+        }
+
+        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
+        {
+            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            return Model::forecast_error(psi_stored, y, model, loss_func);
+        }
+
+        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
+        {
+            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            return Model::fitted_error(psi_stored, y, model, loss_func);
+        }
+
+        void infer(Model &model)
         {
             model_info = model.info();
 
@@ -452,6 +479,7 @@ namespace MCMC
         unsigned int nthin = 1;
         unsigned int nsample = 100;
         unsigned int ntotal = 200;
+        unsigned int nforecast = 0;
 
         Rcpp::List model_info;
 

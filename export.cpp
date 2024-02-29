@@ -172,17 +172,26 @@ Rcpp::List dgtf_infer(
     const arma::vec &y,
     const std::string &method,
     const Rcpp::List &method_settings,
-    const bool &summarize = true)
+    const bool &summarize = true,
+    const bool &forecast_error = true,
+    const bool &fitted_error = true,
+    const std::string &loss_func = "quadratic")
 {
     // Model model = dgtf_initialize(model_settings);
     Model model(model_settings);
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::string algo_name = tolower(method);
 
+    unsigned int nforecast = 0;
+    if (method_settings.containsElementNamed("num_step_ahead_forecast"))
+    {
+        nforecast = Rcpp::as<unsigned int>(method_settings["num_step_ahead_forecast"]);
+    }
+
     // arma::vec ypad(model.dim.nT + 1, arma::fill::zeros);
     // ypad.tail(y.n_elem) = y;
 
-    Rcpp::List output;
+    Rcpp::List output, forecast, error;
     arma::mat psi(model.dim.nT + 1, 3);
     arma::vec ci_prob = {0.025, 0.5, 0.975};
 
@@ -196,6 +205,17 @@ Rcpp::List dgtf_infer(
         linear_bayes.smoother();
         output = linear_bayes.get_output();
 
+        if (forecast_error)
+        {
+            Rcpp::List tmp = linear_bayes.forecast_error(1000, loss_func);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = linear_bayes.fitted_error(1000, loss_func);
+            error["fitted"] = tmp;
+        }
+
         break;
     } // case Linear Bayes
     case AVAIL::Algo::MCS:
@@ -205,7 +225,22 @@ Rcpp::List dgtf_infer(
         mcs.infer(model);
         output = mcs.get_output();
 
-        
+        if (nforecast > 0)
+        {
+            forecast = mcs.forecast(model);
+        }
+
+        if (forecast_error)
+        {
+            Rcpp::List tmp = mcs.forecast_error(model, loss_func);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = mcs.fitted_error(model, loss_func);
+            error["fitted"] = tmp;
+        }
+
         break;
     } // case MCS
     case AVAIL::Algo::FFBS:
@@ -214,6 +249,23 @@ Rcpp::List dgtf_infer(
         ffbs.init(method_settings);
         ffbs.infer(model);
         output = ffbs.get_output();
+
+        if (nforecast > 0)
+        {
+            forecast = ffbs.forecast(model);
+        }
+
+        if (forecast_error)
+        {
+            Rcpp::List tmp = ffbs.forecast_error(model, loss_func);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = ffbs.fitted_error(model, loss_func);
+            error["fitted"] = tmp;
+        }
+
         break;
     } // case FFBS
     case AVAIL::Algo::ParticleLearning:
@@ -222,29 +274,131 @@ Rcpp::List dgtf_infer(
         pl.init(method_settings);
         pl.infer(model);
         output = pl.get_output();
-        
+
+        if (nforecast > 0)
+        {
+            forecast = pl.forecast(model);
+        }
+
+        if (forecast_error)
+        {
+            Rcpp::List tmp = pl.forecast_error(model, loss_func);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = pl.fitted_error(model, loss_func);
+            error["fitted"] = tmp;
+        }
+
+
         break;
     } // case particle learning
     case AVAIL::Algo::MCMC:
     {
         MCMC::Disturbance mcmc(model, y);
         mcmc.init(method_settings);
-        mcmc.infer(model, y);
+        mcmc.infer(model);
         output = mcmc.get_output();
+
+        if (nforecast > 0)
+        {
+            forecast = mcmc.forecast(model);
+        }
+
+        if (forecast_error)
+        {
+            Rcpp::List tmp = mcmc.forecast_error(model, loss_func);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = mcmc.fitted_error(model, loss_func);
+            error["fitted"] = tmp;
+        }
         break;
     }
     case AVAIL::Algo::HybridVariation:
     {
         VB::Hybrid hvb(model, y);
         hvb.init(method_settings);
-        hvb.infer(model, y);
+        hvb.infer(model);
         output = hvb.get_output();
+
+        if (nforecast > 0)
+        {
+            forecast = hvb.forecast(model);
+        }
+
+        if (forecast_error)
+        {
+            Rcpp::List tmp = hvb.forecast_error(model, loss_func);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = hvb.fitted_error(model, loss_func);
+            error["fitted"] = tmp;
+        }
         break;
     }
     default:
         break;
     }// switch by algorithm
 
+    Rcpp::List out;
+    if (nforecast > 0 || forecast_error || fitted_error)
+    {
+        out["fit"] = output;
+        if (nforecast > 0) { out["pred"] = forecast; }
+        if (forecast_error || fitted_error)
+        {
+            out["error"] = error;
+        }
+    }
+    else
+    {
+        out = output;
+    }
 
-    return output;
+
+    return out;
+}
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List dgtf_forecast(
+    const Rcpp::List &model_settings,
+    const arma::vec &y, // (nT + 1) x 1
+    const arma::mat &psi, // (nT + 1) x nsample
+    const arma::vec &W, // nsample x 1
+    const unsigned int &k = 1 // k-step-ahead forecasting
+    )
+{
+    Model model(model_settings);
+    Rcpp::List out = Model::forecast(
+        y, psi, W, model, k
+    );
+    return out;
+}
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List dgtf_evaluate(
+    const Rcpp::List &model_settings,
+    const arma::vec &y,   // (nT + 1) x 1
+    const arma::mat &psi, // (nT + 1) x nsample
+    const std::string &loss_func = "quadratic"
+)
+{
+    Model model(model_settings);
+    Rcpp::List forecast = Model::forecast_error(psi, y, model, loss_func);
+    Rcpp::List fitted = Model::fitted_error(psi, y, model, loss_func);
+
+    Rcpp::List out;
+    out["forecast"] = forecast;
+    out["fitted"] = fitted;
+
+    return out;
 }
