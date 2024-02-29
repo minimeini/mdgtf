@@ -26,7 +26,7 @@ namespace SMC
 
             meff.set_size(dim.nT + 1);
             meff.zeros();
-            pmarg = meff;
+            log_cond_marginal = meff;
 
             return;
         }
@@ -39,7 +39,7 @@ namespace SMC
 
             meff.set_size(dim.nT + 1);
             meff.zeros();
-            pmarg = meff;
+            log_cond_marginal = meff;
         }
 
         static Rcpp::List default_settings()
@@ -252,6 +252,28 @@ namespace SMC
             return weights;            
         }
 
+
+        static double log_conditional_marginal(const arma::vec &unnormalised_weights)
+        {
+            unsigned int N = unnormalised_weights.n_elem; // number of particles
+            double N_ = static_cast<double>(N);
+            double wsum = arma::accu(arma::abs(unnormalised_weights));
+            double log_cond_marg = std::log(wsum + EPS) - std::log(N_);
+
+            return log_cond_marg;
+        }
+
+        static double marginal_likelihood(const arma::vec log_cond_marg, const bool &return_log = true)
+        {
+            double pmarg = arma::accu(log_cond_marg);
+            if (!return_log)
+            {
+                pmarg = std::exp(std::min(pmarg, UPBND));
+            }
+
+            return pmarg;
+        }
+
         static arma::vec imp_weights_forecast(
             const arma::mat &Theta_now,
             const arma::vec &Wsqrt,
@@ -316,8 +338,8 @@ namespace SMC
 
         arma::vec y, Wt; // (nT + 1) x 1
         arma::vec weights, lambda; // N x 1
-        arma::vec meff, pmarg;
-        
+        arma::vec meff, log_cond_marginal;
+
         arma::cube Theta_stored; // p x N x (nT + B)
         arma::cube Theta_smooth; // p x M x (nT + B)
         // arma::mat psi_smooth; // (nT + B) x M
@@ -361,6 +383,8 @@ namespace SMC
             {
                 output["psi"] = Rcpp::wrap(psi_filter);
             }
+
+            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return output;
         }
@@ -435,6 +459,8 @@ namespace SMC
                 bool positive_noise = (t < Theta_now.n_rows) ? true : false;
                 arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
                 weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
+                log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
+
                 arma::uvec resample_idx = get_resample_index(weights);
 
                 Theta_stored.slice(t + B) = Theta_next;
@@ -517,6 +543,8 @@ namespace SMC
                     output["psi"] = Rcpp::wrap(psi);
                 }
             }
+
+            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return output;
         }
@@ -636,6 +664,8 @@ namespace SMC
                 bool positive_noise = (t < Theta_now.n_rows) ? true : false;
                 arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
                 weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
+                log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
+
                 arma::uvec resample_idx = get_resample_index(weights);
 
                 Theta_stored.slice(t + 1) = Theta_next.cols(resample_idx);
@@ -805,6 +835,8 @@ namespace SMC
                 }
             }
 
+            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
+
             return output;
         }
 
@@ -942,6 +974,8 @@ namespace SMC
                 arma::vec err = arma::vectorise(Theta_next.row(0) - Theta_now.row(0)); // N x 1, for W
                 
                 weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
+                log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
+
                 // meff.at(t) = 1. / arma::dot(weights, weights);
 
                 // if (meff.at(t) > 0.1 * static_cast<double>(N))

@@ -367,6 +367,20 @@ namespace VB
             arma::vec oldEg2 = curEg2;
 
             curEg2 = (1. - learning_rate) * oldEg2 + learning_rate * arma::pow(dYJinv_dVecPar, 2.); // m x 1
+            try
+            {
+                bound_check<arma::vec>(curEg2, "curEg2");
+            }
+            catch(const std::exception& e)
+            {
+                oldEg2.t().print("\n oldEg2");
+                dYJinv_dVecPar.t().print("\ndYJinv_dVecPar");
+                curEg2.t().print("\n curEg2");
+
+                std::cerr << e.what() << '\n';
+                throw std::invalid_argument(e.what());
+            }
+            
             rho = arma::sqrt(curEdelta2 + eps_step_size) / arma::sqrt(curEg2 + eps_step_size);
 
             par_change = rho % dYJinv_dVecPar;
@@ -376,11 +390,11 @@ namespace VB
             }
             catch(const std::exception& e)
             {
-                std::cout << e.what() << std::endl;
                 dYJinv_dVecPar.t().print("\ndYJinv_dVecPar");
                 rho.t().print("\n rho");
                 oldEg2.t().print("\n oldEg2");
                 std::cout << "\n learn rate = " << learning_rate << " eps = " << eps_step_size << std::endl;
+                throw std::invalid_argument(e.what());
             }
             
             
@@ -388,7 +402,7 @@ namespace VB
             arma::vec oldEdelta2 = curEdelta2;
             curEdelta2 = (1. - learning_rate) * oldEdelta2 + learning_rate * arma::pow(par_change, 2.);
 
-            bound_check<arma::vec>(curEg2, "update_grad: curEg2");
+            
             bound_check<arma::vec>(curEdelta2, "update_grad: curEdelta2");
             return;
         }

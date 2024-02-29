@@ -775,20 +775,26 @@ namespace LBA
             }
 
             Rcpp::List out_filter;
-            out_filter["yhat"] = Rcpp::wrap(yhat_filter);
+            arma::vec qprob = {0.025, 0.5, 0.975};
+            arma::mat yhat_out = arma::quantile(yhat_filter, qprob, 1);
+
+            out_filter["yhat"] = Rcpp::wrap(yhat_out);
+            out_filter["yhat_all"] = Rcpp::wrap(yhat_filter);
             out_filter["residual"] = Rcpp::wrap(res_filter);
+            out_filter["y_loss"] = Rcpp::wrap(y_loss);
+            out_filter["y_lost_all"] = y_loss_all;
 
             /*
             Smoothing fitted distribution: (y[t] | D[nT]) = int (y[t] | theta[t]) (theta[t] | D[nT]) d theta[t], where (theta[t] | D[nT]) ~ (atilde[t], Rtilde[t])
             */
             arma::vec psi_mean = arma::vectorise(_atilde_t.row(0)); // (nT + 1) x 1
             arma::vec psi_var = arma::vectorise(_Rtilde_t.tube(0, 0)); // (nT + 1) x 1
-            arma::vec psi_sd = arma::sqrt(psi_var);
+            arma::vec psi_sd = arma::sqrt(psi_var);                    // (nT + 1) x 1
 
             arma::mat psi_sample(_model.dim.nT + 1, nsample, arma::fill::zeros);
             for (unsigned int i = 0; i < nsample; i ++)
             {
-                arma::vec psi_tmp = psi_mean + psi_sd * arma::randn(_model.dim.nT + 1); // (nT + 1) x 1
+                arma::vec psi_tmp = psi_mean + psi_sd % arma::randn(_model.dim.nT + 1); // (nT + 1) x 1
                 psi_sample.col(i) = psi_tmp;
             }
 
@@ -809,7 +815,7 @@ namespace LBA
         Rcpp::List forecast_error(const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
         {
             arma::mat ycast(_model.dim.nT + 1, nsample, arma::fill::zeros);
-            arma::mat y_err_cast(_model.dim.nT, nsample, arma::fill::zeros);
+            arma::mat y_err_cast(_model.dim.nT + 1, nsample, arma::fill::zeros);
             for (unsigned int t = 2; t <= _model.dim.nT; t ++)
             {
                 arma::vec ytmp = _ft_prior_mean.at(t) + std::sqrt(_ft_prior_var.at(t)) * arma::randn(nsample);
@@ -847,7 +853,11 @@ namespace LBA
             }
 
             Rcpp::List out;
-            out["y_cast"] = Rcpp::wrap(ycast);
+
+            arma::vec qprob = {0.025, 0.5, 0.975};
+            arma::mat ycast_out = arma::quantile(ycast, qprob, 1);
+            out["y_cast"] = Rcpp::wrap(ycast_out);
+            out["y_cast_all"] = Rcpp::wrap(ycast);
             out["y"] = Rcpp::wrap(_y);
             out["y_loss"] = Rcpp::wrap(y_loss);
             out["y_loss_all"] = y_loss_all;

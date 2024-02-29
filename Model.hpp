@@ -479,14 +479,17 @@ public:
             psi_all.col(i) = psi_vec;
         }
 
+        
+        arma::vec qprob = {0.025, 0.5, 0.975};
+        arma::mat yqt = arma::quantile(yall, qprob, 1);
+
         Rcpp::List out;
+        out["y"] = Rcpp::wrap(yqt);
         out["yall"] = Rcpp::wrap(yall);
         out["yfit"] = Rcpp::wrap(y);
         out["ypred"] = Rcpp::wrap(yall.tail_rows(k));
 
-        arma::vec qprob = {0.025, 0.5, 0.975};
         arma::mat psi_qt = arma::quantile(psi_all, qprob, 1);
-
         out["psi_all"] = Rcpp::wrap(psi_qt);
 
         arma::mat psi_pred = psi_qt.tail_rows(k);
@@ -576,11 +579,19 @@ public:
         }
 
         Rcpp::List out;
-        out["psi_cast"] = Rcpp::wrap(psi_cast);
+        arma::vec qprob = {0.025, 0.5, 0.975};
+
+        arma::mat psi_qt = arma::quantile(psi_cast, qprob, 1);
+        out["psi_cast"] = Rcpp::wrap(psi_qt);
+        out["psi_cast_all"] = Rcpp::wrap(psi_cast);
         out["psi"] = Rcpp::wrap(psi);
         out["psi_loss"] = psi_loss;
 
-        out["y_cast"] = Rcpp::wrap(ycast);
+        
+        arma::mat yqt = arma::quantile(ycast, qprob, 1);
+
+        out["y_cast"] = Rcpp::wrap(yqt);
+        out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
         out["y_loss"] = y_loss;
 
@@ -679,13 +690,21 @@ public:
         }
         }
 
-        Rcpp::List out;
-        out["psi_cast"] = Rcpp::wrap(psi_cast);
+        Rcpp::List out;        
+        arma::vec qprob = {0.025, 0.5, 0.975};
+
+        arma::mat psi_qt = arma::quantile(psi_cast, qprob, 1);
+        out["psi_cast"] = Rcpp::wrap(psi_qt);
+        out["psi_cast_all"] = Rcpp::wrap(psi_cast);
+
         out["psi"] = Rcpp::wrap(psi);
         out["psi_loss"] = Rcpp::wrap(psi_loss);
         out["psi_loss_all"] = psi_loss_all;
 
-        out["y_cast"] = Rcpp::wrap(ycast);
+        arma::mat yqt = arma::quantile(ycast, qprob, 1);
+
+        out["y_cast"] = Rcpp::wrap(yqt);
+        out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
         out["y_loss"] = Rcpp::wrap(y_loss);
         out["y_loss_all"] = y_loss_all;
@@ -750,10 +769,14 @@ public:
 
 
         Rcpp::List out;
-        out["yhat"] = Rcpp::wrap(yhat);
+        arma::vec qprob = {0.025, 0.5, 0.975};
+
+        arma::mat yhat_qt = arma::quantile(yhat, qprob, 1);
+        out["yhat"] = Rcpp::wrap(yhat_qt);
+        out["yhat_all"] = Rcpp::wrap(yhat);
         out["residual"] = Rcpp::wrap(residual);
-        out["loss"] = Rcpp::wrap(y_loss);
-        out["loss_all"] = y_loss_all;
+        out["y_loss"] = Rcpp::wrap(y_loss);
+        out["y_loss_all"] = y_loss_all;
 
         return out;
     }
@@ -1052,11 +1075,18 @@ public:
         Rcpp::List out;
         arma::vec psi_cast = arma::vectorise(theta_cast.row(0));
         arma::vec psi = arma::vectorise(theta.row(0));
-        out["psi_cast"] = Rcpp::wrap(psi_cast);
+        arma::vec qprob = {0.025, 0.5, 0.975};
+
+        arma::mat psi_qt = arma::quantile(psi_cast, qprob, 1);
+        out["psi_cast"] = Rcpp::wrap(psi_qt);
+        out["psi_cast_all"] = Rcpp::wrap(psi_cast);
         out["psi"] = Rcpp::wrap(psi);
         out["psi_loss"] = psi_loss;
 
-        out["y_cast"] = Rcpp::wrap(ycast);
+                arma::mat yqt = arma::quantile(ycast, qprob, 1);
+
+        out["y_cast"] = Rcpp::wrap(yqt);
+        out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
         out["y_loss"] = y_loss;
 
@@ -1139,14 +1169,19 @@ public:
         }
 
         Rcpp::List out;
-        out["psi_cast"] = Rcpp::wrap(psi_cast);
+        arma::vec qprob = {0.025, 0.5, 0.975};
 
-        arma::mat psi = theta.row_as_mat(0); // (nT + 1) x nsample
-        out["psi"] = Rcpp::wrap(psi);
+        arma::mat psi_qt = arma::quantile(psi_cast, qprob, 1);
+        out["psi_cast"] = Rcpp::wrap(psi_qt);
+        out["psi_cast_all"] = Rcpp::wrap(psi_cast);
+
         out["psi_loss"] = Rcpp::wrap(psi_loss);
         out["psi_loss_all"] = psi_loss_all;
 
-        out["y_cast"] = Rcpp::wrap(ycast);
+        arma::mat yqt = arma::quantile(ycast, qprob, 1);
+
+        out["y_cast"] = Rcpp::wrap(yqt);
+        out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
         out["y_loss"] = Rcpp::wrap(y_loss);
         out["y_loss_all"] = y_loss_all;
@@ -1206,10 +1241,13 @@ public:
 
 
         Rcpp::List out;
-        out["yhat"] = Rcpp::wrap(yhat);
+        arma::vec qprob = {0.025, 0.5, 0.975};
+
+        arma::mat yhat_qt = arma::quantile(yhat, qprob, 1);
+        out["yhat"] = Rcpp::wrap(yhat_qt);
         out["residual"] = Rcpp::wrap(residual);
-        out["loss"] = Rcpp::wrap(y_loss);
-        out["loss_all"] = y_loss_all;
+        out["y_loss"] = Rcpp::wrap(y_loss);
+        out["y_loss_all"] = y_loss_all;
 
         return out;
     }
@@ -1487,6 +1525,7 @@ public:
 private:
     unsigned int nT = 200;
     std::string gain_func = "softplus";
+    
 
     arma::mat Fn;
     arma::vec f0;
