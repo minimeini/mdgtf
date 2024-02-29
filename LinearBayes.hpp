@@ -488,8 +488,7 @@ namespace LBA
         arma::mat optimal_discount_factor(
             const double &from, 
             const double &to, 
-            const double &delta = 0.01, 
-            const bool do_smoothing = true)
+            const double &delta = 0.01)
         {
             bool use_discount_old = _use_discount;
             _use_discount = true;
@@ -503,11 +502,15 @@ namespace LBA
             }
             arma::vec delta_grid = arma::regspace(from, delta, to);
             unsigned int nelem = delta_grid.n_elem;
-            arma::mat stats_forecast(nelem, _model.dim.nT, arma::fill::zeros);
+            arma::mat y_loss(nelem, 2, arma::fill::zeros);
 
             for (unsigned int i = 0; i < nelem; i ++)
             {
                 _discount_factor = delta_grid.at(i);
+                y_loss.at(i, 0) = delta_grid.at(i);
+
+                arma::vec ft_prior_mean(_model.dim.nT + 1, arma::fill::zeros);
+                arma::vec ft_prior_var(_model.dim.nT + 1, arma::fill::zeros);
 
                 filter_single_iter(1);
 
@@ -523,9 +526,9 @@ namespace LBA
                         ft_tmp, qt_tmp, _Ft,
                         t, _model, _y,
                         _at.col(t), _Rt.slice(t), _fill_zero);
-                                        
-                    func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), false);
-                    stats_forecast.at(i, t) = ObsDist::dforecast(_y.at(t), _model.dobs.name, _model.dobs.par2, _alphat, _betat, false);
+                    
+                    ft_prior_mean.at(t) = ft_tmp;
+                    ft_prior_var.at(t) = qt_tmp;
 
                     func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
 
@@ -542,16 +545,14 @@ namespace LBA
                     _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
                 }
 
-                if (do_smoothing)
-                {
-                    smoother();
-                }
-
+                y_loss.at(i, 1) = forecast_error(_y, ft_prior_mean, ft_prior_var);
 
             }
 
-            return stats_forecast;
+            _use_discount = use_discount_old;
+            _discount_factor = discount_old;
 
+            return y_loss;
         }
 
 
@@ -863,6 +864,55 @@ namespace LBA
             out["y_loss_all"] = y_loss_all;
 
             return out;
+        }
+
+        static double forecast_error(
+            const arma::vec &y,
+            const arma::vec &ft_prior_mean, 
+            const arma::vec &ft_prior_var,
+            const unsigned int &nsample = 1000, 
+            const std::string &loss_func = "quadratic")
+        {
+            unsigned int nT = y.n_elem - 1;
+            arma::mat ycast(nT + 1, nsample, arma::fill::zeros);
+            arma::mat y_err_cast(nT + 1, nsample, arma::fill::zeros);
+            for (unsigned int t = 2; t <= nT; t++)
+            {
+                arma::vec ytmp = ft_prior_mean.at(t) + std::sqrt(ft_prior_var.at(t)) * arma::randn(nsample);
+                ycast.row(t) = ytmp.t();
+
+                y_err_cast.row(t) = y.at(t) - ycast.row(t);
+            }
+
+            arma::vec y_loss(nT + 1, arma::fill::zeros);
+            double y_loss_all = 0;
+
+            std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+            switch (loss_list[tolower(loss_func)])
+            {
+            case AVAIL::L1: // mae
+            {
+                arma::mat ytmp = arma::abs(y_err_cast);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(nT - 1));
+                break;
+            }
+            case AVAIL::L2: // rmse
+            {
+                arma::mat ytmp = arma::square(y_err_cast);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(nT - 1));
+                y_loss = arma::sqrt(y_loss);
+                y_loss_all = std::sqrt(y_loss_all);
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            }
+
+            return y_loss_all;
         }
 
         void init(const Rcpp::List &opts_in)

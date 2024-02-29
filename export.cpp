@@ -402,3 +402,77 @@ Rcpp::List dgtf_evaluate(
 
     return out;
 }
+
+//' @export
+// [[Rcpp::export]]
+arma::mat lba_optimal_discount_factor(
+    const Rcpp::List &model_settings,
+    const arma::vec &y,
+    const double from = 0.8,
+    const double to = 0.99,
+    const double delta = 0.01)
+{
+    Model model(model_settings);
+    LBA::LinearBayes linear_bayes(model, y);
+    arma::mat out = linear_bayes.optimal_discount_factor(from, to, delta);
+    return out;
+}
+
+
+
+//' @export
+// [[Rcpp::export]]
+arma::mat hva_optimal_learning_rate(
+    const Rcpp::List &model_settings,
+    const arma::vec &y,
+    const double from = 0.01,
+    const double to = 0.1,
+    const double delta = 0.01,
+    const double step_size = 1.e-6)
+{
+    Model model(model_settings);
+    Rcpp::List hva_opts = VB::Hybrid::default_settings();
+    hva_opts["nsample"] = 1000;
+    hva_opts["nthin"] = 2;
+    hva_opts["nburnin"] = 1000;
+    hva_opts["eps_step_size"] = 1.e-6;
+    hva_opts["k"] = 1;
+
+    Rcpp::List mcs_opts = SMC::MCS::default_settings();
+    mcs_opts["num_particle"] = 100;
+    mcs_opts["num_backward"] = model.dim.nL;
+    hva_opts["mcs"] = mcs_opts;
+    
+    VB::Hybrid hva(model, y);
+    hva.init(hva_opts);
+    arma::mat stats = hva.optimal_learning_rate(model, from, to, delta, step_size);
+    return stats;
+}
+
+//' @export
+// [[Rcpp::export]]
+arma::mat hva_optimal_step_size(
+    const Rcpp::List &model_settings,
+    const arma::vec &y,
+    const arma::vec &step_size_grid,
+    const double &learning_rate = 0.01)
+{
+    Model model(model_settings);
+    Rcpp::List hva_opts = VB::Hybrid::default_settings();
+    hva_opts["nsample"] = 1000;
+    hva_opts["nthin"] = 2;
+    hva_opts["nburnin"] = 1000;
+    hva_opts["learning_rate"] = learning_rate;
+    hva_opts["eps_step_size"] = 1.e-6;
+    hva_opts["k"] = 1;
+
+    Rcpp::List mcs_opts = SMC::MCS::default_settings();
+    mcs_opts["num_particle"] = 100;
+    mcs_opts["num_backward"] = model.dim.nL;
+    hva_opts["mcs"] = mcs_opts;
+
+    VB::Hybrid hva(model, y);
+    hva.init(hva_opts);
+    arma::mat stats = hva.optimal_step_size(model, step_size_grid, learning_rate);
+    return stats;
+}
