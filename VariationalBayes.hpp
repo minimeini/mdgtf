@@ -1188,53 +1188,51 @@ namespace VB
             const Model &model,
             const double &from, 
             const double &to, 
-            const double &delta = 0.01, 
-            const double &step_size = 1.e-6)
+            const double &delta = 0.01,
+            const std::string &loss = "quadratic")
         {
             arma::vec grid = arma::regspace(from, delta, to);
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            nsample = 1000;
-            nthin = 2;
-            nburnin = 1000;
-            ntotal = nsample * nthin + nburnin + 1;
 
             for (unsigned int i = 0; i < nelem; i ++)
             {
+                R_CheckUserInterrupt();
+
                 double lrate = grid.at(i);
                 stats.at(i, 0) = lrate;
 
                 gamma.set_size(m);
                 gamma.ones();
-                grad_tau.init(m, lrate, step_size);
+                grad_tau.init(m, lrate, eps_step_size);
 
                 mu.set_size(m);
                 mu.zeros();
-                grad_mu.init(m, lrate, step_size);
+                grad_mu.init(m, lrate, eps_step_size);
 
                 B.set_size(m, k);
                 B.zeros();
-                grad_vecB.init(m * k, lrate, step_size);
+                grad_vecB.init(m * k, lrate, eps_step_size);
 
                 d.set_size(m);
                 d.ones();
-                grad_d.init(m, lrate, step_size);
+                grad_d.init(m, lrate, eps_step_size);
 
                 infer(model);
 
                 double forecast_loss = 0.;
-                Model::forecast_error(forecast_loss, psi_stored, y, model);
+                Model::forecast_error(forecast_loss, psi_stored, y, model, loss);
                 stats.at(i, 1) = forecast_loss;
 
                 double fit_loss = 0.;
-                Model::fitted_error(fit_loss, psi_stored, y, model);
+                Model::fitted_error(fit_loss, psi_stored, y, model, loss);
                 stats.at(i, 2) = fit_loss;
 
-                std::cout << "Learning rate = " << lrate;
-                std::cout << " forecast error = " << stats.at(i, 1);
-                std::cout << " fitting error = " << stats.at(i, 2) << std::endl;
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
             }
+
+            Rcpp::Rcout << std::endl;
 
             return stats;
         }
@@ -1242,18 +1240,15 @@ namespace VB
         arma::mat optimal_step_size(
             const Model &model,
             const arma::vec &step_size_grid,
-            const double &learning_rate = 0.01)
+            const std::string &loss = "quadratic")
         {
             unsigned int nelem = step_size_grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            nsample = 1000;
-            nthin = 2;
-            nburnin = 1000;
-            ntotal = nsample * nthin + nburnin + 1;
-
             for (unsigned int i = 0; i < nelem; i++)
             {
+                R_CheckUserInterrupt();
+
                 double step_size = step_size_grid.at(i);
                 stats.at(i, 0) = step_size;
 
@@ -1276,17 +1271,54 @@ namespace VB
                 infer(model);
 
                 double forecast_loss = 0.;
-                Model::forecast_error(forecast_loss, psi_stored, y, model);
+                Model::forecast_error(forecast_loss, psi_stored, y, model, loss);
                 stats.at(i, 1) = forecast_loss;
 
                 double fit_loss = 0.;
-                Model::fitted_error(fit_loss, psi_stored, y, model);
+                Model::fitted_error(fit_loss, psi_stored, y, model, loss);
                 stats.at(i, 2) = fit_loss;
 
-                std::cout << "Step size = " << step_size;
-                std::cout << " forecast error = " << stats.at(i, 1);
-                std::cout << " fitting error = " << stats.at(i, 2) << std::endl;
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
             }
+
+            Rcpp::Rcout << std::endl;
+
+            return stats;
+        }
+
+        arma::mat optimal_num_backward(
+            const Model &model,
+            const unsigned int &from,
+            const unsigned int &to,
+            const unsigned int &delta = 1,
+            const std::string &loss = "quadratic")
+        {
+            arma::uvec grid = arma::regspace<arma::uvec>(from, delta, to);
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
+
+            for (unsigned int i = 0; i < nelem; i++)
+            {
+                R_CheckUserInterrupt();
+
+                unsigned int B = grid.at(i);
+                stats.at(i, 0) = B;
+                mcs_opts["num_backward"] = B;
+
+                infer(model);
+
+                double err_forecast = 0.;
+                Model::forecast_error(err_forecast, psi_stored, y, model, loss);
+                stats.at(i, 1) = err_forecast;
+
+                double err_fit = 0.;
+                Model::fitted_error(err_fit, psi_stored, y, model, loss);
+                stats.at(i, 2) = err_fit;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+            }
+
+            Rcpp::Rcout << std::endl;
 
             return stats;
         }

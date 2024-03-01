@@ -59,6 +59,9 @@ namespace SMC
         }
 
 
+        void infer(const Model &model){return;}
+
+
 
         void init(const Rcpp::List &smc_settings)
         {
@@ -172,7 +175,11 @@ namespace SMC
             bound_check(W, "SequentialMonteCarlo::discount_W");
             return W;
         }
+
         
+
+        
+
     /**
      * @brief Propagate from now theta[t] to theta[t + 1] following the evolution distribution. Theta_now = Theta_stored.slice(t + B - 1), Theta_new = Theta_stored.slice(t + B). Input: theta[t] (old theta at t), variance W[t] (true value or estimated value at time t), previous observation y[0:t], new observation theta[t + 1]. Output: theta[t + 1] (new theta at t + 1) and corresponding importance weights.
      * 
@@ -424,7 +431,199 @@ namespace SMC
             return StateSpace::fitted_error(theta_tmp, y, model, loss_func);
         }
 
-            void infer(const Model &model)
+        arma::mat optimal_discount_factor(
+            const Model &model,
+            const double &from,
+            const double &to,
+            const double &delta = 0.01,
+            const std::string &loss = "quadratic")
+        {
+            arma::vec grid = arma::regspace<arma::vec>(from, delta, to);
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
+
+            use_discount = true;
+            use_custom = true;
+
+            for (unsigned int i = 0; i < nelem; i++)
+            {
+                R_CheckUserInterrupt();
+
+                custom_discount_factor = grid.at(i);
+                stats.at(i, 0) = custom_discount_factor;
+
+                infer(model);
+                arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+                double err_forecast = 0.;
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                stats.at(i, 1) = err_forecast;
+
+                double err_fit = 0.;
+                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                stats.at(i, 2) = err_fit;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+            }
+
+            Rcpp::Rcout << std::endl;
+            
+            return stats;
+        }
+
+        arma::mat optimal_W(
+            const Model &model,
+            const arma::vec &grid,
+            const std::string &loss = "quadratic")
+        {
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
+
+            use_discount = false;
+
+            for (unsigned int i = 0; i < nelem; i++)
+            {
+                R_CheckUserInterrupt();
+
+                W = grid.at(i);
+                stats.at(i, 0) = W;
+
+                infer(model);
+                arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+                double err_forecast = 0.;
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                stats.at(i, 1) = err_forecast;
+
+                double err_fit = 0.;
+                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                stats.at(i, 2) = err_fit;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+            }
+
+            Rcpp::Rcout << std::endl;
+
+            return stats;
+        }
+
+        arma::mat optimal_num_backward(
+            const Model &model,
+            const unsigned int &from, 
+            const unsigned int &to, 
+            const unsigned int &delta = 1,
+            const std::string &loss = "quadratic")
+        {
+            arma::uvec grid = arma::regspace<arma::uvec>(from, delta, to);
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
+
+            for (unsigned int i = 0; i < nelem; i ++)
+            {
+                R_CheckUserInterrupt();
+
+                B = grid.at(i);
+                stats.at(i, 0) = B;
+
+                Theta_stored.clear();
+                Theta_stored.set_size(model.dim.nP, N, model.dim.nT + B);
+                Theta_stored.zeros();
+
+                Theta_smooth.clear();
+                Theta_smooth.set_size(dim.nP, M, dim.nT + B);
+                Theta_smooth.zeros();
+
+                infer(model);
+                arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+                double err_forecast = 0.;
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                stats.at(i, 1) = err_forecast;
+
+                double err_fit = 0.;
+                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                stats.at(i, 2) = err_fit;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+            }
+
+            Rcpp::Rcout << std::endl;
+
+            return stats;
+        }
+
+
+        // arma::mat optimal_discount_factor(
+        //     const Model &model,
+        //     const double &from,
+        //     const double &to,
+        //     const double &delta = 0.01,
+        //     const std::string &loss = "quadratic"
+        // )
+        // {
+        //     arma::vec grid = arma::regspace<arma::vec>(from, delta, to);
+        //     unsigned int nelem = grid.n_elem;
+        //     arma::mat stats(nelem, 3, arma::fill::zeros);
+
+        //     use_discount = true;
+        //     use_custom = true;
+
+        //     arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+        //     for (unsigned int i = 0; i < nelem; i ++)
+        //     {
+        //         custom_discount_factor = grid.at(i);
+        //         stats.at(i, 0) = custom_discount_factor;
+
+        //         infer(model);
+
+        //         double err_forecast = 0.;
+        //         StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+        //         stats.at(i, 1) = err_forecast;
+
+        //         double err_fit = 0.;
+        //         StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+        //         stats.at(i, 2) = err_fit;
+        //     }
+
+        //     return stats;
+        // }
+
+
+        // arma::mat optimal_W(
+        //     const Model &model,
+        //     const arma::vec &grid,
+        //     const std::string &loss = "quadratic"
+        // )
+        // {
+        //     unsigned int nelem = grid.n_elem;
+        //     arma::mat stats(nelem, 3, arma::fill::zeros);
+
+        //     use_discount = false;
+
+        //     arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+        //     for (unsigned int i = 0; i < nelem; i++)
+        //     {
+        //         W = grid.at(i);
+        //         stats.at(i, 0) = W;
+
+        //         infer(model);
+
+        //         double err_forecast = 0.;
+        //         StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+        //         stats.at(i, 1) = err_forecast;
+
+        //         double err_fit = 0.;
+        //         StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+        //         stats.at(i, 2) = err_fit;
+        //     }
+
+        //     return stats;
+        // }
+        
+
+        void infer(const Model &model)
         {
             // y: (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
@@ -613,6 +812,7 @@ namespace SMC
             return out2;
         }
 
+
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
         {
             Rcpp::List out3;
@@ -629,6 +829,83 @@ namespace SMC
             }
 
             return out3;
+        }
+
+        arma::mat optimal_discount_factor(
+            const Model &model,
+            const double &from,
+            const double &to,
+            const double &delta = 0.01,
+            const std::string &loss = "quadratic")
+        {
+            arma::vec grid = arma::regspace<arma::vec>(from, delta, to);
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
+
+            use_discount = true;
+            use_custom = true;
+
+            for (unsigned int i = 0; i < nelem; i++)
+            {
+                R_CheckUserInterrupt();
+
+                custom_discount_factor = grid.at(i);
+                stats.at(i, 0) = custom_discount_factor;
+
+                infer(model);
+                arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+                double err_forecast = 0.;
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                stats.at(i, 1) = err_forecast;
+
+                double err_fit = 0.;
+                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                stats.at(i, 2) = err_fit;
+            }
+
+            return stats;
+        }
+
+        arma::mat optimal_W(
+            const Model &model,
+            const arma::vec &grid,
+            const std::string &loss = "quadratic")
+        {
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
+
+            use_discount = false;
+
+            for (unsigned int i = 0; i < nelem; i++)
+            {
+                R_CheckUserInterrupt();
+
+                W = grid.at(i);
+                stats.at(i, 0) = W;
+
+                infer(model);
+                arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
+
+                double err_forecast = 0.;
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                stats.at(i, 1) = err_forecast;
+
+                double err_fit = 0.;
+                if (smoothing)
+                {
+                    arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
+                    StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                }
+                else
+                {
+                    StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                }
+                
+                stats.at(i, 2) = err_fit;
+            }
+
+            return stats;
         }
 
         void infer(const Model &model)

@@ -50,12 +50,17 @@ public:
     enum Param
     {
         W,
-        mu0, // par1 of dobs
+        mu0,   // par1 of dobs
         delta, // par2 of dobs
         kappa, // par1 of dlag - nbinom
-        r, // par2 of dlag - nbinom
-        mu, // par1 of dLag - lognorm
-        sd // par2 of dLag - lognorm
+        r,     // par2 of dlag - nbinom
+        mu,    // par1 of dLag - lognorm
+        sd,    // par2 of dLag - lognorm
+        discount_factor,
+        num_backward,
+        learning_rate,
+        step_size,
+        mh_sd
     };
 
     enum Loss
@@ -63,6 +68,7 @@ public:
         L1,
         L2
     };
+
 
     static const std::map<std::string, Algo> algo_list;
     static const std::map<std::string, Dist> obs_list;
@@ -74,6 +80,7 @@ public:
     static const std::map<std::string, Dist> W_prior_list;
     static const std::map<std::string, Param> static_param_list;
     static const std::map<std::string, Loss> loss_list;
+    static const std::map<std::string, Param> tuning_param_list;
 
     static unsigned int get_gain_code(const std::string &gain_func);
     static unsigned int get_obs_code(const std::string &obs_dist);
@@ -247,6 +254,40 @@ private:
 
         return LOSS_MAP;
     }
+
+    static std::map<std::string, Param> map_tuning_param()
+    {
+        std::map<std::string, Param> maps;
+        maps["W"] = Param::W;
+        maps["w"] = Param::W;
+
+        maps["discount_factor"] = Param::discount_factor;
+        maps["discountfactor"] = Param::discount_factor;
+        maps["discount factor"] = Param::discount_factor;
+
+        maps["num_backward"] = Param::num_backward;
+        maps["numbackward"] = Param::num_backward;
+
+        maps["learning_rate"] = Param::learning_rate;
+        maps["learningrate"] = Param::learning_rate;
+        maps["learning rate"] = Param::learning_rate;
+        maps["learn_rate"] = Param::learning_rate;
+        maps["learnrate"] = Param::learning_rate;
+        maps["learn rate"] = Param::learning_rate;
+
+        maps["step_size"] = Param::step_size;
+        maps["stepsize"] = Param::step_size;
+        maps["step size"] = Param::step_size;
+        maps["eps_step_size"] = Param::step_size;
+        maps["epsstepsize"] = Param::step_size;
+        maps["eps step size"] = Param::step_size;
+        maps["eps_step"] = Param::step_size;
+        maps["epsstep"] = Param::step_size;
+        maps["eps step"] = Param::step_size;
+        maps["eps"] = Param::step_size;
+
+        return maps;
+    }
 }; // class AVAIL
 
 inline const std::map<std::string, AVAIL::Algo> AVAIL::algo_list = AVAIL::map_algorithm();
@@ -260,7 +301,7 @@ inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err
 inline const std::map<std::string, AVAIL::Dist> AVAIL::W_prior_list = AVAIL::map_W_prior();
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 inline const std::map<std::string, AVAIL::Loss> AVAIL::loss_list = AVAIL::map_loss_func();
-
+inline const std::map<std::string, AVAIL::Param> AVAIL::tuning_param_list = AVAIL::map_tuning_param();
 
 inline unsigned int AVAIL::get_obs_code(const std::string &obs_dist)
 {

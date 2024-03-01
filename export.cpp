@@ -343,7 +343,10 @@ Rcpp::List dgtf_infer(
         break;
     }
     default:
+    {
+        throw std::invalid_argument("Unknown algorithm " + algo_name);
         break;
+    }
     }// switch by algorithm
 
     Rcpp::List out;
@@ -405,8 +408,179 @@ Rcpp::List dgtf_evaluate(
 
 //' @export
 // [[Rcpp::export]]
+arma::mat dgtf_tuning(
+    const Rcpp::List &model_opts,
+    const arma::vec &y,
+    const std::string &algo_name,
+    const Rcpp::List &algo_opts,
+    const std::string &tuning_param,
+    const double &from = 0.,
+    const double &to = 0.,
+    const double &delta = 0.,
+    const Rcpp::Nullable<Rcpp::NumericVector> &grid = R_NilValue,
+    const std::string &loss = "quadratic"
+)
+{
+    Model model(model_opts);
+
+    arma::vec param_grid;
+    if (!grid.isNull())
+    {
+        param_grid = Rcpp::as<arma::vec>(grid);
+    }
+
+    std::map<std::string, AVAIL::Param> tuning_param_list = AVAIL::tuning_param_list;
+    std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
+
+    arma::mat stats;
+
+    switch (algo_list[algo_name])
+    {
+    case AVAIL::Algo::LinearBayes:
+    {
+        LBA::LinearBayes linear_bayes(model, y);
+        linear_bayes.init(algo_opts);
+
+        switch (tuning_param_list[tuning_param])
+        {
+        case AVAIL::Param::discount_factor:
+        {
+            stats = linear_bayes.optimal_discount_factor(from, to, delta, loss);
+            break;
+        }
+        case AVAIL::Param::W:
+        {
+            stats = linear_bayes.optimal_W(param_grid, loss);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
+        }
+        } // switch by tuning parameter
+        
+
+        break;
+    } // case Linear Bayes
+    case AVAIL::Algo::MCS:
+    {
+        SMC::MCS mcs(model, y);
+        mcs.init(algo_opts);
+
+        switch (tuning_param_list[tuning_param])
+        {
+        case AVAIL::Param::discount_factor:
+        {
+            stats = mcs.optimal_discount_factor(model, from, to, delta, loss);
+            break;
+        }
+        case AVAIL::Param::W:
+        {
+            stats = mcs.optimal_W(model, param_grid, loss);
+            break;
+        }
+        case AVAIL::Param::num_backward:
+        {
+            stats = mcs.optimal_num_backward(model, from, to, delta, loss);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
+        }
+        } // switch by tuning parameter
+
+        break;
+    } // case MCS
+    case AVAIL::Algo::FFBS:
+    {
+        SMC::FFBS ffbs(model, y);
+        ffbs.init(algo_opts);
+        switch (tuning_param_list[tuning_param])
+        {
+        case AVAIL::Param::discount_factor:
+        {
+            stats = ffbs.optimal_discount_factor(model, from, to, delta, loss);
+            break;
+        }
+        case AVAIL::Param::W:
+        {
+            stats = ffbs.optimal_W(model, param_grid, loss);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
+        }
+        } // switch by tuning parameter
+
+        break;
+    } // case FFBS
+    case AVAIL::Algo::ParticleLearning:
+    {
+        SMC::PL pl(model, y);
+        pl.init(algo_opts);
+        
+
+        break;
+    } // case particle learning
+    case AVAIL::Algo::MCMC:
+    {
+        MCMC::Disturbance mcmc(model, y);
+        mcmc.init(algo_opts);
+
+
+        
+        break;
+    }
+    case AVAIL::Algo::HybridVariation:
+    {
+        VB::Hybrid hva(model, y);
+        hva.init(algo_opts);
+        hva.infer(model);
+
+        switch (tuning_param_list[tuning_param])
+        {
+        case AVAIL::Param::learning_rate:
+        {
+            stats = hva.optimal_learning_rate(model, from, to, delta, loss);
+            break;
+        }
+        case AVAIL::Param::step_size:
+        {
+            stats = hva.optimal_step_size(model, param_grid, loss);
+            break;
+        }
+        case AVAIL::Param::num_backward:
+        {
+            stats = hva.optimal_num_backward(model, from, to, delta, loss);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
+        }
+        } // switch by tuning parameter
+
+        break;
+    }
+    default:
+    {
+        throw std::invalid_argument("Unknown algorithm " + algo_name);
+        break;
+    }
+    } // switch by algorithm
+
+
+    return stats;
+}
+
+
+//' @export
+// [[Rcpp::export]]
 arma::mat lba_optimal_discount_factor(
     const Rcpp::List &model_settings,
+    const Rcpp::List &algo_opts,
     const arma::vec &y,
     const double from = 0.8,
     const double to = 0.99,
@@ -414,6 +588,7 @@ arma::mat lba_optimal_discount_factor(
 {
     Model model(model_settings);
     LBA::LinearBayes linear_bayes(model, y);
+    linear_bayes.init(algo_opts);
     arma::mat out = linear_bayes.optimal_discount_factor(from, to, delta);
     return out;
 }
@@ -445,7 +620,7 @@ arma::mat hva_optimal_learning_rate(
     
     VB::Hybrid hva(model, y);
     hva.init(hva_opts);
-    arma::mat stats = hva.optimal_learning_rate(model, from, to, delta, step_size);
+    arma::mat stats = hva.optimal_learning_rate(model, from, to, delta);
     return stats;
 }
 
@@ -473,6 +648,6 @@ arma::mat hva_optimal_step_size(
 
     VB::Hybrid hva(model, y);
     hva.init(hva_opts);
-    arma::mat stats = hva.optimal_step_size(model, step_size_grid, learning_rate);
+    arma::mat stats = hva.optimal_step_size(model, step_size_grid);
     return stats;
 }

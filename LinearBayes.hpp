@@ -488,7 +488,8 @@ namespace LBA
         arma::mat optimal_discount_factor(
             const double &from, 
             const double &to, 
-            const double &delta = 0.01)
+            const double &delta = 0.01,
+            const std::string &loss = "quadratic")
         {
             bool use_discount_old = _use_discount;
             _use_discount = true;
@@ -502,60 +503,137 @@ namespace LBA
             }
             arma::vec delta_grid = arma::regspace(from, delta, to);
             unsigned int nelem = delta_grid.n_elem;
-            arma::mat y_loss(nelem, 2, arma::fill::zeros);
+            arma::mat stats(nelem, 3, arma::fill::zeros);
 
             for (unsigned int i = 0; i < nelem; i ++)
             {
+                R_CheckUserInterrupt();
+
                 _discount_factor = delta_grid.at(i);
-                y_loss.at(i, 0) = delta_grid.at(i);
+                stats.at(i, 0) = delta_grid.at(i);
 
-                arma::vec ft_prior_mean(_model.dim.nT + 1, arma::fill::zeros);
-                arma::vec ft_prior_var(_model.dim.nT + 1, arma::fill::zeros);
+                // arma::vec ft_prior_mean(_model.dim.nT + 1, arma::fill::zeros);
+                // arma::vec ft_prior_var(_model.dim.nT + 1, arma::fill::zeros);
 
-                filter_single_iter(1);
+                // filter_single_iter(1);
 
-                for (unsigned int t = 2; t < _model.dim.nT; t++)
-                {
-                    _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
-                    _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
-                    _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
+                // for (unsigned int t = 2; t < _model.dim.nT; t++)
+                // {
+                //     _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                //     _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+                //     _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
 
-                    double ft_tmp, qt_tmp;
+                //     double ft_tmp, qt_tmp;
                     
-                    func_prior_ft(
-                        ft_tmp, qt_tmp, _Ft,
-                        t, _model, _y,
-                        _at.col(t), _Rt.slice(t), _fill_zero);
+                //     func_prior_ft(
+                //         ft_tmp, qt_tmp, _Ft,
+                //         t, _model, _y,
+                //         _at.col(t), _Rt.slice(t), _fill_zero);
                     
-                    ft_prior_mean.at(t) = ft_tmp;
-                    ft_prior_var.at(t) = qt_tmp;
+                //     ft_prior_mean.at(t) = ft_tmp;
+                //     ft_prior_var.at(t) = qt_tmp;
 
-                    func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
+                //     func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
 
-                    _alpha_t.at(t) = _alphat;
-                    _beta_t.at(t) = _betat;
+                //     _alpha_t.at(t) = _alphat;
+                //     _beta_t.at(t) = _betat;
 
-                    _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
+                //     _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
 
-                    double ft_tmp2, qt_tmp2;
+                //     double ft_tmp2, qt_tmp2;
 
-                    func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+                //     func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
 
-                    _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
-                    _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
-                }
+                //     _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
+                //     _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
+                // }
 
-                y_loss.at(i, 1) = forecast_error(_y, ft_prior_mean, ft_prior_var);
+                filter();
+                stats.at(i, 1) = forecast_error(_y, _ft_prior_mean, _ft_prior_var);
 
+                smoother();
+
+                double fit_err = 0.;
+                fitted_error(fit_err, 1000, loss);
+                stats.at(i, 2) = fit_err;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
             }
+
+            Rcpp::Rcout << std::endl;
 
             _use_discount = use_discount_old;
             _discount_factor = discount_old;
 
-            return y_loss;
+            return stats;
         }
 
+        arma::mat optimal_W(
+            const arma::vec &grid,
+            const std::string &loss = "quadratic")
+        {
+            _use_discount = false;
+            unsigned int nelem = grid.n_elem;
+            arma::mat stats(nelem, 3, arma::fill::zeros);
 
+            for (unsigned int i = 0; i < nelem; i++)
+            {
+                R_CheckUserInterrupt();
+
+                _W = grid.at(i);
+                stats.at(i, 0) = grid.at(i);
+
+                // arma::vec ft_prior_mean(_model.dim.nT + 1, arma::fill::zeros);
+                // arma::vec ft_prior_var(_model.dim.nT + 1, arma::fill::zeros);
+
+                // filter_single_iter(1);
+
+                // for (unsigned int t = 2; t < _model.dim.nT; t++)
+                // {
+                //     _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                //     _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+                //     _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
+
+                //     double ft_tmp, qt_tmp;
+
+                //     func_prior_ft(
+                //         ft_tmp, qt_tmp, _Ft,
+                //         t, _model, _y,
+                //         _at.col(t), _Rt.slice(t), _fill_zero);
+
+                //     ft_prior_mean.at(t) = ft_tmp;
+                //     ft_prior_var.at(t) = qt_tmp;
+
+                //     func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
+
+                //     _alpha_t.at(t) = _alphat;
+                //     _beta_t.at(t) = _betat;
+
+                //     _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
+
+                //     double ft_tmp2, qt_tmp2;
+
+                //     func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+
+                //     _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
+                //     _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
+                // }
+
+                filter();
+                stats.at(i, 1) = forecast_error(_y, _ft_prior_mean, _ft_prior_var);
+
+                smoother();
+                double fit_err = 0.;
+                fitted_error(fit_err, 1000, loss);
+                stats.at(i, 2) = fit_err;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+            }
+
+            Rcpp::Rcout << std::endl;
+
+            return stats;
+        }
 
         void filter_single_iter(const unsigned int &t)
         {
@@ -783,7 +861,7 @@ namespace LBA
             out_filter["yhat_all"] = Rcpp::wrap(yhat_filter);
             out_filter["residual"] = Rcpp::wrap(res_filter);
             out_filter["y_loss"] = Rcpp::wrap(y_loss);
-            out_filter["y_lost_all"] = y_loss_all;
+            out_filter["y_loss_all"] = y_loss_all;
 
             /*
             Smoothing fitted distribution: (y[t] | D[nT]) = int (y[t] | theta[t]) (theta[t] | D[nT]) d theta[t], where (theta[t] | D[nT]) ~ (atilde[t], Rtilde[t])
@@ -807,6 +885,52 @@ namespace LBA
             return out;
         }
 
+        void fitted_error(double &y_loss_all, const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
+        {
+            /*
+            Filtering fitted distribution: (y[t] | D[t]) ~ (_ft_post_mean, _ft_post_var);
+
+            */
+            arma::mat res_filter(_model.dim.nT + 1, nsample, arma::fill::zeros);
+            arma::mat yhat_filter(_model.dim.nT + 1, nsample, arma::fill::zeros);
+            for (unsigned int t = 1; t <= _model.dim.nT; t++)
+            {
+                arma::vec yhat = _ft_post_mean.at(t) + std::sqrt(_ft_post_var.at(t)) * arma::randn(nsample);
+                arma::vec res = _y.at(t) - yhat;
+
+                yhat_filter.row(t) = yhat.t();
+                res_filter.row(t) = res.t();
+            }
+
+            arma::vec y_loss(_model.dim.nT + 1, arma::fill::zeros);
+            y_loss_all = 0.;
+            std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+            switch (loss_list[tolower(loss_func)])
+            {
+            case AVAIL::L1: // mae
+            {
+                arma::mat ytmp = arma::abs(res_filter);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+                break;
+            }
+            case AVAIL::L2: // rmse
+            {
+                arma::mat ytmp = arma::square(res_filter);
+                y_loss = arma::mean(ytmp, 1);
+                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+                y_loss = arma::sqrt(y_loss);
+                y_loss_all = std::sqrt(y_loss_all);
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            }
+
+            return;
+        }
 
         /**
          * @brief Forecasting distribution y[t + 1] | D[t] ~ (ft prior mean, ft prior var)
