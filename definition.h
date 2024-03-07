@@ -139,7 +139,6 @@ private:
         LAG_MAP["koyama"] = Dist::lognorm;
 
         LAG_MAP["nbinom"] = Dist::nbinomp;
-
         LAG_MAP["nbinomp"] = Dist::nbinomp;
         LAG_MAP["solow"] = Dist::nbinomp;
 

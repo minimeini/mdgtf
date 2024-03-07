@@ -549,7 +549,9 @@ namespace LBA
                 // }
 
                 filter();
-                stats.at(i, 1) = forecast_error(_y, _ft_prior_mean, _ft_prior_var);
+                double forecast_err = 0.;
+                forecast_error(forecast_err, 1000, loss);
+                stats.at(i, 1) = forecast_err;
 
                 smoother();
 
@@ -620,7 +622,9 @@ namespace LBA
                 // }
 
                 filter();
-                stats.at(i, 1) = forecast_error(_y, _ft_prior_mean, _ft_prior_var);
+                double forecast_err = 0.;
+                forecast_error(forecast_err, 1000, loss);
+                stats.at(i, 1) = forecast_err;
 
                 smoother();
                 double fit_err = 0.;
@@ -937,38 +941,97 @@ namespace LBA
          * 
          * @return Rcpp::List 
          */
-        Rcpp::List forecast_error(const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
+        Rcpp::List forecast_error(
+            const unsigned int &nsample = 5000, 
+            const std::string &loss_func = "quadratic",
+            const unsigned int &k = 1)
         {
-            arma::mat ycast(_model.dim.nT + 1, nsample, arma::fill::zeros);
-            arma::mat y_err_cast(_model.dim.nT + 1, nsample, arma::fill::zeros);
-            for (unsigned int t = 2; t <= _model.dim.nT; t ++)
-            {
-                arma::vec ytmp = _ft_prior_mean.at(t) + std::sqrt(_ft_prior_var.at(t)) * arma::randn(nsample);
-                ycast.row(t) = ytmp.t();
+            arma::cube ycast(_model.dim.nT + 1, nsample, k, arma::fill::zeros);
+            arma::cube y_err_cast(_model.dim.nT + 1, nsample, k, arma::fill::zeros); // (nT + 1) x nsample x k
 
-                y_err_cast.row(t) = _y.at(t) - ycast.row(t);
+            arma::cube at_cast = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nT + 1, k + 1);
+            arma::field<arma::cube> Rt_cast(k + 1);
+
+            for (unsigned int j = 0; j <= k; j ++)
+            {
+                Rt_cast.at(j) = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nP, _model.dim.nT + 1);
             }
 
-            arma::vec y_loss(_model.dim.nT + 1, arma::fill::zeros);
-            double y_loss_all = 0;
+            for (unsigned int t = k; t < _model.dim.nT; t ++)
+            {
+                arma::vec ytmp = _y;
+
+                at_cast.slice(0).col(t) = _mt.col(t);
+                Rt_cast.at(0).slice(t) = _Ct.slice(t);
+
+                unsigned int ncast = std::min(k, _model.dim.nT - t);
+                for (unsigned int j = 1; j <= ncast; j ++)
+                {
+                    at_cast.slice(j).col(t) = StateSpace::func_gt(
+                        _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                    arma::mat Gt_cast = func_Gt(_model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                    Rt_cast.at(j).slice(t) = func_Rt(
+                        Gt_cast, Rt_cast.at(j - 1).slice(t), _W, _use_discount, _discount_factor);
+                    
+                    arma::vec Ft_cast;
+                    double ft_tmp = 0.;
+                    double qt_tmp = 0.;
+                    func_prior_ft(
+                        ft_tmp, qt_tmp, Ft_cast, 
+                        t + j, _model, ytmp, 
+                        at_cast.slice(j).col(t),
+                        Rt_cast.at(j).slice(t),
+                        _fill_zero
+                    );
+
+                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink.name, _model.dobs.par1);
+
+                    arma::vec ft_cast_tmp = ft_tmp + std::sqrt(qt_tmp) * arma::randn(nsample);
+                    arma::vec lambda_cast_tmp(nsample);
+                    for (unsigned int i = 0; i < nsample; i ++)
+                    {
+                        lambda_cast_tmp.at(i) = LinkFunc::ft2mu(
+                            ft_cast_tmp.at(i), _model.flink.name, _model.dobs.par1);
+                    }
+
+                    ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();
+                    y_err_cast.slice(j - 1).row(t) = _y.at(t + j) - lambda_cast_tmp.t(); // nsample x 1
+
+                }
+            }
+
+            arma::mat y_loss(_model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
+            arma::vec y_loss_all(k, arma::fill::zeros); // k x 1
+            y_err_cast = arma::abs(y_err_cast);
 
             std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
             switch (loss_list[tolower(loss_func)])
             {
             case AVAIL::L1: // mae
-            {
-                arma::mat ytmp = arma::abs(y_err_cast);
-                y_loss = arma::mean(ytmp, 1);
-                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
+            {                
+                for (unsigned int j = 0; j < k; j ++)
+                {
+                    arma::mat ytmp = y_err_cast.slice(j); // (nT + 1) x nsample
+                    arma::vec ymean = arma::vectorise(arma::mean(ytmp, 1)); // (nT + 1) x 1
+
+                    y_loss.col(j) =  ymean; // (nT + 1) x 1
+                    y_loss_all.at(j) = arma::mean(ymean.subvec(1, _model.dim.nT - k));
+                }
                 break;
             }
             case AVAIL::L2: // rmse
             {
-                arma::mat ytmp = arma::square(y_err_cast);
-                y_loss = arma::mean(ytmp, 1);
-                y_loss_all = arma::mean(y_loss.tail(_model.dim.nT - 1));
-                y_loss = arma::sqrt(y_loss);
-                y_loss_all = std::sqrt(y_loss_all);
+                for (unsigned int j = 0; j < k; j ++)
+                {
+                    arma::mat ytmp = y_err_cast.slice(j); // (nT + 1) x nsample
+                    ytmp = arma::square(ytmp);
+
+                    arma::vec ymean = arma::vectorise(arma::mean(ytmp, 1));
+                    double ymean_all = arma::mean(ymean.subvec(1, _model.dim.nT - k));
+
+                    y_loss.col(j) = arma::sqrt(ymean);
+                    y_loss_all.at(j) = std::sqrt(ymean_all);
+                }
                 break;
             }
             default:
@@ -980,36 +1043,39 @@ namespace LBA
             Rcpp::List out;
 
             arma::vec qprob = {0.025, 0.5, 0.975};
-            arma::mat ycast_out = arma::quantile(ycast, qprob, 1);
+            arma::cube ycast_out(_model.dim.nT + 1, qprob.n_elem, k);
+            for (unsigned int j = 0; j < k; j ++)
+            {
+                ycast_out.slice(j) = arma::quantile(ycast.slice(j), qprob, 1);
+            }
+
             out["y_cast"] = Rcpp::wrap(ycast_out);
             out["y_cast_all"] = Rcpp::wrap(ycast);
             out["y"] = Rcpp::wrap(_y);
             out["y_loss"] = Rcpp::wrap(y_loss);
-            out["y_loss_all"] = y_loss_all;
+            out["y_loss_all"] = Rcpp::wrap(y_loss_all);
 
             return out;
         }
 
-        static double forecast_error(
-            const arma::vec &y,
-            const arma::vec &ft_prior_mean, 
-            const arma::vec &ft_prior_var,
+        void forecast_error(
+            double &y_loss_all,
             const unsigned int &nsample = 1000, 
             const std::string &loss_func = "quadratic")
         {
-            unsigned int nT = y.n_elem - 1;
+            unsigned int nT = _y.n_elem - 1;
             arma::mat ycast(nT + 1, nsample, arma::fill::zeros);
             arma::mat y_err_cast(nT + 1, nsample, arma::fill::zeros);
             for (unsigned int t = 2; t <= nT; t++)
             {
-                arma::vec ytmp = ft_prior_mean.at(t) + std::sqrt(ft_prior_var.at(t)) * arma::randn(nsample);
+                arma::vec ytmp = _ft_prior_mean.at(t) + std::sqrt(_ft_prior_var.at(t)) * arma::randn(nsample);
                 ycast.row(t) = ytmp.t();
 
-                y_err_cast.row(t) = y.at(t) - ycast.row(t);
+                y_err_cast.row(t) = _y.at(t) - ycast.row(t);
             }
 
             arma::vec y_loss(nT + 1, arma::fill::zeros);
-            double y_loss_all = 0;
+            y_loss_all = 0;
 
             std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
             switch (loss_list[tolower(loss_func)])
@@ -1036,7 +1102,7 @@ namespace LBA
             }
             }
 
-            return y_loss_all;
+            return;
         }
 
         void init(const Rcpp::List &opts_in)

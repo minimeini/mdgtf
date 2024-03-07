@@ -93,39 +93,42 @@ public:
         std::map <std::string, AVAIL::Dist> err_list = AVAIL::err_list;
         arma::vec wt(nT + 1, arma::fill::zeros);
 
-        switch (err_list[err_dist])
+        if (W > 0)
         {
-        case AVAIL::Dist::gaussian:
-        {
-            double Wsd = std::sqrt(W);
-            wt.randn();
-            wt.for_each([&Wsd](arma::vec::elem_type &val)
-                        { val *= Wsd; });
-            wt.at(0) = w0;
-            break;
-        }
-        case AVAIL::Dist::constant:
-        {
-            wt.zeros();
-            if (wt_init.isNull())
+            switch (err_list[err_dist])
             {
-                throw std::invalid_argument("Constant states undefined.");
-            }
-            else
+            case AVAIL::Dist::gaussian:
             {
-                arma::vec _wt_init = Rcpp::as<arma::vec>(wt_init);
-                unsigned int nelem = std::min(_wt_init.n_elem, wt.n_elem);
-                wt.head(nelem) = _wt_init;
+                double Wsd = std::sqrt(W);
+                wt.randn();
+                wt.for_each([&Wsd](arma::vec::elem_type &val)
+                            { val *= Wsd; });
+                wt.at(0) = w0;
+                break;
             }
-            break;
+            case AVAIL::Dist::constant:
+            {
+                wt.zeros();
+                if (wt_init.isNull())
+                {
+                    throw std::invalid_argument("Constant states undefined.");
+                }
+                else
+                {
+                    arma::vec _wt_init = Rcpp::as<arma::vec>(wt_init);
+                    unsigned int nelem = std::min(_wt_init.n_elem, wt.n_elem);
+                    wt.head(nelem) = _wt_init;
+                }
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument("Undefined.");
+                break;
+            }
+            }
         }
-        default:
-        {
-            throw std::invalid_argument("Undefined.");
-            break;
-        }
-            
-        }
+
         
 
         arma::vec output = wt;
@@ -155,41 +158,44 @@ public:
         _wt.set_size(nT + 1);
         _wt.zeros();
 
-
-        switch (_err_list[_name])
+        if (_par1 > 0)
         {
-        case AVAIL::Dist::gaussian:
-        {
-
-            double Wsd = std::sqrt(_par1);
-            _wt.randn();
-            _wt.for_each([&Wsd](arma::vec::elem_type &val)
-                         { val *= Wsd; });
-            _wt.at(0) = _par2;
-            break;
-        }
-        case AVAIL::Dist::constant:
-        {
-            _wt.zeros();
-            if (wt_init.isNull())
+            switch (_err_list[_name])
             {
-                throw std::invalid_argument("Constant states undefined.");
-            }
-            else
+            case AVAIL::Dist::gaussian:
             {
-                _wt_init = Rcpp::as<arma::vec>(wt_init);
-                unsigned int nelem = std::min(_wt_init.n_elem, _wt.n_elem);
-                _wt.head(nelem) = _wt_init;
+
+                double Wsd = std::sqrt(_par1);
+                _wt.randn();
+                _wt.for_each([&Wsd](arma::vec::elem_type &val)
+                             { val *= Wsd; });
+                _wt.at(0) = _par2;
+                break;
             }
-            break;
-        }
-        default:
-        {
-            throw std::invalid_argument("Undefined.");
-            break;
-        }
+            case AVAIL::Dist::constant:
+            {
+                _wt.zeros();
+                if (wt_init.isNull())
+                {
+                    throw std::invalid_argument("Constant states undefined.");
+                }
+                else
+                {
+                    _wt_init = Rcpp::as<arma::vec>(wt_init);
+                    unsigned int nelem = std::min(_wt_init.n_elem, _wt.n_elem);
+                    _wt.head(nelem) = _wt_init;
+                }
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument("Undefined.");
+                break;
+            }
+            }
         }
 
+        
 
         if (cumsum)
         {

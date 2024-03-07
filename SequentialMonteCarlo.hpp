@@ -339,7 +339,59 @@ namespace SMC
 
             return resample_idx;
         }
-        
+
+        Rcpp::List forecast_error(
+            const Model &model, 
+            const std::string &loss_func = "quadratic", 
+            const unsigned int &k = 1)
+        {
+            arma::cube th_filter = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
+            Rcpp::List out2 = StateSpace::forecast_error(th_filter, y, model, loss_func, k);
+
+            return out2;
+        }
+
+        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+            arma::cube theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
+            StateSpace::forecast_error(err, theta_tmp, y, model, loss_func);
+            return;
+        }
+
+        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
+        {
+            Rcpp::List out3;
+
+            arma::cube theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
+            Rcpp::List out_filter = StateSpace::fitted_error(theta_tmp, y, model, loss_func);
+            out3["filter"] = out_filter;
+
+            if (smoothing)
+            {
+                arma::cube theta_tmp2 = Theta_smooth.tail_slices(dim.nT + 1); // p x N x (nT + 1)
+                Rcpp::List out_smooth = StateSpace::fitted_error(theta_tmp2, y, model, loss_func);
+                out3["smooth"] = out_smooth;
+            }
+
+            return out3;
+        }
+
+        void fitted_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+
+            arma::cube theta_tmp;
+            if (smoothing)
+            {
+                theta_tmp = Theta_smooth.tail_slices(dim.nT + 1); // p x N x (nT + 1)
+            }
+            else
+            {
+                theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
+            }
+
+            StateSpace::fitted_error(err, theta_tmp, y, model, loss_func);
+            return;
+        }
 
         Dim dim;
 
@@ -372,7 +424,7 @@ namespace SMC
     public:
         MCS(
             const Model &dgtf_model,
-            const arma::vec &y_in) : SequentialMonteCarlo(dgtf_model, y_in) {}
+            const arma::vec &y_in) : SequentialMonteCarlo(dgtf_model, y_in) { smoothing = false; }
         
         Rcpp::List get_output(const bool &summarize = true)
         {
@@ -409,6 +461,8 @@ namespace SMC
             }
             Wt.set_size(dim.nT + 1);
             Wt.fill(W);
+
+            smoothing = false;
         }
 
         Rcpp::List forecast(const Model &model)
@@ -419,17 +473,6 @@ namespace SMC
             return out;
         }
 
-        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
-        {
-            arma::cube theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            return StateSpace::forecast_error(theta_tmp, y, model, loss_func);
-        }
-
-        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
-        {
-            arma::cube theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            return StateSpace::fitted_error(theta_tmp, y, model, loss_func);
-        }
 
         arma::mat optimal_discount_factor(
             const Model &model,
@@ -804,32 +847,7 @@ namespace SMC
             return out;
         }
 
-        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
-        {
-            arma::cube th_filter = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            Rcpp::List out2 = StateSpace::forecast_error(th_filter, y, model, loss_func);
-
-            return out2;
-        }
-
-
-        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
-        {
-            Rcpp::List out3;
-
-            arma::cube theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            Rcpp::List out_filter = StateSpace::fitted_error(theta_tmp, y, model, loss_func);
-            out3["filter"] = out_filter;
-
-            if (smoothing)
-            {
-                arma::cube theta_tmp2 = Theta_smooth.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-                Rcpp::List out_smooth = StateSpace::fitted_error(theta_tmp2, y, model, loss_func);
-                out3["smooth"] = out_smooth;
-            }
-
-            return out3;
-        }
+        
 
         arma::mat optimal_discount_factor(
             const Model &model,
@@ -1188,31 +1206,6 @@ namespace SMC
             return out;
         }
 
-        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
-        {
-            arma::cube th_filter = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            Rcpp::List out = StateSpace::forecast_error(th_filter, y, model, loss_func);
-
-            return out;
-        }
-
-        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
-        {
-            Rcpp::List out;
-
-            arma::cube theta_tmp = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            Rcpp::List out_filter = StateSpace::fitted_error(theta_tmp, y, model, loss_func);
-            out["filter"] = out_filter;
-
-            if (smoothing)
-            {
-                arma::cube theta_tmp2 = Theta_smooth.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-                Rcpp::List out_smooth = StateSpace::fitted_error(theta_tmp2, y, model, loss_func);
-                out["smooth"] = out_smooth;
-            }
-
-            return out;
-        }
 
         void infer(const Model &model)
         {

@@ -395,17 +395,34 @@ namespace MCMC
 
             return out;
         }
-
-        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
+        
+        Rcpp::List forecast_error(
+            const Model &model, 
+            const std::string &loss_func = "quadratic", 
+            const unsigned int &k = 1)
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            return Model::forecast_error(psi_stored, y, model, loss_func);
+            return Model::forecast_error(psi_stored, y, model, loss_func, k);
+        }
+
+        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            Model::forecast_error(err, psi_stored, y, model, loss_func);
+            return;
         }
 
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             return Model::fitted_error(psi_stored, y, model, loss_func);
+        }
+
+        void fitted_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            Model::fitted_error(err, psi_stored, y, model, loss_func);
+            return;
         }
 
         void infer(Model &model)

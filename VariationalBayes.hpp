@@ -284,9 +284,18 @@ namespace VB
         }
 
 
-        Rcpp::List forecast_error(const Model &model, const std::string &loss_func = "quadratic")
+        Rcpp::List forecast_error(
+            const Model &model, const 
+            std::string &loss_func = "quadratic",
+            const unsigned int &k = 1)
         {
-            return Model::forecast_error(psi_stored, y, model, loss_func);
+            return Model::forecast_error(psi_stored, y, model, loss_func, k);
+        }
+
+        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+            Model::forecast_error(err, psi_stored, y, model, loss_func);
+            return;
         }
 
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
@@ -294,7 +303,11 @@ namespace VB
             return Model::fitted_error(psi_stored, y, model, loss_func);
         }
 
-        
+        void fitted_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+            Model::fitted_error(err, psi_stored, y, model, loss_func);
+            return;
+        }
     };
     /**
      * @brief Gradient ascent.

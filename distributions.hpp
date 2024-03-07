@@ -628,14 +628,51 @@ public:
      */
     static double binom(const int &n, const int &k) { return 1. / ((static_cast<double>(n) + 1.) * boost::math::beta(std::max(static_cast<double>(n - k + 1), EPS), std::max(static_cast<double>(k + 1), EPS))); }
 
-    /**
-     * @brief P.M.F of negative-binomial distribution.
-     * [Checked. OK.]
-     *
-     * @param nL
-     * @return arma::vec
-     */
-    arma::vec dnbinom(const unsigned int &nL)
+
+    static double mean(
+        const double &kappa, // probability of failures
+        const double &r) // number of success
+    {
+        double prob_succ = 1. - kappa;
+        double val = r * (1. - prob_succ);
+        val /= prob_succ;
+        return val;
+    }
+
+    static double var(
+        const double &kappa, // probability of failures
+        const double &r)  // number of success
+    {
+        double prob_succ = 1. - kappa;
+        double val = r * (1. - prob_succ);
+        val /= std::pow(prob_succ, 2.);
+        return val;
+    }
+
+    static int mode(
+        const double &kappa,
+        const double &r
+    )
+    {
+        double val = 0.;
+        if (r > 1)
+        {
+            double prob_succ = 1. - kappa;
+            val = (r - 1.) * (1. - prob_succ);
+            val /= prob_succ;
+        }
+
+        return static_cast<int>(val);
+    }
+
+        /**
+         * @brief P.M.F of negative-binomial distribution.
+         * [Checked. OK.]
+         *
+         * @param nL
+         * @return arma::vec
+         */
+        arma::vec dnbinom(const unsigned int &nL)
     {
         if (nL < 1)
         {
@@ -800,6 +837,28 @@ public:
         _name = "lognorm";
         _par1 = mu;
         _par2 = sd2;
+    }
+
+    static double mean(const double &mu, const double &sd2)
+    {
+        double val = mu + 0.5 * sd2;
+        return std::exp(val);
+    }
+
+    static double var(const double &mu, const double &sd2)
+    {
+        double val1 = 2. * mu + 0.5 * sd2;
+        val1 = std::exp(val1);
+        double val2 = std::exp(sd2) - 1.;
+        return val1 * val2;
+
+    }
+
+
+    static double mode(const double &mu, const double &sd2)
+    {
+        double val = mu - sd2;
+        return std::exp(val);
     }
 
     /**
