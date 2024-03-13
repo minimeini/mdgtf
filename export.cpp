@@ -1,3 +1,4 @@
+#include <chrono>
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
@@ -256,9 +257,16 @@ Rcpp::List dgtf_infer(
     {
         LBA::LinearBayes linear_bayes(model, y);
         linear_bayes.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
         linear_bayes.filter();
         linear_bayes.smoother();
-        output = linear_bayes.get_output();
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+        
+         output = linear_bayes.get_output();
 
         if (forecast_error)
         {
@@ -277,7 +285,14 @@ Rcpp::List dgtf_infer(
     {
         SMC::MCS mcs(model, y);
         mcs.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
         mcs.infer(model);
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+
         output = mcs.get_output();
 
         if (nforecast > 0)
@@ -302,7 +317,13 @@ Rcpp::List dgtf_infer(
     {
         SMC::FFBS ffbs(model, y);
         ffbs.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
         ffbs.infer(model);
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+
         output = ffbs.get_output();
 
         if (nforecast > 0)
@@ -327,7 +348,13 @@ Rcpp::List dgtf_infer(
     {
         SMC::PL pl(model, y);
         pl.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
         pl.infer(model);
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+
         output = pl.get_output();
 
         if (nforecast > 0)
@@ -353,7 +380,13 @@ Rcpp::List dgtf_infer(
     {
         MCMC::Disturbance mcmc(model, y);
         mcmc.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
         mcmc.infer(model);
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+
         output = mcmc.get_output();
 
         if (nforecast > 0)
@@ -377,7 +410,13 @@ Rcpp::List dgtf_infer(
     {
         VB::Hybrid hvb(model, y);
         hvb.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
         hvb.infer(model);
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+
         output = hvb.get_output();
 
         if (nforecast > 0)
@@ -461,6 +500,27 @@ Rcpp::List dgtf_evaluate(
 
     return out;
 }
+
+// //' @export
+// // [[Rcpp::export]]
+// Rcpp::List dgtf_post_predictive_check(
+//     const Rcpp::List &model_settings,
+//     const arma::vec &y,   // (nT + 1) x 1
+//     const std::string &method, 
+//     const Rcpp::List &method_settings,
+//     const std::string &loss_func = "quadratic",
+//     const unsigned int &k = 1)
+// {
+//     Model model(model_settings);
+//     Rcpp::List forecast = Model::forecast_error(psi, y, model, loss_func, k);
+//     Rcpp::List fitted = Model::fitted_error(psi, y, model, loss_func);
+
+//     Rcpp::List out;
+//     out["forecast"] = forecast;
+//     out["fitted"] = fitted;
+
+//     return out;
+// }
 
 //' @export
 // [[Rcpp::export]]
@@ -648,7 +708,9 @@ arma::mat dgtf_optimal_lag(
     unsigned int ntotal = npar1 * npar2;
 
     arma::mat stats(npar1 * npar2, 7, arma::fill::zeros);
+
     Model model(model_opts);
+
 
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
@@ -661,6 +723,7 @@ arma::mat dgtf_optimal_lag(
         
         double par1 = par1_grid.at(i);
         model.transfer.dlag.update_par1(par1);
+        
 
         for (unsigned int j = 0; j < npar2; j ++)
         {
@@ -671,6 +734,7 @@ arma::mat dgtf_optimal_lag(
             stats.at(idx, 1) = par2;
             model.transfer.dlag.update_par2(par2);
             model.transfer.dlag.get_Fphi(model.dim.nL);
+
 
             switch (lag_list[model.transfer.dlag.name])
             {
@@ -709,6 +773,7 @@ arma::mat dgtf_optimal_lag(
 
                     linear_bayes.fitted_error(err_fit, 1000, loss);
                     linear_bayes.forecast_error(err_forecast, 1000, loss);
+
                 }
                 catch(...)
                 {
@@ -724,11 +789,19 @@ arma::mat dgtf_optimal_lag(
             {
                 SMC::MCS mcs(model, y);
                 mcs.init(algo_opts);
-                mcs.infer(model);
-                
-                mcs.fitted_error(err_fit, model, loss);
-                mcs.forecast_error(err_forecast, model, loss);
 
+                try
+                {
+                    mcs.infer(model);
+
+                    mcs.fitted_error(err_fit, model, loss);
+                    mcs.forecast_error(err_forecast, model, loss);
+                }
+                catch(...)
+                {
+                    err_fit = NA_REAL;
+                    err_forecast = NA_REAL;
+                }
                 break;
             } // case MCS
             case AVAIL::Algo::FFBS:
@@ -767,10 +840,19 @@ arma::mat dgtf_optimal_lag(
             {
                 VB::Hybrid hvb(model, y);
                 hvb.init(algo_opts);
-                hvb.infer(model);
-                
-                hvb.fitted_error(err_fit, model, loss);
-                hvb.forecast_error(err_forecast, model, loss);
+
+                try
+                {
+                    hvb.infer(model);
+
+                    hvb.fitted_error(err_fit, model, loss);
+                    hvb.forecast_error(err_forecast, model, loss);
+                }
+                catch(...)
+                {
+                    err_fit = NA_REAL;
+                    err_forecast = NA_REAL;
+                }
                 break;
             }
             default:
@@ -908,7 +990,135 @@ arma::mat dgtf_optimal_obs(
         stats.at(i, 1) = err_forecast;
         stats.at(i, 2) = err_fit;
 
+        Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << npar;
+
     }     // loop over par1
+
+    Rcpp::Rcout << std::endl;
+
+    return stats;
+}
+
+//' @export
+// [[Rcpp::export]]
+arma::mat dgtf_optimal_nlag(
+    const Rcpp::List &model_opts,
+    const arma::vec &y,
+    const std::string &algo_name,
+    const Rcpp::List &algo_opts,
+    const arma::uvec &nlag_grid,
+    const std::string &loss = "quadratic")
+{
+    unsigned int npar = nlag_grid.n_elem;
+    Rcpp::List opts = model_opts;
+    Rcpp::List dim_opts = Rcpp::as<Rcpp::List>(opts["dim"]);
+
+    arma::mat stats(npar, 3);
+    std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
+
+    for (unsigned int i = 0; i < npar; i++)
+    {
+        R_CheckUserInterrupt();
+
+        unsigned int nlag = nlag_grid.at(i);
+        dim_opts["nlag"] = nlag;
+        opts["dim"] = dim_opts;
+        Model model(opts);
+
+        stats.at(i, 0) = nlag;
+
+        double err_forecast = 0.;
+        double err_fit = 0.;
+
+        switch (algo_list[algo_name])
+        {
+        case AVAIL::Algo::LinearBayes:
+        {
+            LBA::LinearBayes linear_bayes(model, y);
+            linear_bayes.init(algo_opts);
+
+            try
+            {
+                linear_bayes.filter();
+                linear_bayes.smoother();
+
+                linear_bayes.fitted_error(err_fit, 1000, loss);
+                linear_bayes.forecast_error(err_forecast, 1000, loss);
+            }
+            catch (...)
+            {
+                err_fit = NA_REAL;
+                err_forecast = NA_REAL;
+            }
+
+            break;
+        } // case Linear Bayes
+        case AVAIL::Algo::MCS:
+        {
+            SMC::MCS mcs(model, y);
+            mcs.init(algo_opts);
+            mcs.infer(model);
+
+            mcs.fitted_error(err_fit, model, loss);
+            mcs.forecast_error(err_forecast, model, loss);
+
+            break;
+        } // case MCS
+        case AVAIL::Algo::FFBS:
+        {
+            SMC::FFBS ffbs(model, y);
+            ffbs.init(algo_opts);
+            ffbs.infer(model);
+
+            ffbs.fitted_error(err_fit, model, loss);
+            ffbs.forecast_error(err_forecast, model, loss);
+
+            break;
+        } // case FFBS
+        case AVAIL::Algo::ParticleLearning:
+        {
+            SMC::PL pl(model, y);
+            pl.init(algo_opts);
+            pl.infer(model);
+
+            pl.fitted_error(err_fit, model, loss);
+            pl.forecast_error(err_forecast, model, loss);
+
+            break;
+        } // case particle learning
+        case AVAIL::Algo::MCMC:
+        {
+            MCMC::Disturbance mcmc(model, y);
+            mcmc.init(algo_opts);
+            mcmc.infer(model);
+
+            mcmc.fitted_error(err_fit, model, loss);
+            mcmc.forecast_error(err_forecast, model, loss);
+            break;
+        }
+        case AVAIL::Algo::HybridVariation:
+        {
+            VB::Hybrid hvb(model, y);
+            hvb.init(algo_opts);
+            hvb.infer(model);
+
+            hvb.fitted_error(err_fit, model, loss);
+            hvb.forecast_error(err_forecast, model, loss);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument("Unknown algorithm " + algo_name);
+            break;
+        }
+        } // switch by algorithm
+
+        stats.at(i, 1) = err_forecast;
+        stats.at(i, 2) = err_fit;
+
+        Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << npar;
+
+    } // loop over par1
 
     Rcpp::Rcout << std::endl;
 

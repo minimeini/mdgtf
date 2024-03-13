@@ -26,7 +26,6 @@ namespace VB
         unsigned int nforecast = 0;
 
         unsigned int N = 500; // number of SMC particles
-        unsigned int B = 1;
 
         bool update_static = true;
         unsigned int m = 1; // number of unknown static parameters
@@ -113,11 +112,6 @@ namespace VB
                 nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
             }
 
-            B = 1;
-            if (opts.containsElementNamed("num_backward"))
-            {
-                B = Rcpp::as<unsigned int>(opts["num_backward"]);
-            }
 
             psi_stored.set_size(psi.n_elem, nsample);
             psi_stored.zeros();
@@ -264,7 +258,6 @@ namespace VB
             opts["nburnin"] = 1000;
 
             opts["num_particle"] = 500;
-            opts["num_backward"] = 1;
             opts["num_step_ahead_forecast"] = 0;
 
             opts["W"] = W_opts;
@@ -284,19 +277,15 @@ namespace VB
         }
 
 
-        Rcpp::List forecast_error(
-            const Model &model, const 
-            std::string &loss_func = "quadratic",
-            const unsigned int &k = 1)
-        {
-            return Model::forecast_error(psi_stored, y, model, loss_func, k);
-        }
+        // Rcpp::List forecast_error(
+        //     const Model &model, 
+        //     const std::string &loss_func = "quadratic",
+        //     const unsigned int &k = 1)
+        // {
+        //     return Model::forecast_error(psi_stored, y, model, loss_func, k);
+        // }
 
-        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
-        {
-            Model::forecast_error(err, psi_stored, y, model, loss_func);
-            return;
-        }
+        
 
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
         {
@@ -450,6 +439,13 @@ namespace VB
             k = 1;
             learning_rate = 0.01;
             eps_step_size = 1.e-6;
+
+            rcomb.set_size(dim.nT);
+            rcomb.zeros();
+            for (unsigned int l = 1; l <= dim.nT; l++)
+            {
+                rcomb.at(l - 1) = nbinom::binom((unsigned int)model_in.transfer.dlag.par2 - 2 + l, l - 1);
+            }
         }
 
         Hybrid() : VariationalBayes() {}
@@ -1336,7 +1332,194 @@ namespace VB
             return stats;
         }
 
-        void infer(const Model &model_in)
+        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        {
+            Model::forecast_error(err, psi_stored, y, model, loss_func);
+            return;
+        }
+
+        Rcpp::List forecast_error(
+            const Model &model, 
+            const std::string &loss_func = "quadratic",
+            const unsigned int &kstep = 1)
+        {
+            const unsigned int ntime = model.dim.nT;
+
+            arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
+            arma::vec y_loss_all(kstep, arma::fill::zeros);
+
+            Rcpp::NumericVector lag_param = {
+                model.transfer.dlag.par1,
+                model.transfer.dlag.par2};
+
+            unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
+            tstart = std::max(tstart, kstep);
+            tstart += 1;
+
+            arma::vec yall = y;
+            arma::vec rcomb_all = rcomb;
+            arma::vec psi_all = psi;
+            arma::mat psi_stored_all = psi_stored;
+
+            arma::uvec success(ntime + 1, arma::fill::ones);
+            success.head(tstart).fill(0);
+            success.tail(kstep + 2).fill(0);
+
+            for (unsigned int t = 0; t < ntime; t++)
+            {
+                if (t < tstart || t >= (ntime - kstep))
+                {
+                    arma::vec ysub(kstep, arma::fill::zeros);
+                    unsigned int idxs = t + 1;
+                    unsigned int idxe = std::min(t + kstep, ntime);
+                    unsigned int nelem = idxe - idxs + 1;
+                    ysub.head(nelem) = y.subvec(idxs, idxe);
+
+                    for (unsigned int i = 0; i < nsample; i++)
+                    {
+                        ycast.tube(t, i) = ysub;
+                    }
+                }
+            }
+
+            Model submodel = model;
+
+            for (unsigned int t = tstart; t < (ntime - kstep); t++)
+            {
+                R_CheckUserInterrupt();
+
+                submodel.dim.nT = t;
+                submodel.dim.init(
+                    submodel.dim.nT, submodel.dim.nL, 
+                    submodel.dobs.par2);
+                
+                submodel.transfer.init(
+                    submodel.dim, submodel.transfer.name, 
+                    submodel.transfer.fgain.name, 
+                    submodel.transfer.dlag.name, lag_param);
+
+
+                psi.clear();
+                psi = psi_all.head(t + 1);
+                y.clear();
+                y = yall.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
+                rcomb.clear();
+                rcomb = rcomb_all.head(t);
+                psi_stored.clear();
+                psi_stored = psi_stored_all.head_rows(t + 1); // (t + 1) x nsample
+
+                arma::mat ynew(kstep, nsample, arma::fill::zeros);
+
+                try
+                {
+                    infer(submodel, false);
+
+                    ynew = Model::forecast(
+                        y, psi_stored, W_stored,
+                        submodel.dim, submodel.transfer,
+                        submodel.flink.name,
+                        submodel.dobs.par1, kstep); // k x nsample, y[t + 1], ..., y[t + k]
+                }
+                catch(const std::exception& e)
+                {
+                    success.at(t) = 0;
+                }
+
+                for (unsigned int j = 0; j < kstep; j++)
+                {
+                    ycast.slice(j).row(t) = ynew.row(j); // 1 x nsample
+                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
+                }
+
+
+                Rcpp::Rcout << "\rProgress: " << t + 1 << "/" << ntime - kstep;
+            } // k-step ahead forecasting with information D[t] for each t.
+
+            Rcpp::Rcout << std::endl;
+
+            submodel.dim.nT = ntime;
+            submodel.dim.init(
+                submodel.dim.nT, submodel.dim.nL,
+                submodel.dobs.par2);
+
+            submodel.transfer.init(
+                submodel.dim, submodel.transfer.name,
+                submodel.transfer.fgain.name,
+                submodel.transfer.dlag.name, lag_param);
+
+            arma::uvec succ_idx = arma::find(success == 1);
+
+            arma::vec qprob = {0.025, 0.5, 0.975};
+            arma::cube ycast_qt = arma::zeros<arma::cube>(ntime + 1, 3, kstep);
+            std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+
+
+            for (unsigned int j = 0; j < kstep; j++)
+            {
+                arma::mat ycast_qtmp = arma::quantile(ycast.slice(j), qprob, 1); // (nT + 1) x nsample x k
+                ycast_qt.slice(j) = ycast_qtmp;
+                arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
+
+
+                switch (loss_list[tolower(loss_func)])
+                {
+                case AVAIL::L1: // mae
+                {
+                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
+                    y_loss.col(j) = y_loss_tmp;
+
+                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
+                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+
+                    break;
+                }
+                case AVAIL::L2: // rmse
+                {
+                    ytmp = arma::square(ytmp);
+                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
+                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
+                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+
+                    y_loss.col(j) = arma::sqrt(y_loss_tmp);
+                    y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
+
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+                } // switch by loss
+
+            } // switch by kstep
+
+
+            y.clear();
+            y = yall;
+            rcomb.clear();
+            rcomb = rcomb_all;
+            psi.clear();
+            psi = psi_all;
+            psi_stored.clear();
+            psi_stored = psi_stored_all;
+
+
+            Rcpp::List output;
+            output["y_cast"] = Rcpp::wrap(ycast_qt);
+            output["y_cast_all"] = Rcpp::wrap(ycast);
+            output["y"] = Rcpp::wrap(yall);
+            output["y_loss"] = Rcpp::wrap(y_loss);
+            output["y_loss_all"] = Rcpp::wrap(y_loss_all);
+
+            output["tstart"] = tstart;
+            output["tend"] = (ntime - kstep);
+
+            return output;
+        } // end of function
+
+        void infer(const Model &model_in, const bool &verbose = true)
         {
             Model model = model_in;
             W = model.derr.par1;
@@ -1357,12 +1540,7 @@ namespace VB
             // arma::vec eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
             // arma::vec eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
 
-            arma::vec rcomb(model.dim.nT, arma::fill::zeros);
-            for (unsigned int l = 1; l <= model.dim.nT; l++)
-            {
-                rcomb.at(l - 1) = nbinom::binom((unsigned int)model.transfer.dlag.par2 - 2 + l, l - 1);
-            }
-
+            
             
             for (unsigned int b = 0; b < ntotal; b ++)
             {
@@ -1371,7 +1549,7 @@ namespace VB
                 
                 mcs.W = W;
                 mcs.infer(model);
-                arma::mat psi_all = mcs.get_psi_filter(); // (nT + 1) x M
+                arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
                 psi = arma::median(psi_all, 1);
 
 
@@ -1468,13 +1646,19 @@ namespace VB
                     r_stored.at(idx_run) = r;
                 }
 
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+                }
                 
-
-                Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
 
             } // HVB loop
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+            
         }
 
         Rcpp::List get_output()
@@ -1524,6 +1708,7 @@ namespace VB
         arma::mat B; // m x k
         arma::vec vecL_B;  // mk x 1
         arma::uvec B_uptri_idx;
+        arma::vec rcomb;
 
 
 

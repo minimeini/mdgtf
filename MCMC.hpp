@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+// #include <chrono>
 #include <RcppArmadillo.h>
 #include "Model.hpp"
 #include "LinkFunc.hpp"
@@ -30,7 +31,6 @@ namespace MCMC
 
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
-                
                 double wt_old = wt.at(t);
                 arma::vec lam = model.wt2lambda(y, wt); // Checked. OK.
 
@@ -41,15 +41,15 @@ namespace MCMC
                 } // Checked. OK.
 
                 logp_old += R::dnorm4(wt_old, w0_prior.par1, prior_sd, true);
-                
-
 
                 /*
                 Metropolis-Hastings
                 */
                 approx_dlm.update_by_wt(y, wt);
+
                 arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1); // nT x 1, f0, Fn and psi is updated
                 arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.); // nT x 1
+
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink.name); // nT x 1
 
@@ -399,10 +399,172 @@ namespace MCMC
         Rcpp::List forecast_error(
             const Model &model, 
             const std::string &loss_func = "quadratic", 
-            const unsigned int &k = 1)
+            const unsigned int &kstep = 1)
         {
-            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            return Model::forecast_error(psi_stored, y, model, loss_func, k);
+            const unsigned int ntime = model.dim.nT;
+
+            arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
+            arma::vec y_loss_all(kstep, arma::fill::zeros);
+
+            Rcpp::NumericVector lag_param = {
+                model.transfer.dlag.par1,
+                model.transfer.dlag.par2};
+
+            unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
+            tstart = std::max(tstart, kstep);
+            tstart += 1;
+
+            arma::vec yall = y;
+            arma::vec wt_all = wt;
+            arma::mat wt_stored_all = wt_stored; // (nT + 1) x nsample
+
+            arma::uvec success(ntime + 1, arma::fill::ones);
+            success.head(tstart).fill(0);
+            success.tail(kstep + 2).fill(0);
+
+            for (unsigned int t = 0; t < ntime; t ++)
+            {
+                if (t < tstart || t >= (ntime - kstep))
+                {
+                    arma::vec ysub(kstep, arma::fill::zeros);
+                    unsigned int idxs = t + 1;
+                    unsigned int idxe = std::min(t + kstep, ntime);
+                    unsigned int nelem = idxe - idxs + 1;
+                    ysub.head(nelem) = y.subvec(idxs, idxe);
+
+                    for (unsigned int i = 0; i < nsample; i ++)
+                    {
+                        ycast.tube(t, i) = ysub;
+                    }
+                    
+                }
+            }
+
+            Model submodel = model;
+
+            for (unsigned int t = tstart; t < (ntime - kstep); t++)
+            {
+                R_CheckUserInterrupt();
+
+                submodel.dim.nT = t;
+                submodel.dim.init(
+                    submodel.dim.nT, submodel.dim.nL,
+                    submodel.dobs.par2);
+
+                submodel.transfer.init(
+                    submodel.dim, submodel.transfer.name, 
+                    submodel.transfer.fgain.name, 
+                    submodel.transfer.dlag.name, lag_param);
+
+                wt.clear();
+                wt = wt_all.head(t + 1);
+                y.clear();
+                y = yall.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
+                wt_stored.clear();
+                wt_stored = wt_stored_all.head_rows(t + 1); // (t + 1) x nsample
+
+                arma::mat psi_stored = arma::cumsum(wt_stored, 0);
+                arma::mat ynew(kstep, nsample, arma::fill::zeros);
+
+                try
+                {
+                    infer(submodel, false);
+                    ynew = Model::forecast(
+                        y, psi_stored, W_stored,
+                        submodel.dim, submodel.transfer,
+                        submodel.flink.name,
+                        submodel.dobs.par1, kstep); // k x nsample, y[t + 1], ..., y[t + k]
+                }
+                catch(const std::exception& e)
+                {
+                    success.at(t) = 0;
+                }
+                
+
+                for (unsigned int j = 0; j < kstep; j++)
+                {
+                    ycast.slice(j).row(t) = ynew.row(j);                                      // 1 x nsample
+                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
+                }
+
+                Rcpp::Rcout << "\rProgress: " << t + 1 << "/" << ntime - kstep;
+            } // k-step ahead forecasting with information D[t] for each t.
+            Rcpp::Rcout << std::endl;
+
+            submodel.dim.nT = ntime;
+            submodel.dim.init(
+                submodel.dim.nT, submodel.dim.nL,
+                submodel.dobs.par2);
+
+            submodel.transfer.init(
+                submodel.dim, submodel.transfer.name,
+                submodel.transfer.fgain.name,
+                submodel.transfer.dlag.name, lag_param);
+
+            arma::uvec succ_idx = arma::find(success == 1);
+
+            arma::vec qprob = {0.025, 0.5, 0.975};
+            arma::cube ycast_qt(ntime + 1, 3, kstep);
+            std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+
+            for (unsigned int j = 0; j < kstep; j++)
+            {
+                arma::mat ycast_qtmp = arma::quantile(ycast.slice(j), qprob, 1); // (nT + 1) x nsample x k
+                ycast_qt.slice(j) = ycast_qtmp;
+                arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
+
+                switch (loss_list[tolower(loss_func)])
+                {
+                case AVAIL::L1: // mae
+                {
+                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
+                    y_loss.col(j) = y_loss_tmp;
+
+                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
+                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+
+                    break;
+                }
+                case AVAIL::L2: // rmse
+                {
+                    ytmp = arma::square(ytmp);
+                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
+                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
+                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+
+                    y_loss.col(j) = arma::sqrt(y_loss_tmp);
+                    y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
+
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+                } // switch by loss
+
+            } // switch by kstep
+
+            y.clear();
+            y = yall;
+            wt.clear();
+            wt = wt_all;
+            wt_stored.clear();
+            wt_stored = wt_stored_all;
+
+            Rcpp::List output;
+            output["y_cast"] = Rcpp::wrap(ycast_qt);
+            output["y_cast_all"] = Rcpp::wrap(ycast);
+            output["y"] = Rcpp::wrap(yall);
+            output["y_loss"] = Rcpp::wrap(y_loss);
+            output["y_loss_all"] = Rcpp::wrap(y_loss_all);
+
+            output["tstart"] = tstart;
+            output["tend"] = (ntime - kstep);
+
+            return output;
         }
 
         void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
@@ -425,7 +587,7 @@ namespace MCMC
             return;
         }
 
-        void infer(Model &model)
+        void infer(Model &model, const bool &verbose = true)
         {
             model_info = model.info();
 
@@ -480,11 +642,18 @@ namespace MCMC
                     mu0_stored.at(idx_run) = mu0;
                 }
 
-
-                Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+                }
+                
             } // end a single iteration
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+            
             return;
         }
 

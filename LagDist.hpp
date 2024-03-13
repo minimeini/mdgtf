@@ -87,11 +87,36 @@ public:
         switch (lag_list[_name])
         {
         case AVAIL::Dist::lognorm:
-            _Fphi = lognorm::dlognorm(nlag, _par1, _par2);
+        {
+            try
+            {
+                _Fphi = lognorm::dlognorm(nlag, _par1, _par2);
+            }
+            catch(const std::invalid_argument& e)
+            {
+                std::cout << "Lag: lognorm(" << _par1 << ", " << _par2 << ")\n";
+                std::cerr << e.what() << '\n';
+                throw;
+            }
+
             break;
+            
+        }
         case AVAIL::Dist::nbinomp:
-            _Fphi = nbinom::dnbinom(nlag, _par1, _par2);
+        {
+            try
+            {
+                _Fphi = nbinom::dnbinom(nlag, _par1, _par2);
+            }
+            catch(const std::exception& e)
+            {
+                std::cout << "Lag: nbinom(" << _par1 << ", " << _par2 << ")\n";
+                std::cerr << e.what() << '\n';
+                throw;
+            }
+
             break;
+        }            
         default:
             throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
             break;

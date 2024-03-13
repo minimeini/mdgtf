@@ -1104,6 +1104,8 @@ namespace LBA
 
             return;
         }
+        
+
 
         void init(const Rcpp::List &opts_in)
         {

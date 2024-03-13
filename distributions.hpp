@@ -908,7 +908,15 @@ public:
     }
 
 private:
-    static double Pd(
+    /**
+     * @brief C.D.F of log-normal distribution. The Pd function in Koyama (2021).
+     *
+     * @param d
+     * @param mu double: the mean of the log-normal distribution.
+     * @param sigmasq double: the variance of the log-normal distribution.
+     * @return double
+     */
+    static double plognorm(
         const double d,
         const double mu,
         const double sigmasq)
@@ -918,12 +926,20 @@ private:
         return arma::as_scalar(0.5 * arma::erfc(tmpv1));
     }
 
+    /**
+     * @brief P.M.F of discretized log-normal distribution. p(d) = Pd(d) - Pd(d - 1).
+     *
+     * @param lag
+     * @param mu
+     * @param sd2
+     * @return double
+     */
     static double dlognorm0(
         const double &lag, // starting from 1
         const double &mu,
         const double &sd2)
     {
-        double output = Pd(lag, mu, sd2) - Pd(lag - 1., mu, sd2);
+        double output = plognorm(lag, mu, sd2) - plognorm(lag - 1., mu, sd2);
         bound_check(output, "dlognorm0", false, true);
         return output;
     }

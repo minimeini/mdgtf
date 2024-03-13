@@ -475,17 +475,30 @@ public:
             */
             unsigned int r = static_cast<unsigned int>(dlag.par2);
             arma::vec ft_prev(r, arma::fill::zeros);
+
             int idx_s = std::max((int)(t - r), 0);
             int idx_e = std::max((int)(t - 1), 0);
             unsigned int nelem = idx_e - idx_s + 1;
-            if (nelem > 1)
+            try
             {
-                ft_prev.tail(nelem) = ft.subvec(idx_s, idx_e); // 0, ..., 0, f[t-r], ..., f[t-1]
+                
+                if (nelem > 1)
+                {
+                    ft_prev.tail(nelem) = ft.subvec(idx_s, idx_e); // 0, ..., 0, f[t-r], ..., f[t-1]
+                }
+                else
+                {
+                    ft_prev.at(r - 1) = ft.at(idx_e);
+                }
             }
-            else
+            catch(const std::exception& e)
             {
-                ft_prev.at(r - 1) = ft.at(idx_e);
+                std::cout << "\n nelem = " << nelem;
+                std::cout << " idx_s = " << idx_s << " idx_e = " << idx_e << " ft = " << ft.n_elem << std::endl;
+                std::cerr << e.what() << '\n';
             }
+            
+            
 
             arma::vec ft_prev_rev = arma::reverse(ft_prev);
             ft_now = transfer_iterative(t, y.at(t - 1));
@@ -508,9 +521,9 @@ private:
     arma::vec _iter_coef;
     double _coef_now;
 
-    arma::vec _ft;
-    arma::vec _F0;
-    arma::mat _G0;
+    arma::vec _ft; // (nT + r) x 1, r = 1 if using sliding transfer function.
+    arma::vec _F0; // nP x 1
+    arma::mat _G0; // nP x nP
 };
 
 #endif

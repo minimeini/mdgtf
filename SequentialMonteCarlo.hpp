@@ -431,16 +431,20 @@ namespace SMC
             arma::vec ci_prob = {0.025, 0.5, 0.975};
             Rcpp::List output;
             arma::mat psi_filter = get_psi_filter();
+            arma::mat psi_smooth = get_psi_smooth();
 
             if (summarize)
             {
-                          // (nT + 1) x M
-                arma::mat psi = arma::quantile(psi_filter, ci_prob, 1); // (nT + 1) x 3
-                output["psi"] = Rcpp::wrap(psi);
+                arma::mat psi1 = arma::quantile(psi_filter, ci_prob, 1); // (nT + 1) x 3
+                output["psi_filter"] = Rcpp::wrap(psi1);
+
+                arma::mat psi2 = arma::quantile(psi_smooth, ci_prob, 1); // (nT + 1) x 3
+                output["psi"] = Rcpp::wrap(psi2);
             }
             else
             {
-                output["psi"] = Rcpp::wrap(psi_filter);
+                output["psi_filter"] = Rcpp::wrap(psi_filter);
+                output["psi"] = Rcpp::wrap(psi_smooth);
             }
 
             output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
@@ -462,7 +466,10 @@ namespace SMC
             Wt.set_size(dim.nT + 1);
             Wt.fill(W);
 
-            smoothing = false;
+            smoothing = true;
+
+            Theta_smooth.clear();
+            Theta_smooth = Theta_stored;
         }
 
         Rcpp::List forecast(const Model &model)
@@ -502,8 +509,9 @@ namespace SMC
                 StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
                 stats.at(i, 1) = err_forecast;
 
+                arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
                 stats.at(i, 2) = err_fit;
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -538,8 +546,9 @@ namespace SMC
                 StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
                 stats.at(i, 1) = err_forecast;
 
+                arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
                 stats.at(i, 2) = err_fit;
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -573,8 +582,7 @@ namespace SMC
                 Theta_stored.zeros();
 
                 Theta_smooth.clear();
-                Theta_smooth.set_size(dim.nP, M, dim.nT + B);
-                Theta_smooth.zeros();
+                Theta_smooth = Theta_stored;
 
                 infer(model);
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
@@ -583,8 +591,9 @@ namespace SMC
                 StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
                 stats.at(i, 1) = err_forecast;
 
+                arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
                 stats.at(i, 2) = err_fit;
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -678,7 +687,7 @@ namespace SMC
                     bool use_custom_val = (use_custom && t > B) ? true : false;
 
                     Wt.at(t + 1) = SequentialMonteCarlo::discount_W(
-                        Theta_stored.slice(t + B - 1),
+                        Theta_smooth.slice(t + B - 1),
                         custom_discount_factor,
                         use_custom_val, 
                         default_discount_factor);
@@ -694,9 +703,8 @@ namespace SMC
 
 
                 bound_check<arma::vec>(Wsqrt, "SMC::propagate: Wsqrt", true, true);
-                
 
-                arma::mat Theta_now = Theta_stored.slice(t + B - 1);
+                arma::mat Theta_now = Theta_smooth.slice(t + B - 1);
 
                 bool positive_noise = (t < Theta_now.n_rows) ? true : false;
                 arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
@@ -705,14 +713,15 @@ namespace SMC
 
                 arma::uvec resample_idx = get_resample_index(weights);
 
-                Theta_stored.slice(t + B) = Theta_next;
+                Theta_smooth.slice(t + B) = Theta_next;
 
                 for (unsigned int b = t + 1; b < t + B + 1; b++)
                 {
-                    arma::mat theta_tmp = Theta_stored.slice(b);
-                    Theta_stored.slice(b) = theta_tmp.cols(resample_idx);
-                    
+                    arma::mat theta_tmp = Theta_smooth.slice(b);
+                    Theta_smooth.slice(b) = theta_tmp.cols(resample_idx);
                 }
+
+                Theta_stored.slice(t + 1) = Theta_next.cols(resample_idx);
 
 
 
@@ -870,7 +879,7 @@ namespace SMC
                 custom_discount_factor = grid.at(i);
                 stats.at(i, 0) = custom_discount_factor;
 
-                infer(model);
+                infer(model, false);
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
@@ -878,9 +887,20 @@ namespace SMC
                 stats.at(i, 1) = err_forecast;
 
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
-                stats.at(i, 2) = err_fit;
+                if (smoothing)
+                {
+                    arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
+                    StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                }
+                else
+                {
+                    StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                }
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
             }
+
+            Rcpp::Rcout << std::endl;
 
             return stats;
         }
@@ -902,7 +922,7 @@ namespace SMC
                 W = grid.at(i);
                 stats.at(i, 0) = W;
 
-                infer(model);
+                infer(model, false);
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
@@ -921,12 +941,15 @@ namespace SMC
                 }
                 
                 stats.at(i, 2) = err_fit;
+
+                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
             }
+            Rcpp::Rcout << std::endl;
 
             return stats;
         }
 
-        void infer(const Model &model)
+        void infer(const Model &model, const bool &verbose = true)
         {
             // y: (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
@@ -995,7 +1018,19 @@ namespace SMC
 
                     Theta_smooth.slice(t - 1) = theta_next;
                     // psi_smooth.row(t - 1) = theta_next.row(0); // 1 x M
+
+                    if (verbose)
+                    {
+                        Rcpp::Rcout << "\rProgress: " << dim.nT - t + 1 << "/" << dim.nT;
+                    }
+                    
                 }
+
+                if (verbose)
+                {
+                    Rcpp::Rcout << std::endl;
+                }
+                
             }
 
             return;
@@ -1207,7 +1242,7 @@ namespace SMC
         }
 
 
-        void infer(const Model &model)
+        void infer(const Model &model, const bool &verbose = true)
         {
             for (unsigned int t = 0; t < dim.nT; t++)
             {
@@ -1310,6 +1345,10 @@ namespace SMC
 
             } // propagate and resample
 
+            /**
+             * @todo Actually we should not resample W, but re-draw W from the posterior at every step of smoothing?
+             * 
+             */
             if (smoothing)
             {
                 weights.ones();
@@ -1350,7 +1389,19 @@ namespace SMC
 
                     Theta_smooth.slice(t - 1) = theta_tmp;
                     // psi_smooth.row(t - 1) = theta_tmp.row(0);
+
+                    if (verbose)
+                    {
+                        Rcpp::Rcout << "\rProgress: " << dim.nT - t + 1 << "/" << dim.nT;
+                    }
+                    
                 }
+
+                if (verbose)
+                {
+                    Rcpp::Rcout << std::endl;
+                }
+
             } // opts.smoothing
         } // Particle Learning inference
 

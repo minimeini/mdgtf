@@ -140,6 +140,19 @@ public:
         double ys = y;
         double lambda_s = lambda;
 
+        if (lambda < EPS)
+        {
+            // std::cout << "Warning<loglike>: negative lambda = " << lambda << "given y = " << y << std::endl;
+            // density = -999999;
+            // if (return_log)
+            // {
+            //     density = 0.;
+            // }
+
+            // return density;
+            lambda_s = EPS;
+        }
+
         switch (obs_list[obs_dist])
         {
         case AVAIL::Dist::nbinomm:
@@ -198,6 +211,17 @@ public:
         return deriv;
     }
 
+    /**
+     * @brief Marginal one-step-ahead forecasting distribution: y[t + 1] | D[t].
+     * 
+     * @param ynext 
+     * @param obs_dist 
+     * @param obs_par2 
+     * @param alpha_next 
+     * @param beta_next 
+     * @param return_log 
+     * @return double 
+     */
     static double dforecast(
         const double &ynext,
         const std::string &obs_dist,
@@ -215,10 +239,24 @@ public:
         {
         case AVAIL::Dist::poisson:
         {
+            // For a Poisson observation distribution, its marginal forecast distribution is a negative-binomial
             // One-step-aheading forecasting for Poisson observations follows a negative-binomial distribution.
             double par1 = alpha_next; // Targeted number of successes.
             double par2 = 1. / (beta_next + 1.); // Probability of failures.
             logp_pred = nbinom::dnbinom(ynext, par2, par1);
+
+            double c1 = R::lgammafn(ynext + alpha_next);
+            c1 -= R::lgammafn(alpha_next);
+            c1 -= R::lgammafn(ynext + 1.);
+
+            double c2 = std::log(beta_next) - std::log(beta_next + 1.);
+            c2 *= alpha_next;
+
+            double c3 = - std::log(beta_next + 1.);
+            c3 *= ynext;
+
+            logp_pred = c1 + c2 + c3;
+
             break;
         }
         case AVAIL::Dist::nbinomm:
@@ -245,7 +283,7 @@ public:
         }
         }
 
-        bound_check(logp_pred, "dforecast");
+        bound_check(logp_pred, "dforecast(y="+std::to_string(ynext)+", alpha=" + std::to_string(alpha_next) + ", beta=" + std::to_string(beta_next)+")");
 
         if (return_log)
         {
