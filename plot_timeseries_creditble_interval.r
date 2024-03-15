@@ -6,34 +6,41 @@ plot_ts_ci_multi = function(
                     xlab = "Time",
                     ylab = expression(psi[t]),
                     alpha = 0.2) {
-  mlist = c("EpiEstim","WT","Koyama2021",
-            "LBA","HVB","MCMC",
-            "True","VB",
-            "PL",
-            "SMCS-FL","APF",
-            "SMCF-BF","SMCS-BS")
-  clist = c("seagreen", # Epi
-            "orange",  # WT
-            "burlywood4", # Koyama
-            "maroon", # LBA **
-            "purple", # HVB **
-            "darkturquoise", # MCMC
-            "black", # True
-            "salmon", # VB
-            "royalblue", # PL **
-            "cornflowerblue", # SMCS-FL **
-            "gold", # APF
-            "sandybrown", # SMCF-BF
-            "mediumaquamarine") # SMCS-BS **
+  mlist_external = c("EpiEstim", "WT", "Koyama2021")
+  clist_external = c("seagreen", "orange", "burlywood4")
+
+  mlist_dgtf = c(
+    "LBA", "LBE", 
+    "HVB", "HVA", 
+    "MCMC", 
+    "True", 
+    "VB", 
+    "PL", 
+    "SMCS-FL", "MCS",  
+    "APF", 
+    "SMCF-BF",
+    "SMCS-BS", "BS", "FFBS"
+  )
+  clist_dgtf = c(
+    rep("maroon", 2), # LBA, LBE
+    rep("purple", 2), # HVB, HVA **
+    "darkturquoise", # MCMC
+    "black", # True
+    "salmon", # VB
+    "royalblue", # PL **
+    rep("cornflowerblue", 2), # SMCS-FL, MCS **
+    "gold", # APF
+    "sandybrown", # SMCF-BF
+    rep("mediumaquamarine", 3) # SMCS-BS
+  )
+
+  mlist = c(mlist_external, mlist_dgtf)
+  clist = c(clist_external, clist_dgtf)
   
 
   nl = length(psi_list)
   n = max(c(unlist(lapply(psi_list,function(psi){dim(psi)[1]}))))
-  
-  nl2 = sum(names(psi_list)%in%c("LBA","HVB","MCMC","VB",
-                                 "SMCS-FL","SMCS-BS","APF","SMCF-BF",
-                                 "Koyama2021",
-                                 "PL"))
+  nl2 = sum(names(psi_list)%in%c(mlist_dgtf, "Koyama2021"))
   
   if (is.null(time_label)) {
     time_label = c(1:n)
@@ -136,13 +143,21 @@ plot_ypred <- function(
     ypred_quantile,
     yfit,
     start_time = 0.9) {
-  ntotal <- dim(ypred_quantile)[1] + dim(yfit)[1]
+  
+  if (!is.null(dim(yfit))) {
+    nfit = dim(yfit)[1]
+  } else {
+    nfit = length(c(yfit))    
+  }
+
+  ntotal <- dim(ypred_quantile)[1] + nfit
+  
 
   dat <- data.frame(
     y = ypred_quantile[, 2],
     ymin = ypred_quantile[, 1],
     ymax = ypred_quantile[, 3],
-    time = dim(yfit)[1]:(ntotal - 1)
+    time = nfit:(ntotal - 1)
   )
 
   dat0 <- data.frame(

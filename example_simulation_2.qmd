@@ -21,6 +21,7 @@ format:
     keep-tex: true
     tbl-cap-location: bottom
     layout-valign: bottom
+error: true
 ---
 
 ```{r}
@@ -44,6 +45,7 @@ library(gridExtra)
 repo <- "/Users/meinitang/Dropbox/Repository/poisson-dlm"
 Rcpp::sourceCpp(file.path(repo, "export.cpp"))
 source(file.path(repo, "plot_timeseries_creditble_interval.r"))
+source(file.path(repo, "external_methods.r"))
 
 opath <- "/Users/meinitang/Dropbox/Research/Project1/simulation"
 ```
@@ -120,6 +122,10 @@ mod1 <- list(
     param = param,
     dim = dim
 )
+
+rm(dim)
+rm(param)
+rm(component)
 ```
 
 
@@ -271,9 +277,25 @@ opts1.lba$custom_discount_factor <- 0.82
 #### Inference
 
 ```{r}
-#| label: run dgtf_infer of lba
-
+#| label: run dgtf_infer of lba with discount factor
+opts1.lba$use_discount = TRUE
 out1.lba <- dgtf_infer(
+    mod1, sim1$y,
+    "lba", opts1.lba,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err, 
+    loss_func = loss
+)
+
+```
+
+```{r}
+#| label: run dgtf_infer of lba with W
+
+opts1.lba$use_discount = FALSE
+
+out1.lba2 <- dgtf_infer(
     mod1, sim1$y,
     "lba", opts1.lba,
     forecast_error = eval_forecast_err,
@@ -287,18 +309,29 @@ out1.lba <- dgtf_infer(
 ```{r}
 #| label: evaluation of lba
 #| error: true
-out1.lba.loss_all = c(
+out1.lba.loss_all <- c(
     c(out1.lba$error$forecast$y_loss_all),
-  out1.lba$error$fitted$filter$y_loss_all,
-  out1.lba$error$fitted$smooth$y_loss_all
+    out1.lba$error$fitted$filter$y_loss_all,
+    out1.lba$error$fitted$smooth$y_loss_all
 )
 
-names(out1.lba.loss_all) = c(
+names(out1.lba.loss_all) <- c(
     paste0("forecast", 1:length(c(out1.lba$error$forecast$y_loss_all))),
-  "fitted-filter", "fitted-smooth"
+    "fitted-filter", "fitted-smooth"
+)
+print(out1.lba.loss_all)
+
+out1.lba2.loss_all <- c(
+    c(out1.lba2$error$forecast$y_loss_all),
+    out1.lba2$error$fitted$filter$y_loss_all,
+    out1.lba2$error$fitted$smooth$y_loss_all
 )
 
-print(out1.lba.loss_all)
+names(out1.lba2.loss_all) <- c(
+    paste0("forecast", 1:length(c(out1.lba2$error$forecast$y_loss_all))),
+    "fitted-filter", "fitted-smooth"
+)
+print(out1.lba2.loss_all)
 ```
 
 ```{r}
@@ -339,8 +372,8 @@ for (j in 1:10) {
 
 if (mode == "save") {
     save(
-        out1.lba, opts1.lba, delta.lba, W.lba, 
-        out1.lba.loss_all,
+        out1.lba, out1.lba2, opts1.lba, delta.lba, W.lba, 
+        out1.lba.loss_all, out1.lba2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-lba.RData")
@@ -489,7 +522,7 @@ opts1.mcs <- dgtf_default_algo_settings("mcs")
 opts1.mcs$num_particle <- 5000
 opts1.mcs$num_step_ahead_forecast <- 10
 
-opts1.mcs$W <- 0.008
+opts1.mcs$W <- 0.006
 
 opts1.mcs$use_discount <- TRUE
 opts1.mcs$use_custom <- TRUE
@@ -501,18 +534,31 @@ opts1.mcs$num_backward <- 3
 #### Inference
 
 ```{r}
-#| label: run dgtf_infer of mcs
-
+#| label: run dgtf_infer of mcs with discount factor
+opts1.mcs$use_discount <- TRUE
 out1.mcs <- dgtf_infer(
     mod1, sim1$y,
     "mcs", opts1.mcs,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err, 
+    k = kstep_forecast_err,
     loss_func = loss
 )
 ```
 
+
+```{r}
+#| label: run dgtf_infer of mcs with W
+opts1.mcs$use_discount <- FALSE
+out1.mcs2 <- dgtf_infer(
+    mod1, sim1$y,
+    "mcs", opts1.mcs,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+```
 
 ```{r}
 #| label: evaluation of mcs
@@ -526,6 +572,18 @@ names(out1.mcs.loss_all) <- c(
     "fitted-filter", "fitted-smooth"
 )
 print(out1.mcs.loss_all)
+
+
+out1.mcs2.loss_all <- c(
+    c(out1.mcs2$error$forecast$y_loss_all),
+    c(out1.mcs2$error$fitted$filter$y_loss_all),
+    c(out1.mcs2$error$fitted$smooth$y_loss_all)
+)
+names(out1.mcs2.loss_all) <- c(
+    paste0("forecast", 1:length(c(out1.mcs2$error$forecast$y_loss_all))),
+    "fitted-filter", "fitted-smooth"
+)
+print(out1.mcs2.loss_all)
 ```
 
 
@@ -558,8 +616,8 @@ for (j in 1:kstep_forecast_err) {
 
 if (mode == "save") {
     save(
-        out1.mcs, opts1.mcs, delta.mcs, W.mcs, B.mcs,
-        out1.lba.loss_all,
+        out1.mcs, out1.mcs2, opts1.mcs, delta.mcs, W.mcs, B.mcs,
+        out1.mcs.loss_all, out1.mcs2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-mcs.RData")
@@ -670,7 +728,7 @@ opts1.ffbs$do_smoothing <- TRUE
 
 opts1.ffbs$num_step_ahead_forecast <- 10
 
-opts1.ffbs$W = 0.002
+opts1.ffbs$W = 0.001
 
 opts1.ffbs$use_discount <- TRUE
 opts1.ffbs$use_custom <- TRUE
@@ -678,10 +736,25 @@ opts1.ffbs$custom_discount_factor <- 0.92
 
 ```
 
-```{r}
-#| label: run dgtf_infer with ffbs
+#### Inference
 
+```{r}
+#| label: run dgtf_infer with ffbs with discount factor
+opts1.ffbs$use_discount <- TRUE
 out1.ffbs <- dgtf_infer(
+    mod1, sim1$y,
+    "ffbs", opts1.ffbs,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss)
+
+```
+
+```{r}
+#| label: run dgtf_infer with ffbs with W
+opts1.ffbs$use_discount <- FALSE
+out1.ffbs2 <- dgtf_infer(
     mod1, sim1$y,
     "ffbs", opts1.ffbs,
     forecast_error = eval_forecast_err,
@@ -695,18 +768,28 @@ out1.ffbs <- dgtf_infer(
 #| error: true
 #| label: evaluation of ffbs
 
-out1.ffbs.loss_all = c(
+out1.ffbs.loss_all <- c(
     c(out1.ffbs$error$forecast$y_loss_all),
-  out1.ffbs$error$fitted$filter$y_loss_all,
-  out1.ffbs$error$fitted$smooth$y_loss_all
+    out1.ffbs$error$fitted$filter$y_loss_all,
+    out1.ffbs$error$fitted$smooth$y_loss_all
 )
-
-names(out1.ffbs.loss_all) = c(
+names(out1.ffbs.loss_all) <- c(
     paste0("forecast", 1:length(out1.ffbs$error$forecast$y_loss_all)),
-  "fitted-filter", "fitted-smooth"
+    "fitted-filter", "fitted-smooth"
 )
-
 print(out1.ffbs.loss_all)
+
+
+out1.ffbs2.loss_all <- c(
+    c(out1.ffbs2$error$forecast$y_loss_all),
+    out1.ffbs2$error$fitted$filter$y_loss_all,
+    out1.ffbs2$error$fitted$smooth$y_loss_all
+)
+names(out1.ffbs2.loss_all) <- c(
+    paste0("forecast", 1:length(out1.ffbs2$error$forecast$y_loss_all)),
+    "fitted-filter", "fitted-smooth"
+)
+print(out1.ffbs2.loss_all)
 
 ```
 
@@ -741,8 +824,8 @@ for (j in 1:kstep_forecast_err) {
 
 if (mode == "save") {
     save(
-        out1.ffbs, opts1.ffbs, delta.ffbs, W.ffbs, 
-        out1.ffbs.loss_all,
+        out1.ffbs, out1.ffbs2, opts1.ffbs, delta.ffbs, W.ffbs, 
+        out1.ffbs.loss_all, out1.ffbs2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-ffbs.RData")
@@ -874,8 +957,6 @@ opts1.hva$W$infer <- TRUE
 opts1.hva$eps_step_size <- 1.e-5
 opts1.hva$k <- 1
 
-print("Learning Rate")
-
 lrate.hva <- dgtf_tuning(
     mod1, sim1$y, "hva", opts1.hva,
     "learning_rate",
@@ -917,6 +998,29 @@ p2 <- ggplot(
     ylab("Mean One-step-ahead Forecasting Error")
 
 plot(p2)
+```
+
+```{r}
+#| label: figure of hva tuning
+
+if (mode == "save") {
+    ggsave(
+        file.path(
+            opath, "hva",
+            paste0("sim-", seed, "-hva-optimal-learning-rate.pdf")
+        ),
+        plot = p1, device = "pdf", dpi = 300
+    )
+
+    ggsave(
+        file.path(
+            opath, "hva",
+            paste0("sim-", seed, "-hva-step-size.pdf")
+        ),
+        plot = p2, device = "pdf", dpi = 300
+    )
+}
+
 ```
 
 #### Optimal Settings
@@ -1000,7 +1104,7 @@ plot(p6)
 plist = vector("list", length = kstep_forecast_err)
 for (j in 1:kstep_forecast_err) {
     plist[[j]] <- plot_ts_ci_single(out1.hva$error$forecast$y_cast[c(1:(length(sim1$y) - j)), , 2], sim1$y[(j + 1):length(sim1$y)], main = paste0(j, "step-ahead forecast of y"))
-    plot(p[[j]])
+    plot(plist[[j]])
 }
 
 ```
@@ -1236,6 +1340,17 @@ p <- ggplot(data = data.frame(
     xlab("Mode") +
     ylab("RMSE of one-step-ahead forecasting")
 plot(p)
+
+
+if (mode == "save") {
+    ggsave(
+        file.path(
+            opath, "model-selection",
+            paste0("sim-", seed, "-lag-lognorm.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300
+    )
+}
 ```
 
 ```{r}
@@ -1268,15 +1383,26 @@ lattice::contourplot(forecast ~ kappa * r, data = out1.stats.lag.nbinom)
 ggplot(out1.stats.lag.nbinom, aes(kappa, r, fill = forecast)) +
     geom_tile()
 
-plot(out1.stats.lag.nbinom$mode_int, out1.stats.lag.nbinom$forecast, main = "mode vs mfe", xlab = "mode", ylab = "RMSE of one-step-ahead forecasting")
+p <- ggplot(data = data.frame(
+    mode = c(out1.stats.lag.nbinom$mode_int),
+    mfe = c(out1.stats.lag.nbinom$forecast)
+), aes(x = mode, y = mfe)) +
+    theme_light() +
+    geom_boxplot() +
+    xlab("Mode") +
+    ylab("RMSE of one-step-ahead forecasting")
+plot(p)
 
-barplot(table(rnbinom(5000, 6, 1 - 0.5)), main = paste0("mode = 5, var = ", 12, ", mfe = ", 286.32))
-barplot(table(rnbinom(5000, 5, 1 - 0.6)), main = paste0("mode = 5, var = ", 18, ", mfe = ", 287.19))
-barplot(table(rnbinom(5000, 4, 1 - 0.65)), main = paste0("mode = 5, var = ", 21, ", mfe = ", 287.84))
-barplot(table(rnbinom(5000, 2, 1 - 0.85)), main = paste0("mode = 5, var = ", 75, ", mfe = ", 296.89))
 
-barplot(table(rnbinom(1000, 1, 1 - 0.5)), main = paste0("mode = 0, var = ", 0.21, ", mfe = ", 276.12))
-barplot(table(rnbinom(1000, 2, 1 - 0.15)), main = paste0("mode = 0, var = ", 10, ", mfe = ", 281.71))
+if (mode == "save") {
+    ggsave(
+        file.path(
+            opath, "model-selection",
+            paste0("sim-", seed, "-lag-nbinom.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300
+    )
+}
 ```
 
 
@@ -1296,4 +1422,94 @@ if (mode == "save") {
         )
     )
 }
+```
+
+
+## External Methods
+
+```{r}
+#| label: run external methods
+si_para = lognorm2serial(1.386262, 0.3226017)
+out1.epi = epi_poisson(c(sim1$y), si_para[1], si_para[2])
+out1.wt = wt_poisson(c(sim1$y), si_para[1], si_para[2])
+```
+
+```{r}
+#| label: figure of external methods
+p1 <- plot_ts_ci_single(out1.epi)
+p2 <- plot_ts_ci_single(out1.wt)
+
+plot(p1)
+plot(p2)
+
+p3 <- plot_ts_ci_multi(list(
+    LBA = log(exp(out1.lba$fit$psi) + 1),
+    # HVB = log(exp(out1.hva$fit$psi) + 1),
+    FFBS = log(exp(out1.ffbs$fit$psi) + 1),
+    PL = log(exp(out1.pl$fit$psi) + 1),
+    MCS = log(exp(out1.mcs$fit$psi) + 1),
+    EpiEstim = out1.epi,
+    WT = out1.wt,
+    True = log(exp(cbind(sim1$psi, sim1$psi, sim1$psi) + 1))
+), legend.position = "top")
+
+plot(p3)
+```
+
+```{r}
+#| label: k step forecast for EpiEstim
+forecast1.epi <- external_forecast(
+    mod1, si_para, c(sim1$y), "EpiEstim",
+    loss, kstep_forecast_err
+)
+
+if (mode == "save") {
+    save(
+        out1.epi, forecast1.epi,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-epi.RData")
+        )
+    )
+}
+```
+
+```{r}
+#| label: k step forecast for WT
+forecast1.wt <- external_forecast(
+    mod1, si_para, c(sim1$y), "WT",
+    loss, kstep_forecast_err
+)
+
+
+if (mode == "save") {
+    save(
+        out1.wt, forecast1.wt,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-wt.RData")
+        )
+    )
+}
+```
+
+
+```{r}
+#| label: figure of forcast comparison
+dat = data.frame(
+    LBA = out1.lba$error$forecast$y_loss_all,
+    MCS = out1.mcs$error$forecast$y_loss_all,
+    FFBS = out1.ffbs$error$forecast$y_loss_all,
+    PL = out1.pl$error$forecast$y_loss_all,
+    EPI = forecast1.epi$y_loss_all,
+    WT = forecast1.wt$y_loss_all,
+    k = c(1: kstep_forecast_err)
+)
+
+dat2 = reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
+
+p = ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
+    geom_line() + theme_light()
+
+plot(p)
 ```

@@ -862,6 +862,45 @@ public:
     }
 
     /**
+     * @brief mean of the corresponding serial distribution
+     * 
+     * @param mu 
+     * @param sd2 
+     * @return double 
+     */
+    static double mean_serial(const double &mu, const double &sd2)
+    {
+        double b2 = std::exp(2 * mu + sd2);
+        return std::sqrt(b2);
+    }
+
+    static double var_serial(const double &mu, const double &sd2)
+    {
+        double a = std::exp(sd2) - 1.;
+        a *= std::exp(2*mu + sd2);
+        return a;
+    }
+
+    static Rcpp::NumericVector lognorm2serial(const double &mu, const double &sd2)
+    {
+        double s2 = lognorm::var_serial(mu, sd2);
+        double m = lognorm::mean_serial(mu, sd2);
+
+        Rcpp::NumericVector out = {m, s2};
+        return out;
+    }
+
+    static Rcpp::NumericVector serial2lognorm(const double &m, const double &s2)
+    {
+        double m2 = m * m;
+        double mu = std::log(m2 / std::sqrt(s2 + m2));
+        double sd2 = std::log(1. + s2 / m2);
+
+        Rcpp::NumericVector out = {mu, sd2};
+        return out;
+    }
+
+    /**
      * @brief P.M.F of discretized log-normal distribution, characterized by mean and variance.
      * @brief Member function of a class instance.
      *

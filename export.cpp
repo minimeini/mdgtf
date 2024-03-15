@@ -24,6 +24,19 @@ arma::vec dnbinom(const unsigned int &nlag, const double &kappa, const double &r
     return nbinom::dnbinom(nlag, kappa, r);
 }
 
+//' @export
+// [[Rcpp::export]]
+Rcpp::NumericVector lognorm2serial(const double &mu, const double &sd2)
+{
+    return lognorm::lognorm2serial(mu, sd2);
+}
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::NumericVector serial2lognorm(const double &m, const double &s2)
+{
+    return lognorm::serial2lognorm(m, s2);
+}
 
 //' @export
 // [[Rcpp::export]]
@@ -469,16 +482,19 @@ Rcpp::List dgtf_forecast(
     const Rcpp::List &model_settings,
     const arma::vec &y, // (nT + 1) x 1
     const arma::mat &psi, // (nT + 1) x nsample
-    const arma::vec &W, // nsample x 1
+    const std::string &loss_func = "quadratic",
     const unsigned int &k = 1 // k-step-ahead forecasting
     )
 {
     Model model(model_settings);
-    Rcpp::List out = Model::forecast(
-        y, psi, W, model, k
+    Rcpp::List out = Model::forecast_error(
+        psi, y, model, loss_func, k
     );
     return out;
 }
+
+
+
 
 //' @export
 // [[Rcpp::export]]
