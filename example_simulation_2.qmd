@@ -26,7 +26,7 @@ error: true
 
 ```{r}
 #| label: global argument
-mode = "save"
+mode = "plot"
 seed = 2793
 
 kstep_forecast_err = 10
@@ -114,7 +114,8 @@ param <- list(
 dim <- list(
     nlag = 16,
     ntime = 200,
-    truncated = TRUE
+    truncated = TRUE,
+    regressor_baseline = TRUE
 )
 
 mod1 <- list(
@@ -193,7 +194,7 @@ opts1.lba$use_custom <- TRUE
 delta.lba <- dgtf_tuning(
     mod1, sim1$y, "lba", opts1.lba,
     "discount_factor",
-    from = 0.6, to = 0.95, delta = 0.01,
+    from = 0.8, to = 1, delta = 0.01,
     loss = "absolute"
 )
 
@@ -271,7 +272,9 @@ opts1.lba$W <- 0.005
 
 opts1.lba$use_discount <- TRUE
 opts1.lba$use_custom <- TRUE
-opts1.lba$custom_discount_factor <- 0.82
+
+opts1.lba$discount_type = "first_elem"
+opts1.lba$custom_discount_factor <- 0.88
 ```
 
 #### Inference

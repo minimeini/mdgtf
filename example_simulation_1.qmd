@@ -26,7 +26,7 @@ error: true
 
 ```{r}
 #| label: global argument
-mode = "save"
+mode = "plot"
 seed = 3269
 
 kstep_forecast_err = 10
@@ -114,7 +114,8 @@ param <- list(
 dim <- list(
     nlag = 16,
     ntime = 200,
-    truncated = TRUE
+    truncated = TRUE,
+    regressor_baseline = TRUE
 )
 
 mod1 <- list(
@@ -182,6 +183,7 @@ if (mode == "save") {
 #| label: lba tuning discount factor
 
 opts1.lba <- dgtf_default_algo_settings("lba")
+opts1.lba$discount_type = "all_lag_elems"
 opts1.lba$W <- 0.01
 opts1.lba$use_discount <- TRUE
 opts1.lba$use_custom <- TRUE
@@ -198,7 +200,7 @@ delta.lba <- dgtf_tuning(
 )
 
 p1 <- ggplot(
-    data.frame(delta = delta.lba[, 1], error = delta.lba[, 2]),
+    data.frame(delta = delta.lba[delta.lba[,1]>0.6, 1], error = delta.lba[delta.lba[,1]>0.6, 2]),
     aes(x = delta, y = error)
 ) +
     geom_point() +
@@ -271,7 +273,13 @@ opts1.lba$W <- 0.01
 
 opts1.lba$use_discount <- TRUE
 opts1.lba$use_custom <- TRUE
-opts1.lba$custom_discount_factor <- 0.8
+
+
+opts1.lba$custom_discount_factor <- 0.87
+opts1.lba$discount_type = "first_elem"
+
+# opts1.lba$discount_type = "all_elems"
+# opts1.lba$custom_discount_factor <- 0.8
 ```
 
 #### Inference
@@ -355,7 +363,7 @@ p5 <- plot_ts_ci_single(
 plot(p5)
 
 
-plist = vector("list", 10)
+plist <- vector("list", 10)
 for (j in 1:10) {
     plist[[j]] <- plot_ts_ci_single(
         out1.lba$error$forecast$y_cast[c(1:(length(sim1$y) - j)), , j], sim1$y[c((j + 1):length(sim1$y))],

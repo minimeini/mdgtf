@@ -54,6 +54,22 @@ namespace LBA
         return Gt;
     }
 
+    enum DiscountType
+    {
+        all_elems,
+        all_lag_elems,
+        first_elem
+    };
+
+    std::map<std::string, DiscountType> map_discount_type()
+    {
+        std::map<std::string, DiscountType> map;
+        map["all_elems"] = DiscountType::all_elems;
+        map["all_lag_elems"] = DiscountType::all_lag_elems;
+        map["first_elem"] = DiscountType::first_elem;
+        return map;
+    }
+
     /**
      * @brief R[t] = G[t] C[t-1] t(G[t]) + W[t] = P[t] + W[t].
      *
@@ -69,14 +85,49 @@ namespace LBA
         const arma::mat &Ct_old,
         const double &W = 0.01,
         const bool &use_discount = false,
-        const double &delta_discount = 0.95)
+        const double &delta_discount = 0.95,
+        const bool &regressor_baseline = false,
+        const std::string &discount_type = "all_lag_elems")
     {
         arma::mat Rt = Gt * Ct_old * Gt.t();
+        std::map<std::string, DiscountType> discount_list = map_discount_type();
+
         if (use_discount)
         {
-            // A unknown but general W[t] (could have non-zero off-diagonal values) with discount factor
-            Rt.for_each([&delta_discount](arma::mat::elem_type &val)
-                        { val /= delta_discount; });
+            switch (discount_list[tolower(discount_type)])
+            {
+            case DiscountType::first_elem:
+            {
+                Rt.at(0, 0) /= delta_discount;
+                break;
+            }
+            case DiscountType::all_lag_elems:
+            {
+                if (regressor_baseline)
+                {
+                    arma::mat Rtmp = Rt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2);
+                    Rtmp.for_each([&delta_discount](arma::mat::elem_type &val)
+                                  { val /= delta_discount; });
+                    Rt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2) = Rtmp;
+
+                    break;
+                } // otherwise, discounting on the whole matrix
+            }
+            case DiscountType::all_elems:
+            {
+                // A unknown but general W[t] (could have non-zero off-diagonal values) with discount factor
+                Rt.for_each([&delta_discount](arma::mat::elem_type &val)
+                            { val /= delta_discount; });
+                break;
+            }
+            default:
+            {
+                Rt.for_each([&delta_discount](arma::mat::elem_type &val)
+                            { val /= delta_discount; });
+                break;
+            }
+            }
+            
         }
         else
         {
@@ -136,9 +187,10 @@ namespace LBA
             
             yold = arma::reverse(yold);
 
-            arma::vec dhpsi_cur = GainFunc::psi2dhpsi(theta_cur, model.transfer.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
-            Ft_cur = yold % dhpsi_cur;
-            Ft_cur = Ft_cur % model.transfer.dlag.Fphi;
+            arma::vec th = theta_cur.head(model.dim.nL);
+            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, model.transfer.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
+            arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
+            Ft_cur.head(model.dim.nL) = Ftmp % model.transfer.dlag.Fphi;
         }
 
         bound_check<arma::vec>(Ft_cur, "func_Ft: Ft_cur");
@@ -191,13 +243,19 @@ namespace LBA
         const double &ycur = 0.,
         const bool &get_posterior = true)
     {
-        double regressor = model.flink.mu0 + ft;
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+
+        double regressor = ft;
+        if (!model.dim.regressor_baseline)
+        {
+            regressor += model.dobs.par1;
+        }
 
         switch (model.dobs.obs_list[model.dobs.name])
         {
         case AVAIL::Dist::poisson:
         {
-            switch (model.flink.link_list[model.flink.name])
+            switch (link_list[model.flink.name])
             {
             case AVAIL::Func::identity:
             {
@@ -227,7 +285,7 @@ namespace LBA
         }
         case AVAIL::Dist::nbinomm:
         {
-            if (model.flink.link_list[model.flink.name] == AVAIL::Func::identity)
+            if (link_list[model.flink.name] == AVAIL::Func::identity)
             {
                 beta = regressor * (regressor + model.dobs.par2);
                 beta /= qt;
@@ -267,11 +325,13 @@ namespace LBA
         const double &alpha,
         const double &beta)
     {
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+
         switch (model.dobs.obs_list[model.dobs.name])
         {
         case AVAIL::Dist::poisson:
         {
-            switch (model.flink.link_list[model.flink.name])
+            switch (link_list[model.flink.name])
             {
             case AVAIL::Func::identity:
             {
@@ -294,7 +354,7 @@ namespace LBA
         }
         case AVAIL::Dist::nbinomm:
         {
-            if (model.flink.link_list[model.flink.name] == AVAIL::Func::identity)
+            if (link_list[model.flink.name] == AVAIL::Func::identity)
             {
                 nbinomm::moments_mean(mean_ft, var_ft, alpha, beta, model.dobs.par2);
             }
@@ -310,7 +370,11 @@ namespace LBA
         }
         }
 
-        mean_ft -= model.flink.mu0;
+        if (!model.dim.regressor_baseline)
+        {
+            mean_ft -= model.dobs.par1;
+        }
+        
 
         bound_check(mean_ft, "func_posterior_ft: mean_ft");
         bound_check(var_ft, "func_posterior_ft: var_ft");
@@ -643,7 +707,11 @@ namespace LBA
         {
             _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
             _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
-            _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
+            _Rt.slice(t) = func_Rt(
+                _Gt, _Ct.slice(t - 1), _W, 
+                _use_discount, _discount_factor,
+                _model.dim.regressor_baseline,
+                _discount_type);
 
             double ft_tmp = 0.;
             double qt_tmp = 0.;
@@ -695,7 +763,11 @@ namespace LBA
                 // filter_single_iter(t);
                 _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
-                _Rt.slice(t) = func_Rt(_Gt, _Ct.slice(t - 1), _W, _use_discount, _discount_factor);
+                _Rt.slice(t) = func_Rt(
+                    _Gt, _Ct.slice(t - 1), _W, 
+                    _use_discount, _discount_factor, 
+                    _model.dim.regressor_baseline,
+                    _discount_type);
 
                 double ft_tmp = 0.;
                 double qt_tmp = 0.;
@@ -729,6 +801,8 @@ namespace LBA
         void smoother(const bool &use_pseudo = false)
         {
             bool is_iterative = _model.transfer.trans_list[_model.transfer.name] == AVAIL::Transfer::iterative;
+            std::map<std::string, DiscountType> discount_list = map_discount_type();
+            bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
 
             _atilde_t.col(_nT) = _mt.col(_nT);
             _Rtilde_t.slice(_nT) = _Ct.slice(_nT);
@@ -754,7 +828,7 @@ namespace LBA
                     arma::mat _Rtilde_right = (Bt * diff_R) * Bt.t();
                     _Rtilde_t.slice(t - 1) = _Ct.slice(t - 1) + _Rtilde_right;
                 }
-                else if (is_iterative || use_pseudo)
+                else if (is_iterative || (use_pseudo && !is_first_elem_discount))
                 {
                     // use discount factor + iterative transFunc / sliding transFunc with pseudo inverse for Gt
                     _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
@@ -792,10 +866,16 @@ namespace LBA
                     double aleft = (1. - _discount_factor) * _mt.at(0, t - 1);
                     double aright = _discount_factor * _atilde_t.at(0, t);
                     _atilde_t.at(0, t - 1) = aleft + aright;
-
+                    
                     double rleft = (1. - _discount_factor) * _Ct.at(0, 0, t - 1);
                     double rright = std::pow(_discount_factor, 2.) * _Rtilde_t.at(0, 0, t);
                     _Rtilde_t.at(0, 0, t - 1) = rleft + rright;
+
+                    if (_model.dim.regressor_baseline)
+                    {
+                        _atilde_t.at(_model.dim.nP - 1, t - 1) = _atilde_t.at(_model.dim.nP - 1, t);
+                        _Rtilde_t.at(_model.dim.nP - 1, _model.dim.nP - 1, t - 1) = _Rtilde_t.at(_model.dim.nP - 1, _model.dim.nP - 1, t);
+                    }
                 }
 
                 _psi_mean.at(t - 1) = _atilde_t.at(0, t - 1);
@@ -957,6 +1037,9 @@ namespace LBA
                 Rt_cast.at(j) = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nP, _model.dim.nT + 1);
             }
 
+            double mu0 = 0.;
+            if (!_model.dim.regressor_baseline) { mu0 = _model.dobs.par1; }
+
             for (unsigned int t = k; t < _model.dim.nT; t ++)
             {
                 arma::vec ytmp = _y;
@@ -971,7 +1054,10 @@ namespace LBA
                         _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
                     arma::mat Gt_cast = func_Gt(_model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
                     Rt_cast.at(j).slice(t) = func_Rt(
-                        Gt_cast, Rt_cast.at(j - 1).slice(t), _W, _use_discount, _discount_factor);
+                        Gt_cast, Rt_cast.at(j - 1).slice(t), _W, 
+                        _use_discount, _discount_factor,
+                        _model.dim.regressor_baseline,
+                        _discount_type);
                     
                     arma::vec Ft_cast;
                     double ft_tmp = 0.;
@@ -984,14 +1070,14 @@ namespace LBA
                         _fill_zero
                     );
 
-                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink.name, _model.dobs.par1);
+                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink.name, mu0);
 
                     arma::vec ft_cast_tmp = ft_tmp + std::sqrt(qt_tmp) * arma::randn(nsample);
                     arma::vec lambda_cast_tmp(nsample);
                     for (unsigned int i = 0; i < nsample; i ++)
                     {
                         lambda_cast_tmp.at(i) = LinkFunc::ft2mu(
-                            ft_cast_tmp.at(i), _model.flink.name, _model.dobs.par1);
+                            ft_cast_tmp.at(i), _model.flink.name, mu0);
                     }
 
                     ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();
@@ -1139,6 +1225,12 @@ namespace LBA
             {
                 _fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
             }
+
+            _discount_type = "first_elem";
+            if (opts.containsElementNamed("discount_type"))
+            {
+                _discount_type = Rcpp::as<std::string>(opts["discount_type"]);
+            }
         }
 
         static Rcpp::List default_settings()
@@ -1147,6 +1239,7 @@ namespace LBA
 
             opts["W"] = 0.01;
             opts["use_discount"] = false;
+            opts["discount_type"] = "first_elem";
             opts["use_custom"] = false;
             opts["custom_discount_factor"] = 0.95;
             opts["do_smoothing"] =  true;
@@ -1165,6 +1258,16 @@ namespace LBA
             output["psi"] = Rcpp::wrap(psi);
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
+            if (_model.dim.regressor_baseline)
+            {
+                output["mu0_filter"] = arma::vectorise(_mt.row(_model.dim.nP - 1));
+                output["mu0"] = arma::vectorise(_atilde_t.row(_model.dim.nP - 1));
+            }
+            else
+            {
+                output["mu0"] = _model.dobs.par1;
+            }
+
             return output;
         }
     
@@ -1177,6 +1280,7 @@ namespace LBA
         double _discount_factor = 0.95;
 
         bool _use_discount = false;
+        std::string _discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
         bool _do_reference_analysis = false;
         bool _fill_zero = true;
 

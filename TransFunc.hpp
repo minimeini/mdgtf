@@ -9,18 +9,38 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include <nlopt.h>
 #include "LagDist.hpp"
 #include "GainFunc.hpp"
-#include "LinkFunc.hpp"
+// #include "LinkFunc.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo, nloptr)]]
+// [[Rcpp::depends(RcppArmadillo)]]
 
 class TransFunc
 {
+private:
+    Dim _dim;
+    unsigned int _r;
+
+    std::string _name = "sliding";
+    arma::vec _iter_coef;
+    double _coef_now;
+
+    arma::vec _ft; // (nT + r) x 1, r = 1 if using sliding transfer function.
+    arma::vec _F0; // nP x 1
+    arma::mat _G0; // nP x nP
+    
 public:
-    TransFunc() : F0(_F0), G0(_G0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+    LagDist dlag;
+    GainFunc fgain;
+    const arma::mat &G0;
+    const arma::vec &F0;
+    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    const std::string &name;
+    const arma::vec &iter_coef;
+    const double &coef_now;
+
+    TransFunc() : G0(_G0), F0(_F0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init_default();
         return;
@@ -30,7 +50,7 @@ public:
         const std::string &trans_func = "sliding",
         const std::string &gain_func = "softplus",
         const std::string &lag_dist = "lognorm",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : F0(_F0), G0(_G0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : G0(_G0), F0(_F0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init(dim, trans_func, gain_func, lag_dist, lag_param);
         return;
@@ -112,15 +132,7 @@ public:
         return;
     }
 
-    LagDist dlag;
-    GainFunc fgain;
-    const arma::mat &G0;
-    const arma::vec &F0;
-    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-    const std::string &name;
-    const arma::vec &iter_coef;
-    const double &coef_now;
-
+    
     /**
      * @brief From latent state psi[t] to transfer effect f[t] using the exact formula. Note that psi[t] is the random-walk component of the latent state theta[t].
      *
@@ -218,12 +230,21 @@ public:
     {
         _F0.set_size(_dim.nP);
         _F0.zeros();
+
+        if (_dim.regressor_baseline)
+        {
+            _F0.at(_dim.nP - 1) = 1.;
+        }
         return;
     }
 
-    static arma::vec F0_sliding(const unsigned int &nP)
+    static arma::vec F0_sliding(const unsigned int &nP, const bool &regressor_baseline = false)
     {
         arma::vec F0(nP, arma::fill::zeros);
+        if (regressor_baseline)
+        {
+            F0.at(nP - 1) = 1.;
+        }
         return F0;
     }
 
@@ -233,7 +254,15 @@ public:
         _G0.set_size(_dim.nP, _dim.nP);
         _G0.zeros();
         _G0.at(0, 0) = 1.;
-        for (unsigned int i = 1; i < _dim.nP; i++)
+
+        unsigned int nr = _dim.nP - 1;
+        if (_dim.regressor_baseline)
+        {
+            nr -= 1;
+            _G0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
+        }
+
+        for (unsigned int i = 1; i <= nr; i++)
         {
             _G0.at(i, i - 1) = 1.;
         }
@@ -246,7 +275,14 @@ public:
     {
         arma::mat G0(dim.nP, dim.nP, arma::fill::zeros);
         G0.at(0, 0) = 1.;
-        for (unsigned int i = 1; i < dim.nP; i++)
+
+        unsigned int nr = dim.nP - 1;
+        if (dim.regressor_baseline)
+        {
+            nr -= 1;
+            G0.at(dim.nP - 1, dim.nP - 1) = 1.;
+        }
+        for (unsigned int i = 1; i <= nr; i++)
         {
             G0.at(i, i - 1) = 1.;
         }
@@ -323,13 +359,22 @@ public:
         _F0.set_size(_dim.nP);
         _F0.zeros();
         _F0.at(1) = 1.;
+
+        if (_dim.regressor_baseline)
+        {
+            _F0.at(_dim.nP - 1) = 1.;
+        }
         return;
     }
 
-    static arma::vec F0_iterative(const unsigned int &nP)
+    static arma::vec F0_iterative(const unsigned int &nP, const bool &regressor_baseline)
     {
         arma::vec F0(nP, arma::fill::zeros);
         F0.at(1) = 1.;
+        if (regressor_baseline)
+        {
+            F0.at(nP - 1) = 1.;
+        }
         return F0;
     }
 
@@ -340,8 +385,16 @@ public:
         _G0.zeros();
         _G0.at(0, 0) = 1.;
         _G0.at(1, 0) = _coef_now;                          // (1 - kappa)^r
-        _G0.submat(1, 1, 1, _dim.nP - 1) = _iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
-        for (unsigned int i = 2; i < _dim.nP; i++)
+
+        unsigned int nr = _dim.nP - 1;
+        if (_dim.regressor_baseline)
+        {
+            nr -= 1;
+            _G0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
+        }
+
+        _G0.submat(1, 1, 1, nr) = _iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+        for (unsigned int i = 2; i <= nr; i++)
         {
             _G0.at(i, i - 1) = 1.;
         }
@@ -357,8 +410,16 @@ public:
 
         G0.at(0, 0) = 1.;
         G0.at(1, 0) = coef_now;                         // (1 - kappa)^r
-        G0.submat(1, 1, 1, dim.nP - 1) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
-        for (unsigned int i = 2; i < dim.nP; i++)
+
+        unsigned int nr = dim.nP - 1;
+        if (dim.regressor_baseline)
+        {
+            nr -= 1;
+            G0.at(dim.nP - 1, dim.nP - 1) = 1.;
+        }
+
+        G0.submat(1, 1, 1, nr) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+        for (unsigned int i = 2; i <= nr; i++)
         {
             G0.at(i, i - 1) = 1.;
         }
@@ -511,19 +572,6 @@ public:
 
         return ft_now;
     }
-
-
-private:
-    Dim _dim;
-    unsigned int _r;
-
-    std::string _name = "sliding";
-    arma::vec _iter_coef;
-    double _coef_now;
-
-    arma::vec _ft; // (nT + r) x 1, r = 1 if using sliding transfer function.
-    arma::vec _F0; // nP x 1
-    arma::mat _G0; // nP x nP
 };
 
 #endif

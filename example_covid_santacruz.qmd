@@ -26,7 +26,7 @@ error: true
 
 ```{r}
 #| label: global argument
-mode <- "save"
+mode <- "plot"
 tag <- "santacruz"
 Tag2 <- "Santa Cruz"
 
@@ -165,7 +165,8 @@ param <- list(
 dim <- list(
     nlag = 16,
     ntime = length(y2) - 1,
-    truncated = TRUE
+    truncated = TRUE,
+    regressor_baseline = TRUE
 )
 
 mod <- list(
@@ -203,7 +204,7 @@ opts.lba$use_custom <- TRUE
 delta.lba <- dgtf_tuning(
     mod, y2, "lba", opts.lba,
     "discount_factor",
-    from = 0.6, to = 0.99, delta = 0.01,
+    from = 0.8, to = 0.99, delta = 0.01,
     loss = "absolute"
 )
 
@@ -277,11 +278,13 @@ if (mode == "save") {
 
 opts.lba <- dgtf_default_algo_settings("lba")
 
-opts.lba$W <- 0.004
+opts.lba$W <- 0.005
 
 opts.lba$use_discount <- TRUE
 opts.lba$use_custom <- TRUE
-opts.lba$custom_discount_factor <- 0.85
+
+opts.lba$discount_type = "first_elem"
+opts.lba$custom_discount_factor <- 0.91
 ```
 
 #### Inference
@@ -298,6 +301,7 @@ out.lba <- dgtf_infer(
     loss_func = loss
 )
 
+print(summary(c(out.lba$fit$mu0)))
 ```
 
 ```{r}

@@ -9,10 +9,9 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include <nlopt.h>
-#include "nloptrAPI.h"
 #include "definition.h"
 
+// [[Rcpp::depends(RcppArmadillo)]]
 
 inline void tolower(std::string &S)
 {

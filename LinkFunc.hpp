@@ -23,35 +23,33 @@ mu2ft: inverse link
 
 class LinkFunc // between mean and regressor
 {
+private:
+    std::string _name;
+
 public:
-    LinkFunc() : name(_name), mu0(_mu0)
+    const std::string &name;
+
+    LinkFunc() : name(_name)
     {
         init_default();
         return;
     }
 
-    LinkFunc(const std::string &name_, const double &mu0 = 0.) : name(_name), mu0(_mu0)
+    LinkFunc(const std::string &name_) : name(_name)
     {
-        init(name_, mu0);
+        
+        init(name_);
     }
-
-    std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
-    const std::string &name;
-    const double &mu0;
 
     void init_default()
     {
-        _mu0 = 0.;
         _name = "identity";
-        link_list = AVAIL::link_list;
         return;
     }
 
-    void init(const std::string &name, const double &mu0 = 0.)
+    void init(const std::string &name)
     {
-        _mu0 = mu0;
         _name = name;
-        link_list = AVAIL::link_list;
     }
 
     /**
@@ -178,11 +176,6 @@ public:
 
         return ft;
     }
-
-private:
-    std::string _name;
-    double _mu0;
-
 };
 
 #endif

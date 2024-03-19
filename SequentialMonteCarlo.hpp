@@ -242,12 +242,14 @@ namespace SMC
         {
             unsigned int N = Theta_next.n_cols;
             arma::vec weights(N, arma::fill::zeros);
+            double mu0 = 0.;
+            if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
 
             for (unsigned int i = 0; i < N; i++)
             {
                 arma::vec theta_next = Theta_next.col(i);
                 double ft = StateSpace::func_ft(model, t_next, theta_next, yall); // use y[t], ..., y[t + 1 - nelem]
-                double lambda = LinkFunc::ft2mu(ft, model.flink.name, model.dobs.par1); // conditional mean of the observations
+                double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0); // conditional mean of the observations
 
                 weights.at(i) = ObsDist::loglike(
                     yall.at(t_next),

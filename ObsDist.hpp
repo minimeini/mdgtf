@@ -134,7 +134,7 @@ public:
         const bool &return_log = true)
     {
         std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
-        double density;
+        double density = 0.;
         // double ys = std::abs(y);
         // double lambda_s = std::max(lambda, EPS);
         double ys = y;

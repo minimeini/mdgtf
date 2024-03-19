@@ -517,7 +517,8 @@ class Dim
 {
 public:
     unsigned int nT, nL, nP;
-    bool truncated;
+    bool truncated = true;
+    bool regressor_baseline = false;
 
 
     /**
@@ -536,22 +537,25 @@ public:
     Dim(
         const unsigned int &ntime, 
         const unsigned int &nlag = 0, 
-        const double &nb_r = 0.)
+        const double &nb_r = 0.,
+        const bool &add_regressor_baseline = false)
     {
-        init(ntime, nlag, nb_r);
+        init(ntime, nlag, nb_r, add_regressor_baseline);
     }
 
     Dim(
         const unsigned int &nlag,
         const unsigned int &np,
         const bool &truncated_,
-        const unsigned int &ntime = 0
+        const unsigned int &ntime = 0,
+        const bool &add_regressor_baseline = false
     )
     {
         nL = nlag;
         nP = np;
         truncated = truncated_;
         nT = ntime;
+        regressor_baseline = add_regressor_baseline;
     }
 
 
@@ -562,7 +566,9 @@ public:
     void init_default()
     {
         // an non-truncated example
+        regressor_baseline = false;
         truncated = true;
+
         nT = 200;
         nL = 10;
         nP = nL;
@@ -580,9 +586,12 @@ public:
     void init(
         const unsigned int &ntime, 
         const unsigned int &nlag = 0, 
-        const double &nb_r = 0)
+        const double &nb_r = 0,
+        const bool &add_regressor_baseline = false)
     {
         nT = ntime;
+        regressor_baseline = add_regressor_baseline;
+
         if (nlag > 0 && nlag < ntime)
         {
             // truncated if we have a valid nlag, 0 < nlag < ntime
@@ -596,6 +605,11 @@ public:
             truncated = false;
             nL = ntime;
             nP = static_cast<unsigned int>(nb_r) + 1;
+        }
+
+        if (regressor_baseline)
+        {
+            nP += 1; // dim = (nL + 1) or (r + 2) if adding constant term to the state vector
         }
 
         return;
@@ -630,13 +644,13 @@ public:
 };
 
 
-struct Discount
-{
-    bool use_discount = false;
-    bool use_custom = false;
-    double custom_value = 0.95;
-    double default_value = 0.99;
-};
+// struct Discount
+// {
+//     bool use_discount = false;
+//     bool use_custom = false;
+//     double custom_value = 0.95;
+//     double default_value = 0.99;
+// };
 
 /**
  * @brief Define a two-parameter distributions.
@@ -694,10 +708,10 @@ public:
 
 
 
-struct Sys
-{
-    Discount discount_factor;
-    unsigned int nburnin, nthin, nsample, ntotal, nsmc, nbackward;
-};
+// struct Sys
+// {
+//     Discount discount_factor;
+//     unsigned int nburnin, nthin, nsample, ntotal, nsmc, nbackward;
+// };
 
 #endif
