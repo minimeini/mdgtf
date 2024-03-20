@@ -1333,11 +1333,11 @@ namespace VB
                 infer(model);
 
                 double err_forecast = 0.;
-                Model::forecast_error(err_forecast, psi_stored, y, model, loss);
+                Model::forecast_error(err_forecast, psi_stored, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
                 double err_fit = 0.;
-                Model::fitted_error(err_fit, psi_stored, y, model, loss);
+                Model::fitted_error(err_fit, psi_stored, y, model, loss, false);
                 stats.at(i, 2) = err_fit;
 
                 if (verbose)
