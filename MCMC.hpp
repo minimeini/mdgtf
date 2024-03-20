@@ -154,16 +154,16 @@ namespace MCMC
             return W;
         } // func update_W
 
-        static void update_mu0(
-            double &mu0,
+        static double update_mu0(
             double &mu0_accept,
-            double &logp_mu0,
+            const double &mu0_old,
             const arma::vec &y, // nobs x 1
             const arma::vec &wt,
             const Model &model,
             const double &mh_sd = 1.)
         {
-            double mu0_old = mu0;
+            // double mu0_old = mu0;
+            double mu0 = mu0_old;
 
             ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
             approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
@@ -187,7 +187,7 @@ namespace MCMC
             double mu0_sd = std::sqrt(mu0_var);
             double mu0_new = R::rnorm(mu0_old, mu0_sd * mh_sd);
 
-            logp_mu0 = logp_old;
+            // logp_mu0 = logp_old;
             if (mu0_new > -EPS) // non-negative
             {
                 eta = approx_dlm.get_eta_approx(mu0_new); // f0, Fn and psi is updated
@@ -201,13 +201,14 @@ namespace MCMC
                 double logratio = std::min(0., logp_new - logp_old);
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
-                    mu0 = mu0_new;
+                    mu0 = std::abs(mu0_new);
                     mu0_accept += 1.;
-                    logp_mu0 = logp_new;
+                    // logp_mu0 = logp_new;
                 }
             }
         
             bound_check(mu0, "Posterior::update_mu0");
+            return mu0;
         } // func update_mu0
     }; // class Posterior
 
@@ -271,6 +272,7 @@ namespace MCMC
             infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
             W_stored.set_size(nsample);
+            W_accept = 0.;
             if (opts.containsElementNamed("W"))
             {
                 Rcpp::List Wopts = Rcpp::as<Rcpp::List>(opts["W"]);
@@ -280,10 +282,17 @@ namespace MCMC
             mu0 = 0.;
             mu0_stored.set_size(nsample);
             infer_mu0 = false;
+            mu0_accept = 0.;
+            mu0_mh_sd = 1.;
             if (opts.containsElementNamed("mu0"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
                 init_param(infer_mu0, mu0, mu0_prior, param_opts);
+
+                if (param_opts.containsElementNamed("mh_sd"))
+                {
+                    mu0_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
+                }
             }
 
             wt = arma::randn(dim.nT + 1) * 0.01;
@@ -349,6 +358,7 @@ namespace MCMC
             Rcpp::List mu0_opts;
             mu0_opts["infer"] = false;
             mu0_opts["init"] = 0.;
+            mu0_opts["mh_sd"] = 1.;
 
             Rcpp::List opts;
             opts["W"] = Wopts;
@@ -377,9 +387,11 @@ namespace MCMC
 
             output["infer_W"] = infer_W;
             output["W"] = Rcpp::wrap(W_stored);
+            output["W_accept"] = W_accept;
 
             output["infer_mu0"] = infer_mu0;
             output["mu0"] = Rcpp::wrap(mu0_stored);
+            output["mu0_accept"] = mu0_accept;
 
             output["model"] = model_info;
 
@@ -595,7 +607,7 @@ namespace MCMC
             return;
         }
 
-        void infer(Model &model, const bool &verbose = true)
+        void infer(Model &model, const bool &verbose = VERBOSE)
         {
             model_info = model.info();
 
@@ -627,8 +639,8 @@ namespace MCMC
                 if (infer_mu0)
                 {
                     double mu0_accept = 0.;
-                    double logp_mu0 = 0.;
-                    Posterior::update_mu0(mu0, mu0_accept, logp_mu0, y, wt, model, mh_sd);
+                    double mu0_old = mu0;
+                    mu0 = Posterior::update_mu0(mu0_accept, mu0_old, y, wt, model, mu0_mh_sd);
                     model.dobs.update_par1(mu0);
                 }
 
@@ -689,6 +701,8 @@ namespace MCMC
         bool infer_mu0 = false;
         double mu0 = 0.;
         arma::vec mu0_stored;
+        double mu0_accept = 0.;
+        double mu0_mh_sd = 1.;
 
         Dist W_prior;
         bool infer_W = false;

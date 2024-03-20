@@ -1198,7 +1198,8 @@ namespace VB
             const double &from, 
             const double &to, 
             const double &delta = 0.01,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             arma::vec grid = arma::regspace(from, delta, to);
             unsigned int nelem = grid.n_elem;
@@ -1207,7 +1208,7 @@ namespace VB
 
             for (unsigned int i = 0; i < nelem; i ++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 double lrate = grid.at(i);
                 stats.at(i, 0) = lrate;
@@ -1231,17 +1232,23 @@ namespace VB
                 infer(model);
 
                 double forecast_loss = 0.;
-                Model::forecast_error(forecast_loss, psi_stored, y, model, loss);
+                Model::forecast_error(forecast_loss, psi_stored, y, model, loss, false);
                 stats.at(i, 1) = forecast_loss;
 
                 double fit_loss = 0.;
-                Model::fitted_error(fit_loss, psi_stored, y, model, loss);
+                Model::fitted_error(fit_loss, psi_stored, y, model, loss, false);
                 stats.at(i, 2) = fit_loss;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }
@@ -1249,14 +1256,15 @@ namespace VB
         arma::mat optimal_step_size(
             const Model &model,
             const arma::vec &step_size_grid,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             unsigned int nelem = step_size_grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 double step_size = step_size_grid.at(i);
                 stats.at(i, 0) = step_size;
@@ -1280,17 +1288,24 @@ namespace VB
                 infer(model);
 
                 double forecast_loss = 0.;
-                Model::forecast_error(forecast_loss, psi_stored, y, model, loss);
+                Model::forecast_error(forecast_loss, psi_stored, y, model, loss, false);
                 stats.at(i, 1) = forecast_loss;
 
                 double fit_loss = 0.;
-                Model::fitted_error(fit_loss, psi_stored, y, model, loss);
+                Model::fitted_error(fit_loss, psi_stored, y, model, loss, false);
                 stats.at(i, 2) = fit_loss;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rForecast error: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+            
 
             return stats;
         }
@@ -1300,7 +1315,8 @@ namespace VB
             const unsigned int &from,
             const unsigned int &to,
             const unsigned int &delta = 1,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             arma::uvec grid = arma::regspace<arma::uvec>(from, delta, to);
             unsigned int nelem = grid.n_elem;
@@ -1308,7 +1324,7 @@ namespace VB
 
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 unsigned int B = grid.at(i);
                 stats.at(i, 0) = B;
@@ -1324,10 +1340,16 @@ namespace VB
                 Model::fitted_error(err_fit, psi_stored, y, model, loss);
                 stats.at(i, 2) = err_fit;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }
@@ -1341,7 +1363,8 @@ namespace VB
         Rcpp::List forecast_error(
             const Model &model, 
             const std::string &loss_func = "quadratic",
-            const unsigned int &kstep = 1)
+            const unsigned int &kstep = 1,
+            const bool &verbose = VERBOSE)
         {
             const unsigned int ntime = model.dim.nT;
 
@@ -1388,7 +1411,7 @@ namespace VB
 
             for (unsigned int t = tstart; t < (ntime - kstep); t++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 submodel.dim.nT = t;
                 submodel.dim.init(
@@ -1434,10 +1457,16 @@ namespace VB
                 }
 
 
-                Rcpp::Rcout << "\rProgress: " << t + 1 << "/" << ntime - kstep;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
+                }
             } // k-step ahead forecasting with information D[t] for each t.
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             submodel.dim.nT = ntime;
             submodel.dim.init(
@@ -1519,7 +1548,7 @@ namespace VB
             return output;
         } // end of function
 
-        void infer(const Model &model_in, const bool &verbose = true)
+        void infer(const Model &model_in, const bool &verbose = VERBOSE)
         {
             Model model = model_in;
             W = model.derr.par1;
@@ -1545,7 +1574,7 @@ namespace VB
             for (unsigned int b = 0; b < ntotal; b ++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
                 
                 mcs.W = W;
                 mcs.infer(model);

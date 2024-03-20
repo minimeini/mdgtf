@@ -1049,7 +1049,7 @@ namespace SMC
             return stats;
         }
 
-        void infer(const Model &model, const bool &verbose = true)
+        void infer(const Model &model, const bool &verbose = VERBOSE)
         {
             // y: (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
@@ -1357,7 +1357,7 @@ namespace SMC
         }
 
 
-        void infer(const Model &model, const bool &verbose = true)
+        void infer(const Model &model, const bool &verbose = VERBOSE)
         {
             for (unsigned int t = 0; t < dim.nT; t++)
             {

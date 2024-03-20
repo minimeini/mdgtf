@@ -680,7 +680,7 @@ opts.ffbs$custom_discount_factor <- 0.88
 delta.ffbs <- dgtf_tuning(
     mod, y2, "ffbs", opts.ffbs,
     "discount_factor",
-    from = 0.8, to = 1, delta = 0.01
+    from = 0.95, to = 1, delta = 0.0005
 )
 
 p1 <- ggplot(
@@ -758,11 +758,11 @@ opts.ffbs$do_smoothing <- TRUE
 
 opts.ffbs$num_step_ahead_forecast <- 10
 
-opts.ffbs$W = 0.002
+opts.ffbs$W = 0.0001
 
 opts.ffbs$use_discount <- TRUE
 opts.ffbs$use_custom <- TRUE
-opts.ffbs$custom_discount_factor <- 1
+opts.ffbs$custom_discount_factor <- 0.996
 
 ```
 
