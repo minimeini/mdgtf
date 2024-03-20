@@ -93,6 +93,42 @@ save_figure <- function(algo_name, tag, p_psi_post, p_y_filter, p_y_smooth, plis
         )
     }
 }
+
+
+print_loss_all <- function(out_list) {
+    loss_all <- NULL
+    old_names <- NULL
+
+    if (!("error" %in% names(out_list))) {
+        return(loss_all)
+    }
+
+    if ("forecast" %in% names(out_list$error)) {
+        loss_all <- c(loss_all, out_list$error$forecast$y_loss_all)
+        old_names <- c(old_names, paste0("forecast", 1:length(c(out_list$error$forecast$y_loss_all))))
+    }
+
+    if ("fitted" %in% names(out_list$error)) {
+        if ("filter" %in% names(out_list$error$fitted)) {
+            loss_all <- c(loss_all, c(out_list$error$fitted$filter$y_loss_all))
+            old_names <- c(old_names, "fitted-filter")
+        }
+
+        if ("smooth" %in% names(out_list$error$fitted)) {
+            loss_all <- c(loss_all, c(out_list$error$fitted$smooth$y_loss_all))
+            old_names <- c(old_names, "fitted-smooth")
+        }
+
+        if ("y_loss_all" %in% names(out_list$error$fitted)) {
+            loss_all <- c(loss_all, c(out_list$error$fitted$y_loss_all))
+            old_names <- c(old_names, "fitted")
+        }
+
+        names(loss_all) <- old_names
+    }
+
+    return(loss_all)
+}
 ```
 
 ## Modal and Data
@@ -324,29 +360,8 @@ out.lba2 <- dgtf_infer(
 ```{r}
 #| label: evaluation of lba
 #| error: true
-out.lba.loss_all <- c(
-    c(out.lba$error$forecast$y_loss_all),
-    out.lba$error$fitted$filter$y_loss_all,
-    out.lba$error$fitted$smooth$y_loss_all
-)
-
-names(out.lba.loss_all) <- c(
-    paste0("forecast", 1:length(c(out.lba$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out.lba.loss_all)
-
-out.lba2.loss_all <- c(
-    c(out.lba2$error$forecast$y_loss_all),
-    out.lba2$error$fitted$filter$y_loss_all,
-    out.lba2$error$fitted$smooth$y_loss_all
-)
-
-names(out.lba2.loss_all) <- c(
-    paste0("forecast", 1:length(c(out.lba2$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out.lba2.loss_all)
+print(print_loss_all(out.lba))
+print(print_loss_all(out.lba2))
 ```
 
 ```{r}
@@ -409,9 +424,14 @@ if (mode == "save") {
 #| label: mcs tuning discount factor
 
 opts.mcs <- dgtf_default_algo_settings("mcs")
-opts.mcs$num_backward <- 4
+opts.mcs$num_backward <- 10
 opts.mcs$num_particle <- 5000
 opts.mcs$num_step_ahead_forecast <- 10
+
+opts.mcs$mu0 <- list(
+    prior_name = "gamma",
+    prior_param = c(2, 2)
+)
 
 opts.mcs$W <- 0.01
 opts.mcs$use_discount <- TRUE
@@ -420,7 +440,7 @@ opts.mcs$use_custom <- TRUE
 delta.mcs <- dgtf_tuning(
     mod, y2, "mcs", opts.mcs,
     "discount_factor",
-    from = 0.65, to = 0.99, delta = 0.01
+    from = 0.65, to = 1, delta = 0.01
 )
 
 p1 <- ggplot(
@@ -441,7 +461,7 @@ plot(p1)
 ```{r}
 #| label: mcs tuning W
 
-W_grid <- seq(from = 0.001, to = 0.05, by = 0.001)
+W_grid <- seq(from = 0.0001, to = 0.01, by = 0.0005)
 opts.mcs$use_discount <- FALSE
 
 W.mcs <- dgtf_tuning(
@@ -473,12 +493,12 @@ plot(p2)
 
 opts.mcs$use_discount <- TRUE
 opts.mcs$use_custom <- TRUE
-opts.mcs$custom_discount_factor <- 0.86
+opts.mcs$custom_discount_factor <- 0.92
 
 B.mcs <- dgtf_tuning(
     mod, y2, "mcs", opts.mcs,
     "num_backward",
-    from = 1, to = 10, delta = 1
+    from = 1, to = 30, delta = 1
 )
 
 p3 <- ggplot(
@@ -534,16 +554,27 @@ if (mode == "save") {
 # mod$model$obs_dist = "poisson"
 
 opts.mcs <- dgtf_default_algo_settings("mcs")
-opts.mcs$num_particle <- 5000
+opts.mcs$num_particle <- 100000
 opts.mcs$num_step_ahead_forecast <- 10
 
-opts.mcs$W <- 0.009
+opts.mcs$W <- 0.002
 
 opts.mcs$use_discount <- TRUE
 opts.mcs$use_custom <- TRUE
-opts.mcs$custom_discount_factor <- 0.85
+opts.mcs$custom_discount_factor <- 0.92
 
-opts.mcs$num_backward <- 3
+opts.mcs$num_backward <- 10
+
+opts.mcs$mu0 <- list(
+    prior_name = "gamma",
+    prior_param = c(2, 2)
+)
+
+
+opts.mcs$mu0 <- list(
+    prior_name = "uniform",
+    prior_param = c(0, 10)
+)
 ```
 
 #### Inference
@@ -579,52 +610,62 @@ out.mcs2 <- dgtf_infer(
 
 ```{r}
 #| label: evaluation of mcs
-out.mcs.loss_all <- c(
-    c(out.mcs$error$forecast$y_loss_all),
-    c(out.mcs$error$fitted$filter$y_loss_all),
-    c(out.mcs$error$fitted$smooth$y_loss_all)
-)
-names(out.mcs.loss_all) <- c(
-    paste0("forecast", 1:length(c(out.mcs$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out.mcs.loss_all)
-
-out.mcs2.loss_all <- c(
-    c(out.mcs2$error$forecast$y_loss_all),
-    c(out.mcs2$error$fitted$filter$y_loss_all),
-    c(out.mcs2$error$fitted$smooth$y_loss_all)
-)
-names(out.mcs2.loss_all) <- c(
-    paste0("forecast", 1:length(c(out.mcs2$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out.mcs2.loss_all)
+print(print_loss_all(out.mcs))
+print(print_loss_all(out.mcs2))
 ```
 
 
 ```{r}
 #| label: figure of mcs inference
-#| error: true
+## | #| | error: true
 
 p2 <- plot_ts_ci_single(out.mcs$fit$psi, main = "Posterior distribution of psi")
 plot(p2)
-p4 <- plot_ts_ci_single(out.mcs$error$fitted$filter$yhat, y2, main = "Fitted y")
-plot(p4)
 
-ypred_qt <- t(apply(out.mcs$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, y2)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-plist = vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out.mcs$error$forecast$y_cast[1:(length(y2) - j), , j],
-        y2[(j + 1):length(y2)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
+if ("fitted" %in% names(out.mcs$error)) {
+    p4 <- plot_ts_ci_single(out.mcs$error$fitted$filter$yhat, y2, main = "Fitted y")
+    plot(p4)
 }
+
+
+if ("pred" %in% names(out.mcs)) {
+    ypred_qt <- t(apply(out.mcs$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
+    p5 <- plot_ypred(ypred_qt, y2)
+    p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
+    plot(p5)
+}
+
+
+if ("forecast" %in% names(out.mcs$error)) {
+    if ("y_cast" %in% names(out.mcs$error$forecast)) {
+        plist <- vector("list", length = kstep_forecast_err)
+        for (j in 1:kstep_forecast_err) {
+            plist[[j]] <- plot_ts_ci_single(out.mcs$error$forecast$y_cast[1:(length(y2) - j), , j],
+                y2[(j + 1):length(y2)],
+                main = paste0(j, "step-ahead forecast of y")
+            )
+            plot(plist[[j]])
+        }
+    }
+}
+
+
+if ("mu0" %in% names(out.mcs$fit)) {
+    p6 <- ggplot(data.frame(mu0 = c(out.mcs$fit$mu0)), aes(x = mu0)) +
+        stat_bin(bins = 50) +
+        theme_light()
+
+    plot(p6)
+}
+
+if ("mu0" %in% names(out.mcs2$fit)) {
+    p7 <- ggplot(data.frame(mu0 = c(out.mcs2$fit$mu0)), aes(x = mu0)) +
+        stat_bin(bins = 50) +
+        theme_light()
+
+    plot(p7)
+}
+
 ```
 
 
@@ -667,7 +708,7 @@ opts.ffbs$custom_discount_factor <- 0.88
 delta.ffbs <- dgtf_tuning(
     mod, y2, "ffbs", opts.ffbs,
     "discount_factor",
-    from = 0.8, to = 0.99, delta = 0.01
+    from = 0.8, to = 1, delta = 0.01
 )
 
 p1 <- ggplot(
@@ -786,32 +827,8 @@ out.ffbs2 <- dgtf_infer(
 #| error: true
 #| label: evaluation of ffbs
 
-out.ffbs.loss_all <- c(
-    c(out.ffbs$error$forecast$y_loss_all),
-    out.ffbs$error$fitted$filter$y_loss_all,
-    out.ffbs$error$fitted$smooth$y_loss_all
-)
-
-names(out.ffbs.loss_all) <- c(
-    paste0("forecast", 1:length(out.ffbs$error$forecast$y_loss_all)),
-    "fitted-filter", "fitted-smooth"
-)
-
-print(out.ffbs.loss_all)
-
-
-out.ffbs2.loss_all <- c(
-    c(out.ffbs2$error$forecast$y_loss_all),
-    out.ffbs2$error$fitted$filter$y_loss_all,
-    out.ffbs2$error$fitted$smooth$y_loss_all
-)
-
-names(out.ffbs2.loss_all) <- c(
-    paste0("forecast", 1:length(out.ffbs2$error$forecast$y_loss_all)),
-    "fitted-filter", "fitted-smooth"
-)
-
-print(out.ffbs2.loss_all)
+print(print_loss_all(out.ffbs))
+print(print_loss_all(out.ffbs2))
 
 ```
 
@@ -884,16 +901,7 @@ out.pl = dgtf_infer(
 
 ```{r}
 #| label: evaluation of pl
-out.pl.loss_all <- c(
-    c(out.pl$error$forecast$y_loss_all),
-    out.pl$error$fitted$filter$y_loss_all,
-    out.pl$error$fitted$smooth$y_loss_all
-)
-names(out.pl.loss_all) <- c(
-    paste0("forecast", 1:length(out.pl$error$forecast$y_loss_all)),
-    "fitted-filter", "fitted-smooth"
-)
-print(out.pl.loss_all)
+print(print_loss_all(out.pl))
 ```
 
 ```{r}
@@ -1083,18 +1091,7 @@ out.hva <- dgtf_infer(
 ```{r}
 #| error: true
 #| label: evaluation of hva
-
-out.hva.loss_all = c(
-  c(out.hva$error$forecast$y_loss_all),
-  c(out.hva$error$fitted$y_loss_all)
-)
-
-names(out.hva.loss_all) = c(
-  paste0("forecast", 1:length(out.hva$error$forecast$y_loss_all)),
-  "fitted"
-)
-
-print(out.hva.loss_all)
+print(print_loss_all(out.hva))
 ```
 
 
@@ -1186,15 +1183,7 @@ out.mcmc <- dgtf_infer(
 ```{r}
 #| label: evaluation of mcmc
 
-out.mcmc.loss_all <- c(
-    c(out.mcmc$error$forecast$y_loss_all),
-    out.mcmc$error$fitted$y_loss_all
-)
-names(out.mcmc.loss_all) <- c(
-    paste0("forecast", 1:length(out.mcmc$error$forecast$y_loss_all)),
-    "fitted"
-)
-print(out.mcmc.loss_all)
+print(print_loss_all(out.mcmc))
 
 ```
 

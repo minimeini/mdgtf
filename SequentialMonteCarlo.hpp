@@ -55,6 +55,11 @@ namespace SMC
             opts["custom_discount_factor"] = 0.95;
             opts["do_smoothing"] = false;
 
+            Rcpp::List mu0_opts;
+            mu0_opts["prior_name"] = "uniform";
+            mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+            opts["mu0"] = mu0_opts;
+
             return opts;
         }
 
@@ -93,6 +98,25 @@ namespace SMC
             Theta_smooth.set_size(dim.nP, M, dim.nT + B);
             Theta_smooth.zeros();
 
+            if (dim.regressor_baseline)
+            {
+                Rcpp::List mu0_opts;
+                if (settings.containsElementNamed("mu0"))
+                {
+                    mu0_opts = Rcpp::as<Rcpp::List>(settings["mu0"]);
+                }
+                else
+                {
+                    mu0_opts["prior_name"] = "uniform";
+                    mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+                }
+                arma::vec mu0 = init_mu0(mu0_opts, N);
+                for (unsigned int t = 0; t < dim.nT + B; t++)
+                {
+                    Theta_stored.slice(t).row(dim.nP - 1) = mu0.t();
+                }
+            }
+
             nforecast = 0;
             if (settings.containsElementNamed("num_step_ahead_forecast"))
             {
@@ -126,6 +150,52 @@ namespace SMC
             {
                 smoothing = Rcpp::as<bool>(settings["do_smoothing"]);
             }
+        }
+
+        static arma::vec init_mu0(const Rcpp::List &mu0_opts, const unsigned int &N)
+        {
+            Rcpp::List opts = mu0_opts;
+            std::string prior_name = "uniform";
+            if (opts.containsElementNamed("prior_name"))
+            {
+                prior_name = Rcpp::as<std::string>(opts["prior_name"]);
+                tolower(prior_name);
+            }
+
+            Rcpp::NumericVector prior_param = {0., 10.};
+            if (opts.containsElementNamed("prior_param"))
+            {
+                prior_param = Rcpp::as<Rcpp::NumericVector>(opts["prior_param"]);
+            }
+
+            arma::vec mu0(N, arma::fill::zeros);
+            std::map<std::string, AVAIL::Dist> mu0_prior_list = AVAIL::mu0_prior_list;
+
+            switch (mu0_prior_list[prior_name])
+            {
+            case AVAIL::Dist::gamma:
+            {
+                mu0 = arma::randg(N, arma::distr_param(prior_param[0], 1./prior_param[1]));
+                break;
+            }
+            case AVAIL::Dist::invgamma:
+            {
+                mu0 = 1. / arma::randg(N, arma::distr_param(prior_param[0], 1. / prior_param[1]));
+                break;
+            }
+            case AVAIL::Dist::uniform:
+            {
+                mu0 = arma::randu(N, arma::distr_param(prior_param[0], prior_param[1]));
+                break;
+            }
+            default:
+            {
+                mu0 = arma::randu(N, arma::distr_param(0., 10.));
+                break;
+            }
+            } // switch by mu0 prior type
+
+            return mu0;
         }
 
         arma::mat get_psi_filter()
@@ -435,6 +505,12 @@ namespace SMC
             arma::mat psi_filter = get_psi_filter();
             arma::mat psi_smooth = get_psi_smooth();
 
+            if (DEBUG)
+            {
+                output["Theta_filter"] = Rcpp::wrap(Theta_stored);
+                output["Theta"] = Rcpp::wrap(Theta_smooth);
+            }
+
             if (summarize)
             {
                 arma::mat psi1 = arma::quantile(psi_filter, ci_prob, 1); // (nT + 1) x 3
@@ -448,6 +524,13 @@ namespace SMC
                 output["psi_filter"] = Rcpp::wrap(psi_filter);
                 output["psi"] = Rcpp::wrap(psi_smooth);
             }
+
+            if (dim.regressor_baseline)
+            {
+                arma::vec mu0 = arma::vectorise(Theta_smooth.slice(Theta_smooth.n_slices - 1).row(Theta_smooth.n_rows - 1));
+                output["mu0"] = Rcpp::wrap(mu0);
+            }
+
 
             output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
@@ -499,7 +582,7 @@ namespace SMC
 
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 custom_discount_factor = grid.at(i);
                 stats.at(i, 0) = custom_discount_factor;
@@ -508,12 +591,12 @@ namespace SMC
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
-                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
                 arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 stats.at(i, 2) = err_fit;
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -536,7 +619,7 @@ namespace SMC
 
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 W = grid.at(i);
                 stats.at(i, 0) = W;
@@ -545,12 +628,12 @@ namespace SMC
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
-                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
                 arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 stats.at(i, 2) = err_fit;
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -574,7 +657,7 @@ namespace SMC
 
             for (unsigned int i = 0; i < nelem; i ++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 B = grid.at(i);
                 stats.at(i, 0) = B;
@@ -590,12 +673,12 @@ namespace SMC
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
-                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
                 arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
-                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 stats.at(i, 2) = err_fit;
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -682,7 +765,7 @@ namespace SMC
             // y: (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 if (use_discount)
                 { // Use discount factor if W is not given
@@ -782,6 +865,15 @@ namespace SMC
                     output["psi_filter"] = Rcpp::wrap(psi_filter);
                     output["psi"] = Rcpp::wrap(psi_smooth);
                 }
+
+                if (dim.regressor_baseline)
+                {
+                    arma::mat mu0_filter = Theta_stored.row_as_mat(dim.nP - 1);
+                    output["mu0_filter"] = Rcpp::wrap(mu0_filter);
+
+                    arma::mat mu0_smooth = Theta_smooth.row_as_mat(dim.nP - 1);
+                    output["mu0"] = Rcpp::wrap(mu0_smooth);
+                }
             }
             else
             {
@@ -794,6 +886,12 @@ namespace SMC
                 else
                 {
                     output["psi"] = Rcpp::wrap(psi);
+                }
+
+                if (dim.regressor_baseline)
+                {
+                    arma::mat mu0_filter = Theta_stored.row_as_mat(dim.nP - 1);
+                    output["mu0"] = Rcpp::wrap(mu0_filter);
                 }
             }
 
@@ -876,7 +974,7 @@ namespace SMC
 
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 custom_discount_factor = grid.at(i);
                 stats.at(i, 0) = custom_discount_factor;
@@ -885,18 +983,18 @@ namespace SMC
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
-                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
                 double err_fit = 0.;
                 if (smoothing)
                 {
                     arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
-                    StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                    StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 }
                 else
                 {
-                    StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                    StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss, false);
                 }
 
                 Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
@@ -919,7 +1017,7 @@ namespace SMC
 
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 W = grid.at(i);
                 stats.at(i, 0) = W;
@@ -928,18 +1026,18 @@ namespace SMC
                 arma::cube theta_tmp = Theta_stored.tail_slices(model.dim.nT + 1);
 
                 double err_forecast = 0.;
-                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss);
+                StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
                 double err_fit = 0.;
                 if (smoothing)
                 {
                     arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
-                    StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss);
+                    StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 }
                 else
                 {
-                    StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss);
+                    StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss, false);
                 }
                 
                 stats.at(i, 2) = err_fit;
@@ -956,7 +1054,7 @@ namespace SMC
             // y: (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 if (use_discount)
                 { // Use discount factor if W is not given
@@ -1002,7 +1100,7 @@ namespace SMC
 
                 for (unsigned int t = dim.nT; t > 0; t--)
                 {
-                    R_CheckUserInterrupt();
+                    Rcpp::checkUserInterrupt();
 
                     double Wnow = Wt.at(t);
                     double Wsd = std::sqrt(Wnow);
@@ -1147,6 +1245,15 @@ namespace SMC
                     output["W_filter"] = Rcpp::wrap(get_W_filtered());
                     output["W"] = Rcpp::wrap(get_W_smoothed());
                 }
+
+                if (dim.regressor_baseline)
+                {
+                    arma::mat mu0_filter = Theta_stored.row_as_mat(dim.nP - 1);
+                    output["mu0_filter"] = Rcpp::wrap(mu0_filter);
+
+                    arma::mat mu0_smooth = Theta_smooth.row_as_mat(dim.nP - 1);
+                    output["mu0"] = Rcpp::wrap(mu0_smooth);
+                }
             }
             else
             {
@@ -1164,6 +1271,12 @@ namespace SMC
                 if (_infer_W)
                 {
                     output["W"] = Rcpp::wrap(get_W_filtered());
+                }
+
+                if (dim.regressor_baseline)
+                {
+                    arma::mat mu0_filter = Theta_stored.row_as_mat(dim.nP - 1);
+                    output["mu0"] = Rcpp::wrap(mu0_filter);
                 }
             }
 
@@ -1248,7 +1361,7 @@ namespace SMC
         {
             for (unsigned int t = 0; t < dim.nT; t++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 // propagate(t, Wsqrt, model); // step 1 (a)
                 // arma::uvec resample_idx = resample(t); // step 1 (b)
@@ -1373,7 +1486,7 @@ namespace SMC
 
                 for (unsigned int t = dim.nT; t > 1; t--)
                 {
-                    R_CheckUserInterrupt();
+                    Rcpp::checkUserInterrupt();
 
                     arma::vec Wtmp0 = W_stored.col(t - 1); // N x 1
                     arma::vec Wtmp = Wtmp0.elem(idx); // M x 1

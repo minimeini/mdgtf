@@ -663,7 +663,8 @@ public:
         const arma::vec &y,   // (nT + 1) x 1
         const Model &model,
         const std::string &loss_func = "quadratic",
-        const unsigned int &k = 1)
+        const unsigned int &k = 1,
+        const bool &verbose = VERBOSE)
     {
         unsigned int nsample = psi.n_cols;
 
@@ -695,6 +696,8 @@ public:
 
             for (unsigned int t = 1; t < model.dim.nT; t ++)
             {
+                Rcpp::checkUserInterrupt();
+
                 arma::vec psi_tmp = psi_vec;
                 arma::vec ft_tmp = ft_vec;
                 arma::vec ytmp = y;
@@ -722,6 +725,16 @@ public:
                     y_err_cast.at(t, i, j - 1) = y.at(t + j) - ytmp.at(t + j);
                     psi_err_cast.at(t, i, j - 1) = psi.at(t + j, i) - psi_tmp.at(t + j);
                 }
+
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
+                }
+            }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
             }
 
         }
@@ -822,7 +835,8 @@ public:
         const arma::mat &psi, // (nT + 1) x nsample
         const arma::vec &y,   // (nT + 1) x 1
         const Model &model,
-        const std::string &loss_func = "quadratic")
+        const std::string &loss_func = "quadratic",
+        const bool &verbose = VERBOSE)
     {
         unsigned int nsample = psi.n_cols;
 
@@ -836,6 +850,8 @@ public:
 
         for (unsigned int i = 0; i < nsample; i++)
         {
+            Rcpp::checkUserInterrupt();
+
             arma::vec psi_vec = psi.col(i);                        // (nT + 1) x 1
             arma::vec ft_vec(model.dim.nT + 1, arma::fill::zeros); // (nT + 1) x 1
             ft_vec.at(1) = TransFunc::func_ft(
@@ -862,6 +878,16 @@ public:
                 ycast.at(t + 1, i) = LinkFunc::ft2mu(ft_tmp.at(t + 1), model.flink.name, model.dobs.par1);
                 y_err_cast.at(t + 1, i) = y.at(t + 1, i) - ycast.at(t + 1, i);
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rForecast error: " << i + 1 << "/" << nsample;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
@@ -901,7 +927,8 @@ public:
         const arma::mat &psi, // (nT + 1) x nsample
         const arma::vec &y,      // (nT + 1) x 1
         const Model &model,
-        const std::string &loss_func = "quadratic")
+        const std::string &loss_func = "quadratic",
+        const bool &verbose = VERBOSE)
     {
         unsigned int nsample = psi.n_cols;
         arma::mat residual(model.dim.nT + 1, nsample, arma::fill::zeros);
@@ -909,6 +936,8 @@ public:
 
         for (unsigned int i = 0; i < nsample; i ++)
         {
+            Rcpp::checkUserInterrupt();
+
             arma::vec ft(model.dim.nT + 1, arma::fill::zeros);
             arma::vec psi_tmp = psi.col(i);
             for (unsigned int t = 1; t <= model.dim.nT; t ++)
@@ -922,6 +951,16 @@ public:
                 yhat.at(t, i) = LinkFunc::ft2mu(ft.at(t), model.flink.name, model.dobs.par1);
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rFitted error: " << i + 1 << "/" << nsample;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
         
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
@@ -970,7 +1009,8 @@ public:
         const arma::mat &psi, // (nT + 1) x nsample
         const arma::vec &y,   // (nT + 1) x 1
         const Model &model,
-        const std::string &loss_func = "quadratic")
+        const std::string &loss_func = "quadratic",
+        const bool &verbose = VERBOSE)
     {
         unsigned int nsample = psi.n_cols;
         arma::mat residual(model.dim.nT + 1, nsample, arma::fill::zeros);
@@ -991,6 +1031,16 @@ public:
                 yhat.at(t, i) = LinkFunc::ft2mu(ft.at(t), model.flink.name, model.dobs.par1);
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rFitted error: " << i + 1 << "/" << nsample;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
@@ -1353,7 +1403,8 @@ public:
         const arma::vec &y,   // (nT + 1) x 1
         const Model &model,
         const std::string &loss_func = "quadratic",
-        const unsigned int &k = 1)
+        const unsigned int &k = 1,
+        const bool &verbose = VERBOSE)
     {
         unsigned int p = theta.n_rows;
         unsigned int nsample = theta.n_cols;
@@ -1369,6 +1420,8 @@ public:
 
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
+            Rcpp::checkUserInterrupt();
+
             unsigned int ncast = std::min(k, model.dim.nT - t);
             for (unsigned int i = 0; i < nsample; i ++)
             {
@@ -1390,6 +1443,16 @@ public:
                     psi_err_cast.at(t, i, j - 1) = theta.at(0, i, t + j) - theta_next.at(0);
                 }
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
 
 
@@ -1488,7 +1551,8 @@ public:
         const arma::cube &theta, // p x nsample x (nT + 1)
         const arma::vec &y,      // (nT + 1) x 1
         const Model &model,
-        const std::string &loss_func = "quadratic")
+        const std::string &loss_func = "quadratic",
+        const bool &verbose = VERBOSE)
     {
         unsigned int p = theta.n_rows;
         unsigned int nsample = theta.n_cols;
@@ -1504,6 +1568,8 @@ public:
 
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
+            Rcpp::checkUserInterrupt();
+
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec theta_next = func_gt(model, theta.slice(t).col(i), y.at(t));
@@ -1516,6 +1582,16 @@ public:
                 y_err_cast.at(t + 1, i) = y.at(t + 1) - ycast.at(t + 1, i);
                 psi_err_cast.at(t + 1, i) = theta.at(0, i, t + 1) - theta_next.at(0);
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
@@ -1555,7 +1631,8 @@ public:
         const arma::cube &theta, // p x nsample x (nT + 1)
         const arma::vec &y,      // (nT + 1) x 1
         const Model &model,
-        const std::string &loss_func = "quadratic")
+        const std::string &loss_func = "quadratic",
+        const bool &verbose = VERBOSE)
     {
         unsigned int nsample = theta.n_cols;
         arma::mat residual(model.dim.nT + 1, nsample, arma::fill::zeros);
@@ -1567,6 +1644,8 @@ public:
         
         for (unsigned int t = 1; t <= model.dim.nT; t ++)
         {
+            Rcpp::checkUserInterrupt();
+
             for (unsigned int i = 0; i < nsample; i ++)
             {                
                 arma::vec th = theta.slice(t).col(i); // p x 1
@@ -1575,6 +1654,16 @@ public:
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rFitted error: " << t << "/" << model.dim.nT;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
 
 
@@ -1623,7 +1712,8 @@ public:
         const arma::cube &theta, // p x nsample x (nT + 1)
         const arma::vec &y,      // (nT + 1) x 1
         const Model &model,
-        const std::string &loss_func = "quadratic")
+        const std::string &loss_func = "quadratic",
+        const bool &verbose = VERBOSE)
     {
         unsigned int nsample = theta.n_cols;
         arma::mat residual(model.dim.nT + 1, nsample, arma::fill::zeros);
@@ -1635,6 +1725,8 @@ public:
 
         for (unsigned int t = 1; t <= model.dim.nT; t++)
         {
+            Rcpp::checkUserInterrupt();
+
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec th = theta.slice(t).col(i); // p x 1
@@ -1643,6 +1735,16 @@ public:
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << "\rFitted error: " << t << "/" << model.dim.nT;
+            }
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << std::endl;
         }
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);

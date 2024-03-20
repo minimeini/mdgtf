@@ -399,7 +399,8 @@ namespace MCMC
         Rcpp::List forecast_error(
             const Model &model, 
             const std::string &loss_func = "quadratic", 
-            const unsigned int &kstep = 1)
+            const unsigned int &kstep = 1,
+            const bool &verbose = VERBOSE)
         {
             const unsigned int ntime = model.dim.nT;
 
@@ -446,7 +447,7 @@ namespace MCMC
 
             for (unsigned int t = tstart; t < (ntime - kstep); t++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 submodel.dim.nT = t;
                 submodel.dim.init(
@@ -489,9 +490,16 @@ namespace MCMC
                     y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
                 }
 
-                Rcpp::Rcout << "\rProgress: " << t + 1 << "/" << ntime - kstep;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
+                }
             } // k-step ahead forecasting with information D[t] for each t.
-            Rcpp::Rcout << std::endl;
+            
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             submodel.dim.nT = ntime;
             submodel.dim.init(
@@ -604,7 +612,7 @@ namespace MCMC
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, mh_sd);
 

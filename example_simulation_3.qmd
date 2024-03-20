@@ -91,6 +91,42 @@ save_figure <- function(algo_name, seed, p_psi_post, p_y_filter, p_y_smooth, pli
         )
     }
 }
+
+
+print_loss_all <- function(out_list) {
+    loss_all <- NULL
+    old_names <- NULL
+
+    if (!("error" %in% names(out_list))) {
+        return(loss_all)
+    }
+
+    if ("forecast" %in% names(out_list$error)) {
+        loss_all <- c(loss_all, out_list$error$forecast$y_loss_all)
+        old_names <- c(old_names, paste0("forecast", 1:length(c(out_list$error$forecast$y_loss_all))))
+    }
+
+    if ("fitted" %in% names(out_list$error)) {
+        if ("filter" %in% names(out_list$error$fitted)) {
+            loss_all <- c(loss_all, c(out_list$error$fitted$filter$y_loss_all))
+            old_names <- c(old_names, "fitted-filter")
+        }
+
+        if ("smooth" %in% names(out_list$error$fitted)) {
+            loss_all <- c(loss_all, c(out_list$error$fitted$smooth$y_loss_all))
+            old_names <- c(old_names, "fitted-smooth")
+        }
+
+        if ("y_loss_all" %in% names(out_list$error$fitted)) {
+            loss_all <- c(loss_all, c(out_list$error$fitted$y_loss_all))
+            old_names <- c(old_names, "fitted")
+        }
+
+        names(loss_all) <- old_names
+    }
+
+    return(loss_all)
+}
 ```
 
 ## Modal and Simulated Data
@@ -315,29 +351,9 @@ out1.lba2 <- dgtf_infer(
 ```{r}
 #| label: evaluation of lba
 #| error: true
-out1.lba.loss_all <- c(
-    c(out1.lba$error$forecast$y_loss_all),
-    out1.lba$error$fitted$filter$y_loss_all,
-    out1.lba$error$fitted$smooth$y_loss_all
-)
 
-names(out1.lba.loss_all) <- c(
-    paste0("forecast", 1:length(c(out1.lba$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.lba.loss_all)
-
-out1.lba2.loss_all <- c(
-    c(out1.lba2$error$forecast$y_loss_all),
-    out1.lba2$error$fitted$filter$y_loss_all,
-    out1.lba2$error$fitted$smooth$y_loss_all
-)
-
-names(out1.lba2.loss_all) <- c(
-    paste0("forecast", 1:length(c(out1.lba2$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.lba2.loss_all)
+print(print_loss_all(out1.lba))
+print(print_loss_all(out1.lba2))
 ```
 
 ```{r}
@@ -400,7 +416,7 @@ if (mode == "save") {
 #| label: mcs tuning discount factor
 
 opts1.mcs <- dgtf_default_algo_settings("mcs")
-opts1.mcs$num_backward <- 4
+opts1.mcs$num_backward <- 3
 opts1.mcs$num_particle <- 5000
 opts1.mcs$num_step_ahead_forecast <- 10
 
@@ -411,7 +427,7 @@ opts1.mcs$use_custom <- TRUE
 delta.mcs <- dgtf_tuning(
     mod1, sim1$y, "mcs", opts1.mcs,
     "discount_factor",
-    from = 0.65, to = 0.99, delta = 0.01
+    from = 0.9, to = 1, delta = 0.001
 )
 
 p1 <- ggplot(
@@ -469,7 +485,7 @@ opts1.mcs$custom_discount_factor <- 0.9
 B.mcs <- dgtf_tuning(
     mod1, sim1$y, "mcs", opts1.mcs,
     "num_backward",
-    from = 1, to = 10, delta = 1
+    from = 1, to = 30, delta = 1
 )
 
 p3 <- ggplot(
@@ -525,14 +541,14 @@ if (mode == "save") {
 # mod1$model$obs_dist = "poisson"
 
 opts1.mcs <- dgtf_default_algo_settings("mcs")
-opts1.mcs$num_particle <- 5000
+opts1.mcs$num_particle <- 10000
 opts1.mcs$num_step_ahead_forecast <- 10
 
-opts1.mcs$W <- 0.008
+opts1.mcs$W <- 0.007
 
 opts1.mcs$use_discount <- TRUE
 opts1.mcs$use_custom <- TRUE
-opts1.mcs$custom_discount_factor <- 0.92
+opts1.mcs$custom_discount_factor <- 0.95
 
 opts1.mcs$num_backward <- 3
 ```
@@ -568,28 +584,9 @@ out1.mcs2 <- dgtf_infer(
 
 ```{r}
 #| label: evaluation of mcs
-out1.mcs.loss_all <- c(
-    c(out1.mcs$error$forecast$y_loss_all),
-    c(out1.mcs$error$fitted$filter$y_loss_all),
-    c(out1.mcs$error$fitted$smooth$y_loss_all)
-)
-names(out1.mcs.loss_all) <- c(
-    paste0("forecast", 1:length(c(out1.mcs$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.mcs.loss_all)
 
-
-out1.mcs2.loss_all <- c(
-    c(out1.mcs2$error$forecast$y_loss_all),
-    c(out1.mcs2$error$fitted$filter$y_loss_all),
-    c(out1.mcs2$error$fitted$smooth$y_loss_all)
-)
-names(out1.mcs2.loss_all) <- c(
-    paste0("forecast", 1:length(c(out1.mcs2$error$forecast$y_loss_all))),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.mcs2.loss_all)
+print(print_loss_all(out1.mcs))
+print(print_loss_all(out1.mcs2))
 ```
 
 
@@ -615,6 +612,11 @@ for (j in 1:kstep_forecast_err) {
     )
     plot(plist[[j]])
 }
+
+p6 = ggplot(data.frame(mu0 = c(out1.mcs$fit$mu0)), aes(x = mu0)) +
+    stat_bin(bins=50) + theme_light()
+
+plot(p6)
 ```
 
 
@@ -642,10 +644,11 @@ if (mode == "save") {
 
 ```{r}
 #| label: ffbs tuning of discount factor
+mod1$model$obs_dist = "poisson"
 
 opts1.ffbs <- dgtf_default_algo_settings("ffbs")
-opts1.ffbs$num_particle <- 5000
-opts1.ffbs$num_smooth <- 1000
+opts1.ffbs$num_particle <- 1000
+opts1.ffbs$num_smooth <- 500
 opts1.ffbs$do_smoothing <- TRUE
 opts1.ffbs$num_step_ahead_forecast <- 10
 
@@ -657,7 +660,7 @@ opts1.ffbs$custom_discount_factor <- 0.88
 delta.ffbs <- dgtf_tuning(
     mod1, sim1$y, "ffbs", opts1.ffbs,
     "discount_factor",
-    from = 0.8, to = 0.99, delta = 0.01
+    from = 0.8, to = 1, delta = 0.01
 )
 
 p1 <- ggplot(
@@ -678,7 +681,7 @@ plot(p1)
 ```{r}
 #| label: ffbs tuning of W
 
-W_grid <- seq(from = 0.001, to = 0.04, by = 0.001)
+W_grid <- seq(from = 0.00001, to = 0.01, by = 0.0001)
 opts1.ffbs$use_discount <- FALSE
 
 W.ffbs <- dgtf_tuning(
@@ -688,7 +691,7 @@ W.ffbs <- dgtf_tuning(
 )
 
 p2 <- ggplot(
-    data.frame(W = W.ffbs[W.ffbs[,1]<0.01, 1], error = W.ffbs[W.ffbs[,1]<0.01, 2]),
+    data.frame(W = W.ffbs[, 1], error = W.ffbs[, 2]),
     aes(x = W, y = error)
 ) +
     geom_point() +
@@ -739,7 +742,7 @@ opts1.ffbs$W = 0.001
 
 opts1.ffbs$use_discount <- TRUE
 opts1.ffbs$use_custom <- TRUE
-opts1.ffbs$custom_discount_factor <- 0.95
+opts1.ffbs$custom_discount_factor <- 0.94
 
 ```
 
@@ -775,28 +778,8 @@ out1.ffbs2 <- dgtf_infer(
 #| error: true
 #| label: evaluation of ffbs
 
-out1.ffbs.loss_all <- c(
-    c(out1.ffbs$error$forecast$y_loss_all),
-    out1.ffbs$error$fitted$filter$y_loss_all,
-    out1.ffbs$error$fitted$smooth$y_loss_all
-)
-names(out1.ffbs.loss_all) <- c(
-    paste0("forecast", 1:length(out1.ffbs$error$forecast$y_loss_all)),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.ffbs.loss_all)
-
-
-out1.ffbs2.loss_all <- c(
-    c(out1.ffbs2$error$forecast$y_loss_all),
-    out1.ffbs2$error$fitted$filter$y_loss_all,
-    out1.ffbs2$error$fitted$smooth$y_loss_all
-)
-names(out1.ffbs2.loss_all) <- c(
-    paste0("forecast", 1:length(out1.ffbs2$error$forecast$y_loss_all)),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.ffbs2.loss_all)
+print(print_loss_all(out1.ffbs))
+print(print_loss_all(out1.ffbs2))
 
 ```
 
@@ -869,16 +852,8 @@ out1.pl = dgtf_infer(
 
 ```{r}
 #| label: evaluation of pl
-out1.pl.loss_all <- c(
-    c(out1.pl$error$forecast$y_loss_all),
-    out1.pl$error$fitted$filter$y_loss_all,
-    out1.pl$error$fitted$smooth$y_loss_all
-)
-names(out1.pl.loss_all) <- c(
-    paste0("forecast", 1:length(out1.pl$error$forecast$y_loss_all)),
-    "fitted-filter", "fitted-smooth"
-)
-print(out1.pl.loss_all)
+
+print(print_loss_all(out1.pl))
 ```
 
 ```{r}
@@ -1071,17 +1046,7 @@ out1.hva <- dgtf_infer(
 #| error: true
 #| label: evaluation of hva
 
-out1.hva.loss_all = c(
-  c(out1.hva$error$forecast$y_loss_all),
-  c(out1.hva$error$fitted$y_loss_all)
-)
-
-names(out1.hva.loss_all) = c(
-  paste0("forecast", 1:length(out1.hva$error$forecast$y_loss_all)),
-  "fitted"
-)
-
-print(out1.hva.loss_all)
+print(print_loss_all(out1.hva))
 ```
 
 
@@ -1175,16 +1140,7 @@ out1.mcmc <- dgtf_infer(
 ```{r}
 #| label: evaluation of mcmc
 
-out1.mcmc.loss_all <- c(
-    c(out1.mcmc$error$forecast$y_loss_all),
-    out1.mcmc$error$fitted$y_loss_all
-)
-names(out1.mcmc.loss_all) <- c(
-    paste0("forecast", 1:length(out1.mcmc$error$forecast$y_loss_all)),
-    "fitted"
-)
-print(out1.mcmc.loss_all)
-
+print(print_loss_all(out1.mcmc))
 ```
 
 

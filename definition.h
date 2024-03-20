@@ -78,6 +78,7 @@ public:
     static const std::map<std::string, Func> gain_list;
     static const std::map<std::string, Dist> err_list;
     static const std::map<std::string, Dist> W_prior_list;
+    static const std::map<std::string, Dist> mu0_prior_list;
     static const std::map<std::string, Param> static_param_list;
     static const std::map<std::string, Loss> loss_list;
     static const std::map<std::string, Param> tuning_param_list;
@@ -222,6 +223,21 @@ private:
         return map;
     }
 
+    static std::map<std::string, Dist> map_mu0_prior()
+    {
+        std::map<std::string, Dist> map;
+        map["invgamma"] = Dist::invgamma;
+        map["ig"] = Dist::invgamma;
+        map["inv-gamma"] = Dist::invgamma;
+        map["inv_gamma"] = Dist::invgamma;
+
+        map["gamma"] = Dist::gamma;
+
+        map["uniform"] = Dist::uniform;
+
+        return map;
+    }
+
     static std::map<std::string, Param> map_static_param()
     {
         std::map<std::string, Param> map;
@@ -298,6 +314,7 @@ inline const std::map<std::string, AVAIL::Func> AVAIL::gain_list = AVAIL::map_ga
 inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
 
 inline const std::map<std::string, AVAIL::Dist> AVAIL::W_prior_list = AVAIL::map_W_prior();
+inline const std::map<std::string, AVAIL::Dist> AVAIL::mu0_prior_list = AVAIL::map_mu0_prior();
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 inline const std::map<std::string, AVAIL::Loss> AVAIL::loss_list = AVAIL::map_loss_func();
 inline const std::map<std::string, AVAIL::Param> AVAIL::tuning_param_list = AVAIL::map_tuning_param();

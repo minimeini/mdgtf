@@ -735,7 +735,7 @@ arma::mat dgtf_optimal_lag(
 
     for (unsigned int i = 0; i < npar1; i ++)
     {
-        R_CheckUserInterrupt();
+        Rcpp::checkUserInterrupt();
         
         double par1 = par1_grid.at(i);
         model.transfer.dlag.update_par1(par1);
@@ -743,7 +743,7 @@ arma::mat dgtf_optimal_lag(
 
         for (unsigned int j = 0; j < npar2; j ++)
         {
-            R_CheckUserInterrupt();
+            Rcpp::checkUserInterrupt();
 
             stats.at(idx, 0) = par1;
             double par2 = par2_grid.at(j);
@@ -911,7 +911,7 @@ arma::mat dgtf_optimal_obs(
 
     for (unsigned int i = 0; i < npar; i++)
     {
-        R_CheckUserInterrupt();
+        Rcpp::checkUserInterrupt();
 
         double delta = delta_grid.at(i);
         model.dobs.update_par2(delta);
@@ -1034,7 +1034,7 @@ arma::mat dgtf_optimal_nlag(
 
     for (unsigned int i = 0; i < npar; i++)
     {
-        R_CheckUserInterrupt();
+        Rcpp::checkUserInterrupt();
 
         unsigned int nlag = nlag_grid.at(i);
         dim_opts["nlag"] = nlag;
