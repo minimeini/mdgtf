@@ -899,7 +899,7 @@ opts.hva$nburnin <- 5000
 opts.hva$num_step_ahead_forecast <- 10
 
 opts.hva$mcs$num_particle <- 100
-opts.hva$mcs$num_backward <- 3
+opts.hva$mcs$num_backward <- 10
 
 opts.hva$W$init <- 0.01
 opts.hva$W$infer <- TRUE
@@ -965,15 +965,15 @@ if (save_data) {
 #| label: run dgtf_infer with mcmc
 opts.mcmc <- dgtf_default_algo_settings("mcmc")
 opts.mcmc$nsample <- 2000
-opts.mcmc$nthin <- 2
-opts.mcmc$nburnin <- 5000
+opts.mcmc$nthin <- 1
+opts.mcmc$nburnin <- 1000
 opts.mcmc$num_step_ahead_forecast <- 10
 
 opts.mcmc$mh_sd <- 0.1
 
-opts1.mcmc$mu0$init <- mod$param$obs[1]
-opts1.mcmc$mu0$infer <- TRUE
-opts1.mcmc$mu0$mh_sd <- 1
+opts.mcmc$mu0$init <- mod$param$obs[1]
+opts.mcmc$mu0$infer <- TRUE
+opts.mcmc$mu0$mh_sd <- 1
 
 opts.mcmc$W$init <- 0.01
 opts.mcmc$W$infer <- TRUE

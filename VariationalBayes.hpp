@@ -13,6 +13,11 @@
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 
+// #ifdef _OPENMP
+// #include <omp.h>
+// #endif
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 namespace VB
 {
@@ -1209,7 +1214,9 @@ namespace VB
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i ++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1266,6 +1273,9 @@ namespace VB
             unsigned int nelem = step_size_grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1326,6 +1336,9 @@ namespace VB
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();

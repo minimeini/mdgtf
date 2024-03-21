@@ -12,6 +12,10 @@
 #include "LinkFunc.hpp"
 #include "LinearBayes.hpp"
 
+// #ifdef _OPENMP
+// #include <omp.h>
+// #endif
+
 namespace MCMC
 {
     class Posterior
@@ -460,6 +464,9 @@ namespace MCMC
 
             Model submodel = model;
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int t = tstart; t < (ntime - kstep); t++)
             {
                 Rcpp::checkUserInterrupt();
@@ -505,16 +512,20 @@ namespace MCMC
                     y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
                 }
 
+                // #if !defined(_OPENMP)
                 if (verbose)
                 {
                     Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
                 }
+                // #endif
             } // k-step ahead forecasting with information D[t] for each t.
             
+            // #if !defined(_OPENMP)
             if (verbose)
             {
                 Rcpp::Rcout << std::endl;
             }
+            // #endif
 
             submodel.dim.nT = ntime;
             submodel.dim.init(

@@ -6,8 +6,9 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include "armadillo"
+#include <RcppArmadillo.h>
 
+// [[Rcpp::depends(RcppArmadillo)]]
 
 /*
 This script is adapted from Loaiza-Maya's Matlalog_det_sympd code.

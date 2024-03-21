@@ -9,10 +9,10 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include <nlopt.h>
+// #include <nlopt.h>
 #include "utils.h"
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo,nloptr)]]
+// [[Rcpp::depends(RcppArmadillo)]]
 
 /**
  * @brief Define the gain functions.

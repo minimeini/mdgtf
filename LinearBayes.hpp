@@ -7,10 +7,13 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include <nlopt.h>
-#include "nloptrAPI.h"
+// #include <nlopt.h>
+// #include "nloptrAPI.h"
 #include "Model.hpp"
 
+// #ifdef _OPENMP
+// #include <omp.h>
+// #endif
 
 /**
  * psi2hpsi: GainFunc.hpp
@@ -569,6 +572,9 @@ namespace LBA
             unsigned int nelem = delta_grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i ++)
             {
                 R_CheckUserInterrupt();
@@ -642,6 +648,9 @@ namespace LBA
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 R_CheckUserInterrupt();

@@ -5,6 +5,8 @@
 #include <boost/math/special_functions/beta.hpp>
 #include "utils.h"
 
+// [[Rcpp::depends(BH)]]
+
 
 class MVNorm
 {

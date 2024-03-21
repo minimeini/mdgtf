@@ -9,6 +9,9 @@
 #include <RcppArmadillo.h>
 #include "Model.hpp"
 
+// #ifdef _OPENMP
+// #include <omp.h>
+// #endif
 
 namespace SMC
 {
@@ -586,6 +589,9 @@ namespace SMC
             use_discount = true;
             use_custom = true;
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -623,6 +629,9 @@ namespace SMC
 
             use_discount = false;
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -661,6 +670,9 @@ namespace SMC
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i ++)
             {
                 Rcpp::checkUserInterrupt();
@@ -978,6 +990,9 @@ namespace SMC
             use_discount = true;
             use_custom = true;
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1021,6 +1036,9 @@ namespace SMC
 
             use_discount = false;
 
+            // #if defined(_OPENMP)
+            // #pragma omp parallel for
+            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();

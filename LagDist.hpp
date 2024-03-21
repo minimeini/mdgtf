@@ -12,7 +12,7 @@
 #include "distributions.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo,BH)]]
+// [[Rcpp::depends(RcppArmadillo)]]
 
 /**
  * @file LagDist.hpp
