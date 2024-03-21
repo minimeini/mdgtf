@@ -57,8 +57,8 @@ namespace SMC
             opts["do_smoothing"] = false;
 
             Rcpp::List mu0_opts;
-            mu0_opts["prior_name"] = "uniform";
-            mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+            mu0_opts["prior_name"] = "gamma";
+            mu0_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
             opts["mu0"] = mu0_opts;
 
             return opts;
@@ -108,8 +108,8 @@ namespace SMC
                 }
                 else
                 {
-                    mu0_opts["prior_name"] = "uniform";
-                    mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+                    mu0_opts["prior_name"] = "gamma";
+                    mu0_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
                 }
                 arma::vec mu0 = init_mu0(mu0_opts, N);
                 for (unsigned int t = 0; t < dim.nT + B; t++)
@@ -156,14 +156,14 @@ namespace SMC
         static arma::vec init_mu0(const Rcpp::List &mu0_opts, const unsigned int &N)
         {
             Rcpp::List opts = mu0_opts;
-            std::string prior_name = "uniform";
+            std::string prior_name = "gamma";
             if (opts.containsElementNamed("prior_name"))
             {
                 prior_name = Rcpp::as<std::string>(opts["prior_name"]);
                 tolower(prior_name);
             }
 
-            Rcpp::NumericVector prior_param = {0., 10.};
+            Rcpp::NumericVector prior_param = {1., 1.};
             if (opts.containsElementNamed("prior_param"))
             {
                 prior_param = Rcpp::as<Rcpp::NumericVector>(opts["prior_param"]);

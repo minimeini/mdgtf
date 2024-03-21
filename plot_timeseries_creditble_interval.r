@@ -186,7 +186,9 @@ plot_output <- function(
   tag = NULL, 
   opath = NULL,
   plot_figures = TRUE,
-  return_figures = FALSE) {
+  return_figures = FALSE,
+  height = 10.1,
+  width = 13.8) {
 
   plots <- list()
 
@@ -200,7 +202,10 @@ plot_output <- function(
     }
   }
 
-  posterior_psi <- plot_ts_ci_single(out_list$fit$psi, psi_true, main = "Posterior distribution of psi")
+  posterior_psi <- plot_ts_ci_single(
+    out_list$fit$psi, psi_true, 
+    main = "Posterior distribution of psi") +
+    ylab(expression(psi[t]))
   if (plot_figures) {
     plot(posterior_psi)
   }
@@ -215,7 +220,8 @@ plot_output <- function(
         opath, "posterior",
         paste0(tag, "posterior-psi.pdf")
       ),
-      plot = posterior_psi, device = "pdf", dpi = 300
+      plot = posterior_psi, device = "pdf", dpi = 300,
+      height = height, width = width
     )
   }
 
@@ -248,7 +254,8 @@ plot_output <- function(
           opath, "posterior",
           paste0(tag, "posterior-W.pdf")
         ),
-        plot = posterior_W, device = "pdf", dpi = 300
+        plot = posterior_W, device = "pdf", dpi = 300,
+        height = height, width = width
       )
     }
   }
@@ -281,7 +288,8 @@ plot_output <- function(
           opath, "posterior",
           paste0(tag, "posterior-mu0.pdf")
         ),
-        plot = posterior_mu0, device = "pdf", dpi = 300
+        plot = posterior_mu0, device = "pdf", dpi = 300,
+        height = height, width = width
       )
     }
   }
@@ -290,7 +298,10 @@ plot_output <- function(
   if ("error" %in% names(out_list)) {
     if ("fitted" %in% names(out_list$error)) {
       if ("filter" %in% names(out_list$error$fitted)) {
-        yfit_filter <- plot_ts_ci_single(out_list$error$fitted$filter$yhat, ytrue, main = "Fitted y after filtering")
+        yfit_filter <- plot_ts_ci_single(
+          out_list$error$fitted$filter$yhat, ytrue, 
+          main = "Fitted y after filtering") + 
+          ylab(expression(y[t]))
 
         if (plot_figures) {
           plot(yfit_filter)
@@ -306,7 +317,8 @@ plot_output <- function(
               opath, "fit",
               paste0(tag, "fit-filter.pdf")
             ),
-            plot = yfit_filter, device = "pdf", dpi = 300
+            plot = yfit_filter, device = "pdf", dpi = 300,
+            height = height, width = width
           )
         }
       }
@@ -315,7 +327,7 @@ plot_output <- function(
         yfit_smooth <- plot_ts_ci_single(
           out_list$error$fitted$smooth$yhat, ytrue,
           main = "Fitted y after smoothing"
-        )
+        ) + ylab(expression(y[t]))
 
         if (plot_figures) {
           plot(yfit_smooth)
@@ -331,13 +343,16 @@ plot_output <- function(
               opath, "fit",
               paste0(tag, "fit-smooth.pdf")
             ),
-            plot = yfit_smooth, device = "pdf", dpi = 300
+            plot = yfit_smooth, device = "pdf", dpi = 300,
+            height = height, width = width
           )
         }
       }
 
       if ("yhat" %in% names(out_list$error$fitted)) {
-        yfit <- plot_ts_ci_single(out_list$error$fitted$yhat, ytrue, main = "Fitted y")
+        yfit <- plot_ts_ci_single(
+          out_list$error$fitted$yhat, ytrue, main = "Fitted y") + 
+          ylab(expression(y[t]))
 
         if (plot_figures) {
           plot(yfit)
@@ -353,7 +368,8 @@ plot_output <- function(
               opath, "fit",
               paste0(tag, "fit.pdf")
             ),
-            plot = yfit, device = "pdf", dpi = 300
+            plot = yfit, device = "pdf", dpi = 300,
+            height = height, width = width
           )
         }
       }
@@ -365,10 +381,10 @@ plot_output <- function(
       forecast <- vector("list", length = kstep_forecast_err)
       for (j in 1:kstep_forecast_err) {
         forecast[[j]] <- plot_ts_ci_single(
-          out_list$error$forecast$y_cast[c(1:(length(ytrue) - j)), , 2],
+          out_list$error$forecast$y_cast[c(1:(length(ytrue) - j)), , j],
           ytrue[(j + 1):length(ytrue)],
-          main = paste0(j, "step-ahead forecast of y")
-        )
+          main = paste0(j, "step-ahead forecast of y")) +
+          ylab(expression(y[t + k]))
 
         if (plot_figures) {
           plot(forecast[[j]])
@@ -380,8 +396,8 @@ plot_output <- function(
               opath, "forecast",
               paste0(tag, paste0("forecast-", j, "step.pdf"))
             ),
-            plot = forecast[[j]], device = "pdf", dpi = 300
-            # height = 4.51, width = 7.29
+            plot = forecast[[j]], device = "pdf", dpi = 300,
+            height = height, width = width
           )
         }
       }
@@ -411,8 +427,8 @@ plot_output <- function(
           opath, "forecast",
           paste0(tag, paste0("forecast-next10.pdf"))
         ),
-        plot = next10, device = "pdf", dpi = 300
-        # height = 4.51, width = 7.29
+        plot = next10, device = "pdf", dpi = 300,
+        height = height, width = width
       )
     }
   }

@@ -87,7 +87,7 @@ namespace LBA
         const bool &regressor_baseline = false,
         const std::string &discount_type = "all_lag_elems")
     {
-        arma::mat Rt = Gt * Ct_old * Gt.t();
+        arma::mat Rt = Gt * Ct_old * Gt.t(); // Pt
         std::map<std::string, DiscountType> discount_list = map_discount_type();
 
         if (use_discount)
@@ -135,6 +135,59 @@ namespace LBA
 
         bound_check<arma::mat>(Rt, "func_Rt: Rt");
         return Rt;
+    }
+
+    static arma::mat Rt2Wt(
+        const arma::mat &Rt,
+        const double &W = 0.01,
+        const bool &use_discount = false,
+        const double &delta_discount = 0.95,
+        const bool &regressor_baseline = false,
+        const std::string &discount_type = "all_lag_elems")
+    {
+        arma::mat Wt(Rt.n_rows, Rt.n_cols, arma::fill::zeros);
+        std::map<std::string, DiscountType> discount_list = map_discount_type();
+
+        if (use_discount)
+        {
+            switch (discount_list[tolower(discount_type)])
+            {
+            case DiscountType::first_elem:
+            {
+                Wt.at(0, 0) = (1. - delta_discount) * Rt.at(0, 0);
+                break;
+            }
+            case DiscountType::all_lag_elems:
+            {
+                if (regressor_baseline)
+                {
+                    arma::mat Rtmp = Rt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2);
+                    Wt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2) = (1. - delta_discount) * Rtmp;
+
+                    break;
+                } // otherwise, discounting on the whole matrix
+            }
+            case DiscountType::all_elems:
+            {
+                // A unknown but general W[t] (could have non-zero off-diagonal values) with discount factor
+                Wt = (1. - delta_discount) * Rt;
+                break;
+            }
+            default:
+            {
+                Wt = (1. - delta_discount) * Rt;
+                break;
+            }
+            }
+        }
+        else
+        {
+            // W[t] = diag(W, 0, ..., 0)
+            Wt.at(0, 0) = W;
+        }
+
+        bound_check<arma::mat>(Wt, "Rt2Wt: Wt");
+        return Wt;
     }
 
  
@@ -1030,7 +1083,7 @@ namespace LBA
         }
 
         /**
-         * @brief Forecasting distribution y[t + 1] | D[t] ~ (ft prior mean, ft prior var)
+         * @brief k-step-ahead forecasting error.
          * 
          * @return Rcpp::List 
          */
@@ -1060,17 +1113,48 @@ namespace LBA
                 at_cast.slice(0).col(t) = _mt.col(t);
                 Rt_cast.at(0).slice(t) = _Ct.slice(t);
 
+                arma::mat Wt_onestep(_model.dim.nP, _model.dim.nP, arma::fill::zeros);
                 unsigned int ncast = std::min(k, _model.dim.nT - t);
                 for (unsigned int j = 1; j <= ncast; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
                         _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
                     arma::mat Gt_cast = func_Gt(_model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
-                    Rt_cast.at(j).slice(t) = func_Rt(
-                        Gt_cast, Rt_cast.at(j - 1).slice(t), _W, 
-                        _use_discount, _discount_factor,
-                        _model.dim.regressor_baseline,
-                        _discount_type);
+
+
+                    if (_use_discount)
+                    {
+                        if (j == 1)
+                        {
+                            arma::mat Rt_onestep = func_Rt(
+                                Gt_cast, Rt_cast.at(j - 1).slice(t), _W,
+                                _use_discount, _discount_factor,
+                                _model.dim.regressor_baseline,
+                                _discount_type);
+                            
+                            Rt_cast.at(j).slice(t) = Rt_onestep;
+                            
+                            Wt_onestep = Rt2Wt(
+                                Rt_onestep, _W, _use_discount,
+                                _discount_factor,
+                                _model.dim.regressor_baseline,
+                                _discount_type);
+                        }
+                        else
+                        {
+                            arma::mat Pt = Gt_cast * Rt_cast.at(j - 1).slice(t) * Gt_cast.t();
+                            Rt_cast.at(j).slice(t) = Pt + Wt_onestep;
+                        }
+                    }
+                    else
+                    {
+                        Rt_cast.at(j).slice(t) = func_Rt(
+                            Gt_cast, Rt_cast.at(j - 1).slice(t), _W,
+                            _use_discount, _discount_factor,
+                            _model.dim.regressor_baseline,
+                            _discount_type);
+                    }
+                    
                     
                     arma::vec Ft_cast;
                     double ft_tmp = 0.;
@@ -1157,6 +1241,13 @@ namespace LBA
             return out;
         }
 
+        /**
+         * @brief One-step-ahead forecasting error
+         * 
+         * @param y_loss_all 
+         * @param nsample 
+         * @param loss_func 
+         */
         void forecast_error(
             double &y_loss_all,
             const unsigned int &nsample = 1000, 

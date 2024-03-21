@@ -1434,7 +1434,8 @@ public:
                 arma::vec ytmp = y;
                 for (unsigned int j = 1; j <= ncast; j ++)
                 {
-                    arma::vec theta_next = func_gt(model, theta_cur, ytmp.at(t + j - 1));
+                    arma::vec theta_next = func_gt(
+                        model, theta_cur, ytmp.at(t + j - 1));
                     psi_cast.at(t, i, j - 1) = theta_next.at(0);
 
                     double ft_next = func_ft(model, t + j, theta_next, y);

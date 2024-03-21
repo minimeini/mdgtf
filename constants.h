@@ -18,6 +18,6 @@ inline constexpr double NB_LAMBDA = 0.;
 inline constexpr double NB_DELTA = 30;
 
 inline constexpr bool DEBUG = false;
-inline constexpr bool VERBOSE = true;
+inline constexpr bool VERBOSE = false;
 
 #endif
