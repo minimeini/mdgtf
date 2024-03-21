@@ -214,6 +214,12 @@ namespace SMC
             // return psi_smooth.tail_rows(dim.nT + 1); // (nT + 1) x M
         }
 
+        arma::vec get_mu0()
+        {
+            arma::vec mu0 = arma::vectorise(Theta_smooth.slice(Theta_smooth.n_slices - 1).row(Theta_smooth.n_rows - 1));
+            return mu0;   
+        }
+
         static double discount_W(
             const arma::mat &Theta_now,
             const double &custom_discount_factor = 0.95, 
@@ -1211,7 +1217,7 @@ namespace SMC
             Wopts["infer"] = true;
             Wopts["prior_name"] = "invgamma";
             Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
-
+            
             opts["W"] = Wopts;
             return opts;
         }

@@ -156,6 +156,7 @@ namespace MCMC
 
         static double update_mu0(
             double &mu0_accept,
+            ApproxDisturbance &approx_dlm,
             const double &mu0_old,
             const arma::vec &y, // nobs x 1
             const arma::vec &wt,
@@ -164,9 +165,6 @@ namespace MCMC
         {
             // double mu0_old = mu0;
             double mu0 = mu0_old;
-
-            ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
-            approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
 
             approx_dlm.update_by_wt(y, wt);
             arma::vec eta = approx_dlm.get_eta_approx(mu0_old); // f0, Fn and psi is updated
@@ -190,6 +188,7 @@ namespace MCMC
             // logp_mu0 = logp_old;
             if (mu0_new > -EPS) // non-negative
             {
+                mu0_new = std::abs(mu0_new);
                 eta = approx_dlm.get_eta_approx(mu0_new); // f0, Fn and psi is updated
                 // arma::vec lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
                 lambda = eta;
@@ -199,9 +198,11 @@ namespace MCMC
                     logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lambda.at(i), model.dobs.par2, true);
                 }
                 double logratio = std::min(0., logp_new - logp_old);
+
+                
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
-                    mu0 = std::abs(mu0_new);
+                    mu0 = mu0_new;
                     mu0_accept += 1.;
                     // logp_mu0 = logp_new;
                 }
@@ -377,6 +378,8 @@ namespace MCMC
         Rcpp::List get_output()
         {
             Rcpp::List output;
+            output["model"] = Rcpp::wrap(model_info);
+
             output["wt"] = Rcpp::wrap(wt_stored); // (nT + 1) x nsample
 
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
@@ -387,11 +390,11 @@ namespace MCMC
 
             output["infer_W"] = infer_W;
             output["W"] = Rcpp::wrap(W_stored);
-            output["W_accept"] = W_accept;
+            output["W_accept"] = W_accept / ntotal;
 
             output["infer_mu0"] = infer_mu0;
             output["mu0"] = Rcpp::wrap(mu0_stored);
-            output["mu0_accept"] = mu0_accept;
+            output["mu0_accept"] = mu0_accept / ntotal;
 
             output["model"] = model_info;
 
@@ -638,9 +641,8 @@ namespace MCMC
 
                 if (infer_mu0)
                 {
-                    double mu0_accept = 0.;
                     double mu0_old = mu0;
-                    mu0 = Posterior::update_mu0(mu0_accept, mu0_old, y, wt, model, mu0_mh_sd);
+                    mu0 = Posterior::update_mu0(mu0_accept, approx_dlm, mu0_old, y, wt, model, mu0_mh_sd);
                     model.dobs.update_par1(mu0);
                 }
 

@@ -523,6 +523,10 @@ namespace VB
 
             mcs_opts["use_discount"] = false;
             mcs_opts["W"] = W;
+
+            unsigned int num_particle = Rcpp::as<unsigned int>(mcs_opts["num_particle"]);
+            mu0_stored.set_size(num_particle, nsample);
+            mu0_stored.zeros();
         }
 
 
@@ -1581,7 +1585,6 @@ namespace VB
                 arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
                 psi = arma::median(psi_all, 1);
 
-
                 arma::vec ft  = psi;
                 ft.at(0) = 0.;
                 for (unsigned int t = 1; t < ft.n_elem; t ++)
@@ -1669,8 +1672,18 @@ namespace VB
                     }
 
                     psi_stored.col(idx_run) = psi;
-                    W_stored.at(idx_run) = W;
-                    mu0_stored.at(idx_run) = mu0;
+
+                    if (infer_W)
+                    {
+                        W_stored.at(idx_run) = W;
+                    }
+
+                    if (infer_mu0 || model_in.dim.regressor_baseline)
+                    {
+                        arma::vec mu0 = mcs.get_mu0();
+                        mu0_stored.col(idx_run) = mu0;
+                    }
+                    
                     kappa_stored.at(idx_run) = kappa;
                     r_stored.at(idx_run) = r;
                 }
@@ -1686,6 +1699,11 @@ namespace VB
             if (verbose)
             {
                 Rcpp::Rcout << std::endl;
+            }
+
+            if (model_in.dim.regressor_baseline)
+            {
+                infer_mu0 = true;
             }
             
         }
@@ -1739,8 +1757,7 @@ namespace VB
         arma::uvec B_uptri_idx;
         arma::vec rcomb;
 
-
-
+        arma::mat mu0_stored;
     }; // class Hybrid
 }
 

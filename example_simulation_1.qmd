@@ -26,11 +26,14 @@ error: true
 
 ```{r}
 #| label: global argument
-mode = "plot"
+save_data = FALSE
+save_figures = FALSE
+plot_figures = TRUE
+
 seed = 3269
 
 kstep_forecast_err = 10
-eval_forecast_err = TRUE
+eval_forecast_err = FALSE
 eval_fitted_err = TRUE
 
 loss = "quadratic"
@@ -50,84 +53,7 @@ source(file.path(repo, "external_methods.r"))
 opath <- "/Users/meinitang/Dropbox/Research/Project1/simulation"
 ```
 
-```{r}
-#| label: r functions for figures
-#|
-save_figure <- function(algo_name, seed, p_psi_post, p_y_filter, p_y_smooth, plist_forecast, opath) {
-    tag <- paste0("sim-", seed, "-", algo_name, "-")
 
-    ggsave(
-        file.path(
-            opath, "posterior",
-            paste0(tag, "posterior-psi.pdf")
-        ),
-        plot = p_psi_post, device = "pdf", dpi = 300
-    )
-
-    ggsave(
-        file.path(
-            opath, "fit",
-            paste0(tag, "fit-filter.pdf")
-        ),
-        plot = p_y_filter, device = "pdf", dpi = 300
-    )
-
-    ggsave(
-        file.path(
-            opath, "fit",
-            paste0(tag, "fit-smooth.pdf")
-        ),
-        plot = p_y_smooth, device = "pdf", dpi = 300
-    )
-    ###
-    for (j in 1:kstep_forecast_err) {
-        ggsave(
-            file.path(
-                opath, "forecast",
-                paste0(tag, paste0("forecast-", j, "step.pdf"))
-            ),
-            plot = plist_forecast[[j]], device = "pdf", dpi = 300
-            # height = 4.51, width = 7.29
-        )
-    }
-}
-
-
-print_loss_all <- function(out_list) {
-    loss_all <- NULL
-    old_names <- NULL
-
-    if (!("error" %in% names(out_list))) {
-        return(loss_all)
-    }
-
-    if ("forecast" %in% names(out_list$error)) {
-        loss_all <- c(loss_all, out_list$error$forecast$y_loss_all)
-        old_names <- c(old_names, paste0("forecast", 1:length(c(out_list$error$forecast$y_loss_all))))
-    }
-
-    if ("fitted" %in% names(out_list$error)) {
-        if ("filter" %in% names(out_list$error$fitted)) {
-            loss_all <- c(loss_all, c(out_list$error$fitted$filter$y_loss_all))
-            old_names <- c(old_names, "fitted-filter")
-        }
-
-        if ("smooth" %in% names(out_list$error$fitted)) {
-            loss_all <- c(loss_all, c(out_list$error$fitted$smooth$y_loss_all))
-            old_names <- c(old_names, "fitted-smooth")
-        }
-
-        if ("y_loss_all" %in% names(out_list$error$fitted)) {
-            loss_all <- c(loss_all, c(out_list$error$fitted$y_loss_all))
-            old_names <- c(old_names, "fitted")
-        }
-
-        names(loss_all) <- old_names
-    }
-
-    return(loss_all)
-}
-```
 
 ## Modal and Simulated Data
 
@@ -193,14 +119,16 @@ p2 <- ggplot(
 
 p <- arrangeGrob(grobs = list(y = p1, psi = p2), ncol = 1)
 
-plot(p)
+if (plot_figures) {
+    plot(p)
+}
 ```
 
 
 ```{r}
 #| label: save figure of y
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(opath, paste0("sim-", seed, "-y.pdf")),
         plot = p,
@@ -280,7 +208,7 @@ plot(p2)
 ```{r}
 #| label: figure of lba tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "discount-factor",
@@ -360,41 +288,19 @@ print(print_loss_all(out1.lba2))
 
 ```{r}
 #| label: figure of lba inference
-p2 <- plot_ts_ci_single(
-    out1.lba$fit$psi, sim1$psi,
-    main = "Posterior distribution of psi after smoothing."
-)
-plot(p2)
-
-p4 <- plot_ts_ci_single(
-    out1.lba$error$fitted$filter$yhat, sim1$y,
-    main = "Fitted y after filtering.",
-    show_caption = FALSE
-)
-plot(p4)
-p5 <- plot_ts_ci_single(
-    out1.lba$error$fitted$smooth$yhat, sim1$y,
-    main = "Fitted y after smoothing"
-)
-plot(p5)
-
-
-plist <- vector("list", 10)
-for (j in 1:10) {
-    plist[[j]] <- plot_ts_ci_single(
-        out1.lba$error$forecast$y_cast[c(1:(length(sim1$y) - j)), , j], sim1$y[c((j + 1):length(sim1$y))],
-        main = paste0(j, "-step-ahead forecasting of y."),
-        show_caption = FALSE
-    )
-    plot(plist[[j]])
-}
+tag <- paste0("sim-", seed, "-lba-")
+plots <- plot_output(
+    out1.lba, sim1$y, 
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1], 
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures)
 
 ```
 
 ```{r}
 #| label: save lba data
 
-if (mode == "save") {
+if (save_data) {
     save(
         out1.lba, out1.lba2, opts1.lba, delta.lba, W.lba,
         out1.lba.loss_all, out1.lba2.loss_all,
@@ -403,8 +309,6 @@ if (mode == "save") {
             paste0("sim-", seed, "-lba.RData")
         )
     )
-
-    save_figure("lba", seed, p2, p4, p5, plist, opath)
 }
 ```
 
@@ -503,7 +407,7 @@ plot(p3)
 ```{r}
 #| label: figure of mcs tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "discount-factor",
@@ -596,37 +500,19 @@ print(print_loss_all(out1.mcs2))
 ```{r}
 #| label: figure of mcs inference
 
-p2 <- plot_ts_ci_single(out1.mcs$fit$psi, sim1$psi, main = "Posterior distribution of psi")
-plot(p2)
-p4 <- plot_ts_ci_single(out1.mcs$error$fitted$filter$yhat, sim1$y, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out1.mcs$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, sim1$y)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-plist = vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out1.mcs$error$forecast$y_cast[1:(length(sim1$y) - j), , j],
-        sim1$y[(j + 1):length(sim1$y)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
-}
-
-
-p6 = ggplot(data.frame(mu0 = c(out1.mcs$fit$mu0)), aes(x = mu0)) +
-    stat_bin(bins=50) + theme_light()
-
-plot(p6)
+tag <- paste0("sim-", seed, "-mcs-")
+plots <- plot_output(
+    out1.mcs, sim1$y, 
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1], 
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures)
 ```
 
 
 ```{r}
 #| label: save mcs data
 
-if (mode == "save") {
+if (save_data) {
     save(
         out1.mcs, out1.mcs2, opts1.mcs, delta.mcs, W.mcs, B.mcs,
         out1.mcs.loss_all, out1.mcs2.loss_all,
@@ -635,8 +521,6 @@ if (mode == "save") {
             paste0("sim-", seed, "-mcs.RData")
         )
     )
-
-    save_figure("mcs", seed, p2, p4, p5, plist, opath)
 }
 ```
 
@@ -676,7 +560,9 @@ p1 <- ggplot(
     ylab("Mean One-step-ahead Forecasting Error") +
     theme(text = element_text(size = 16))
 
-plot(p1)
+if (plot_figures) {
+    plot(p1)
+}
 
 ```
 
@@ -702,14 +588,16 @@ p2 <- ggplot(
     xlab("W") +
     ylab("Mean One-step-ahead Forecasting Error")
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 
 ```
 
 ```{r}
 #| label: figure of ffbs tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "discount-factor",
@@ -790,32 +678,22 @@ print(print_loss_all(out1.ffbs2))
 ```{r}
 #| label: figure of ffbs inference
 
-p2 <- plot_ts_ci_single(out1.ffbs$fit$psi, sim1$psi, main = "Posterior distribution of psi")
-plot(p2)
+tag <- paste0("sim-", seed, "-ffbs-")
+plots <- plot_output(
+    out1.ffbs, sim1$y, 
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1], 
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures)
 
-p4 <- plot_ts_ci_single(out1.ffbs$error$fitted$filter$yhat, sim1$y, main = "Fitted y")
-plot(p4)
 
-ypred_qt <- t(apply(out1.ffbs$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, sim1$y)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
 
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out1.ffbs$error$forecast$y_cast[1:(length(sim1$y) - j), , j],
-        sim1$y[(j + 1):length(sim1$y)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
-}
 ```
 
 
 ```{r}
 #| label: save ffbs data
 
-if (mode == "save") {
+if (save_data) {
     save(
         out1.ffbs, out1.ffbs2, opts1.ffbs, delta.ffbs, W.ffbs, 
         out1.ffbs.loss_all, out1.ffbs2.loss_all,
@@ -824,8 +702,6 @@ if (mode == "save") {
             paste0("sim-", seed, "-ffbs.RData")
         )
     )
-
-    save_figure("ffbs", seed, p2, p4, p5, plist, opath)
 }
 ```
 
@@ -862,43 +738,20 @@ print(print_loss_all(out1.pl))
 ```{r}
 #| label: figure of pl inference
 
-p2 <- plot_ts_ci_single(out1.pl$fit$psi, sim1$psi, main = "Posterior distribution of psi")
-plot(p2)
-
-p4 <- plot_ts_ci_single(out1.pl$error$fitted$filter$yhat, sim1$y, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out1.pl$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, sim1$y)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out1.pl$error$forecast$y_cast[1:(length(sim1$y) - j), , j],
-        sim1$y[(j + 1):length(sim1$y)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
-}
-
-p7 <- ggplot(
-    data = data.frame(w = c(out1.pl$fit$W), idx = 1:length(out1.pl$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    geom_vline(aes(xintercept = sim1$param$err[1]), col = "maroon") +
-    labs(title = "Posterior distribution of W")
-plot(p7)
+tag <- paste0("sim-", seed, "-pl-")
+plots <- plot_output(
+    out1.pl, sim1$y,
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures
+)
 
 ```
 
 
 ```{r}
 #| label: save pl data
-if (mode == "save") {
-    tag = paste0("sim-", seed, "-pl-")
+if (save_data) {
     save(
         out1.pl, opts1.pl,
         out1.pl.loss_all,
@@ -906,16 +759,6 @@ if (mode == "save") {
             opath, "data",
             paste0("sim-", seed, "-pl.RData")
         )
-    )
-
-    save_figure("pl", seed, p2, p4, p5, plist, opath)
-
-    ggsave(
-        file.path(
-            opath, "W",
-            paste0(tag, "posterior-W.pdf")
-        ),
-        plot = p7, device = "pdf", dpi = 300
     )
 }
 ```
@@ -958,7 +801,11 @@ p1 <- ggplot(
     geom_line(alpha = 0.7, color = "grey") +
     xlab("Learning Rate") +
     ylab("Mean One-step-ahead Forecasting Error")
-plot(p1)
+
+
+if (plot_figures) {
+    plot(p1)
+}
 ```
 
 ```{r}
@@ -983,13 +830,15 @@ p2 <- ggplot(
     xlab("Step Size") +
     ylab("Mean One-step-ahead Forecasting Error")
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 ```
 
 ```{r}
 #| label: figure of hva tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "hva",
@@ -1021,10 +870,12 @@ opts1.hva$nburnin <- 5000
 opts1.hva$num_step_ahead_forecast <- 10
 
 opts1.hva$mcs$num_particle <- 100
-opts1.hva$mcs$num_backward <- 5
+opts1.hva$mcs$num_backward <- 10
 
 opts1.hva$W$init <- 0.01
 opts1.hva$W$infer <- TRUE
+
+opts1.hva$mu0$infer = FALSE
 
 opts1.hva$learning_rate <- 0.02
 opts1.hva$eps_step_size <- 1.e-5
@@ -1036,7 +887,7 @@ opts1.hva$k <- 1
 
 ```{r}
 #| label: run dgtf_infer with hva
-
+mod1$dim$regressor_baseline = TRUE
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
     "hva", opts1.hva,
@@ -1057,38 +908,18 @@ print(print_loss_all(out1.hva))
 ```{r}
 #| label: figure of hva inference
 
-p2 <- plot_ts_ci_single(out1.hva$fit$psi, sim1$psi, main = "Posterior distribution of psi")
-plot(p2)
-p4 <- plot_ts_ci_single(out1.hva$error$fitted$yhat, sim1$y[2:(dim(out1.hva$error$fitted$yhat)[1] + 1)], main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out1.hva$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, sim1$y)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-p6 <- ggplot(
-    data = data.frame(w = c(out1.hva$fit$W), idx = 1:length(out1.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    geom_vline(aes(xintercept = sim1$param$err[1]), col = "maroon") +
-    labs(title = "Posterior distribution of W")
-plot(p6)
-
-plist = vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out1.hva$error$forecast$y_cast[c(1:(length(sim1$y) - j)), , 2], sim1$y[(j + 1):length(sim1$y)], main = paste0(j, "step-ahead forecast of y"))
-    plot(plist[[j]])
-}
+tag <- paste0("sim-", seed, "-hva-")
+plots <- plot_output(
+    out1.hva, sim1$y, 
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1], 
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures)
 
 ```
 
 ```{r}
 #| label: save hva data
-if (mode == "save") {
-    tag <- paste0("sim-", seed, "-hva-")
+if (save_data) {
     save(
         out1.hva, opts1.hva,
         out1.hva.loss_all,
@@ -1096,16 +927,6 @@ if (mode == "save") {
             opath, "data",
             paste0("sim-", seed, "-hva.RData")
         )
-    )
-
-    save_figure("hva", seed, p2, p4, p5, plist, opath)
-
-    ggsave(
-        file.path(
-            opath, "W",
-            paste0(tag, "posterior-W.pdf")
-        ),
-        plot = p6, device = "pdf", dpi = 300
     )
 }
 ```
@@ -1126,6 +947,8 @@ opts1.mcmc$num_step_ahead_forecast <- 10
 opts1.mcmc$mh_sd <- 0.1
 
 opts1.mcmc$mu0$init <- mod1$param$obs[1]
+opts1.mcmc$mu0$infer = TRUE
+opts1.mcmc$mu0$mh_sd = 1
 
 opts1.mcmc$W$init <- 0.01
 opts1.mcmc$W$infer <- TRUE
@@ -1152,47 +975,20 @@ print(print_loss_all(out1.mcmc))
 ```{r}
 #| label: figure of mcmc
 
-out1.mcmc$error$forecast$y_cast[out1.mcmc$error$forecast$y_cast < .Machine$double.eps] <- NA
+tag <- paste0("sim-", seed, "-mcmc-")
+plots <- plot_output(
+    out1.mcmc, sim1$y, 
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1], 
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures)
 
-p2 <- plot_ts_ci_single(out1.mcmc$fit$psi[, ], sim1$psi, main = "Posterior distribution of psi")
-plot(p2)
-
-p4 <- plot_ts_ci_single(out1.mcmc$error$fitted$yhat, sim1$y, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out1.mcmc$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, sim1$y)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-p6 <- ggplot(
-    data = data.frame(w = c(out1.mcmc$fit$W), idx = 1:length(out1.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    geom_vline(aes(xintercept = sim1$param$err[1]), col = "maroon") +
-    labs(title = "Posterior distribution of W")
-plot(p6)
-
-
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out1.mcmc$error$forecast$y_cast[tidx - j, , j],
-        sim1$y[tidx],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-
-    plot(plist[[j]])
-}
 ```
 
 
 ```{r}
 #| label: save mcmc data
 
-if (mode == "save") {
-    tag <- paste0("sim-", seed, "-mcmc-")
+if (save_data) {
     save(
         out1.mcmc, opts1.mcmc,
         out1.mcmc.loss_all,
@@ -1200,16 +996,6 @@ if (mode == "save") {
             opath, "data",
             paste0("sim-", seed, "-mcmc.RData")
         )
-    )
-
-    save_figure("mcmc", seed, p2, p4, p5, plist, opath)
-
-    ggsave(
-        file.path(
-            opath, "W",
-            paste0(tag, "posterior-W.pdf")
-        ),
-        plot = p6, device = "pdf", dpi = 300
     )
 }
 ```
@@ -1313,7 +1099,7 @@ p <- ggplot(data = data.frame(
     ylab("RMSE of one-step-ahead forecasting")
 plot(p)
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "model-selection",
@@ -1365,7 +1151,7 @@ p <- ggplot(data = data.frame(
 plot(p)
 
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "model-selection",
@@ -1380,7 +1166,7 @@ if (mode == "save") {
 ```{r}
 #| label: save model selection
 
-if (mode == "save") {
+if (save_data) {
     save(
         mod1, sim1, 
         out1.stats.obs,
@@ -1434,7 +1220,7 @@ forecast1.epi <- external_forecast(
     loss, kstep_forecast_err
 )
 
-if (mode == "save") {
+if (save_data) {
     save(
         out1.epi, forecast1.epi,
         file = file.path(
@@ -1453,7 +1239,7 @@ forecast1.wt <- external_forecast(
 )
 
 
-if (mode == "save") {
+if (save_data) {
     save(
         out1.wt, forecast1.wt,
         file = file.path(

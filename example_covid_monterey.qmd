@@ -26,8 +26,11 @@ error: true
 
 ```{r}
 #| label: global argument
-mode <- "plot"
-tag = "monterey"
+save_data <- FALSE
+save_figures <- FALSE
+plot_figures <- TRUE
+
+tag <- "covid-monterey"
 Tag2 = "Monterey"
 
 kstep_forecast_err <- 10
@@ -52,109 +55,34 @@ dpath <- "/Users/meinitang/Dropbox/Research/Project1"
 opath <- "/Users/meinitang/Dropbox/Research/Project1/real"
 ```
 
-```{r}
-#| label: r functions for figures
-#|
-save_figure <- function(algo_name, tag, p_psi_post, p_y_filter, p_y_smooth, plist_forecast, opath) {
-    label <- paste0("covid-", tag, "-", algo_name, "-")
 
-    ggsave(
-        file.path(
-            opath, "posterior",
-            paste0(label, "posterior-psi.pdf")
-        ),
-        plot = p_psi_post, device = "pdf", dpi = 300
-    )
-
-    ggsave(
-        file.path(
-            opath, "fit",
-            paste0(label, "fit-filter.pdf")
-        ),
-        plot = p_y_filter, device = "pdf", dpi = 300
-    )
-
-    ggsave(
-        file.path(
-            opath, "fit",
-            paste0(label, "fit-smooth.pdf")
-        ),
-        plot = p_y_smooth, device = "pdf", dpi = 300
-    )
-    ###
-    for (j in 1:kstep_forecast_err) {
-        ggsave(
-            file.path(
-                opath, "forecast",
-                paste0(label, paste0("forecast-", j, "step.pdf"))
-            ),
-            plot = plist_forecast[[j]], device = "pdf", dpi = 300
-            # height = 4.51, width = 7.29
-        )
-    }
-}
-
-
-print_loss_all <- function(out_list) {
-    loss_all <- NULL
-    old_names <- NULL
-
-    if (!("error" %in% names(out_list))) {
-        return(loss_all)
-    }
-
-    if ("forecast" %in% names(out_list$error)) {
-        loss_all <- c(loss_all, out_list$error$forecast$y_loss_all)
-        old_names <- c(old_names, paste0("forecast", 1:length(c(out_list$error$forecast$y_loss_all))))
-    }
-
-    if ("fitted" %in% names(out_list$error)) {
-        if ("filter" %in% names(out_list$error$fitted)) {
-            loss_all <- c(loss_all, c(out_list$error$fitted$filter$y_loss_all))
-            old_names <- c(old_names, "fitted-filter")
-        }
-
-        if ("smooth" %in% names(out_list$error$fitted)) {
-            loss_all <- c(loss_all, c(out_list$error$fitted$smooth$y_loss_all))
-            old_names <- c(old_names, "fitted-smooth")
-        }
-
-        if ("y_loss_all" %in% names(out_list$error$fitted)) {
-            loss_all <- c(loss_all, c(out_list$error$fitted$y_loss_all))
-            old_names <- c(old_names, "fitted")
-        }
-
-        names(loss_all) <- old_names
-    }
-
-    return(loss_all)
-}
-```
 
 ## Modal and Data
 
 
 ```{r}
 #| label: monterey county data
-#| 
+#|
 
-data = read.csv(file.path(dpath,"county","covid19cases_test.csv"))
-data = data[data$area == Tag2,]
-data$date = as.Date(data$date)
-data = data[data$date >= "2020-03-01",]
-data = data[1:(nrow(data)-1),]
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == Tag2, ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
 
-y = data$cases
-n = length(y)
+y <- data$cases
+n <- length(y)
 
-data2 = data[data$date >= "2020-07-01" & data$date < "2021-12-01",]
-y2 = c(0, data2$cases)
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+y2 <- c(0, data2$cases)
 
-y3 = round(smooth.spline(y2, spar = 0.0001)$y)
+y3 <- round(smooth.spline(y2, spar = 0.0001)$y)
 ggplot(
-  data = data.frame(y = y2[-1], time = data2$date), 
-  aes(x = time, y = y)) +
-  geom_line() + theme_light()
+    data = data.frame(y = y2[-1], time = data2$date),
+    aes(x = time, y = y)
+) +
+    geom_line() +
+    theme_light()
 
 p1 <- ggplot(
     data = data.frame(y = y2, t = 0:(length(y2) - 1)),
@@ -166,15 +94,17 @@ p1 <- ggplot(
     ylab("Observed Count Values y")
 
 
-plot(p1)
+if (plot_figures) {
+    plot(p1)
+}
 ```
 
 ```{r}
 #| label: save figure of y
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
-        file.path(opath, paste0("covid-", tag, "-y.pdf")),
+        file.path(opath, paste0(tag, "-y.pdf")),
         plot = p1,
         device = "pdf", height = 5, width = 7, dpi = 300
     )
@@ -255,7 +185,9 @@ p1 <- ggplot(
     ylab("MFE") +
     theme(text = element_text(size = 16))
 
-plot(p1)
+if (plot_figures) {
+    plot(p1)
+}
 ```
 
 
@@ -283,23 +215,25 @@ p2 <- ggplot(
     ylab("MFE") +
     theme(text = element_text(size = 16))
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 ```
 
 ```{r}
 #| label: figure of lba tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "discount-factor",
-            paste0("covid-", tag, "-lba-optimal-discount-factor.pdf")
+            paste0(tag, "-lba-optimal-discount-factor.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300
     )
 
     ggsave(
-        file.path(opath, "W", paste0("covid-", tag, "-lba-optimal-W.pdf")),
+        file.path(opath, "W", paste0(tag, "-lba-optimal-W.pdf")),
         plot = p2, device = "pdf", dpi = 300
     )
 }
@@ -366,51 +300,27 @@ print(print_loss_all(out.lba2))
 
 ```{r}
 #| label: figure of lba inference
-p2 <- plot_ts_ci_single(
-    out.lba$fit$psi,
-    main = "Posterior distribution of psi after smoothing."
+plots <- plot_output(
+    out.lba, y2,
+    save_figures = save_figures,
+    tag = paste0(tag, "-lba-"), opath = opath,
+    plot_figures = plot_figures
 )
-plot(p2)
-
-p4 <- plot_ts_ci_single(
-    out.lba$error$fitted$filter$yhat, y2,
-    main = "Fitted y after filtering.",
-    show_caption = FALSE
-)
-plot(p4)
-p5 <- plot_ts_ci_single(
-    out.lba$error$fitted$smooth$yhat, y2,
-    main = "Fitted y after smoothing"
-)
-plot(p5)
-
-
-plist = vector("list", 10)
-for (j in 1:10) {
-    plist[[j]] <- plot_ts_ci_single(
-        out.lba$error$forecast$y_cast[c(1:(length(y2) - j)), , j], y2[c((j + 1):length(y2))],
-        main = paste0(j, "-step-ahead forecasting of y."),
-        show_caption = FALSE
-    )
-    plot(plist[[j]])
-}
 
 ```
 
 ```{r}
 #| label: save lba data
 
-if (mode == "save") {
+if (save_data) {
     save(
-        out.lba, out.lba2, opts.lba, delta.lba, W.lba, 
+        out.lba, out.lba2, opts.lba, delta.lba, W.lba,
         out.lba.loss_all, out.lba2.loss_all,
         file = file.path(
             opath, "data",
-            paste0("covid-", tag, "-lba.RData")
+            paste0(tag, "-lba.RData")
         )
     )
-
-    save_figure("lba", tag, p2, p4, p5, plist, opath)
 }
 ```
 
@@ -449,7 +359,9 @@ p1 <- ggplot(
     ylab("MFE") +
     theme(text = element_text(size = 16))
 
-plot(p1)
+if (plot_figures) {
+    plot(p1)
+}
 ```
 
 
@@ -479,7 +391,9 @@ p2 <- ggplot(
     # geom_point(aes(x=W, y = error2), color = "maroon") +
     # geom_line(aes(x=W, y = error2), alpha = 0.7, color = "salmon")
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 ```
 
 
@@ -506,17 +420,19 @@ p3 <- ggplot(
     xlab("B") +
     ylab("Mean One-step-ahead Forecasting Error")
 
-plot(p3)
+if (plot_figures) {
+    plot(p3)
+}
 ```
 
 ```{r}
 #| label: figure of mcs tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "discount-factor",
-            paste0("covid-",tag, "-mcs-optimal-discount-factor.pdf")
+            paste0(tag, "-mcs-optimal-discount-factor.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300
     )
@@ -524,7 +440,7 @@ if (mode == "save") {
     ggsave(
         file.path(
             opath, "W",
-            paste0("covid-",tag, "-mcs-optimal-W.pdf")
+            paste0(tag, "-mcs-optimal-W.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300
     )
@@ -532,12 +448,11 @@ if (mode == "save") {
     ggsave(
         file.path(
             opath, "num-backward",
-            paste0("covid-",tag, "-mcs-optimal-B.pdf")
+            paste0(tag, "-mcs-optimal-B.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300
     )
 }
-
 ```
 
 
@@ -607,53 +522,27 @@ print(print_loss_all(out.mcs2))
 ```{r}
 #| label: figure of mcs inference
 
-p2 <- plot_ts_ci_single(out.mcs$fit$psi, main = "Posterior distribution of psi")
-plot(p2)
-p4 <- plot_ts_ci_single(out.mcs$error$fitted$filter$yhat, y2, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out.mcs$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, y2)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out.mcs$error$forecast$y_cast[1:(length(y2) - j), , j],
-        y2[(j + 1):length(y2)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
-}
-
-p6 <- ggplot(data.frame(mu0 = c(out.mcs$fit$mu0)), aes(x = mu0)) +
-    stat_bin(bins = 50) +
-    theme_light()
-
-plot(p6)
-
-p7 <- ggplot(data.frame(mu0 = c(out.mcs2$fit$mu0)), aes(x = mu0)) +
-    stat_bin(bins = 50) +
-    theme_light()
-
-plot(p7)
+plots <- plot_output(
+    out.mcs, y2,
+    save_figures = save_figures,
+    tag = paste0(tag, "-mcs-"), opath = opath,
+    plot_figures = plot_figures
+)
 ```
 
 
 ```{r}
 #| label: save mcs data
 
-if (mode == "save") {
+if (save_data) {
     save(
         out.mcs, out.mcs2, opts.mcs, delta.mcs, W.mcs, B.mcs,
         out.mcs.loss_all, out.mcs2.loss_all,
         file = file.path(
             opath, "data",
-            paste0("covid-",tag, "-mcs.RData")
+            paste0(tag, "-mcs.RData")
         )
     )
-
-    save_figure("mcs", tag, p2, p4, p5, plist, opath)
 }
 ```
 
@@ -694,7 +583,9 @@ p1 <- ggplot(
     ylab("Mean One-step-ahead Forecasting Error") +
     theme(text = element_text(size = 16))
 
-plot(p1)
+if (plot_figures) {
+    plot(p1)
+}
 
 ```
 
@@ -711,7 +602,7 @@ W.ffbs <- dgtf_tuning(
 )
 
 p2 <- ggplot(
-    data.frame(W = W.ffbs[W.ffbs[,1]<0.01, 1], error = W.ffbs[W.ffbs[,1]<0.01, 2]),
+    data.frame(W = W.ffbs[W.ffbs[, 1] < 0.01, 1], error = W.ffbs[W.ffbs[, 1] < 0.01, 2]),
     aes(x = W, y = error)
 ) +
     geom_point() +
@@ -720,18 +611,20 @@ p2 <- ggplot(
     xlab("W") +
     ylab("Mean One-step-ahead Forecasting Error")
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 
 ```
 
 ```{r}
 #| label: figure of ffbs tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "discount-factor",
-            paste0("covid-",tag, "-ffbs-optimal-discount-factor.pdf")
+            paste0(tag, "-ffbs-optimal-discount-factor.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300
     )
@@ -739,7 +632,7 @@ if (mode == "save") {
     ggsave(
         file.path(
             opath, "W",
-            paste0("covid-",tag, "-ffbs-optimal-W.pdf")
+            paste0(tag, "-ffbs-optimal-W.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300
     )
@@ -807,42 +700,27 @@ print(print_loss_all(out.ffbs2))
 ```{r}
 #| label: figure of ffbs inference
 
-p2 <- plot_ts_ci_single(out.ffbs$fit$psi, main = "Posterior distribution of psi")
-plot(p2)
-
-p4 <- plot_ts_ci_single(out.ffbs$error$fitted$filter$yhat, y2, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out.ffbs$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, y2)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out.ffbs$error$forecast$y_cast[1:(length(y2) - j), , j],
-        y2[(j + 1):length(y2)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
-}
+plots <- plot_output(
+    out.ffbs, y2,
+    save_figures = save_figures,
+    tag = paste0(tag, "-ffbs-"), opath = opath,
+    plot_figures = plot_figures
+)
 ```
 
 
 ```{r}
 #| label: save ffbs data
 
-if (mode == "save") {
+if (save_data) {
     save(
-        out.ffbs, out.ffbs2, opts.ffbs, delta.ffbs, W.ffbs, 
+        out.ffbs, out.ffbs2, opts.ffbs, delta.ffbs, W.ffbs,
         out.ffbs.loss_all, out.ffbs2.loss_all,
         file = file.path(
             opath, "data",
-            paste0("covid-",tag, "-ffbs.RData")
+            paste0(tag, "-ffbs.RData")
         )
     )
-
-    save_figure("ffbs", tag, p2, p4, p5, plist, opath)
 }
 ```
 
@@ -878,58 +756,27 @@ print(print_loss_all(out.pl))
 ```{r}
 #| label: figure of pl inference
 
-p2 <- plot_ts_ci_single(out.pl$fit$psi, main = "Posterior distribution of psi")
-plot(p2)
 
-p4 <- plot_ts_ci_single(out.pl$error$fitted$filter$yhat, y2, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out.pl$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, y2)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out.pl$error$forecast$y_cast[1:(length(y2) - j), , j],
-        y2[(j + 1):length(y2)],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-    plot(plist[[j]])
-}
-
-p7 <- ggplot(
-    data = data.frame(w = c(out.pl$fit$W), idx = 1:length(out.pl$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "Posterior distribution of W")
-plot(p7)
+plots <- plot_output(
+    out.pl, y2,
+    save_figures = save_figures,
+    tag = paste0(tag, "-pl-"), opath = opath,
+    plot_figures = plot_figures
+)
 
 ```
 
 
 ```{r}
 #| label: save pl data
-if (mode == "save") {
+if (save_data) {
     save(
         out.pl, opts.pl,
         out.pl.loss_all,
         file = file.path(
             opath, "data",
-            paste0("covid-",tag, "-pl.RData")
+            paste0(tag, "-pl.RData")
         )
-    )
-
-    save_figure("pl", tag, p2, p4, p5, plist, opath)
-
-    ggsave(
-        file.path(
-            opath, "W",
-            paste0("covid-", tag, "-posterior-W.pdf")
-        ),
-        plot = p7, device = "pdf", dpi = 300
     )
 }
 ```
@@ -972,7 +819,10 @@ p1 <- ggplot(
     geom_line(alpha = 0.7, color = "grey") +
     xlab("Learning Rate") +
     ylab("Mean One-step-ahead Forecasting Error")
-plot(p1)
+
+if (plot_figures) {
+    plot(p1)
+}
 ```
 
 ```{r}
@@ -997,17 +847,19 @@ p2 <- ggplot(
     xlab("Step Size") +
     ylab("Mean One-step-ahead Forecasting Error")
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 ```
 
 ```{r}
 #| label: figure of hva tuning
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "hva",
-            paste0("covid-", tag, "-hva-optimal-learning-rate.pdf")
+            paste0(tag, "-hva-optimal-learning-rate.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300
     )
@@ -1015,7 +867,7 @@ if (mode == "save") {
     ggsave(
         file.path(
             opath, "hva",
-            paste0("covid-", tag, "-hva-step-size.pdf")
+            paste0(tag, "-hva-step-size.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300
     )
@@ -1071,53 +923,24 @@ print(print_loss_all(out.hva))
 ```{r}
 #| label: figure of hva inference
 
-p2 <- plot_ts_ci_single(out.hva$fit$psi, main = "Posterior distribution of psi")
-plot(p2)
-p4 <- plot_ts_ci_single(out.hva$error$fitted$yhat, y2[2:(dim(out.hva$error$fitted$yhat)[1] + 1)], main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out.hva$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, y2)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-p6 <- ggplot(
-    data = data.frame(w = c(out.hva$fit$W), idx = 1:length(out.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "Posterior distribution of W")
-plot(p6)
-
-plist = vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out.hva$error$forecast$y_cast[c(1:(length(y2) - j)), , 2], y2[(j + 1):length(y2)], main = paste0(j, "step-ahead forecast of y"))
-    plot(plist[[j]])
-}
+plots <- plot_output(
+    out.hva, y2,
+    save_figures = save_figures, tag = paste0(tag, "-hva-"), opath = opath,
+    plot_figures = plot_figures
+)
 
 ```
 
 ```{r}
 #| label: save hva data
-if (mode == "save") {
+if (save_data) {
     save(
         out.hva, opts.hva,
         out.hva.loss_all,
         file = file.path(
             opath, "data",
-            paste0("covid-",tag, "-hva.RData")
+            paste0(tag, "-hva.RData")
         )
-    )
-
-    save_figure("hva", tag, p2, p4, p5, plist, opath)
-
-    ggsave(
-        file.path(
-            opath, "W",
-            paste0("covid-", tag, "-posterior-W.pdf")
-        ),
-        plot = p6, device = "pdf", dpi = 300
     )
 }
 ```
@@ -1164,62 +987,26 @@ print(print_loss_all(out.mcmc))
 ```{r}
 #| label: figure of mcmc
 
-out.mcmc$error$forecast$y_cast[out.mcmc$error$forecast$y_cast < .Machine$double.eps] <- NA
-
-p2 <- plot_ts_ci_single(out.mcmc$fit$psi, main = "Posterior distribution of psi")
-plot(p2)
-
-p4 <- plot_ts_ci_single(out.mcmc$error$fitted$yhat, y2, main = "Fitted y")
-plot(p4)
-
-ypred_qt <- t(apply(out.mcmc$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-p5 <- plot_ypred(ypred_qt, y2)
-p5 <- p5 + labs(title = "Forecasting of the next 10 time points.")
-plot(p5)
-
-p6 <- ggplot(
-    data = data.frame(w = c(out.mcmc$fit$W), idx = 1:length(out.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "Posterior distribution of W")
-plot(p6)
-
-
-plist <- vector("list", length = kstep_forecast_err)
-for (j in 1:kstep_forecast_err) {
-    plist[[j]] <- plot_ts_ci_single(out.mcmc$error$forecast$y_cast[tidx - j, , j],
-        y2[tidx],
-        main = paste0(j, "step-ahead forecast of y")
-    )
-
-    plot(plist[[j]])
-}
+plots <- plot_output(
+    out.mcmc, y2,
+    save_figures = save_figures,
+    tag = paste0(tag, "-mcmc-"), opath = opath,
+    plot_figures = plot_figures
+)
 ```
 
 
 ```{r}
 #| label: save mcmc data
 
-if (mode == "save") {
+if (save_data) {
     save(
         out.mcmc, opts.mcmc,
         out.mcmc.loss_all,
         file = file.path(
             opath, "data",
-            paste0("covid-",tag, "-mcmc.RData")
+            paste0(tag, "-mcmc.RData")
         )
-    )
-
-    save_figure("mcmc", tag, p2, p4, p5, plist, opath)
-
-    ggsave(
-        file.path(
-            opath, "W",
-            paste0("covid-", tag, "-posterior-W.pdf")
-        ),
-        plot = p6, device = "pdf", dpi = 300
     )
 }
 ```
@@ -1232,23 +1019,28 @@ if (mode == "save") {
 
 ```{r}
 #| label: optimal obs with lba
-mod$model$obs_dist = "nbinom"
-delta_grid = 1:100
-out.stats.obs = dgtf_optimal_obs(mod, y2, "lba", opts.lba, delta_grid)
+mod$model$obs_dist <- "nbinom"
+delta_grid <- 1:100
+out.stats.obs <- dgtf_optimal_obs(mod, y2, "lba", opts.lba, delta_grid)
 
-mod$model$obs_dist = "poisson"
-out.lba2 = dgtf_infer(mod, y2, "lba", opts.lba)
+mod$model$obs_dist <- "poisson"
+out.lba2 <- dgtf_infer(mod, y2, "lba", opts.lba)
 
-ymin = min(c(out.stats.obs[,2], out.lba2$error$forecast$y_loss_all[1]))
-ymax = max(c(out.stats.obs[,2], out.lba2$error$forecast$y_loss_all[1]))
+ymin <- min(c(out.stats.obs[, 2], out.lba2$error$forecast$y_loss_all[1]))
+ymax <- max(c(out.stats.obs[, 2], out.lba2$error$forecast$y_loss_all[1]))
 
-out.stats.obs = as.data.frame(out.stats.obs)
-colnames(out.stats.obs) = c("delta", "forecast-err", "fit-err")
-p = ggplot(out.stats.obs, aes(x = delta, y = `forecast-err`)) +
-  geom_point() + theme_light() +
-  geom_hline(aes(yintercept = out.lba2$error$forecast$y_loss_all[1]), color = "maroon") +
-  ylab("RMSE of one-step-ahead forecasting") + xlab(expression(delta))
-plot(p)
+out.stats.obs <- as.data.frame(out.stats.obs)
+colnames(out.stats.obs) <- c("delta", "forecast-err", "fit-err")
+p <- ggplot(out.stats.obs, aes(x = delta, y = `forecast-err`)) +
+    geom_point() +
+    theme_light() +
+    geom_hline(aes(yintercept = out.lba2$error$forecast$y_loss_all[1]), color = "maroon") +
+    ylab("RMSE of one-step-ahead forecasting") +
+    xlab(expression(delta))
+
+if (plot_figures) {
+    plot(p)
+}
 ```
 
 ```{r}
@@ -1271,8 +1063,10 @@ p <- ggplot(out.stats.obs2, aes(x = delta, y = `forecast-err`)) +
     geom_hline(aes(yintercept = out.mcs2$error$forecast$y_loss_all[1]), color = "maroon") +
     ylab("RMSE of one-step-ahead forecasting") +
     xlab(expression(delta))
-    
-plot(p)
+
+if (plot_figures) {
+    plot(p)
+}
 ```
 
 ```{r}
@@ -1305,7 +1099,6 @@ out.stats.lag.lognorm <- out.stats.lag.lognorm[!apply(out.stats.lag.lognorm, 1, 
 out.stats.lag.lognorm <- as.data.frame(out.stats.lag.lognorm)
 colnames(out.stats.lag.lognorm) <- c("mu", "sd2", "mean", "var", "mode", "forecast", "fit")
 out.stats.lag.lognorm$mode_int <- as.factor(round(out.stats.lag.lognorm$mode))
-lattice::contourplot(forecast ~ mu * sd2, data = out.stats.lag.lognorm)
 
 p0 <- ggplot(out.stats.lag.lognorm, aes(mu, sd2, fill = forecast)) +
     geom_raster(na.rm = TRUE) +
@@ -1318,7 +1111,6 @@ p0 <- ggplot(out.stats.lag.lognorm, aes(mu, sd2, fill = forecast)) +
     ) +
     scale_x_continuous(expand = c(0, 0)) +
     scale_y_continuous(expand = c(0, 0))
-plot(p0)
 
 p <- ggplot(data = data.frame(
     mode = c(out.stats.lag.lognorm$mode_int),
@@ -1328,13 +1120,19 @@ p <- ggplot(data = data.frame(
     geom_boxplot() +
     xlab("Mode") +
     ylab("RMSE of one-step-ahead forecasting")
-plot(p)
 
-if (mode == "save") {
+if (plot_figures) {
+    lattice::contourplot(forecast ~ mu * sd2, data = out.stats.lag.lognorm)
+
+    plot(p0)
+    plot(p)
+}
+
+if (save_figures) {
     ggsave(
         file.path(
             opath, "model-selection",
-            paste0("covid-", tag, "-lag-lognorm.pdf")
+            paste0(tag, "-lag-lognorm.pdf")
         ),
         plot = p, device = "pdf", dpi = 300
     )
@@ -1342,7 +1140,7 @@ if (mode == "save") {
     ggsave(
         file.path(
             opath, "model-selection",
-            paste0("covid-", tag, "-lag-lognorm-heatmap.pdf")
+            paste0(tag, "-lag-lognorm-heatmap.pdf")
         ),
         plot = p0, device = "pdf", dpi = 300
     )
@@ -1373,8 +1171,6 @@ colnames(out.stats.lag.nbinom) <- c("kappa", "r", "mean", "var", "mode", "foreca
 out.stats.lag.nbinom$mode_int <- as.factor(round(out.stats.lag.nbinom$mode))
 
 
-lattice::contourplot(forecast ~ kappa * r, data = out.stats.lag.nbinom)
-
 p0 <- ggplot(out.stats.lag.nbinom, aes(kappa, r, fill = forecast)) +
     geom_raster(na.rm = TRUE) +
     theme_minimal() +
@@ -1386,7 +1182,6 @@ p0 <- ggplot(out.stats.lag.nbinom, aes(kappa, r, fill = forecast)) +
     ) +
     scale_x_continuous(expand = c(0, 0)) +
     scale_y_continuous(expand = c(0, 0))
-plot(p0)
 
 
 p <- ggplot(data = data.frame(
@@ -1397,14 +1192,20 @@ p <- ggplot(data = data.frame(
     geom_boxplot() +
     xlab("Mode") +
     ylab("RMSE of one-step-ahead forecasting")
-plot(p)
+
+if (plot_figures) {
+    lattice::contourplot(forecast ~ kappa * r, data = out.stats.lag.nbinom)
+
+    plot(p0)
+    plot(p)
+}
 
 
-if (mode == "save") {
+if (save_figures) {
     ggsave(
         file.path(
             opath, "model-selection",
-            paste0("covid-", tag, "-lag-nbinom.pdf")
+            paste0(tag, "-lag-nbinom.pdf")
         ),
         plot = p, device = "pdf", dpi = 300
     )
@@ -1412,7 +1213,7 @@ if (mode == "save") {
     ggsave(
         file.path(
             opath, "model-selection",
-            paste0("covid-", tag, "-lag-nbinom-heatmap.pdf")
+            paste0(tag, "-lag-nbinom-heatmap.pdf")
         ),
         plot = p0, device = "pdf", dpi = 300
     )
@@ -1427,9 +1228,9 @@ nbinom_param = c(0.45, 6)
 ```{r}
 #| label: save model selection
 
-if (mode == "save") {
+if (save_data) {
     save(
-        mod, y2, 
+        mod, y2,
         out.stats.obs,
         out.stats.obs2,
         out.stats.lag.nbinom,
@@ -1438,7 +1239,7 @@ if (mode == "save") {
         nbinom_param,
         file = file.path(
             opath, "data",
-            paste0("covid-",tag, ".RData")
+            paste0(tag, ".RData")
         )
     )
 }
@@ -1459,9 +1260,6 @@ out.wt = wt_poisson(c(y2), si_para[1], si_para[2])
 p1 <- plot_ts_ci_single(out.epi)
 p2 <- plot_ts_ci_single(out.wt)
 
-plot(p1)
-plot(p2)
-
 p3 <- plot_ts_ci_multi(list(
     LBA = log(exp(out.lba$fit$psi) + 1),
     # HVB = log(exp(out1.hva$fit$psi) + 1),
@@ -1472,7 +1270,11 @@ p3 <- plot_ts_ci_multi(list(
     WT = out.wt
 ), legend.position = "top")
 
-plot(p3)
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 ```
 
 ```{r}
@@ -1482,12 +1284,12 @@ forecast.epi <- external_forecast(
     loss, kstep_forecast_err
 )
 
-if (mode == "save") {
+if (save_data) {
     save(
         out.epi, forecast.epi,
         file = file.path(
             opath, "data",
-            paste0("covid-", tag, "-epi.RData")
+            paste0(tag, "-epi.RData")
         )
     )
 }
@@ -1501,12 +1303,12 @@ forecast.wt <- external_forecast(
 )
 
 
-if (mode == "save") {
+if (save_data) {
     save(
         out.wt, forecast.wt,
         file = file.path(
             opath, "data",
-            paste0("covid-", tag, "-wt.RData")
+            paste0(tag, "-wt.RData")
         )
     )
 }
@@ -1515,20 +1317,23 @@ if (mode == "save") {
 
 ```{r}
 #| label: figure of forcast comparison
-dat = data.frame(
+dat <- data.frame(
     LBA = out.lba$error$forecast$y_loss_all,
     MCS = out.mcs$error$forecast$y_loss_all,
     FFBS = out.ffbs$error$forecast$y_loss_all,
     PL = out.pl$error$forecast$y_loss_all,
     EPI = forecast.epi$y_loss_all,
     WT = forecast.wt$y_loss_all,
-    k = c(1: kstep_forecast_err)
+    k = c(1:kstep_forecast_err)
 )
 
-dat2 = reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
+dat2 <- reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
 
-p = ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
-    geom_line() + theme_light()
+p <- ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
+    geom_line() +
+    theme_light()
 
-plot(p)
+if (plot_figures) {
+    plot(p)
+}
 ```

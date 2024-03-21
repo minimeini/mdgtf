@@ -164,6 +164,8 @@ plot_psi = function(sim_dat=NULL,
 }
 
 
+
+
 # plot_eta = function(vname,eta_list,opts=NULL) {
 #   mlist = c("EpiEstim","WT","Koyama2021","SMC","LBE","HVB","MCMC","True","VB")
 #   clist = c("seagreen","orange","burlywood4","royalblue","maroon","purple","cyan","black","salmon")
