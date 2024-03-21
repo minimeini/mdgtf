@@ -9,9 +9,7 @@
 #include <RcppArmadillo.h>
 #include "Model.hpp"
 
-// #ifdef _OPENMP
-// #include <omp.h>
-// #endif
+// [[Rcpp::depends(RcppArmadillo)]]
 
 namespace SMC
 {
@@ -219,6 +217,10 @@ namespace SMC
 
         arma::vec get_mu0()
         {
+            if (!dim.regressor_baseline)
+            {
+                throw std::invalid_argument("SMC::SequentialMonteCarlo::get_mu0 - Error: mu0 is not included in the state vector");
+            }
             arma::vec mu0 = arma::vectorise(Theta_smooth.slice(Theta_smooth.n_slices - 1).row(Theta_smooth.n_rows - 1));
             return mu0;   
         }
@@ -566,6 +568,13 @@ namespace SMC
             Theta_smooth = Theta_stored;
         }
 
+        static Rcpp::List default_settings()
+        {
+            Rcpp::List opts = SequentialMonteCarlo::default_settings();
+            opts["num_backward"] = 10;
+            return opts;
+        }
+
         Rcpp::List forecast(const Model &model)
         {
             arma::vec Wtmp(N, arma::fill::zeros);
@@ -580,7 +589,8 @@ namespace SMC
             const double &from,
             const double &to,
             const double &delta = 0.01,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             arma::vec grid = arma::regspace<arma::vec>(from, delta, to);
             unsigned int nelem = grid.n_elem;
@@ -589,9 +599,6 @@ namespace SMC
             use_discount = true;
             use_custom = true;
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -604,17 +611,24 @@ namespace SMC
 
                 double err_forecast = 0.;
                 StateSpace::forecast_error(err_forecast, theta_tmp, y, model, loss, false);
-                stats.at(i, 1) = err_forecast;
 
                 arma::cube theta_tmp2 = Theta_smooth.tail_slices(model.dim.nT + 1);
                 double err_fit = 0.;
                 StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
+
+                stats.at(i, 1) = err_forecast;
                 stats.at(i, 2) = err_fit;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
             
             return stats;
         }
@@ -622,16 +636,15 @@ namespace SMC
         arma::mat optimal_W(
             const Model &model,
             const arma::vec &grid,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
             use_discount = false;
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
+
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -651,10 +664,16 @@ namespace SMC
                 StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 stats.at(i, 2) = err_fit;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }
@@ -664,15 +683,13 @@ namespace SMC
             const unsigned int &from, 
             const unsigned int &to, 
             const unsigned int &delta = 1,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             arma::uvec grid = arma::regspace<arma::uvec>(from, delta, to);
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
             for (unsigned int i = 0; i < nelem; i ++)
             {
                 Rcpp::checkUserInterrupt();
@@ -699,10 +716,16 @@ namespace SMC
                 StateSpace::fitted_error(err_fit, theta_tmp2, y, model, loss, false);
                 stats.at(i, 2) = err_fit;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }
@@ -981,7 +1004,8 @@ namespace SMC
             const double &from,
             const double &to,
             const double &delta = 0.01,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             arma::vec grid = arma::regspace<arma::vec>(from, delta, to);
             unsigned int nelem = grid.n_elem;
@@ -990,9 +1014,7 @@ namespace SMC
             use_discount = true;
             use_custom = true;
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
+
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1018,10 +1040,16 @@ namespace SMC
                     StateSpace::fitted_error(err_fit, theta_tmp, y, model, loss, false);
                 }
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }
@@ -1029,16 +1057,14 @@ namespace SMC
         arma::mat optimal_W(
             const Model &model,
             const arma::vec &grid,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
             use_discount = false;
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1066,9 +1092,16 @@ namespace SMC
                 
                 stats.at(i, 2) = err_fit;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
-            Rcpp::Rcout << std::endl;
+            
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }

@@ -12,9 +12,6 @@
 #include "LinkFunc.hpp"
 #include "LinearBayes.hpp"
 
-// #ifdef _OPENMP
-// #include <omp.h>
-// #endif
 
 namespace MCMC
 {
@@ -464,9 +461,6 @@ namespace MCMC
 
             Model submodel = model;
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
             for (unsigned int t = tstart; t < (ntime - kstep); t++)
             {
                 Rcpp::checkUserInterrupt();
@@ -512,20 +506,16 @@ namespace MCMC
                     y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
                 }
 
-                // #if !defined(_OPENMP)
                 if (verbose)
                 {
                     Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
                 }
-                // #endif
             } // k-step ahead forecasting with information D[t] for each t.
             
-            // #if !defined(_OPENMP)
             if (verbose)
             {
                 Rcpp::Rcout << std::endl;
             }
-            // #endif
 
             submodel.dim.nT = ntime;
             submodel.dim.init(
@@ -601,12 +591,12 @@ namespace MCMC
             return output;
         }
 
-        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
-        {
-            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            Model::forecast_error(err, psi_stored, y, model, loss_func);
-            return;
-        }
+        // void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        // {
+        //     arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+        //     Model::forecast_error(err, psi_stored, y, model, loss_func);
+        //     return;
+        // }
 
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
         {

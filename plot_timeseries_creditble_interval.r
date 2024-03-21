@@ -457,3 +457,32 @@ print_loss_all <- function(out_list) {
 
   return(loss_all)
 }
+
+
+
+plot_mfe <- function(dat, upbnd = NULL, fontsize = 16) {
+  dat$k <- as.numeric(dat$k)
+  if (!is.null(upbnd)) {
+    dat[dat > upbnd] <- NA
+  }
+
+  dat$k <- factor(dat$k, levels = c(1:dim(dat)[1]))
+
+  dat2 <- reshape2::melt(
+    dat,
+    id.vars = "k",
+    variable.name = "Algorithm",
+    value.name = "RMSE"
+  )
+
+  p <- ggplot(dat2, aes(x = as.factor(k), y = RMSE, group = Algorithm, color = Algorithm)) +
+    theme_light() +
+    geom_line(na.rm = TRUE) +
+    geom_point(na.rm = TRUE) +
+    xlab(paste0(expression(k), "-step-ahead forecasting")) +
+    ylab("RMSE") +
+    theme(legend.position = "top", text = element_text(size = fontsize)) +
+    guides(color = guide_legend(nrow = 1))
+
+  return(p)
+}

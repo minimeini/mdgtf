@@ -849,7 +849,7 @@ arma::mat dgtf_optimal_lag(
                 mcmc.infer(model);
                 
                 mcmc.fitted_error(err_fit, model, loss);
-                mcmc.forecast_error(err_forecast, model, loss);
+                // mcmc.forecast_error(err_forecast, model, loss);
                 break;
             }
             case AVAIL::Algo::HybridVariation:
@@ -862,7 +862,7 @@ arma::mat dgtf_optimal_lag(
                     hvb.infer(model);
 
                     hvb.fitted_error(err_fit, model, loss);
-                    hvb.forecast_error(err_forecast, model, loss);
+                    // hvb.forecast_error(err_forecast, model, loss);
                 }
                 catch(...)
                 {
@@ -983,7 +983,7 @@ arma::mat dgtf_optimal_obs(
             mcmc.infer(model);
 
             mcmc.fitted_error(err_fit, model, loss);
-            mcmc.forecast_error(err_forecast, model, loss);
+            // mcmc.forecast_error(err_forecast, model, loss);
             break;
         }
         case AVAIL::Algo::HybridVariation:
@@ -993,7 +993,7 @@ arma::mat dgtf_optimal_obs(
             hvb.infer(model);
 
             hvb.fitted_error(err_fit, model, loss);
-            hvb.forecast_error(err_forecast, model, loss);
+            // hvb.forecast_error(err_forecast, model, loss);
             break;
         }
         default:
@@ -1109,7 +1109,7 @@ arma::mat dgtf_optimal_nlag(
             mcmc.infer(model);
 
             mcmc.fitted_error(err_fit, model, loss);
-            mcmc.forecast_error(err_forecast, model, loss);
+            // mcmc.forecast_error(err_forecast, model, loss);
             break;
         }
         case AVAIL::Algo::HybridVariation:
@@ -1119,7 +1119,7 @@ arma::mat dgtf_optimal_nlag(
             hvb.infer(model);
 
             hvb.fitted_error(err_fit, model, loss);
-            hvb.forecast_error(err_forecast, model, loss);
+            // hvb.forecast_error(err_forecast, model, loss);
             break;
         }
         default:

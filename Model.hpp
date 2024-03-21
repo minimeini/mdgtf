@@ -19,8 +19,6 @@
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
-
-
 /**
  * @brief Define a dynamic generalized transfer function (DGTF) model using the transfer function form.
  *
@@ -687,9 +685,7 @@ public:
             psi_cast.slice(j).row(1) = psi.row(1); // 1 x nsample
         }
 
-        // #if defined(_OPENMP)
-        // #pragma omp parallel for
-        // #endif
+
         for (unsigned int i = 0; i < nsample; i ++)
         {
             arma::vec psi_vec = psi.col(i); // (nT + 1) x 1
@@ -704,8 +700,7 @@ public:
                     model.transfer.name);
             }
 
-
-            for (unsigned int t = 1; t < model.dim.nT; t ++)
+            for (unsigned int t = 1; t < model.dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
 
@@ -718,7 +713,7 @@ public:
                 ycast.at(t, i, 0) = ytmp.at(t);
 
                 unsigned int ncast = std::min(k, model.dim.nT - t);
-                for (unsigned int j = 1; j <= ncast; j ++) 
+                for (unsigned int j = 1; j <= ncast; j++)
                 {
                     psi_tmp.at(t + j) = psi_tmp.at(t + j - 1);
 
@@ -737,22 +732,17 @@ public:
                     psi_err_cast.at(t, i, j - 1) = psi.at(t + j, i) - psi_tmp.at(t + j);
                 }
 
-                // #if !defined(_OPENMP)
                 if (verbose)
                 {
                     Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
                 }
-                // #endif
-            }
+            } // loop over time
 
-            // #if !defined(_OPENMP)
             if (verbose)
             {
                 Rcpp::Rcout << std::endl;
             }
-            // #endif
-
-        }
+        } // loop over nsample
 
         
         arma::vec qprob = {0.025, 0.5, 0.975};
@@ -863,9 +853,7 @@ public:
 
         psi_cast.row(1) = psi.row(1);
 
-        // #if defined(_OPENMP)
-        // #pragma omp parallel for
-        // #endif
+
         for (unsigned int i = 0; i < nsample; i++)
         {
             Rcpp::checkUserInterrupt();
@@ -897,20 +885,16 @@ public:
                 y_err_cast.at(t + 1, i) = y.at(t + 1, i) - ycast.at(t + 1, i);
             }
 
-            // #if !defined(_OPENMP)
             if (verbose)
             {
                 Rcpp::Rcout << "\rForecast error: " << i + 1 << "/" << nsample;
             }
-            // #endif
         }
 
-        // #if !defined(_OPENMP)
         if (verbose)
         {
             Rcpp::Rcout << std::endl;
         }
-        // #endif
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
         arma::vec psi_loss(model.dim.nT + 1, arma::fill::zeros);
@@ -1439,9 +1423,6 @@ public:
         double mu0 = 0.;
         if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
 
-        // #if defined(_OPENMP)
-        // #pragma omp parallel for
-        // #endif
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1468,20 +1449,16 @@ public:
                 }
             }
 
-            // #if !defined(_OPENMP)
             if (verbose)
             {
                 Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
             }
-            // #endif
         }
 
-        // #if !defined(_OPENMP)
         if (verbose)
         {
             Rcpp::Rcout << std::endl;
         }
-        // #endif
 
 
         arma::vec qprob = {0.025, 0.5, 0.975};
@@ -1593,9 +1570,6 @@ public:
         double mu0 = 0.;
         if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
 
-        // #if defined(_OPENMP)
-        // #pragma omp parallel for
-        // #endif
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1614,21 +1588,17 @@ public:
             }
 
 
-            // #if !defined(_OPENMP)
             if (verbose)
             {
                 Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
             }
-            // #endif
         }
 
 
-        // #if !defined(_OPENMP)
         if (verbose)
         {
             Rcpp::Rcout << std::endl;
         }
-        // #endif
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
         arma::vec psi_loss(model.dim.nT + 1, arma::fill::zeros);

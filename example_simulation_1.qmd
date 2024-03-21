@@ -26,14 +26,14 @@ error: true
 
 ```{r}
 #| label: global argument
-save_data = FALSE
-save_figures = FALSE
+save_data = TRUE
+save_figures = TRUE
 plot_figures = TRUE
 
 seed = 3269
 
 kstep_forecast_err = 10
-eval_forecast_err = FALSE
+eval_forecast_err = TRUE
 eval_fitted_err = TRUE
 
 loss = "quadratic"
@@ -303,7 +303,6 @@ plots <- plot_output(
 if (save_data) {
     save(
         out1.lba, out1.lba2, opts1.lba, delta.lba, W.lba,
-        out1.lba.loss_all, out1.lba2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-lba.RData")
@@ -515,7 +514,6 @@ plots <- plot_output(
 if (save_data) {
     save(
         out1.mcs, out1.mcs2, opts1.mcs, delta.mcs, W.mcs, B.mcs,
-        out1.mcs.loss_all, out1.mcs2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-mcs.RData")
@@ -696,7 +694,6 @@ plots <- plot_output(
 if (save_data) {
     save(
         out1.ffbs, out1.ffbs2, opts1.ffbs, delta.ffbs, W.ffbs, 
-        out1.ffbs.loss_all, out1.ffbs2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-ffbs.RData")
@@ -754,7 +751,6 @@ plots <- plot_output(
 if (save_data) {
     save(
         out1.pl, opts1.pl,
-        out1.pl.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-pl.RData")
@@ -891,10 +887,33 @@ mod1$dim$regressor_baseline = TRUE
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
     "hva", opts1.hva,
-    forecast_error = eval_forecast_err,
+    forecast_error = FALSE,
     fitted_error = eval_fitted_err,
     k = kstep_forecast_err
 )
+```
+
+```{r}
+#| label: run dgtf_infer with hva (mu0 and W)
+opts1.hva2 = opts1.hva
+opts1.hva2$mu0 <- list(
+    infer = TRUE,
+    init = mod1$param$obs[1]
+)
+
+opts1.hva2$k <- 2
+
+mod2 = mod1
+mod2$dim$regressor_baseline <- FALSE
+
+out1.hva2 <- dgtf_infer(
+    mod2, sim1$y,
+    "hva", opts1.hva2,
+    forecast_error = FALSE,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err
+)
+
 ```
 
 ```{r}
@@ -921,8 +940,8 @@ plots <- plot_output(
 #| label: save hva data
 if (save_data) {
     save(
-        out1.hva, opts1.hva,
-        out1.hva.loss_all,
+        out1.hva, opts1.hva, 
+        out1.hva2, opts1.hva2,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-hva.RData")
@@ -958,7 +977,7 @@ opts1.mcmc$W$infer <- TRUE
 out1.mcmc <- dgtf_infer(
     mod1, sim1$y,
     "mcmc", opts1.mcmc,
-    forecast_error = eval_forecast_err,
+    forecast_error = FALSE,
     fitted_error = eval_fitted_err,
     k = kstep_forecast_err
 )
@@ -991,7 +1010,6 @@ plots <- plot_output(
 if (save_data) {
     save(
         out1.mcmc, opts1.mcmc,
-        out1.mcmc.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-mcmc.RData")
@@ -1269,4 +1287,105 @@ p = ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
     geom_line() + theme_light()
 
 plot(p)
+```
+
+## Forecasting and Fitting Error
+
+```{r}
+#| label: forecasting and fitting error of hva
+
+out1.hva <- dgtf_infer(
+    mod1, sim1$y,
+    "hva", opts1.hva,
+    forecast_error = TRUE,
+    fitted_error = TRUE,
+    k = kstep_forecast_err
+)
+
+tag <- paste0("sim-", seed, "-hva-")
+plots <- plot_output(
+    out1.hva, sim1$y,
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures
+)
+```
+
+```{r}
+#| label: forecasting and fitting error of hva (mu0 and W)
+
+out1.hva2 <- dgtf_infer(
+    mod2, sim1$y,
+    "hva", opts1.hva2,
+    forecast_error = TRUE,
+    fitted_error = TRUE,
+    k = kstep_forecast_err
+)
+
+
+tag <- paste0("sim-", seed, "-hva2-")
+plots <- plot_output(
+    out1.hva2, sim1$y,
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures
+)
+
+if (save_data) {
+    save(
+        out1.hva, out1.hva2, 
+        opts1.hva, opts1.hva2,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-hva.RData")
+        )
+    )
+}
+```
+
+
+```{r}
+#| label: forecasting and fitting error of mcmc
+opts1.mcmc <- dgtf_default_algo_settings("mcmc")
+opts1.mcmc$nsample <- 2000
+opts1.mcmc$nthin <- 2
+opts1.mcmc$nburnin <- 5000
+opts1.mcmc$num_step_ahead_forecast <- 10
+
+opts1.mcmc$mh_sd <- 0.1
+
+opts1.mcmc$mu0$init <- mod1$param$obs[1]
+opts1.mcmc$mu0$infer <- TRUE
+opts1.mcmc$mu0$mh_sd <- 1
+
+opts1.mcmc$W$init <- 0.01
+opts1.mcmc$W$infer <- TRUE
+
+
+
+out1.mcmc <- dgtf_infer(
+    mod1, sim1$y + 1,
+    "mcmc", opts1.mcmc,
+    forecast_error = TRUE,
+    fitted_error = TRUE,
+    k = kstep_forecast_err
+)
+
+tag <- paste0("sim-", seed, "-mcmc-")
+plots <- plot_output(
+    out1.mcmc, sim1$y,
+    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+    save_figures = save_figures, tag = tag, opath = opath,
+    plot_figures = plot_figures
+)
+
+if (save_data) {
+    save(
+        out1.mcmc, opts1.mcmc,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-mcmc.RData")
+        )
+    )
+}
 ```

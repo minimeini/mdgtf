@@ -13,9 +13,6 @@
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 
-// #ifdef _OPENMP
-// #include <omp.h>
-// #endif
 
 // [[Rcpp::depends(RcppArmadillo)]]
 
@@ -244,6 +241,8 @@ namespace VB
             Rcpp::List mu0_opts;
             mu0_opts["infer"] = false;
             mu0_opts["init"] = 0.;
+            mu0_opts["prior_name"] = "gaussian";
+            mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
 
             Rcpp::List delta_opts;
             delta_opts["infer"] = false;
@@ -530,8 +529,8 @@ namespace VB
             mcs_opts["W"] = W;
 
             unsigned int num_particle = Rcpp::as<unsigned int>(mcs_opts["num_particle"]);
-            mu0_stored.set_size(num_particle, nsample);
-            mu0_stored.zeros();
+            mu0_stored2.set_size(num_particle, nsample);
+            mu0_stored2.zeros();
         }
 
 
@@ -1214,9 +1213,7 @@ namespace VB
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
+
             for (unsigned int i = 0; i < nelem; i ++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1273,9 +1270,7 @@ namespace VB
             unsigned int nelem = step_size_grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
+
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1336,9 +1331,6 @@ namespace VB
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1371,11 +1363,11 @@ namespace VB
             return stats;
         }
 
-        void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
-        {
-            Model::forecast_error(err, psi_stored, y, model, loss_func);
-            return;
-        }
+        // void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        // {
+        //     Model::forecast_error(err, psi_stored, y, model, loss_func);
+        //     return;
+        // }
 
         Rcpp::List forecast_error(
             const Model &model, 
@@ -1693,8 +1685,15 @@ namespace VB
 
                     if (infer_mu0 || model_in.dim.regressor_baseline)
                     {
-                        arma::vec mu0 = mcs.get_mu0();
-                        mu0_stored.col(idx_run) = mu0;
+                        if (model_in.dim.regressor_baseline)
+                        {
+                            arma::vec mu0 = mcs.get_mu0();
+                            mu0_stored2.col(idx_run) = mu0;
+                        }
+                        else
+                        {
+                            mu0_stored.at(idx_run) = mu0;
+                        }
                     }
                     
                     kappa_stored.at(idx_run) = kappa;
@@ -1736,7 +1735,15 @@ namespace VB
 
             if (infer_mu0)
             {
-                output["mu0"] = Rcpp::wrap(mu0_stored);
+                if (dim.regressor_baseline)
+                {
+                    output["mu0"] = Rcpp::wrap(mu0_stored2);
+                }
+                else
+                {
+                    output["mu0"] = Rcpp::wrap(mu0_stored);
+                }
+                
             }
 
             if (infer_kappa)
@@ -1770,7 +1777,7 @@ namespace VB
         arma::uvec B_uptri_idx;
         arma::vec rcomb;
 
-        arma::mat mu0_stored;
+        arma::mat mu0_stored2;
     }; // class Hybrid
 }
 

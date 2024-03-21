@@ -5,212 +5,24 @@ format: pdf
 
 ```{r}
 #| label: source code
-mod = "save"
+mod <- "save"
 
 library(ggplot2)
 library(gridExtra)
 
 repo <- "/Users/meinitang/Dropbox/Repository/poisson-dlm"
 Rcpp::sourceCpp(file.path(repo, "export.cpp"))
+
 source(file.path(repo, "plot_timeseries_creditble_interval.r"))
+source(file.path(repo, "load_data.r"))
 source(file.path(repo, "external_methods.r"))
 
-dpath = "/Users/meinitang/Dropbox/Research/Project1"
+dpath <- "/Users/meinitang/Dropbox/Research/Project1"
 opath <- "/Users/meinitang/Dropbox/Research/Project1/simulation"
-opath_real = "/Users/meinitang/Dropbox/Research/Project1/real"
+opath_real <- "/Users/meinitang/Dropbox/Research/Project1/real"
 ```
 
-```{r}
-load_dat = function(opath, seed, type = "sim") {
-  env = new.env(parent = baseenv())
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, ".RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-lba.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-mcs.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-ffbs.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-pl.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-hva.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-mcmc.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-epi.RData")),
-      envir = env
-    )
-  })
-  
-  try({
-    load(file.path(
-      opath, "data", 
-      paste0(type, "-", seed, "-wt.RData")),
-      envir = env
-    )
-  })
-  
-  return(env)
-}
 
-
-load_real = function(dpath, seed, envir) {
-  data = read.csv(file.path(dpath,"county","covid19cases_test.csv"))
-  data = data[data$area == seed,]
-  data$date = as.Date(data$date)
-  data = data[data$date >= "2020-03-01",]
-  data = data[1:(nrow(data)-1),]
-
-  y = data$cases
-  n = length(y)
-
-  data2 = data[data$date >= "2020-07-01" & data$date < "2021-12-01",]
-  y2 = c(0, data2$cases)
-  
-  
-  component <- list(
-    obs_dist = "nbinom",
-    link_func = "identity",
-    trans_func = "sliding",
-    gain_func = "softplus",
-    lag_dist = "nbinom",
-    err_dist = "gaussian"
-  )
-  param <- list(
-    obs = c(0, 5),
-    lag = c(0.4, 6), # mode = 2.8969
-    err = c(0.01, 0)
-  )
-  dim <- list(
-    nlag = 16,
-    ntime = length(y2) - 1,
-    truncated = TRUE
-  )
-
-  mod <- list(
-    model = component,
-    param = param,
-    dim = dim
-  )
-
-  rm(dim)
-  rm(param)
-  rm(component)
-
-  assign("mod", mod, envir = envir)
-  assign("y2", y2, envir = envir)
-  
-  return(envir)
-}
-
-
-load_sim = function(seed, envir) {
-  component <- list(
-    obs_dist = "nbinom",
-    link_func = "identity",
-    trans_func = "sliding",
-    gain_func = "softplus",
-    lag_dist = "lognorm",
-    err_dist = "gaussian"
-  )
-  param <- list(
-    obs = c(1, 30),
-    lag = c(1.386262, 0.3226017), # mode = 2.8969
-    err = c(0.01, 0)
-  )
-  dim <- list(
-    nlag = 16,
-    ntime = 200,
-    truncated = TRUE
-  )
-
-  mod1 <- list(
-    model = component,
-    param = param,
-    dim = dim
-  )
-
-  rm(dim)
-  rm(param)
-  rm(component)
-
-
-  set.seed(seed)
-  sim1 <- dgtf_simulate(mod1)
-  
-  assign("sim1", sim1, envir = envir)
-  assign("mod1", mod1, envir = envir)
-  return(envir)
-}
-
-plot_mfe = function(dat, upbnd = NULL, fontsize = 16) {
-  dat$k = as.numeric(dat$k)
-  if (!is.null(upbnd)) {dat[dat > upbnd] = NA}
-  
-  dat$k = factor(dat$k, levels = c(1:dim(dat)[1]))
-
-  dat2 = reshape2::melt(
-    dat, id.vars = "k", 
-    variable.name = "Algorithm",
-    value.name = "RMSE"
-  )
-
-  p = ggplot(dat2, aes(x = as.factor(k), y = RMSE, group = Algorithm, color = Algorithm)) +
-    theme_light() +
-    geom_line(na.rm = TRUE) +
-    geom_point(na.rm = TRUE) +
-    xlab(paste0(expression(k), "-step-ahead forecasting")) +
-    ylab("RMSE") +
-    theme(legend.position = "top", text = element_text(size = fontsize)) +
-    guides(color = guide_legend(nrow = 1))
-  
-  return(p)
-}
 ```
 
 ## seed = 3269

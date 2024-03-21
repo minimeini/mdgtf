@@ -7,13 +7,8 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-// #include <nlopt.h>
-// #include "nloptrAPI.h"
 #include "Model.hpp"
 
-// #ifdef _OPENMP
-// #include <omp.h>
-// #endif
 
 /**
  * psi2hpsi: GainFunc.hpp
@@ -556,7 +551,8 @@ namespace LBA
             const double &from, 
             const double &to, 
             const double &delta = 0.01,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             bool use_discount_old = _use_discount;
             _use_discount = true;
@@ -572,12 +568,10 @@ namespace LBA
             unsigned int nelem = delta_grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
+
             for (unsigned int i = 0; i < nelem; i ++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 _discount_factor = delta_grid.at(i);
                 stats.at(i, 0) = delta_grid.at(i);
@@ -629,10 +623,16 @@ namespace LBA
                 fitted_error(fit_err, 1000, loss);
                 stats.at(i, 2) = fit_err;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             _use_discount = use_discount_old;
             _discount_factor = discount_old;
@@ -642,18 +642,16 @@ namespace LBA
 
         arma::mat optimal_W(
             const arma::vec &grid,
-            const std::string &loss = "quadratic")
+            const std::string &loss = "quadratic",
+            const bool &verbose = VERBOSE)
         {
             _use_discount = false;
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
 
-            // #if defined(_OPENMP)
-            // #pragma omp parallel for
-            // #endif
             for (unsigned int i = 0; i < nelem; i++)
             {
-                R_CheckUserInterrupt();
+                Rcpp::checkUserInterrupt();
 
                 _W = grid.at(i);
                 stats.at(i, 0) = grid.at(i);
@@ -704,10 +702,16 @@ namespace LBA
                 fitted_error(fit_err, 1000, loss);
                 stats.at(i, 2) = fit_err;
 
-                Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
+                }
             }
 
-            Rcpp::Rcout << std::endl;
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return stats;
         }
