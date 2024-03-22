@@ -158,6 +158,7 @@ rm(component)
 
 ```{r}
 #| label: lba tuning discount factor
+#| include: false
 
 opts.lba <- dgtf_default_algo_settings("lba")
 opts.lba$W <- 0.01
@@ -194,6 +195,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: lba tuning W
+#| include: false
 
 W_grid <- seq(from = 0.001, to = 0.04, by = 0.001)
 opts.lba$use_discount <- FALSE
@@ -264,13 +266,14 @@ opts.lba$custom_discount_factor <- 0.91
 
 ```{r}
 #| label: run dgtf_infer of lba with discount factor
-opts.lba$use_discount = TRUE
+#| include: false
+opts.lba$use_discount <- TRUE
 out.lba <- dgtf_infer(
     mod, y2,
     "lba", opts.lba,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err, 
+    k = kstep_forecast_err,
     loss_func = loss
 )
 
@@ -279,15 +282,16 @@ print(summary(c(out.lba$fit$mu0)))
 
 ```{r}
 #| label: run dgtf_infer of lba with W
+#| include: false
 
-opts.lba$use_discount = FALSE
+opts.lba$use_discount <- FALSE
 
 out.lba2 <- dgtf_infer(
     mod, y2,
     "lba", opts.lba,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err, 
+    k = kstep_forecast_err,
     loss_func = loss
 )
 
@@ -334,6 +338,7 @@ if (save_data) {
 
 ```{r}
 #| label: mcs tuning discount factor
+#| include: false
 
 opts.mcs <- dgtf_default_algo_settings("mcs")
 opts.mcs$num_backward <- 10
@@ -369,6 +374,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: mcs tuning W
+#| include: false
 
 W_grid <- seq(from = 0.001, to = 0.03, by = 0.0005)
 opts.mcs$use_discount <- FALSE
@@ -380,7 +386,7 @@ W.mcs <- dgtf_tuning(
 )
 
 p2 <- ggplot(
-    data.frame(W = W.mcs[, 1], error = W.mcs[, 2], error2 = W.mcs[,3]),
+    data.frame(W = W.mcs[, 1], error = W.mcs[, 2], error2 = W.mcs[, 3]),
     aes(x = W, y = error)
 ) +
     geom_point() +
@@ -388,10 +394,10 @@ p2 <- ggplot(
     geom_line(alpha = 0.7, color = "grey") +
     xlab("W") +
     ylab("MFE") +
-    theme(text = element_text(size = 16)) 
-    # +
-    # geom_point(aes(x=W, y = error2), color = "maroon") +
-    # geom_line(aes(x=W, y = error2), alpha = 0.7, color = "salmon")
+    theme(text = element_text(size = 16))
+# +
+# geom_point(aes(x=W, y = error2), color = "maroon") +
+# geom_line(aes(x=W, y = error2), alpha = 0.7, color = "salmon")
 
 if (plot_figures) {
     plot(p2)
@@ -401,6 +407,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: mcs tuning B
+#| include: false
 
 opts.mcs$use_discount <- TRUE
 opts.mcs$use_custom <- TRUE
@@ -470,7 +477,7 @@ if (save_figures) {
 # mod$model$obs_dist = "poisson"
 
 opts.mcs <- dgtf_default_algo_settings("mcs")
-opts.mcs$num_particle <- 5000
+opts.mcs$num_particle <- 50000
 opts.mcs$num_step_ahead_forecast <- 10
 
 opts.mcs$W <- 0.004
@@ -480,12 +487,18 @@ opts.mcs$use_custom <- TRUE
 opts.mcs$custom_discount_factor <- 0.91
 
 opts.mcs$num_backward <- 10
+
+opts.mcs$mu0 <- list(
+    prior_name = "uniform",
+    prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+)
 ```
 
 #### Inference
 
 ```{r}
 #| label: run dgtf_infer of mcs with discount factor
+#| include: false
 
 opts.mcs$use_discount <- TRUE
 out.mcs <- dgtf_infer(
@@ -493,13 +506,14 @@ out.mcs <- dgtf_infer(
     "mcs", opts.mcs,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err, 
+    k = kstep_forecast_err,
     loss_func = loss
 )
 ```
 
 ```{r}
 #| label: run dgtf_infer of mcs with W
+#| include: false
 
 opts.mcs$use_discount <- FALSE
 out.mcs2 <- dgtf_infer(
@@ -507,7 +521,7 @@ out.mcs2 <- dgtf_infer(
     "mcs", opts.mcs,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err, 
+    k = kstep_forecast_err,
     loss_func = loss
 )
 ```
@@ -554,6 +568,7 @@ if (save_data) {
 
 ```{r}
 #| label: ffbs tuning of discount factor
+#| include: false
 
 opts.ffbs <- dgtf_default_algo_settings("ffbs")
 opts.ffbs$num_particle <- 5000
@@ -591,6 +606,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: ffbs tuning of W
+#| include: false
 
 W_grid <- seq(from = 0.001, to = 0.04, by = 0.001)
 opts.ffbs$use_discount <- FALSE
@@ -602,7 +618,7 @@ W.ffbs <- dgtf_tuning(
 )
 
 p2 <- ggplot(
-    data.frame(W = W.ffbs[W.ffbs[,1]<0.01, 1], error = W.ffbs[W.ffbs[,1]<0.01, 2]),
+    data.frame(W = W.ffbs[W.ffbs[, 1] < 0.01, 1], error = W.ffbs[W.ffbs[, 1] < 0.01, 2]),
     aes(x = W, y = error)
 ) +
     geom_point() +
@@ -647,24 +663,29 @@ if (save_figures) {
 #| label: optimal settings of ffbs
 
 opts.ffbs <- dgtf_default_algo_settings("ffbs")
-opts.ffbs$num_particle <- 5000
+opts.ffbs$num_particle <- 50000
 opts.ffbs$num_smooth <- 1000
 opts.ffbs$do_smoothing <- TRUE
 
 opts.ffbs$num_step_ahead_forecast <- 10
 
-opts.ffbs$W = 0.001
+opts.ffbs$W <- 0.001
 
 opts.ffbs$use_discount <- TRUE
 opts.ffbs$use_custom <- TRUE
 opts.ffbs$custom_discount_factor <- 0.95
 
+opts.ffbs$mu0 <- list(
+    prior_name = "uniform",
+    prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+)
 ```
 
 #### Inference
 
 ```{r}
 #| label: run dgtf_infer with ffbs with discount factor
+#| include: false
 opts.ffbs$use_discount <- TRUE
 out.ffbs <- dgtf_infer(
     mod, y2,
@@ -672,13 +693,14 @@ out.ffbs <- dgtf_infer(
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
     k = kstep_forecast_err,
-    loss_func = loss)
+    loss_func = loss
 
 ```
 
 
 ```{r}
 #| label: run dgtf_infer with ffbs with W
+#| include: false
 opts.ffbs$use_discount <- FALSE
 out.ffbs2 <- dgtf_infer(
     mod, y2,
@@ -733,21 +755,28 @@ if (save_data) {
 
 ```{r}
 #| label: run dgtf_infer with pl
-opts.pl = dgtf_default_algo_settings("pl")
-opts.pl$num_particle = 5000
-opts.pl$num_smooth = 500
-opts.pl$num_step_ahead_forecast = 10
-opts.pl$do_smoothing = TRUE
+#| include: false
+opts.pl <- dgtf_d #| efault_algo_settings("pl")
+opts.pl$num_particle <- 50000
+opts.pl$num_smooth <- 1000
+opts.pl$num_step_ahead_forecast <- 10
+opts.pl$do_smoothing <- TRUE
 
-opts.pl$W$init = 0.01
-opts.pl$W$infer = TRUE
+opts.pl$W$init <- 0.01
+opts.pl$W$infer <- TRUE
 
-out.pl = dgtf_infer(
-  mod, y2 + 1, 
-  "pl", opts.pl,
-  forecast_error = eval_forecast_err,
-  fitted_error = eval_fitted_err,
-  k = kstep_forecast_err)
+opts.pl$mu0 <- list(
+    prior_name = "uniform",
+    prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+)
+
+out.pl <- dgtf_infer(
+    mod, y2 + 1,
+    "pl", opts.pl,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err
+)
 ```
 
 ```{r}
@@ -788,6 +817,8 @@ if (save_data) {
 
 ```{r}
 #| label: hva tuning of learning rate
+#| eval: false
+#| include: false
 
 opts.hva <- dgtf_default_algo_settings("hva")
 opts.hva$nsample <- 1000
@@ -826,6 +857,8 @@ if (plot_figures) {
 
 ```{r}
 #| label: hva tuning of step size
+#| eval: false
+#| include: false
 
 opts.hva$learning_rate <- 0.02
 
@@ -854,7 +887,7 @@ if (plot_figures) {
 ```{r}
 #| label: figure of hva tuning
 
-if (save_figures) {
+if (save_figures && exists("lrate.hva") && exists("p1")) {
     ggsave(
         file.path(
             opath, "hva",
@@ -863,7 +896,9 @@ if (save_figures) {
         plot = p1, device = "pdf", dpi = 300,
         height = fig_height, width = fig_width
     )
+}
 
+if (save_figures && exists("eps.hva") && exists("p1")) {
     ggsave(
         file.path(
             opath, "hva",
@@ -873,7 +908,6 @@ if (save_figures) {
         height = fig_height, width = fig_width
     )
 }
-
 ```
 
 #### Optimal Settings
@@ -903,6 +937,8 @@ opts.hva$k <- 1
 
 ```{r}
 #| label: run dgtf_infer with hva
+#| eval: false
+#| include: false
 
 out.hva <- dgtf_infer(
     mod, y2,
@@ -915,6 +951,8 @@ out.hva <- dgtf_infer(
 
 ```{r}
 #| label: run dgtf_infer with hva (mu0 and W)
+#| eval: false
+#| include: false
 opts.hva2 <- opts.hva
 opts.hva2$mu0 <- list(
     infer = TRUE,
@@ -940,32 +978,54 @@ out.hva2 <- dgtf_infer(
 #| error: true
 #| label: evaluation of hva
 
-print(print_loss_all(out.hva))
+if (exists("out.hva")) {
+    out.hva.loss_all <- print_loss_all(out.hva)
+    print(out.hva.loss_all)
+}
+
+if (exists("out.hva2")) {
+    out.hva2.loss_all <- print_loss_all(out.hva2)
+    print(out.hva2.loss_all)
+}
 ```
 
 
 ```{r}
 #| label: figure of hva inference
 
-plots <- plot_output(
-    out.hva, y2,
-    save_figures = save_figures, tag = paste0(tag, "-hva-"), opath = opath,
-    plot_figures = plot_figures
-)
+if (exists("out.hva")) {
+    plots <- plot_output(
+        out.hva, y2,
+        save_figures = save_figures, tag = paste0(tag, "-hva-"), opath = opath,
+        plot_figures = plot_figures
+    )
+}
+
+if (exists("out.hva2")) {
+    plots <- plot_output(
+        out.hva2, y2,
+        save_figures = save_figures, tag = paste0(tag, "-hva2-"), opath = opath,
+        plot_figures = plot_figures
+    )
+}
 
 ```
 
 ```{r}
 #| label: save hva data
-if (save_data) {
-    save(
-        out.hva, opts.hva,
-        out.hva2, opts.hva2,
-        file = file.path(
-            opath, "data",
-            paste0(tag, "-hva.RData")
+if (exists("out.hva") && exists("out.hva2")) {
+    if (save_data) {
+        save(
+            out.hva, opts.hva,
+            out.hva2, opts.hva2,
+            out.hva.loss_all,
+            out.hva2.loss_all,
+            file = file.path(
+                opath, "data",
+                paste0(tag, "-hva.RData")
+            )
         )
-    )
+    }
 }
 ```
 
@@ -976,6 +1036,8 @@ if (save_data) {
 
 ```{r}
 #| label: run dgtf_infer with mcmc
+#| eval: false
+#| include: false
 opts.mcmc <- dgtf_default_algo_settings("mcmc")
 opts.mcmc$nsample <- 2000
 opts.mcmc$nthin <- 2
@@ -1003,7 +1065,10 @@ out.mcmc <- dgtf_infer(
 ```{r}
 #| label: evaluation of mcmc
 
-print(print_loss_all(out.mcmc))
+if (exists("out.mcmc")) {
+    out.mcmc.loss_all <- print_loss_all(out.mcmc)
+    print(out.mcmc.loss_all)
+}
 
 ```
 
@@ -1011,20 +1076,23 @@ print(print_loss_all(out.mcmc))
 ```{r}
 #| label: figure of mcmc
 
-plots <- plot_output(
-    out.mcmc, y2,
-    save_figures = save_figures,
-    tag = paste0(tag, "-mcmc-"), opath = opath,
-    plot_figures = plot_figures
-)
+if (exists("out.mcmc")) {
+    plots <- plot_output(
+        out.mcmc, y2,
+        save_figures = save_figures,
+        tag = paste0(tag, "-mcmc-"), opath = opath,
+        plot_figures = plot_figures
+    )
+}
 ```
 
 
 ```{r}
 #| label: save mcmc data
-if (save_data) {
+if (save_data && exists("out.mcmc")) {
     save(
         out.mcmc, opts.mcmc,
+        out.mcmc.loss_all,
         file = file.path(
             opath, "data",
             paste0(tag, "-mcmc.RData")
@@ -1063,10 +1131,22 @@ p <- ggplot(out.stats.obs, aes(x = delta, y = `forecast-err`)) +
 if (plot_figures) {
     plot(p)
 }
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath, "model-selection",
+            paste0(tag, "-lba-optimal-obs.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
+    )
+}
 ```
 
 ```{r}
 #| label: optimal obs with mcs
+#| eval: false
 mod$model$obs_dist <- "nbinom"
 delta_grid <- 1:100
 out.stats.obs2 <- dgtf_optimal_obs(mod, y2, "mcs", opts.mcs, delta_grid)
@@ -1257,7 +1337,7 @@ if (save_data) {
     save(
         mod, y2, 
         out.stats.obs,
-        out.stats.obs2,
+        # out.stats.obs2,
         out.stats.lag.nbinom,
         out.stats.lag.lognorm,
         lognorm_param,
@@ -1276,6 +1356,7 @@ if (save_data) {
 
 ```{r}
 #| label: run external methods
+#| eval: false
 si_para = lognorm2serial(1.386262, 0.3226017)
 out.epi = epi_poisson(c(y2), si_para[1], si_para[2])
 out.wt = wt_poisson(c(y2), si_para[1], si_para[2])
@@ -1283,30 +1364,37 @@ out.wt = wt_poisson(c(y2), si_para[1], si_para[2])
 
 ```{r}
 #| label: figure of external methods
-p1 <- plot_ts_ci_single(out.epi)
-p2 <- plot_ts_ci_single(out.wt)
+if (exists("out.epi") && exists("out.wt")) {
+    p1 <- plot_ts_ci_single(out.epi)
+    p2 <- plot_ts_ci_single(out.wt)
 
-p3 <- plot_ts_ci_multi(list(
-    LBA = log(exp(out.lba$fit$psi) + 1),
-    # HVB = log(exp(out1.hva$fit$psi) + 1),
-    FFBS = log(exp(out.ffbs$fit$psi) + 1),
-    PL = log(exp(out.pl$fit$psi) + 1),
-    MCS = log(exp(out.mcs$fit$psi) + 1),
-    EpiEstim = out.epi,
-    WT = out.wt
-), legend.position = "top")
+    p3 <- plot_ts_ci_multi(list(
+        LBA = log(exp(out.lba$fit$psi) + 1),
+        # HVB = log(exp(out1.hva$fit$psi) + 1),
+        FFBS = log(exp(out.ffbs$fit$psi) + 1),
+        PL = log(exp(out.pl$fit$psi) + 1),
+        MCS = log(exp(out.mcs$fit$psi) + 1),
+        EpiEstim = out.epi,
+        WT = out.wt
+    ), legend.position = "top")
 
-if (plot_figures) {
-    plot(p1)
-    plot(p2)
-    plot(p3)
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+        plot(p3)
+    }
 }
 ```
 
 ```{r}
 #| label: k step forecast for EpiEstim
+#| eval: true
+#| include: false
 forecast.epi <- external_forecast(
-    mod, si_para, c(y2), "EpiEstim",
+    mod, si_para, c(y2),
+    mod$param$err[1],
+    mod$param$obs[1],
+    "EpiEstim",
     loss, kstep_forecast_err
 )
 
@@ -1323,10 +1411,17 @@ if (save_data) {
 
 ```{r}
 #| label: k step forecast for WT
+#| eval: true
+#| include: false
+
 forecast.wt <- external_forecast(
-    mod, si_para, c(y2), "WT",
+    mod, si_para, c(y2),
+    mod$param$err[1],
+    mod$param$obs[1],
+    "WT",
     loss, kstep_forecast_err
 )
+
 
 
 if (save_data) {
@@ -1343,24 +1438,26 @@ if (save_data) {
 
 ```{r}
 #| label: figure of forcast comparison
-dat <- data.frame(
-    LBA = out.lba$error$forecast$y_loss_all,
-    MCS = out.mcs$error$forecast$y_loss_all,
-    FFBS = out.ffbs$error$forecast$y_loss_all,
-    PL = out.pl$error$forecast$y_loss_all,
-    EPI = forecast.epi$y_loss_all,
-    WT = forecast.wt$y_loss_all,
-    k = c(1:kstep_forecast_err)
-)
+if (exists("forecast.wt") && exists("forecast.epi")) {
+    dat <- data.frame(
+        LBA = out.lba$error$forecast$y_loss_all,
+        MCS = out.mcs$error$forecast$y_loss_all,
+        FFBS = out.ffbs$error$forecast$y_loss_all,
+        PL = out.pl$error$forecast$y_loss_all,
+        EPI = forecast.epi$y_loss_all,
+        WT = forecast.wt$y_loss_all,
+        k = c(1:kstep_forecast_err)
+    )
 
-dat2 <- reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
+    dat2 <- reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
 
-p <- ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
-    geom_line() +
-    theme_light()
+    p <- ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
+        geom_line() +
+        theme_light()
 
-if (plot_figures) {
-    plot(p)
+    if (plot_figures) {
+        plot(p)
+    }
 }
 ```
 
@@ -1369,6 +1466,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: forecasting and fitting error of hva
+#| include: false
 
 out.hva <- dgtf_infer(
     mod, y2,
@@ -1387,6 +1485,7 @@ plots <- plot_output(
 
 ```{r}
 #| label: forecasting and fitting error of hva (mu0 and W)
+#| include: false
 
 out.hva2 <- dgtf_infer(
     mod2, y2,
@@ -1418,6 +1517,7 @@ if (save_data) {
 
 ```{r}
 #| label: forecasting and fitting error of mcmc
+#| include: false
 opts.mcmc <- dgtf_default_algo_settings("mcmc")
 opts.mcmc$nsample <- 2000
 opts.mcmc$nthin <- 2

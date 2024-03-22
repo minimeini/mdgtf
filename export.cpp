@@ -482,14 +482,69 @@ Rcpp::List dgtf_forecast(
     const Rcpp::List &model_settings,
     const arma::vec &y, // (nT + 1) x 1
     const arma::mat &psi, // (nT + 1) x nsample
+    const arma::vec &W_stored,
+    const double &mu0 = 0.,
+    const Rcpp::Nullable<Rcpp::NumericVector> &ycast_true = R_NilValue, // k x 1
     const std::string &loss_func = "quadratic",
-    const unsigned int &k = 1 // k-step-ahead forecasting
-    )
+    const unsigned int &k = 1, // k-step-ahead forecasting,
+    const bool &verbose = false
+)
 {
     Model model(model_settings);
-    Rcpp::List out = Model::forecast_error(
-        psi, y, model, loss_func, k
-    );
+    arma::mat ycast = Model::forecast(
+        y, psi, W_stored, model.dim, 
+        model.transfer, 
+        model.flink.name, mu0, k); // k x nsample
+
+    Rcpp::List out;
+    out["ycast_all"] = Rcpp::wrap(ycast);
+
+    
+    if (ycast_true.isNotNull())
+    {
+        arma::vec y_loss(k, arma::fill::zeros);
+
+        arma::mat ycast_err = ycast;
+        arma::vec ycast_true_arma = Rcpp::as<arma::vec>(ycast_true);
+        ycast_err.each_col([&ycast_true_arma](arma::vec &col) {
+            col = arma::abs(col - ycast_true_arma);
+        });
+
+        std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
+        switch (loss_list[tolower(loss_func)])
+        {
+        case AVAIL::L1: // mae
+        {
+            // psi_tmp = arma::mean(psi_loss_tmp, 1); // // (nT - i) x 1
+            // psi_loss.submat(1, i, model.dim.nT - i - 1, i) = psi_tmp;
+            // psi_loss_all.at(i) = arma::mean(psi_tmp);
+
+            y_loss = arma::vectorise(arma::mean(ycast_err, 1)); // k x 1
+            break;
+        }
+        case AVAIL::L2: // rmse
+        {
+            // psi_loss_tmp = arma::square(psi_loss_tmp); // (nT - i) x nsample
+
+            // psi_tmp = arma::mean(psi_loss_tmp, 1); // (nT - i) x 1
+            // psi_loss.submat(1, i, model.dim.nT - i - 1, i) = arma::sqrt(psi_tmp);
+
+            // psi_loss_all.at(i) = arma::mean(psi_tmp);
+            // psi_loss_all.at(i) = std::sqrt(psi_loss_all.at(i));
+            ycast_err = arma::square(ycast_err);
+            y_loss = arma::vectorise(arma::mean(ycast_err, 1)); // k x 1
+            y_loss = arma::sqrt(y_loss);
+            break;
+        }
+        default:
+        {
+            break;
+        }
+        } // switch by loss
+
+        out["y_loss"] = Rcpp::wrap(y_loss); // k x 1
+    }
+
     return out;
 }
 
