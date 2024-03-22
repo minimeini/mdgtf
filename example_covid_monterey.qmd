@@ -31,13 +31,16 @@ save_figures <- TRUE
 plot_figures <- TRUE
 
 tag <- "covid-monterey"
-Tag2 = "Monterey"
+Tag2 <- "Monterey"
 
 kstep_forecast_err <- 10
 eval_forecast_err <- TRUE
 eval_fitted_err <- TRUE
 
 loss <- "quadratic"
+
+fig_height <- 10.1
+fig_width <- 13.8
 ```
 
 ```{r}
@@ -106,7 +109,8 @@ if (save_figures) {
     ggsave(
         file.path(opath, paste0(tag, "-y.pdf")),
         plot = p1,
-        device = "pdf", height = 5, width = 7, dpi = 300
+        device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -229,12 +233,14 @@ if (save_figures) {
             opath, "discount-factor",
             paste0(tag, "-lba-optimal-discount-factor.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
         file.path(opath, "W", paste0(tag, "-lba-optimal-W.pdf")),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 
@@ -433,7 +439,8 @@ if (save_figures) {
             opath, "discount-factor",
             paste0(tag, "-mcs-optimal-discount-factor.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -441,7 +448,8 @@ if (save_figures) {
             opath, "W",
             paste0(tag, "-mcs-optimal-W.pdf")
         ),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -449,7 +457,8 @@ if (save_figures) {
             opath, "num-backward",
             paste0(tag, "-mcs-optimal-B.pdf")
         ),
-        plot = p3, device = "pdf", dpi = 300
+        plot = p3, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -624,7 +633,8 @@ if (save_figures) {
             opath, "discount-factor",
             paste0(tag, "-ffbs-optimal-discount-factor.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -632,7 +642,8 @@ if (save_figures) {
             opath, "W",
             paste0(tag, "-ffbs-optimal-W.pdf")
         ),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -857,7 +868,8 @@ if (save_figures) {
             opath, "hva",
             paste0(tag, "-hva-optimal-learning-rate.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -865,7 +877,8 @@ if (save_figures) {
             opath, "hva",
             paste0(tag, "-hva-step-size.pdf")
         ),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 
@@ -1152,7 +1165,8 @@ if (save_figures) {
             opath, "model-selection",
             paste0(tag, "-lag-lognorm.pdf")
         ),
-        plot = p, device = "pdf", dpi = 300
+        plot = p, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -1160,7 +1174,8 @@ if (save_figures) {
             opath, "model-selection",
             paste0(tag, "-lag-lognorm-heatmap.pdf")
         ),
-        plot = p0, device = "pdf", dpi = 300
+        plot = p0, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -1205,7 +1220,7 @@ p0 <- ggplot(out.stats.lag.nbinom, aes(kappa, r, fill = forecast)) +
 p <- ggplot(data = data.frame(
     mode = c(out.stats.lag.nbinom$mode_int),
     mfe = c(out.stats.lag.nbinom$forecast)
-), aes(x = mode, y = mfe)) +
+), ae<-(x = mode, y = mfe)) +
     theme_light() +
     geom_boxplot() +
     xlab("Mode") +
@@ -1225,7 +1240,8 @@ if (save_figures) {
             opath, "model-selection",
             paste0(tag, "-lag-nbinom.pdf")
         ),
-        plot = p, device = "pdf", dpi = 300
+        plot = p, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -1233,7 +1249,8 @@ if (save_figures) {
             opath, "model-selection",
             paste0(tag, "-lag-nbinom-heatmap.pdf")
         ),
-        plot = p0, device = "pdf", dpi = 300
+        plot = p0, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```

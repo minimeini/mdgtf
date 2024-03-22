@@ -475,6 +475,300 @@ print_loss_all <- function(out_list) {
 }
 
 
+get_dat_sim_loss_all = function(dat_env) {
+  kstep = length(c(dat_env$out1.lba$error$forecast$y_loss_all))
+
+  if ("mu0" %in% names(dat_env$out1.lba2$fit)) {
+    mu0 = median(dat_env$out1.lba$fit$mu0)
+  } else {
+    mu0 = NA
+  }
+  discount_factor = dat_env$opts1.lba$custom_discount_factor
+  W = dat_env$opts1.lba$W
+  
+  dat = data.frame(
+    k = factor(c(1:kstep, "discount", "W", "mu0"), levels = c(1:kstep, "discount", "W", "mu0")),
+    LBA.DF = c(dat_env$out1.lba$error$forecast$y_loss_all, discount_factor, W, mu0)
+  )
+
+  if (exists("out1.lba2", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.lba2$fit)) {
+      mu0 = median(dat_env$out1.lba2$fit$mu0)
+    } else {
+      mu0 = NA
+    }
+    
+    dat$LBA.W = c(dat_env$out1.lba2$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.mcs", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.mcs$fit)) {
+      mu0 = median(dat_env$out1.mcs$fit$mu0)
+    } else {
+      mu0 = NA
+    }
+    discount_factor = dat_env$opts1.mcs$custom_discount_factor
+    W = dat_env$opts1.mcs$W
+
+    dat$MCS.DF = c(dat_env$out1.mcs$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.mcs2", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.mcs2$fit)) {
+      mu0 = median(dat_env$out1.mcs2$fit$mu0)
+    } else {
+      mu0 = NA
+    }
+
+    dat$MCS.W = c(dat_env$out1.mcs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.ffbs", dat_env)) {
+    discount_factor = dat_env$opts1.ffbs$custom_discount_factor
+    W = dat_env$opts1.ffbs$W
+    if ("mu0" %in% names(dat_env$out1.ffbs$fit)) {
+      mu0 = median(dat_env$out1.ffbs$fit$mu0[nrow(dat_env$out1.ffbs$fit$mu0), ])
+    } else {
+      mu0 = NA
+    }
+    
+    dat$FFBS.DF = c(dat_env$out1.ffbs$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.ffbs2", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.ffbs2$fit)) {
+      mu0 = median(dat_env$out1.ffbs2$fit$mu0[nrow(dat_env$out1.ffbs2$fit$mu0), ])
+    } else {
+      mu0 = NA
+    }
+    
+    dat$FFBS.W = c(dat_env$out1.ffbs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.pl", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.pl$fit)) {
+      mu0 = median(dat_env$out1.pl$fit$mu0[nrow(dat_env$out1.pl$fit$mu0), ])
+    } else {
+      mu0 = NA
+    }
+    discount_factor = NA
+    W = median(dat_env$out1.pl$fit$W[, ncol(dat_env$out1.pl$fit$W)])
+    
+    dat$PL = c(dat_env$out1.pl$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.hva", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.hva$fit)) {
+      mu0 = median(c(dat_env$out1.hva$fit$mu0))
+    } else {
+      mu0 = NA
+    }
+    discount_factor = NA
+    W = median(dat_env$out1.hva$fit$W)
+    yloss = rep(NA, kstep)
+    if ("error" %in% names(dat_env$out1.hva)) {
+      if ("forecast" %in% names(dat_env$out1.hva)) {
+        yloss = c(dat_env$out1.hva$error$forecast$y_loss_all)
+      }
+    }
+    
+    dat$HVA = c(yloss, discount_factor, W, mu0)
+  }
+
+  if (exists("out1.mcmc", dat_env)) {
+    if ("mu0" %in% names(dat_env$out1.mcmc$fit)) {
+      mu0 = median(c(dat_env$out1.mcmc$fit$mu0))
+    } else {
+      mu0 = NA
+    }
+    discount_factor = NA
+    W = median(dat_env$out1.mcmc$fit$W)
+    yloss = rep(NA, kstep)
+    if ("error" %in% names(dat_env$out1.mcmc)) {
+      if ("forecast" %in% names(dat_env$out1.mcmc)) {
+        yloss = c(dat_env$out1.mcmc$error$forecast$y_loss_all)
+      }
+    }
+    
+    dat$MCMC = c(yloss, discount_factor, W, mu0)
+  }
+
+  if (exists("forecast1.epi", dat_env)) {
+    discount_factor = NA
+    W = NA
+    mu0 = NA
+    dat$EPI = c(dat_env$forecast1.epi$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("forecast1.wt", dat_env)) {
+    discount_factor = NA
+    W = NA
+    mu0 = NA
+    dat$WT = c(dat_env$forecast1.wt$y_loss_all, discount_factor, W, mu0)
+  }
+
+  return(dat)
+}
+
+
+get_dat_real_loss_all <- function(dat_env) {
+  kstep <- length(c(dat_env$out.lba$error$forecast$y_loss_all))
+
+  if ("mu0" %in% names(dat_env$out.lba2$fit)) {
+    mu0 <- median(dat_env$out.lba$fit$mu0)
+  } else {
+    mu0 <- NA
+  }
+  discount_factor <- dat_env$opts.lba$custom_discount_factor
+  W <- dat_env$opts.lba$W
+
+  dat <- data.frame(
+    k = factor(c(1:kstep, "discount", "W", "mu0"), levels = c(1:kstep, "discount", "W", "mu0")),
+    LBA.DF = c(dat_env$out.lba$error$forecast$y_loss_all, discount_factor, W, mu0)
+  )
+
+  if (exists("out.lba2", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.lba2$fit)) {
+      mu0 <- median(dat_env$out.lba2$fit$mu0)
+    } else {
+      mu0 <- NA
+    }
+
+    dat$LBA.W <- c(dat_env$out.lba2$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out.mcs", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.mcs$fit)) {
+      mu0 <- median(dat_env$out.mcs$fit$mu0)
+    } else {
+      mu0 <- NA
+    }
+    discount_factor <- dat_env$opts.mcs$custom_discount_factor
+    W <- dat_env$opts.mcs$W
+
+    dat$MCS.DF <- c(dat_env$out.mcs$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out.mcs2", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.mcs2$fit)) {
+      mu0 <- median(dat_env$out.mcs2$fit$mu0)
+    } else {
+      mu0 <- NA
+    }
+
+    dat$MCS.W <- c(dat_env$out.mcs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out.ffbs", dat_env)) {
+    discount_factor <- dat_env$opts.ffbs$custom_discount_factor
+    W <- dat_env$opts.ffbs$W
+    if ("mu0" %in% names(dat_env$out.ffbs$fit)) {
+      mu0 <- median(dat_env$out.ffbs$fit$mu0[nrow(dat_env$out.ffbs$fit$mu0), ])
+    } else {
+      mu0 <- NA
+    }
+
+    dat$FFBS.DF <- c(dat_env$out.ffbs$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out.ffbs2", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.ffbs2$fit)) {
+      mu0 <- median(dat_env$out.ffbs2$fit$mu0[nrow(dat_env$out.ffbs2$fit$mu0), ])
+    } else {
+      mu0 <- NA
+    }
+
+    dat$FFBS.W <- c(dat_env$out.ffbs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out.pl", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.pl$fit)) {
+      mu0 <- median(dat_env$out.pl$fit$mu0[nrow(dat_env$out.pl$fit$mu0), ])
+    } else {
+      mu0 <- NA
+    }
+    discount_factor <- NA
+    W <- median(dat_env$out.pl$fit$W[, ncol(dat_env$out.pl$fit$W)])
+
+    dat$PL <- c(dat_env$out.pl$error$forecast$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("out.hva", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.hva$fit)) {
+      mu0 <- median(c(dat_env$out.hva$fit$mu0))
+    } else {
+      mu0 <- NA
+    }
+    discount_factor <- NA
+    W <- median(dat_env$out.hva$fit$W)
+    yloss <- rep(NA, kstep)
+    if ("error" %in% names(dat_env$out.hva)) {
+      if ("forecast" %in% names(dat_env$out.hva)) {
+        yloss <- c(dat_env$out.hva$error$forecast$y_loss_all)
+      }
+    }
+
+    dat$HVA <- c(yloss, discount_factor, W, mu0)
+  }
+
+  if (exists("out.mcmc", dat_env)) {
+    if ("mu0" %in% names(dat_env$out.mcmc$fit)) {
+      mu0 <- median(c(dat_env$out.mcmc$fit$mu0))
+    } else {
+      mu0 <- NA
+    }
+    discount_factor <- NA
+    W <- median(dat_env$out.mcmc$fit$W)
+    yloss <- rep(NA, kstep)
+    if ("error" %in% names(dat_env$out.mcmc)) {
+      if ("forecast" %in% names(dat_env$out.mcmc)) {
+        yloss <- c(dat_env$out.mcmc$error$forecast$y_loss_all)
+      }
+    }
+
+    dat$MCMC <- c(yloss, discount_factor, W, mu0)
+  }
+
+  if (exists("forecast.epi", dat_env)) {
+    discount_factor <- NA
+    W <- NA
+    mu0 <- NA
+    dat$EPI <- c(dat_env$forecast.epi$y_loss_all, discount_factor, W, mu0)
+  }
+
+  if (exists("forecast.wt", dat_env)) {
+    discount_factor <- NA
+    W <- NA
+    mu0 <- NA
+    dat$WT <- c(dat_env$forecast.wt$y_loss_all, discount_factor, W, mu0)
+  }
+
+  return(dat)
+}
+
+
+subset_dat_loss_all = function(dat, kstep, type = "W") {
+  dat_sub = data.frame(k = dat$k[1:kstep])
+
+  if (type == "W") {
+    cnames = c("LBA.W", "MCS.W", "FFBS.W", "PL", "HVA", "MCMC", "EPI", "WT")
+  } else if (type == "Wt") {
+    cnames = c("LBA.DF", "MCS.DF", "FFBS.DF", "EPI", "WT")
+  } else if (type == "WvsWt") {
+    cnames = c("LBA.DF", "MCS.DF", "FFBS.DF", "LBA.W", "MCS.W", "FFBS.W", "EPI", "WT")
+  }
+
+  for (cn in cnames) {
+    if (cn %in% colnames(dat)) {
+      ncol_old = ncol(dat_sub)
+      dat_sub$new = c(dat[1:kstep, cn])
+      colnames(dat_sub) = c(colnames(dat_sub)[1:ncol_old], cn)
+    }
+  }
+
+  return(dat_sub)
+}
+
 
 plot_mfe <- function(dat, upbnd = NULL, fontsize = 16) {
   dat$k <- as.numeric(dat$k)

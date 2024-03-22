@@ -37,6 +37,9 @@ eval_forecast_err = TRUE
 eval_fitted_err = TRUE
 
 loss = "quadratic"
+
+fig_height = 10.1
+fig_width = 13.8
 ```
 
 ```{r}
@@ -132,7 +135,8 @@ if (save_figures) {
     ggsave(
         file.path(opath, paste0("sim-", seed, "-y.pdf")),
         plot = p,
-        device = "pdf", height = 5, width = 7, dpi = 300
+        device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -147,7 +151,7 @@ if (save_figures) {
 #| label: lba tuning discount factor
 
 opts1.lba <- dgtf_default_algo_settings("lba")
-opts1.lba$discount_type = "all_lag_elems"
+opts1.lba$discount_type <- "all_lag_elems"
 opts1.lba$W <- 0.01
 opts1.lba$use_discount <- TRUE
 opts1.lba$use_custom <- TRUE
@@ -164,7 +168,7 @@ delta.lba <- dgtf_tuning(
 )
 
 p1 <- ggplot(
-    data.frame(delta = delta.lba[delta.lba[,1]>0.6, 1], error = delta.lba[delta.lba[,1]>0.6, 2]),
+    data.frame(delta = delta.lba[delta.lba[, 1] > 0.6, 1], error = delta.lba[delta.lba[, 1] > 0.6, 2]),
     aes(x = delta, y = error)
 ) +
     geom_point() +
@@ -174,7 +178,9 @@ p1 <- ggplot(
     ylab("MFE") +
     theme(text = element_text(size = 16))
 
-plot(p1)
+if (plot_figures) {
+    plot(p1)
+}
 ```
 
 
@@ -202,7 +208,9 @@ p2 <- ggplot(
     ylab("MFE") +
     theme(text = element_text(size = 16))
 
-plot(p2)
+if (plot_figures) {
+    plot(p2)
+}
 ```
 
 ```{r}
@@ -214,12 +222,14 @@ if (save_figures) {
             opath, "discount-factor",
             paste0("sim-", seed, "-lba-optimal-discount-factor.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
         file.path(opath, "W", paste0("sim-", seed, "-lba-optimal-W.pdf")),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 
@@ -282,8 +292,11 @@ out1.lba2 <- dgtf_infer(
 #| label: evaluation of lba
 #| error: true
 
-print(print_loss_all(out1.lba))
-print(print_loss_all(out1.lba2))
+out1.lba.loss_all = print_loss_all(out1.lba)
+out1.lba2.loss_all = print_loss_all(out1.lba2)
+
+print(out1.lba.loss_all)
+print(out1.lba2.loss_all)
 ```
 
 ```{r}
@@ -303,6 +316,7 @@ plots <- plot_output(
 if (save_data) {
     save(
         out1.lba, out1.lba2, opts1.lba, delta.lba, W.lba,
+        out1.lba.loss_all, out1.lba2.loss_all,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-lba.RData")
@@ -332,11 +346,12 @@ opts1.mcs$use_custom <- TRUE
 delta.mcs <- dgtf_tuning(
     mod1, sim1$y, "mcs", opts1.mcs,
     "discount_factor",
-    from = 0.65, to = 0.99, delta = 0.01
+    from = 0.65, to = 0.98, delta = 0.01
 )
 
 p1 <- ggplot(
-    data.frame(delta = delta.mcs[delta.mcs[, 1] >= 0.7, 1], error = delta.mcs[delta.mcs[, 1] >= 0.7, 2]),
+    data.frame(delta = delta.mcs[delta.mcs[, 1] >= 0.7, 1], 
+    error = delta.mcs[delta.mcs[, 1] >= 0.7, 2]),
     aes(x = delta, y = error)
 ) +
     geom_point() +
@@ -412,7 +427,8 @@ if (save_figures) {
             opath, "discount-factor",
             paste0("sim-", seed, "-mcs-optimal-discount-factor.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -420,7 +436,8 @@ if (save_figures) {
             opath, "W",
             paste0("sim-", seed, "-mcs-optimal-W.pdf")
         ),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -428,7 +445,8 @@ if (save_figures) {
             opath, "num-backward",
             paste0("sim-", seed, "-mcs-optimal-B.pdf")
         ),
-        plot = p3, device = "pdf", dpi = 300
+        plot = p3, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 
@@ -544,7 +562,7 @@ opts1.ffbs$custom_discount_factor <- 0.88
 delta.ffbs <- dgtf_tuning(
     mod1, sim1$y, "ffbs", opts1.ffbs,
     "discount_factor",
-    from = 0.8, to = 1, delta = 0.01
+    from = 0.8, to = 0.95, delta = 0.005
 )
 
 p1 <- ggplot(
@@ -601,7 +619,8 @@ if (save_figures) {
             opath, "discount-factor",
             paste0("sim-", seed, "-ffbs-optimal-discount-factor.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -609,7 +628,8 @@ if (save_figures) {
             opath, "W",
             paste0("sim-", seed, "-ffbs-optimal-W.pdf")
         ),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -840,7 +860,8 @@ if (save_figures) {
             opath, "hva",
             paste0("sim-", seed, "-hva-optimal-learning-rate.pdf")
         ),
-        plot = p1, device = "pdf", dpi = 300
+        plot = p1, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 
     ggsave(
@@ -848,7 +869,8 @@ if (save_figures) {
             opath, "hva",
             paste0("sim-", seed, "-hva-step-size.pdf")
         ),
-        plot = p2, device = "pdf", dpi = 300
+        plot = p2, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 
@@ -1123,7 +1145,8 @@ if (save_figures) {
             opath, "model-selection",
             paste0("sim-", seed, "-lag-lognorm.pdf")
         ),
-        plot = p, device = "pdf", dpi = 300
+        plot = p, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```
@@ -1175,7 +1198,8 @@ if (save_figures) {
             opath, "model-selection",
             paste0("sim-", seed, "-lag-nbinom.pdf")
         ),
-        plot = p, device = "pdf", dpi = 300
+        plot = p, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
     )
 }
 ```

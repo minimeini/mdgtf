@@ -1,11 +1,39 @@
 ---
 title: "Example Plots"
-format: pdf
+date: "`r Sys.Date()`"
+author: "Meini Tang"
+pdf-engine: pdflatex
+format: 
+  pdf:
+    include-in-header:
+      text: |
+        \usepackage{geometry}
+        \usepackage{booktabs}
+        \usepackage{float}
+        \usepackage{pdflscape}
+        \usepackage{hhline}
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    number-depth: 2
+    fig-align: 'center'
+    fig-pos: 'H'
+    keep-tex: true
+    tbl-cap-location: bottom
+    layout-valign: bottom
+error: true
 ---
 
 ```{r}
 #| label: source code
 mod <- "save"
+save_figures <- TRUE
+plot_figures = TRUE
+fig_width = 11.5
+fig_height = 4
+
+kstep_forecast_err <- 10
+
 
 library(ggplot2)
 library(gridExtra)
@@ -23,17 +51,19 @@ opath_real <- "/Users/meinitang/Dropbox/Research/Project1/real"
 ```
 
 
-```
 
-## seed = 3269
+## S1. seed = 3269
 
 ```{r}
 #| label: load data
-seed = 3269
+seed <- 3269
 
-sim1.dat = load_dat(opath, seed)
-sim1.dat = load_sim(seed, sim1.dat)
+sim1.dat <- load_dat(opath, seed)
+sim1.dat <- load_sim(seed, sim1.dat)
 print(ls(envir = sim1.dat))
+
+dat <- get_dat_sim_loss_all(sim1.dat)
+print(dat)
 ```
 
 ### Data
@@ -67,105 +97,72 @@ plot(p)
 ### k-step forecasting error
 
 ```{r}
-dat = data.frame(
-  k = factor(c(1:length(c(sim1.dat$out1.lba$error$forecast$y_loss_all)), "discount", "W"),
-             levels = c(1:10, "discount", "W")),
-  LBA.DF = c(sim1.dat$out1.lba$error$forecast$y_loss_all, 0.8, 0.01),
-  MCS.DF = c(sim1.dat$out1.mcs$error$forecast$y_loss_all, 0.87, 0.007),
-  FFBS.DF = c(sim1.dat$out1.ffbs$error$forecast$y_loss_all, 0.88, 0.007),
-  LBA.W = c(sim1.dat$out1.lba2$error$forecast$y_loss_all, 0.8, 0.01),
-  MCS.W = c(sim1.dat$out1.mcs2$error$forecast$y_loss_all, 0.87, 0.007),
-  FFBS.W = c(sim1.dat$out1.ffbs2$error$forecast$y_loss_all, 0.88, 0.007),
-  PL = c(sim1.dat$out1.pl$error$forecast$y_loss_all, NA, 0.0015),
-  HVA = c(sim1.dat$out1.hva$error$forecast$y_loss_all, NA, 0.0279),
-  MCMC = c(sim1.dat$out1.mcmc$error$forecast$y_loss_all, NA, 0.0046),
-  EPI = c(sim1.dat$forecast.epi$y_loss_all, NA, NA),
-  WT = c(sim1.dat$forecast1.wt$y_loss_all, NA, NA)
+dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
+p1 <- plot_mfe(dat1)
+p1 <- p1 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
+
+
+
+dat2 <- subset_dat_loss_all(dat, kstep_forecast_err, "Wt")
+dat2 <- data.frame(
+    k = dat$k[1:10],
+    `LBA` = dat$`LBA.DF`[1:10],
+    `MCS` = dat$MCS.DF[1:10],
+    `FFBS` = dat$FFBS.DF[1:10],
+    EpiEstim = dat$EPI[1:10],
+    WT = dat$WT[1:10]
 )
 
-dat1 = data.frame(
-  k = dat$k[1:10],
-  LBA = dat$LBA.W[1:10],
-  MCS = dat$MCS.W[1:10],
-  FFBS = dat$FFBS.W[1:10],
-  PL = dat$PL[1:10],
-  HVA = dat$HVA[1:10],
-  MCMC = dat$MCMC[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
 
-p1 = plot_mfe(dat1, 500)
-p1 = p1 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p1)
+p2 <- plot_mfe(dat2)
+p2 <- p2 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat2 = data.frame(
-  k = dat$k[1:10],
-  `LBA` = dat$`LBA.DF`[1:10],
-  `MCS` = dat$MCS.DF[1:10],
-  `FFBS` = dat$FFBS.DF[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
 
-p2 = plot_mfe(dat2, 500)
-p2 = p2 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p2)
+dat3 <- subset_dat_loss_all(dat, kstep_forecast_err, "WvsWt")
+p3 <- plot_mfe(dat3)
+p3 <- p3 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat3 = data.frame(
-  k = dat$k[1:10],
-  `LBA.DF` = dat$`LBA.DF`[1:10],
-  `MCS.DF` = dat$MCS.DF[1:10],
-  `FFBS.DF` = dat$FFBS.DF[1:10],
-  `LBA.W` = dat$`LBA.W`[1:10],
-  `MCS.W` = dat$MCS.W[1:10],
-  `FFBS.W` = dat$FFBS.W[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p3 = plot_mfe(dat3, 500)
-p3 = p3 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p3)
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
 }
 ```
@@ -304,15 +301,18 @@ if (mode == "save") {
 }
 ```
 
-## seed = 2793
+## S2. seed = 2793
 
 ```{r}
 #| label: load data
-seed = 2793
+seed <- 2793
 
-sim2.dat = load_dat(opath, seed)
-sim2.dat = load_sim(seed, sim2.dat)
+sim2.dat <- load_dat(opath, seed)
+sim2.dat <- load_sim(seed, sim2.dat)
 print(ls(envir = sim2.dat))
+
+dat <- get_dat_sim_loss_all(sim2.dat)
+print(dat)
 ```
 
 ### Data
@@ -346,105 +346,72 @@ plot(p)
 ### k-step forecasting error
 
 ```{r}
-dat = data.frame(
-  k = factor(c(1:length(c(sim2.dat$out1.lba$error$forecast$y_loss_all)), "discount", "W"),
-             levels = c(1:10, "discount", "W")),
-  `LBA.DF` = c(sim2.dat$out1.lba$error$forecast$y_loss_all, 0.82, 0.005),
-  `MCS.DF` = c(sim2.dat$out1.mcs$error$forecast$y_loss_all, 0.88, 0.006),
-  `FFBS.DF` = c(sim2.dat$out1.ffbs$error$forecast$y_loss_all, 0.92, 0.001),
-  `LBA.W` = c(sim2.dat$out1.lba2$error$forecast$y_loss_all, 0.82, 0.005),
-  `MCS.W` = c(sim2.dat$out1.mcs2$error$forecast$y_loss_all, 0.88, 0.006),
-  `FFBS.W` = c(sim2.dat$out1.ffbs2$error$forecast$y_loss_all, 0.92, 0.001),
-  PL = c(sim2.dat$out1.pl$error$forecast$y_loss_all, NA, 0.0015),
-  HVA = c(sim2.dat$out1.hva$error$forecast$y_loss_all, NA, 0.0096),
-  MCMC = c(sim2.dat$out1.mcmc$error$forecast$y_loss_all, NA, NA),
-  EPI = c(sim2.dat$forecast1.epi$y_loss_all, NA, NA),
-  WT = c(sim2.dat$forecast1.wt$y_loss_all, NA, NA)
+dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
+p1 <- plot_mfe(dat1)
+p1 <- p1 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
+
+
+
+dat2 <- subset_dat_loss_all(dat, kstep_forecast_err, "Wt")
+dat2 <- data.frame(
+    k = dat$k[1:10],
+    `LBA` = dat$`LBA.DF`[1:10],
+    `MCS` = dat$MCS.DF[1:10],
+    `FFBS` = dat$FFBS.DF[1:10],
+    EpiEstim = dat$EPI[1:10],
+    WT = dat$WT[1:10]
 )
 
-dat1 = data.frame(
-  k = dat$k[1:10],
-  LBA = dat$LBA.W[1:10],
-  MCS = dat$MCS.W[1:10],
-  FFBS = dat$FFBS.W[1:10],
-  PL = dat$PL[1:10],
-  HVA = dat$HVA[1:10],
-  MCMC = dat$MCMC[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
 
-p1 = plot_mfe(dat1)
-p1 = p1 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p1)
+p2 <- plot_mfe(dat2)
+p2 <- p2 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat2 = data.frame(
-  k = dat$k[1:10],
-  `LBA` = dat$`LBA.DF`[1:10],
-  `MCS` = dat$MCS.DF[1:10],
-  `FFBS` = dat$FFBS.DF[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
 
-p2 = plot_mfe(dat2)
-p2 = p2 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p2)
+dat3 <- subset_dat_loss_all(dat, kstep_forecast_err, "WvsWt")
+p3 <- plot_mfe(dat3)
+p3 <- p3 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat3 = data.frame(
-  k = dat$k[1:10],
-  `LBA.DF` = dat$`LBA.DF`[1:10],
-  `MCS.DF` = dat$MCS.DF[1:10],
-  `FFBS.DF` = dat$FFBS.DF[1:10],
-  `LBA.W` = dat$`LBA.W`[1:10],
-  `MCS.W` = dat$MCS.W[1:10],
-  `FFBS.W` = dat$FFBS.W[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p3 = plot_mfe(dat3)
-p3 = p3 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p3)
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
 }
 ```
@@ -590,15 +557,18 @@ if (mode == "save") {
 ```
 
 
-## seed = 8434
+## S3. seed = 8434
 
 ```{r}
 #| label: load data
-seed = 8434
+seed <- 8434
 
-sim3.dat = load_dat(opath, seed)
-sim3.dat = load_sim(seed, sim3.dat)
+sim3.dat <- load_dat(opath, seed)
+sim3.dat <- load_sim(seed, sim3.dat)
 print(ls(envir = sim3.dat))
+
+dat <- get_dat_sim_loss_all(sim3.dat)
+print(dat)
 ```
 
 ### Data
@@ -631,105 +601,72 @@ plot(p)
 ### k-step forecasting error
 
 ```{r}
-dat = data.frame(
-  k = factor(c(1:length(c(sim3.dat$out1.lba$error$forecast$y_loss_all)), "discount", "W"),
-             levels = c(1:10, "discount", "W")),
-  `LBA-DF` = c(sim3.dat$out1.lba$error$forecast$y_loss_all, 0.92, 0.005),
-  `MCS-DF` = c(sim3.dat$out1.mcs$error$forecast$y_loss_all, 0.92, 0.008),
-  `FFBS-DF` = c(sim3.dat$out1.ffbs$error$forecast$y_loss_all, 0.95, 0.001),
-  `LBA-W` = c(sim3.dat$out1.lba2$error$forecast$y_loss_all, 0.92, 0.005),
-  `MCS-W` = c(sim3.dat$out1.mcs2$error$forecast$y_loss_all, 0.92, 0.008),
-  `FFBS-W` = c(sim3.dat$out1.ffbs2$error$forecast$y_loss_all, 0.95, 0.001),
-  PL = c(sim3.dat$out1.pl$error$forecast$y_loss_all, NA, 0.0015),
-  HVA = c(sim3.dat$out1.hva$error$forecast$y_loss_all, NA, 0.1080),
-  MCMC = c(sim3.dat$out1.mcmc$error$forecast$y_loss_all, NA, 0.0121),
-  EPI = c(sim3.dat$forecast1.epi$y_loss_all, NA, NA),
-  WT = c(sim3.dat$forecast1.wt$y_loss_all, NA, NA)
+dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
+p1 <- plot_mfe(dat1)
+p1 <- p1 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
+
+
+
+dat2 <- subset_dat_loss_all(dat, kstep_forecast_err, "Wt")
+dat2 <- data.frame(
+    k = dat$k[1:10],
+    `LBA` = dat$`LBA.DF`[1:10],
+    `MCS` = dat$MCS.DF[1:10],
+    `FFBS` = dat$FFBS.DF[1:10],
+    EpiEstim = dat$EPI[1:10],
+    WT = dat$WT[1:10]
 )
 
-dat1 = data.frame(
-  k = dat$k[1:10],
-  LBA = dat$LBA.W[1:10],
-  MCS = dat$MCS.W[1:10],
-  FFBS = dat$FFBS.W[1:10],
-  PL = dat$PL[1:10],
-  HVA = dat$HVA[1:10],
-  MCMC = dat$MCMC[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
 
-p1 = plot_mfe(dat1)
-p1 = p1 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p1)
+p2 <- plot_mfe(dat2)
+p2 <- p2 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat2 = data.frame(
-  k = dat$k[1:10],
-  `LBA` = dat$`LBA.DF`[1:10],
-  `MCS` = dat$MCS.DF[1:10],
-  `FFBS` = dat$FFBS.DF[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
 
-p2 = plot_mfe(dat2)
-p2 = p2 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p2)
+dat3 <- subset_dat_loss_all(dat, kstep_forecast_err, "WvsWt")
+p3 <- plot_mfe(dat3)
+p3 <- p3 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat3 = data.frame(
-  k = dat$k[1:10],
-  `LBA.DF` = dat$`LBA.DF`[1:10],
-  `MCS.DF` = dat$MCS.DF[1:10],
-  `FFBS.DF` = dat$FFBS.DF[1:10],
-  `LBA.W` = dat$`LBA.W`[1:10],
-  `MCS.W` = dat$MCS.W[1:10],
-  `FFBS.W` = dat$FFBS.W[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p3 = plot_mfe(dat3)
-p3 = p3 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p3)
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
 }
 ```
@@ -862,7 +799,7 @@ p = p + ylab(expression(R[t])) +
 
 plot(p)
 
-if (mode == "save") {
+if (save_figures) {
   ggsave(
         file.path(
             opath, "posterior",
@@ -887,109 +824,75 @@ print(ls(santacruz.dat))
 ### k-step forecasting
 
 ```{r}
-dat = data.frame(
-  k = factor(c(1:length(c(santacruz.dat$out.lba$error$forecast$y_loss_all)), "discount", "W"),
-             levels = c(1:10, "discount", "W")),
-  `LBA-DF` = c(santacruz.dat$out.lba$error$forecast$y_loss_all, 0.85, 0.004),
-  `MCS-DF` = c(santacruz.dat$out.mcs$error$forecast$y_loss_all, 0.85, 0.013),
-  `FFBS-DF` = c(santacruz.dat$out.ffbs$error$forecast$y_loss_all, 0.95, 0.001),
-  `LBA-W` = c(santacruz.dat$out.lba2$error$forecast$y_loss_all, 0.85, 0.004),
-  `MCS-W` = c(santacruz.dat$out.mcs2$error$forecast$y_loss_all, 0.85, 0.013),
-  `FFBS-W` = c(santacruz.dat$out.ffbs2$error$forecast$y_loss_all, 0.95, 0.001),
-  PL = c(santacruz.dat$out.pl$error$forecast$y_loss_all, NA, 0.0015),
-  # HVA = c(santacruz.dat$out.hva$error$forecast$y_loss_all, NA, 0.0096),
-  EPI = c(santacruz.dat$forecast.epi$y_loss_all, NA, NA),
-  WT = c(santacruz.dat$forecast.wt$y_loss_all, NA, NA)
+dat <- get_dat_real_loss_all(santacruz.dat)
+
+
+dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
+p1 <- plot_mfe(dat1)
+p1 <- p1 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
+
+
+
+dat2 <- subset_dat_loss_all(dat, kstep_forecast_err, "Wt")
+dat2 <- data.frame(
+    k = dat$k[1:10],
+    `LBA` = dat$`LBA.DF`[1:10],
+    `MCS` = dat$MCS.DF[1:10],
+    `FFBS` = dat$FFBS.DF[1:10],
+    EpiEstim = dat$EPI[1:10],
+    WT = dat$WT[1:10]
 )
 
-# dat[as.matrix(dat) > 500] = NA
 
-dat1 = data.frame(
-  k = dat$k[1:10],
-  LBA = dat$LBA.W[1:10],
-  MCS = dat$MCS.W[1:10],
-  FFBS = dat$FFBS.W[1:10],
-  PL = dat$PL[1:10],
-  # HVA = dat$HVA[1:10]
-  # MCMC = dat$MCMC[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p1 = plot_mfe(dat1)
-p1 = p1 + ylab("RMSE") + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p2 <- plot_mfe(dat2)
+p2 <- p2 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-plot(p1)
+
+dat3 <- subset_dat_loss_all(dat, kstep_forecast_err, "WvsWt")
+p3 <- plot_mfe(dat3)
+p3 <- p3 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat2 = data.frame(
-  k = dat$k[1:10],
-  `LBA` = dat$`LBA.DF`[1:10],
-  `MCS` = dat$MCS.DF[1:10],
-  `FFBS` = dat$FFBS.DF[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p2 = plot_mfe(dat2)
-p2 = p2 + ylab("RMSE") + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 
 
-plot(p2)
-
-
-dat3 = data.frame(
-  k = dat$k[1:10],
-  `LBA.DF` = dat$`LBA.DF`[1:10],
-  `MCS.DF` = dat$MCS.DF[1:10],
-  `FFBS.DF` = dat$FFBS.DF[1:10],
-  `LBA.W` = dat$`LBA.W`[1:10],
-  `MCS.W` = dat$MCS.W[1:10],
-  `FFBS.W` = dat$FFBS.W[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p3 = plot_mfe(dat3)
-p3 = p3 + ylab("RMSE") + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-
-plot(p3)
-
-
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
 }
 ```
@@ -1142,108 +1045,75 @@ print(ls(santaclara.dat))
 ### k-step forecasting error
 
 ```{r}
-dat = data.frame(
-  k = factor(c(1:length(c(santaclara.dat$out.lba$error$forecast$y_loss_all)), "discount", "W"),
-             levels = c(1:10, "discount", "W")),
-  `LBA.DF` = c(santaclara.dat$out.lba$error$forecast$y_loss_all, 0.83, 0.005),
-  `MCS.DF` = c(santaclara.dat$out.mcs$error$forecast$y_loss_all, 0.85, 0.009),
-  `FFBS.DF` = c(santaclara.dat$out.ffbs$error$forecast$y_loss_all, 0.91, 0.002),
-  `LBA.W` = c(santaclara.dat$out.lba2$error$forecast$y_loss_all, 0.83, 0.005),
-  `MCS.W` = c(santaclara.dat$out.mcs2$error$forecast$y_loss_all, 0.85, 0.009),
-  `FFBS.W` = c(santaclara.dat$out.ffbs2$error$forecast$y_loss_all, 0.91, 0.002),
-  PL = c(santaclara.dat$out.pl$error$forecast$y_loss_all, NA, 0.0015),
-  HVA = c(santaclara.dat$out.hva$error$forecast$y_loss_all, NA, 0.4459),
-  EPI = c(santaclara.dat$forecast.epi$y_loss_all, NA, NA),
-  WT = c(santaclara.dat$forecast.wt$y_loss_all, NA, NA)
+dat <- get_dat_real_loss_all(santaclara.dat)
+
+
+dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
+p1 <- plot_mfe(dat1)
+p1 <- p1 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
+
+
+
+dat2 <- subset_dat_loss_all(dat, kstep_forecast_err, "Wt")
+dat2 <- data.frame(
+    k = dat$k[1:10],
+    `LBA` = dat$`LBA.DF`[1:10],
+    `MCS` = dat$MCS.DF[1:10],
+    `FFBS` = dat$FFBS.DF[1:10],
+    EpiEstim = dat$EPI[1:10],
+    WT = dat$WT[1:10]
 )
 
 
-dat1 = data.frame(
-  k = dat$k[1:10],
-  LBA = dat$LBA.W[1:10],
-  MCS = dat$MCS.W[1:10],
-  FFBS = dat$FFBS.W[1:10],
-  PL = dat$PL[1:10],
-  # HVA = dat$HVA[1:10]
-  # MCMC = dat$MCMC[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p1 = plot_mfe(dat1)
-p1 = p1 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p2 <- plot_mfe(dat2)
+p2 <- p2 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-plot(p1)
+
+dat3 <- subset_dat_loss_all(dat, kstep_forecast_err, "WvsWt")
+p3 <- plot_mfe(dat3)
+p3 <- p3 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat2 = data.frame(
-  k = dat$k[1:10],
-  `LBA` = dat$`LBA.DF`[1:10],
-  `MCS` = dat$MCS.DF[1:10],
-  `FFBS` = dat$FFBS.DF[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p2 = plot_mfe(dat2)
-p2 = p2 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 
 
-plot(p2)
-
-
-dat3 = data.frame(
-  k = dat$k[1:10],
-  `LBA.DF` = dat$`LBA.DF`[1:10],
-  `MCS.DF` = dat$MCS.DF[1:10],
-  `FFBS.DF` = dat$FFBS.DF[1:10],
-  `LBA.W` = dat$`LBA.W`[1:10],
-  `MCS.W` = dat$MCS.W[1:10],
-  `FFBS.W` = dat$FFBS.W[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p3 = plot_mfe(dat3)
-p3 = p3 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-
-plot(p3)
-
-
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
 }
 ```
@@ -1396,110 +1266,75 @@ print(ls(monterey.dat))
 ### k-step forecasting error
 
 ```{r}
-dat = data.frame(
-  k = factor(c(1:length(c(monterey.dat$out.lba$error$forecast$y_loss_all)), "discount", "W"),
-             levels = c(1:10, "discount", "W")),
-  `LBA-DF` = c(monterey.dat$out.lba$error$forecast$y_loss_all, 0.85, 0.004),
-  `MCS-DF` = c(monterey.dat$out.mcs$error$forecast$y_loss_all, 0.81, 0.018),
-  `FFBS-DF` = c(monterey.dat$out.ffbs$error$forecast$y_loss_all, 0.95, 0.002),
-  `LBA-W` = c(monterey.dat$out.lba2$error$forecast$y_loss_all, 0.85, 0.004),
-  `MCS-W` = c(monterey.dat$out.mcs2$error$forecast$y_loss_all, 0.81, 0.018),
-  `FFBS-W` = c(monterey.dat$out.ffbs2$error$forecast$y_loss_all, 0.95, 0.002),
-  PL = c(monterey.dat$out.pl$error$forecast$y_loss_all, NA, NA),
-  HVA = c(monterey.dat$out.hva$error$forecast$y_loss_all, NA, 0.4459),
-  # ,
-  EPI = c(monterey.dat$forecast.epi$y_loss_all, NA, NA),
-  WT = c(monterey.dat$forecast.wt$y_loss_all, NA, NA)
+dat <- get_dat_real_loss_all(monterey.dat)
+
+
+dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
+p1 <- plot_mfe(dat1)
+p1 <- p1 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
+
+
+
+dat2 <- subset_dat_loss_all(dat, kstep_forecast_err, "Wt")
+dat2 <- data.frame(
+    k = dat$k[1:10],
+    `LBA` = dat$`LBA.DF`[1:10],
+    `MCS` = dat$MCS.DF[1:10],
+    `FFBS` = dat$FFBS.DF[1:10],
+    EpiEstim = dat$EPI[1:10],
+    WT = dat$WT[1:10]
 )
 
 
-
-dat1 = data.frame(
-  k = dat$k[1:10],
-  LBA = dat$LBA.W[1:10],
-  MCS = dat$MCS.W[1:10],
-  FFBS = dat$FFBS.W[1:10],
-  PL = dat$PL[1:10],
-  # HVA = dat$HVA[1:10]
-  # MCMC = dat$MCMC[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p1 = plot_mfe(dat1)
-p1 = p1 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p2 <- plot_mfe(dat2)
+p2 <- p2 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-plot(p1)
+
+dat3 <- subset_dat_loss_all(dat, kstep_forecast_err, "WvsWt")
+p3 <- plot_mfe(dat3)
+p3 <- p3 + ylab("RMSE") +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 
-dat2 = data.frame(
-  k = dat$k[1:10],
-  `LBA` = dat$`LBA.DF`[1:10],
-  `MCS` = dat$MCS.DF[1:10],
-  `FFBS` = dat$FFBS.DF[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p2 = plot_mfe(dat2)
-p2 = p2 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+if (plot_figures) {
+    plot(p1)
+    plot(p2)
+    plot(p3)
+}
 
 
-plot(p2)
-
-
-dat3 = data.frame(
-  k = dat$k[1:10],
-  `LBA.DF` = dat$`LBA.DF`[1:10],
-  `MCS.DF` = dat$MCS.DF[1:10],
-  `FFBS.DF` = dat$FFBS.DF[1:10],
-  `LBA.W` = dat$`LBA.W`[1:10],
-  `MCS.W` = dat$MCS.W[1:10],
-  `FFBS.W` = dat$FFBS.W[1:10],
-  EpiEstim = dat$EPI[1:10],
-  WT = dat$WT[1:10]
-)
-
-p3 = plot_mfe(dat3)
-p3 = p3 + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-
-plot(p3)
-
-
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
-  
-  ggsave(
+
+    ggsave(
         file.path(
             opath_real, "forecast",
             paste0("covid-", tag, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width, height = fig_height
     )
 }
 ```
