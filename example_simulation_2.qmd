@@ -678,7 +678,7 @@ out1.ffbs <- dgtf_infer(
     fitted_error = eval_fitted_err,
     k = kstep_forecast_err,
     loss_func = loss
-
+)
 ```
 
 ```{r}
@@ -692,7 +692,7 @@ out1.ffbs2 <- dgtf_infer(
     fitted_error = eval_fitted_err,
     k = kstep_forecast_err,
     loss_func = loss
-
+)
 ```
 
 ```{r}
@@ -1035,9 +1035,9 @@ if (exists("out1.hva") && exists("out1.hva2")) {
 #| include: false
 #| eval: false
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
-opts1.mcmc$nsample <- 2000
+opts1.mcmc$nsample <- 5000
 opts1.mcmc$nthin <- 2
-opts1.mcmc$nburnin <- 5000
+opts1.mcmc$nburnin <- 50000
 opts1.mcmc$num_step_ahead_forecast <- 10
 
 opts1.mcmc$mh_sd <- 0.1

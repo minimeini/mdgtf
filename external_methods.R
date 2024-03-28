@@ -90,6 +90,8 @@ external_forecast = function(
   W_samples = W_samples[1:nsample]
 
   y_loss = array(0, dim = c(ntime + 1, k))
+  y_covered = y_loss
+  y_width = y_loss
 
   pb = progress::progress_bar$new(total = (ntime + 1))
   pb$tick(0)
@@ -129,13 +131,15 @@ external_forecast = function(
     
     try(
       {
-        y_loss_tmp = dgtf_forecast(
+        dtmp = dgtf_forecast(
           model, ypast, psi_samples, W_samples, 
           mu0, ycast_true,
           loss_func = loss_func, k = k, verbose = FALSE
-        )$y_loss # k x 1
+        ) 
 
-        y_loss[t, ] = y_loss_tmp
+        y_loss[t, ] = dtmp$y_loss # k x 1
+        y_covered[t, ] = dtmp$y_covered
+        y_width[t, ] = dtmp$y_width
       },
       silent = !stop_on_error
     )
@@ -143,6 +147,9 @@ external_forecast = function(
     pb$tick()
 
   } # loop over time
+
+  y_covered_all = apply(y_covered[c(tstart:(ntime - k)), ], 2, mean) * 100
+  y_width_all = apply(y_width[c(tstart:(ntime - k)), ], 2, mean)
 
 
   if (loss_func == "absolute" | loss_func == "L1") {
@@ -154,6 +161,8 @@ external_forecast = function(
   }
   
   return(list(
-    y_loss_all = c(y_loss_all)
+    y_loss_all = c(y_loss_all),
+    y_covered_all = c(y_covered_all),
+    y_width_all = c(y_width_all)
   ))
 }

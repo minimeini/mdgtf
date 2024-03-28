@@ -503,12 +503,25 @@ Rcpp::List dgtf_forecast(
     if (ycast_true.isNotNull())
     {
         arma::vec y_loss(k, arma::fill::zeros);
+        arma::vec y_covered = y_loss;
+        arma::vec y_width = y_loss;
 
         arma::mat ycast_err = ycast;
         arma::vec ycast_true_arma = Rcpp::as<arma::vec>(ycast_true);
         ycast_err.each_col([&ycast_true_arma](arma::vec &col) {
             col = arma::abs(col - ycast_true_arma);
         });
+
+        for (unsigned int j = 0; j < k; j ++)
+        {
+            arma::rowvec ysamples = ycast.row(j);
+            double ymin = ysamples.min();
+            double ymax = ysamples.max();
+            double ytrue = ycast_true_arma.at(j);
+
+            y_width.at(j) = std::abs(ymax - ymin);
+            y_covered.at(j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+        }
 
         std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
         switch (loss_list[tolower(loss_func)])
@@ -543,6 +556,8 @@ Rcpp::List dgtf_forecast(
         } // switch by loss
 
         out["y_loss"] = Rcpp::wrap(y_loss); // k x 1
+        out["y_covered"] = Rcpp::wrap(y_covered);
+        out["y_width"] = Rcpp::wrap(y_width);
     }
 
     return out;
@@ -829,6 +844,8 @@ arma::mat dgtf_optimal_lag(
 
             double err_forecast = 0.;
             double err_fit = 0.;
+            double cov_forecast = 0.;
+            double width_forecast = 0.;
 
             switch (algo_list[algo_name])
             {
@@ -843,8 +860,7 @@ arma::mat dgtf_optimal_lag(
                     linear_bayes.smoother();
 
                     linear_bayes.fitted_error(err_fit, 1000, loss);
-                    linear_bayes.forecast_error(err_forecast, 1000, loss);
-
+                    linear_bayes.forecast_error(err_forecast, cov_forecast, width_forecast, 1000, loss);
                 }
                 catch(...)
                 {
@@ -866,7 +882,7 @@ arma::mat dgtf_optimal_lag(
                     mcs.infer(model);
 
                     mcs.fitted_error(err_fit, model, loss);
-                    mcs.forecast_error(err_forecast, model, loss);
+                    mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
                 }
                 catch(...)
                 {
@@ -882,7 +898,7 @@ arma::mat dgtf_optimal_lag(
                 ffbs.infer(model);
                 
                 ffbs.fitted_error(err_fit, model, loss);
-                ffbs.forecast_error(err_forecast, model, loss);
+                ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
                 break;
             } // case FFBS
@@ -893,7 +909,7 @@ arma::mat dgtf_optimal_lag(
                 pl.infer(model);
                 
                 pl.fitted_error(err_fit, model, loss);
-                pl.forecast_error(err_forecast, model, loss);
+                pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
                 break;
             } // case particle learning
@@ -934,7 +950,7 @@ arma::mat dgtf_optimal_lag(
             } // switch by algorithm
 
             stats.at(idx, 5) = err_forecast;
-            stats.at(idx, 6) = err_fit;
+            stats.at(idx, 6) = width_forecast;
 
             Rcpp::Rcout << "\rProgress: " << idx + 1 << "/" << ntotal;
             idx++;
@@ -973,7 +989,9 @@ arma::mat dgtf_optimal_obs(
         stats.at(i, 0) = delta;
 
         double err_forecast = 0.;
-        double err_fit = 0.;
+        // double err_fit = 0.;
+        double cov_forecast = 0.;
+        double width_forecast = 0.;
 
         switch (algo_list[algo_name])
         {
@@ -987,12 +1005,12 @@ arma::mat dgtf_optimal_obs(
                 linear_bayes.filter();
                 linear_bayes.smoother();
 
-                linear_bayes.fitted_error(err_fit, 1000, loss);
-                linear_bayes.forecast_error(err_forecast, 1000, loss);
+                // linear_bayes.fitted_error(err_fit, 1000, loss);
+                linear_bayes.forecast_error(err_forecast, cov_forecast, width_forecast, 1000, loss);
             }
             catch (...)
             {
-                err_fit = NA_REAL;
+                // err_fit = NA_REAL;
                 err_forecast = NA_REAL;
             }
 
@@ -1004,8 +1022,8 @@ arma::mat dgtf_optimal_obs(
             mcs.init(algo_opts);
             mcs.infer(model);
 
-            mcs.fitted_error(err_fit, model, loss);
-            mcs.forecast_error(err_forecast, model, loss);
+            // mcs.fitted_error(err_fit, model, loss);
+            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
             break;
         } // case MCS
@@ -1015,8 +1033,8 @@ arma::mat dgtf_optimal_obs(
             ffbs.init(algo_opts);
             ffbs.infer(model);
 
-            ffbs.fitted_error(err_fit, model, loss);
-            ffbs.forecast_error(err_forecast, model, loss);
+            // ffbs.fitted_error(err_fit, model, loss);
+            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
             break;
         } // case FFBS
@@ -1026,8 +1044,8 @@ arma::mat dgtf_optimal_obs(
             pl.init(algo_opts);
             pl.infer(model);
 
-            pl.fitted_error(err_fit, model, loss);
-            pl.forecast_error(err_forecast, model, loss);
+            // pl.fitted_error(err_fit, model, loss);
+            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
             break;
         } // case particle learning
@@ -1037,7 +1055,7 @@ arma::mat dgtf_optimal_obs(
             mcmc.init(algo_opts);
             mcmc.infer(model);
 
-            mcmc.fitted_error(err_fit, model, loss);
+            // mcmc.fitted_error(err_fit, model, loss);
             // mcmc.forecast_error(err_forecast, model, loss);
             break;
         }
@@ -1047,7 +1065,7 @@ arma::mat dgtf_optimal_obs(
             hvb.init(algo_opts);
             hvb.infer(model);
 
-            hvb.fitted_error(err_fit, model, loss);
+            // hvb.fitted_error(err_fit, model, loss);
             // hvb.forecast_error(err_forecast, model, loss);
             break;
         }
@@ -1059,7 +1077,8 @@ arma::mat dgtf_optimal_obs(
         } // switch by algorithm
 
         stats.at(i, 1) = err_forecast;
-        stats.at(i, 2) = err_fit;
+        // stats.at(i, 2) = err_fit;
+        stats.at(i, 2) = width_forecast;
 
         Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << npar;
 
@@ -1100,6 +1119,8 @@ arma::mat dgtf_optimal_nlag(
 
         double err_forecast = 0.;
         double err_fit = 0.;
+        double cov_forecast = 0.;
+        double width_forecast = 0.;
 
         switch (algo_list[algo_name])
         {
@@ -1114,7 +1135,7 @@ arma::mat dgtf_optimal_nlag(
                 linear_bayes.smoother();
 
                 linear_bayes.fitted_error(err_fit, 1000, loss);
-                linear_bayes.forecast_error(err_forecast, 1000, loss);
+                linear_bayes.forecast_error(err_forecast, cov_forecast, width_forecast, 1000, loss);
             }
             catch (...)
             {
@@ -1131,7 +1152,7 @@ arma::mat dgtf_optimal_nlag(
             mcs.infer(model);
 
             mcs.fitted_error(err_fit, model, loss);
-            mcs.forecast_error(err_forecast, model, loss);
+            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
             break;
         } // case MCS
@@ -1142,7 +1163,7 @@ arma::mat dgtf_optimal_nlag(
             ffbs.infer(model);
 
             ffbs.fitted_error(err_fit, model, loss);
-            ffbs.forecast_error(err_forecast, model, loss);
+            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
             break;
         } // case FFBS
@@ -1153,7 +1174,7 @@ arma::mat dgtf_optimal_nlag(
             pl.infer(model);
 
             pl.fitted_error(err_fit, model, loss);
-            pl.forecast_error(err_forecast, model, loss);
+            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
 
             break;
         } // case particle learning
@@ -1185,7 +1206,7 @@ arma::mat dgtf_optimal_nlag(
         } // switch by algorithm
 
         stats.at(i, 1) = err_forecast;
-        stats.at(i, 2) = err_fit;
+        stats.at(i, 2) = width_forecast;
 
         Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << npar;
 

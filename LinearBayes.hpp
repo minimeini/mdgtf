@@ -190,22 +190,21 @@ namespace LBA
         return Wt;
     }
 
- 
     /**
      * @brief First-order derivative of f[t] w.r.t theta[t].
      *
      * @param model
-     * @param t
-     * @param theta_cur
-     * @param yall
+     * @param t time index of theta_cur
+     * @param theta_cur theta[t] = (psi[t], ..., psi[t+1 - nL]) with sliding transfer function or (psi[t+1], f[t], ..., f[t+1-r]) with iterative transfer function
+     * @param yall y[0], y[1], ..., y[nT]
      * @return arma::vec
      */
     static arma::vec func_Ft(
         const Model &model,
-        const unsigned int &t,      // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
+        const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,       // y[0], y[1], ..., y[nT]
-        const bool &fill_zero = true
+        const bool &fill_zero = LBA_FILL_ZERO
     )
     {
         arma::vec Ft_cur = model.transfer.F0;
@@ -238,7 +237,7 @@ namespace LBA
             
             yold = arma::reverse(yold);
 
-            arma::vec th = theta_cur.head(model.dim.nL);
+            arma::vec th = theta_cur.head(model.dim.nL); // nL x 1
             arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, model.transfer.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
             Ft_cur.head(model.dim.nL) = Ftmp % model.transfer.dlag.Fphi;
@@ -269,7 +268,7 @@ namespace LBA
         const arma::vec &yall,
         const arma::vec &at,
         const arma::mat &Rt,
-        const bool &fill_zero = true)
+        const bool &fill_zero = LBA_FILL_ZERO)
     {
         mean_ft = StateSpace::func_ft(model, t, at, yall);
         _Ft = func_Ft(model, t, at, yall, fill_zero);
@@ -619,7 +618,7 @@ namespace LBA
             }
             arma::vec delta_grid = arma::regspace(from, delta, to);
             unsigned int nelem = delta_grid.n_elem;
-            arma::mat stats(nelem, 3, arma::fill::zeros);
+            arma::mat stats(nelem, 4, arma::fill::zeros);
 
 
             for (unsigned int i = 0; i < nelem; i ++)
@@ -667,14 +666,17 @@ namespace LBA
 
                 filter();
                 double forecast_err = 0.;
-                forecast_error(forecast_err, 1000, loss);
+                double forecast_cover = 0.;
+                double forecast_width = 0.;
+                forecast_error(forecast_err, forecast_cover, forecast_width, 1000, loss);
                 stats.at(i, 1) = forecast_err;
 
-                smoother();
+                // smoother();
 
-                double fit_err = 0.;
-                fitted_error(fit_err, 1000, loss);
-                stats.at(i, 2) = fit_err;
+                // double fit_err = 0.;
+                // fitted_error(fit_err, 1000, loss);
+                stats.at(i, 2) = forecast_cover;
+                stats.at(i, 3) = forecast_width;
 
                 if (verbose)
                 {
@@ -700,7 +702,7 @@ namespace LBA
         {
             _use_discount = false;
             unsigned int nelem = grid.n_elem;
-            arma::mat stats(nelem, 3, arma::fill::zeros);
+            arma::mat stats(nelem, 4, arma::fill::zeros);
 
             for (unsigned int i = 0; i < nelem; i++)
             {
@@ -747,13 +749,16 @@ namespace LBA
 
                 filter();
                 double forecast_err = 0.;
-                forecast_error(forecast_err, 1000, loss);
+                double forecast_cover = 0.;
+                double forecast_width = 0.;
+                forecast_error(forecast_err, forecast_cover, forecast_width, 1000, loss);
                 stats.at(i, 1) = forecast_err;
 
-                smoother();
-                double fit_err = 0.;
-                fitted_error(fit_err, 1000, loss);
-                stats.at(i, 2) = fit_err;
+                // smoother();
+                // double fit_err = 0.;
+                // fitted_error(fit_err, 1000, loss);
+                stats.at(i, 2) = forecast_cover;
+                stats.at(i, 3) = forecast_width;
 
                 if (verbose)
                 {
@@ -1094,6 +1099,8 @@ namespace LBA
         {
             arma::cube ycast(_model.dim.nT + 1, nsample, k, arma::fill::zeros);
             arma::cube y_err_cast(_model.dim.nT + 1, nsample, k, arma::fill::zeros); // (nT + 1) x nsample x k
+            arma::mat y_cov_cast(_model.dim.nT + 1, k,arma::fill::zeros);               // (nT + 1) x k
+            arma::mat y_width_cast = y_cov_cast;
 
             arma::cube at_cast = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nT + 1, k + 1);
             arma::field<arma::cube> Rt_cast(k + 1);
@@ -1178,50 +1185,68 @@ namespace LBA
                     }
 
                     ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();
-                    y_err_cast.slice(j - 1).row(t) = _y.at(t + j) - lambda_cast_tmp.t(); // nsample x 1
+                    double ymin = arma::min(lambda_cast_tmp);
+                    double ymax = arma::max(lambda_cast_tmp);
+                    double ytrue = _y.at(t + j);
 
+                    y_err_cast.slice(j - 1).row(t) = ytrue - lambda_cast_tmp.t(); // nsample x 1
+                    y_width_cast.at(t, j - 1) = std::abs(ymax - ymin);
+                    y_cov_cast.at(t, j - 1) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+
+                    
                 }
             }
 
             arma::mat y_loss(_model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
             arma::vec y_loss_all(k, arma::fill::zeros); // k x 1
+            arma::vec y_covered_all = y_loss_all;
+            arma::vec y_width_all = y_loss_all;
+
             y_err_cast = arma::abs(y_err_cast);
 
             std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
-            switch (loss_list[tolower(loss_func)])
+            unsigned int tstart = std::max(k, _model.dim.nP);
+
+            for (unsigned int j = 0; j < k; j ++)
             {
-            case AVAIL::L1: // mae
-            {                
-                for (unsigned int j = 0; j < k; j ++)
+                unsigned int tend = _model.dim.nT - j;
+
+                arma::vec ycov_tmp = arma::vectorise(y_cov_cast(arma::span(tstart, tend), arma::span(j)));
+                y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
+
+                ycov_tmp = arma::vectorise(y_width_cast(arma::span(tstart, tend), arma::span(j)));
+                y_width_all.at(j) = arma::mean(ycov_tmp);
+
+                switch (loss_list[tolower(loss_func)])
                 {
-                    arma::mat ytmp = y_err_cast.slice(j); // (nT + 1) x nsample
+                case AVAIL::L1: // mae
+                {
+                    arma::mat ytmp = y_err_cast.slice(j);                   // (nT + 1) x nsample
                     arma::vec ymean = arma::vectorise(arma::mean(ytmp, 1)); // (nT + 1) x 1
 
-                    y_loss.col(j) =  ymean; // (nT + 1) x 1
-                    y_loss_all.at(j) = arma::mean(ymean.subvec(1, _model.dim.nT - k));
+                    y_loss.col(j) = ymean; // (nT + 1) x 1
+                    y_loss_all.at(j) = arma::mean(ymean.subvec(tstart, tend));
+                    break;
                 }
-                break;
-            }
-            case AVAIL::L2: // rmse
-            {
-                for (unsigned int j = 0; j < k; j ++)
+                case AVAIL::L2: // rmse
                 {
                     arma::mat ytmp = y_err_cast.slice(j); // (nT + 1) x nsample
                     ytmp = arma::square(ytmp);
 
                     arma::vec ymean = arma::vectorise(arma::mean(ytmp, 1));
-                    double ymean_all = arma::mean(ymean.subvec(1, _model.dim.nT - k));
+                    double ymean_all = arma::mean(ymean.subvec(tstart, tend));
 
                     y_loss.col(j) = arma::sqrt(ymean);
                     y_loss_all.at(j) = std::sqrt(ymean_all);
+                    break;
                 }
-                break;
+                default:
+                {
+                    break;
+                }
+                }
             }
-            default:
-            {
-                break;
-            }
-            }
+            
 
             Rcpp::List out;
 
@@ -1237,6 +1262,8 @@ namespace LBA
             out["y"] = Rcpp::wrap(_y);
             out["y_loss"] = Rcpp::wrap(y_loss);
             out["y_loss_all"] = Rcpp::wrap(y_loss_all);
+            out["y_covered_all"] = Rcpp::wrap(y_covered_all);
+            out["y_width_all"] = Rcpp::wrap(y_width_all);
 
             return out;
         }
@@ -1250,19 +1277,33 @@ namespace LBA
          */
         void forecast_error(
             double &y_loss_all,
+            double &y_cover,
+            double &y_width,
             const unsigned int &nsample = 1000, 
             const std::string &loss_func = "quadratic")
         {
             unsigned int nT = _y.n_elem - 1;
             arma::mat ycast(nT + 1, nsample, arma::fill::zeros);
             arma::mat y_err_cast(nT + 1, nsample, arma::fill::zeros);
+            arma::vec y_cover_cast(nT + 1, arma::fill::zeros);
+            arma::vec y_width_cast(nT + 1, arma::fill::zeros);
+
             for (unsigned int t = 2; t <= nT; t++)
             {
                 arma::vec ytmp = _ft_prior_mean.at(t) + std::sqrt(_ft_prior_var.at(t)) * arma::randn(nsample);
                 ycast.row(t) = ytmp.t();
 
-                y_err_cast.row(t) = _y.at(t) - ycast.row(t);
+                double ymin = arma::min(ytmp);
+                double ymax = arma::max(ytmp);
+                double ytrue = _y.at(t);
+
+                y_width_cast.at(t) = std::abs(ymax - ymin);
+                y_cover_cast.at(t) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+                y_err_cast.row(t) = ytrue - ycast.row(t);
             }
+
+            y_cover = arma::mean(y_cover_cast.tail(nT - 1)) * 100.;
+            y_width = arma::mean(y_width_cast.tail(nT - 1));
 
             arma::vec y_loss(nT + 1, arma::fill::zeros);
             y_loss_all = 0;
@@ -1324,7 +1365,7 @@ namespace LBA
                 _do_reference_analysis = Rcpp::as<bool>(opts["do_reference_analysis"]);
             }
 
-            _fill_zero = true;
+            _fill_zero = LBA_FILL_ZERO;
             if (opts.containsElementNamed("fill_zero"))
             {
                 _fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
@@ -1348,7 +1389,7 @@ namespace LBA
             opts["custom_discount_factor"] = 0.95;
             opts["do_smoothing"] =  true;
             opts["do_reference_analysis"] = false;
-            opts["fill_zero"] = true;
+            opts["fill_zero"] = LBA_FILL_ZERO;
 
             return opts;
         }
@@ -1386,7 +1427,7 @@ namespace LBA
         bool _use_discount = false;
         std::string _discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
         bool _do_reference_analysis = false;
-        bool _fill_zero = true;
+        bool _fill_zero = LBA_FILL_ZERO;
 
         arma::mat _mt, _at, _atilde_t; // nP x (nT + 1)
         arma::cube _Ct, _Rt, _Rtilde_t; // nP x nP x (nT + 1)

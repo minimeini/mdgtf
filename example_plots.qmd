@@ -26,11 +26,14 @@ error: true
 
 ```{r}
 #| label: source code
-mod <- "save"
-save_figures <- TRUE
-plot_figures = TRUE
-fig_width = 11.5
-fig_height = 4
+save_figures <- FALSE
+plot_figures <- TRUE
+
+fig_width_rect <- 11.5
+fig_height_rect <- 4
+
+fig_width_square <- 13.8
+fig_height_square <- 10.1
 
 kstep_forecast_err <- 10
 
@@ -144,7 +147,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -153,7 +156,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -162,7 +165,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
@@ -173,7 +176,7 @@ dat
 
 
 ```{r}
-k = 10
+k = 5
 
 p = plot_ts_ci_multi(
   list(
@@ -181,8 +184,8 @@ p = plot_ts_ci_multi(
     MCS = sim1.dat$out1.mcs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
     FFBS = sim1.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
     PL = sim1.dat$out1.pl$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    HVA = sim1.dat$out1.hva$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    MCMC = sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
+    # HVA = sim1.dat$out1.hva$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
+    # MCMC = sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
     # WT = sim1.dat$out1.wt,
     True = cbind(sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)], sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)], sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)])
   ), 
@@ -195,116 +198,67 @@ p = p + ylab(expression(y[t])) +
 
 plot(p)
 
-if (mode == "save") {
+if (save_figures) {
   ggsave(
         file.path(
             opath, "forecast",
             paste0("sim-", seed, "-", k,"step.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
 
-### Posterior of W
-
-```{r}
-p1 <- ggplot(
-    data = data.frame(w = c(sim1.dat$out1.hva$fit$W), idx = 1:length(sim1.dat$out1.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "HVA: Posterior distribution of W")
-plot(p1)
-
-
-p2 <- ggplot(
-    data = data.frame(w = c(sim1.dat$out1.mcmc$fit$W), idx = 1:length(sim1.dat$out1.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "MCMC: Posterior distribution of W")
-plot(p2)
-
-p3 <- ggplot(
-    data = data.frame(w = c(sim1.dat$out1.pl$fit$W[,length(sim1.dat$sim1$y)]), idx = 1:length(sim1.dat$out1.pl$fit$W[,length(sim1.dat$sim1$y)])),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "PL: Posterior distribution of W")
-plot(p3)
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-hva-posterior-W.pdf")
-        ),
-        plot = p1, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-mcmc-posterior-W.pdf")
-        ),
-        plot = p2, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-pl-posterior-W.pdf")
-        ),
-        plot = p3, device = "pdf", dpi = 300
-    )
-}
-```
 
 ### Posterior of Rt
 
 ```{r}
-p = plot_ts_ci_multi(
-  list(
-    LBA = log(exp(sim1.dat$out1.lba$fit$psi) + 1),
-    MCS = log(exp(sim1.dat$out1.mcs$fit$psi) + 1),
-    FFBS = log(exp(sim1.dat$out1.ffbs$fit$psi) + 1),
-    PL = log(exp(sim1.dat$out1.pl$fit$psi) + 1),
-    HVA = log(exp(sim1.dat$out1.hva$fit$psi) + 1),
-    MCMC = log(exp(sim1.dat$out1.mcmc$fit$psi) + 1),
-    WT = sim1.dat$out1.wt,
-    EpiEstim = sim1.dat$out1.epi,
-    True = log(exp(cbind(sim1.dat$sim1$psi, sim1.dat$sim1$psi, sim1.dat$sim1$psi)) + 1)
-  ), 
-  legend.position = "top"
+tstart <- 50
+ntime <- 140
+tend <- tstart + ntime
+
+p <- plot_ts_ci_multi(
+    list(
+        LBA = log(exp(sim1.dat$out1.lba$fit$psi[tstart:tend, ]) + 1),
+        MCS = log(exp(sim1.dat$out1.mcs$fit$psi[tstart:tend, ]) + 1),
+        FFBS = log(exp(sim1.dat$out1.ffbs$fit$psi[tstart:tend, ]) + 1),
+        PL = log(exp(sim1.dat$out1.pl$fit$psi[tstart:tend, ]) + 1),
+        HVA = log(exp(sim1.dat$out1.hva$fit$psi[tstart:tend, ]) + 1),
+        MCMC = log(exp(sim1.dat$out1.mcmc$fit$psi[tstart:tend, ]) + 1),
+        WT = sim1.dat$out1.wt[tstart:tend, ],
+        EpiEstim = sim1.dat$out1.epi[tstart:tend, ],
+        True = log(exp(cbind(sim1.dat$sim1$psi[tstart:tend, ], sim1.dat$sim1$psi[tstart:tend, ], sim1.dat$sim1$psi[tstart:tend, ])) + 1)
+    ),
+    legend.position = "top"
 )
 
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p <- p + ylab(expression(R[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 plot(p)
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath, "posterior",
             paste0("sim-", seed, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
+```
+
+```{r}
+rm(sim1.dat)
 ```
 
 ## S2. seed = 2793
 
 ```{r}
-#| label: load data
+#| label: load data 2793
 seed <- 2793
 
 sim2.dat <- load_dat(opath, seed)
@@ -393,7 +347,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -402,7 +356,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -411,7 +365,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
@@ -421,146 +375,95 @@ dat
 ```
 
 ```{r}
-k = 10
-
-p = plot_ts_ci_multi(
-  list(
-    LBA = sim2.dat$out1.lba$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
-    MCS = sim2.dat$out1.mcs$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
-    FFBS = sim2.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
-    PL = sim2.dat$out1.pl$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
-    HVA = sim2.dat$out1.hva$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
-    MCMC = sim2.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
-    True = cbind(sim2.dat$sim1$y[1:(length(sim2.dat$sim1$y) - 10)], sim2.dat$sim1$y[1:(length(sim2.dat$sim1$y) - 10)], sim2.dat$sim1$y[1:(length(sim2.dat$sim1$y) - 10)])
-  ), 
-  legend.position = "top"
-)
-
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12)) +
-  ylab(expression(y[t]))
-
-plot(p)
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath, "forecast",
-            paste0("sim-", seed, "-", k,"step.pdf")
+for (k in c(1, 5, 10)) {
+    p <- plot_ts_ci_multi(
+        list(
+            LBA = sim2.dat$out1.lba$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10), , k],
+            MCS = sim2.dat$out1.mcs$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10), , k],
+            FFBS = sim2.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10), , k],
+            PL = sim2.dat$out1.pl$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10), , k],
+            # HVA = sim2.dat$out1.hva$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
+            # MCMC = sim2.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim2.dat$sim1$y) - 10),,k],
+            True = cbind(sim2.dat$sim1$y[1:(length(sim2.dat$sim1$y) - 10)], sim2.dat$sim1$y[1:(length(sim2.dat$sim1$y) - 10)], sim2.dat$sim1$y[1:(length(sim2.dat$sim1$y) - 10)])
         ),
-        plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        legend.position = "top"
     )
+
+    p <- p + ylab(expression(R[t])) +
+        guides(color = guide_legend(nrow = 1)) +
+        theme(text = element_text(size = 12)) +
+        ylab(expression(y[t]))
+
+    if (plot_figures) {
+        plot(p)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath, "forecast",
+                paste0("sim-", seed, "-", k, "step.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            width = fig_width_rect, height = fig_height_rect
+        )
+    }
 }
+
+
 ```
 
-### Posterior of W
 
-```{r}
-try({
-p1 <- ggplot(
-    data = data.frame(w = c(sim2.dat$out1.hva$fit$W), idx = 1:length(sim2.dat$out1.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "HVA: Posterior distribution of W")
-plot(p1)
-})
-
-
-try({
-p2 <- ggplot(
-    data = data.frame(w = c(sim2.dat$out1.mcmc$fit$W), idx = 1:length(sim2.dat$out1.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "MCMC: Posterior distribution of W")
-plot(p2)
-})
-
-try({
-p3 <- ggplot(
-    data = data.frame(w = c(sim2.dat$out1.pl$fit$W[,length(sim2.dat$sim1$y)]), idx = 1:length(sim2.dat$out1.pl$fit$W[,length(sim2.dat$sim1$y)])),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "PL: Posterior distribution of W")
-plot(p3)
-})
-
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-hva-posterior-W.pdf")
-        ),
-        plot = p1, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-mcmc-posterior-W.pdf")
-        ),
-        plot = p2, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-pl-posterior-W.pdf")
-        ),
-        plot = p3, device = "pdf", dpi = 300
-    )
-}
-```
 
 ### Posterior of Rt
 
 ```{r}
-p = plot_ts_ci_multi(
-  list(
-    LBA = log(exp(sim2.dat$out1.lba$fit$psi) + 1),
-    MCS = log(exp(sim2.dat$out1.mcs$fit$psi) + 1),
-    FFBS = log(exp(sim2.dat$out1.ffbs$fit$psi) + 1),
-    PL = log(exp(sim2.dat$out1.pl$fit$psi) + 1),
-    HVA = log(exp(sim2.dat$out1.hva$fit$psi) + 1),
-    MCMC = log(exp(sim2.dat$out1.mcmc$fit$psi) + 1),
-    WT = sim2.dat$out1.wt,
-    EpiEstim = sim2.dat$out1.epi,
-    True = log(exp(cbind(sim2.dat$sim1$psi, sim2.dat$sim1$psi, sim2.dat$sim1$psi)) + 1)
-  ), 
-  legend.position = "top"
+tstart <- 30
+ntime <- 140
+tend <- tstart + ntime
+
+p <- plot_ts_ci_multi(
+    list(
+        LBA = log(exp(sim2.dat$out1.lba$fit$psi[tstart:tend, ]) + 1),
+        MCS = log(exp(sim2.dat$out1.mcs$fit$psi[tstart:tend, ]) + 1),
+        FFBS = log(exp(sim2.dat$out1.ffbs$fit$psi[tstart:tend, ]) + 1),
+        PL = log(exp(sim2.dat$out1.pl$fit$psi[tstart:tend, ]) + 1),
+        HVA = log(exp(sim2.dat$out1.hva$fit$psi[tstart:tend, ]) + 1),
+        MCMC = log(exp(sim2.dat$out1.mcmc$fit$psi[tstart:tend, ]) + 1),
+        WT = sim2.dat$out1.wt[tstart:tend, ],
+        EpiEstim = sim2.dat$out1.epi[tstart:tend, ],
+        True = log(exp(cbind(sim2.dat$sim1$psi[tstart:tend, ], sim2.dat$sim1$psi[tstart:tend, ], sim2.dat$sim1$psi[tstart:tend,])) + 1)
+    ),
+    legend.position = "top"
 )
 
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p <- p + ylab(expression(R[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 plot(p)
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath, "posterior",
             paste0("sim-", seed, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
+```
+
+```{r}
+rm(sim2.dat)
 ```
 
 
 ## S3. seed = 8434
 
 ```{r}
-#| label: load data
+#| label: load data 8434
 seed <- 8434
 
 sim3.dat <- load_dat(opath, seed)
@@ -570,6 +473,7 @@ print(ls(envir = sim3.dat))
 dat <- get_dat_sim_loss_all(sim3.dat)
 print(dat)
 ```
+
 
 ### Data
 
@@ -648,7 +552,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -657,7 +561,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -666,7 +570,7 @@ if (save_figures) {
             paste0("sim-", seed, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
@@ -676,139 +580,86 @@ dat
 ```
 
 ```{r}
-k = 5
-
-p = plot_ts_ci_multi(
-  list(
-    LBA = sim3.dat$out1.lba$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10),,k],
-    MCS = sim3.dat$out1.mcs$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10),,k],
-    FFBS = sim3.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10),,k],
-    PL = sim3.dat$out1.pl$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10),,k],
-    HVA = sim3.dat$out1.hva$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10),,k],
-    MCMC = sim3.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10),,k],
-    # WT = sim3.dat$out1.wt,
-    True = cbind(sim3.dat$sim1$y[1:(length(sim3.dat$sim1$y) - 10)], sim3.dat$sim1$y[1:(length(sim3.dat$sim1$y) - 10)], sim3.dat$sim1$y[1:(length(sim3.dat$sim1$y) - 10)])
-  ), 
-  legend.position = "top"
-)
-
-p = p + ylab(expression(y[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p)
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath, "forecast",
-            paste0("sim-", seed, "-", k,"step.pdf")
+k <- 1
+for (k in c(1, 5, 10)) {
+    p <- plot_ts_ci_multi(
+        list(
+            LBA = sim3.dat$out1.lba$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10), , k],
+            MCS = sim3.dat$out1.mcs$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10), , k],
+            FFBS = sim3.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10), , k],
+            PL = sim3.dat$out1.pl$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10), , k],
+            # HVA = sim3.dat$out1.hva$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10), , k],
+            # MCMC = sim3.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim3.dat$sim1$y) - 10), , k],
+            # WT = sim3.dat$out1.wt,
+            True = cbind(sim3.dat$sim1$y[1:(length(sim3.dat$sim1$y) - 10)], sim3.dat$sim1$y[1:(length(sim3.dat$sim1$y) - 10)], sim3.dat$sim1$y[1:(length(sim3.dat$sim1$y) - 10)])
         ),
-        plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        legend.position = "top"
     )
+
+    p <- p + ylab(expression(y[t])) +
+        guides(color = guide_legend(nrow = 1)) +
+        theme(text = element_text(size = 12))
+
+    plot(p)
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath, "forecast",
+                paste0("sim-", seed, "-", k, "step.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            width = fig_width_rect, height = fig_height_rect
+        )
+    }
 }
+
 ```
 
-### Posterior of W
-
-```{r}
-try({
-p1 <- ggplot(
-    data = data.frame(w = c(sim3.dat$out1.hva$fit$W), idx = 1:length(sim3.dat$out1.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "HVA: Posterior distribution of W")
-plot(p1)
-})
-
-
-try({
-p2 <- ggplot(
-    data = data.frame(w = c(sim3.dat$out1.mcmc$fit$W), idx = 1:length(sim3.dat$out1.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "MCMC: Posterior distribution of W")
-plot(p2)
-})
-
-try({
-p3 <- ggplot(
-    data = data.frame(w = c(sim3.dat$out1.pl$fit$W[,length(sim3.dat$sim1$y)]), idx = 1:length(sim3.dat$out1.pl$fit$W[,length(sim3.dat$sim1$y)])),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "PL: Posterior distribution of W")
-plot(p3)
-})
-
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-hva-posterior-W.pdf")
-        ),
-        plot = p1, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-mcmc-posterior-W.pdf")
-        ),
-        plot = p2, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath, "W",
-            paste0("sim-", seed, "-pl-posterior-W.pdf")
-        ),
-        plot = p3, device = "pdf", dpi = 300
-    )
-}
-```
 
 ### Posterior of Rt
 
 ```{r}
-p = plot_ts_ci_multi(
-  list(
-    LBA = log(exp(sim3.dat$out1.lba$fit$psi) + 1),
-    MCS = log(exp(sim3.dat$out1.mcs$fit$psi) + 1),
-    FFBS = log(exp(sim3.dat$out1.ffbs$fit$psi) + 1),
-    PL = log(exp(sim3.dat$out1.pl$fit$psi) + 1),
-    HVA = log(exp(sim3.dat$out1.hva$fit$psi) + 1),
-    MCMC = log(exp(sim3.dat$out1.mcmc$fit$psi) + 1),
-    EpiEstim = sim3.dat$out1.epi,
-    WT = sim3.dat$out1.wt,
-    True = log(exp(cbind(sim3.dat$sim1$psi, sim3.dat$sim1$psi, sim3.dat$sim1$psi)) + 1)
-  ), 
-  legend.position = "top"
+tstart <- 50
+ntime <- 140
+tend <- tstart + ntime
+
+p <- plot_ts_ci_multi(
+    list(
+        LBA = log(exp(sim3.dat$out1.lba$fit$psi) + 1),
+        MCS = log(exp(sim3.dat$out1.mcs$fit$psi) + 1),
+        FFBS = log(exp(sim3.dat$out1.ffbs$fit$psi) + 1),
+        PL = log(exp(sim3.dat$out1.pl$fit$psi) + 1),
+        HVA = log(exp(sim3.dat$out1.hva$fit$psi) + 1),
+        MCMC = log(exp(sim3.dat$out1.mcmc$fit$psi) + 1),
+        EpiEstim = sim3.dat$out1.epi,
+        WT = sim3.dat$out1.wt,
+        True = log(exp(cbind(sim3.dat$sim1$psi, sim3.dat$sim1$psi, sim3.dat$sim1$psi)) + 1)
+    ),
+    legend.position = "top"
 )
 
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p <- p + ylab(expression(R[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 plot(p)
 
 if (save_figures) {
-  ggsave(
+    ggsave(
         file.path(
             opath, "posterior",
             paste0("sim-", seed, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
+```
+
+
+```{r}
+rm(sim3.dat)
 ```
 
 
@@ -874,7 +725,7 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -883,7 +734,7 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -892,146 +743,94 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
 
 ```{r}
-k = 5
-
-p = plot_ts_ci_multi(
-  list(
-    LBA = santacruz.dat$out.lba$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
-    MCS = santacruz.dat$out.mcs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
-    FFBS = santacruz.dat$out.ffbs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
-    PL = santacruz.dat$out.pl$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
-    # HVA = santacruz.dat$out.hva$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
-    # MCMC = log(exp(santacruz.dat$out1.mcmc$fit$psi) + 1),
-    # WT = t(santacruz.dat$forecast.wt$y_cast[,1:(length(santacruz.dat$y2) - 10),k]),
-    True = cbind(santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)], santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)], santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)])
-  ), 
-  legend.position = "top"
-)
-
-p = p + ylab(expression(y[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p)
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath_real, "forecast",
-            paste0("covid-", tag, "-", k,"step.pdf")
+for (k in c(1, 5, 10)) {
+    p <- plot_ts_ci_multi(
+        list(
+            LBA = santacruz.dat$out.lba$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
+            MCS = santacruz.dat$out.mcs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
+            FFBS = santacruz.dat$out.ffbs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
+            PL = santacruz.dat$out.pl$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
+            # HVA = santacruz.dat$out.hva$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
+            # MCMC = log(exp(santacruz.dat$out1.mcmc$fit$psi) + 1),
+            # WT = t(santacruz.dat$forecast.wt$y_cast[,1:(length(santacruz.dat$y2) - 10),k]),
+            True = cbind(santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)], santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)], santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)])
         ),
-        plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        legend.position = "top"
     )
+
+    p <- p + ylab(expression(y[t])) +
+        guides(color = guide_legend(nrow = 1)) +
+        theme(text = element_text(size = 12))
+
+    plot(p)
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath_real, "forecast",
+                paste0("covid-", tag, "-", k, "step.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            width = fig_width_rect, height = fig_height_rect
+        )
+    }
 }
+
+
 ```
 
-### Posterior of W
-
-```{r}
-try({
-p1 <- ggplot(
-    data = data.frame(w = c(santacruz.dat$out.hva$fit$W), idx = 1:length(santacruz.dat$out.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "HVA: Posterior distribution of W")
-plot(p1)
-})
-
-
-try({
-p2 <- ggplot(
-    data = data.frame(w = c(santacruz.dat$out.mcmc$fit$W), idx = 1:length(santacruz.dat$out.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "MCMC: Posterior distribution of W")
-plot(p2)
-})
-
-try({
-p3 <- ggplot(
-    data = data.frame(w = c(santacruz.dat$out.pl$fit$W[,length(santacruz.dat$y2)]), idx = 1:length(santacruz.dat$out.pl$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50, na.rm = TRUE) +
-    labs(title = "PL: Posterior distribution of W")
-plot(p3)
-})
-
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-hva-posterior-W.pdf")
-        ),
-        plot = p1, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-mcmc-posterior-W.pdf")
-        ),
-        plot = p2, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-pl-posterior-W.pdf")
-        ),
-        plot = p3, device = "pdf", dpi = 300
-    )
-}
-```
 
 ### Posterior of Rt
 
 ```{r}
-p = plot_ts_ci_multi(
-  list(
-    LBA = log(exp(santacruz.dat$out.lba$fit$psi) + 1),
-    MCS = log(exp(santacruz.dat$out.mcs$fit$psi) + 1),
-    FFBS = log(exp(santacruz.dat$out.ffbs$fit$psi) + 1),
-    PL = log(exp(santacruz.dat$out.pl$fit$psi) + 1),
-    # HVA = log(exp(santacruz.dat$out.hva$fit$psi) + 1),
-    # MCMC = log(exp(santacruz.dat$out.mcmc$fit$psi) + 1),
-    WT = santacruz.dat$out.wt,
-    EpiEstim = santacruz.dat$out.epi
-  ), 
-  legend.position = "top"
+tstart <- 50
+ntime <- 450
+tend <- tstart + ntime
+
+p <- plot_ts_ci_multi(
+    list(
+        LBA = log(exp(santacruz.dat$out.lba$fit$psi[tstart:tend, ]) + 1),
+        MCS = log(exp(santacruz.dat$out.mcs$fit$psi[tstart:tend, ]) + 1),
+        FFBS = log(exp(santacruz.dat$out.ffbs$fit$psi[tstart:tend, ]) + 1),
+        PL = log(exp(santacruz.dat$out.pl$fit$psi[tstart:tend, ]) + 1),
+        # HVA = log(exp(santacruz.dat$out.hva$fit$psi) + 1),
+        # MCMC = log(exp(santacruz.dat$out.mcmc$fit$psi) + 1),
+        WT = santacruz.dat$out.wt[tstart:tend, ],
+        EpiEstim = santacruz.dat$out.epi[tstart:tend, ]
+    ),
+    legend.position = "top"
 )
 
-p = p + ylab(expression(R[t]))
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p <- p + ylab(expression(R[t]))
+p <- p + ylab(expression(R[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 plot(p)
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath_real, "posterior",
             paste0("covid-", tag, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
+
+
+```{r}
+rm(santacruz.dat)
+```
+
 
 ## Santa Clara
 
@@ -1095,7 +894,7 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -1104,7 +903,7 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -1113,146 +912,97 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
 
 ```{r}
-k = 5
-
-p = plot_ts_ci_multi(
-  list(
-    LBA = santaclara.dat$out.lba$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
-    MCS = santaclara.dat$out.mcs$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
-    # FFBS = santaclara.dat$out.ffbs$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
-    PL = santaclara.dat$out.pl$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
-    # HVA = santaclara.dat$out.hva$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
-    # MCMC = log(exp(santaclara.dat$out1.mcmc$fit$psi) + 1),
-    # WT = santaclara.dat$out1.wt,
-    True = cbind(santaclara.dat$y2[1:(length(santaclara.dat$y2) - 10)], santaclara.dat$y2[1:(length(santaclara.dat$y2) - 10)], santaclara.dat$y2[1:(length(santaclara.dat$y2) - 10)])
-  ), 
-  legend.position = "top"
-)
-
-p = p + ylab(expression(y[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p)
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath_real, "forecast",
-            paste0("covid-", tag, "-", k,"step.pdf")
+tstart <- 50
+for (k in c(1, 5, 10)) {
+    p <- plot_ts_ci_multi(
+        list(
+            LBA = santaclara.dat$out.lba2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
+            MCS = santaclara.dat$out.mcs2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
+            FFBS = santaclara.dat$out.ffbs2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
+            PL = santaclara.dat$out.pl$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
+            # HVA = santaclara.dat$out.hva$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
+            # MCMC = log(exp(santaclara.dat$out1.mcmc$fit$psi) + 1),
+            # WT = santaclara.dat$out1.wt,
+            True = cbind(santaclara.dat$y2[tstart:(length(santaclara.dat$y2) - 10)], santaclara.dat$y2[tstart:(length(santaclara.dat$y2) - 10)], santaclara.dat$y2[tstart:(length(santaclara.dat$y2) - 10)])
         ),
-        plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        legend.position = "top"
     )
+
+    p <- p + ylab(expression(y[t])) +
+        guides(color = guide_legend(nrow = 1)) +
+        theme(text = element_text(size = 12))
+
+    plot(p)
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath_real, "forecast",
+                paste0("covid-", tag, "-", k, "step.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            width = fig_width_rect, height = fig_height_rect
+        )
+    }
 }
+
+
 ```
 
-### Posterior of W
 
-```{r}
-try({
-p1 <- ggplot(
-    data = data.frame(w = c(santaclara.dat$out.hva$fit$W), idx = 1:length(santaclara.dat$out.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "HVA: Posterior distribution of W")
-plot(p1)
-})
-
-
-try({
-p2 <- ggplot(
-    data = data.frame(w = c(santaclara.dat$out.mcmc$fit$W), idx = 1:length(santaclara.dat$out.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "MCMC: Posterior distribution of W")
-plot(p2)
-})
-
-try({
-p3 <- ggplot(
-    data = data.frame(w = c(santaclara.dat$out.pl$fit$W[,length(santaclara.dat$y2)]), idx = 1:length(santaclara.dat$out.pl$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "PL: Posterior distribution of W")
-plot(p3)
-})
-
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-hva-posterior-W.pdf")
-        ),
-        plot = p1, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-mcmc-posterior-W.pdf")
-        ),
-        plot = p2, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-pl-posterior-W.pdf")
-        ),
-        plot = p3, device = "pdf", dpi = 300
-    )
-}
-```
 
 ### Posterior of Rt
 
 ```{r}
-p = plot_ts_ci_multi(
-  list(
-    LBA = log(exp(santaclara.dat$out.lba$fit$psi) + 1),
-    MCS = log(exp(santaclara.dat$out.mcs$fit$psi) + 1),
-    FFBS = log(exp(santaclara.dat$out.ffbs$fit$psi) + 1),
-    PL = log(exp(santaclara.dat$out.pl$fit$psi) + 1),
-    # HVA = log(exp(santaclara.dat$out.hva$fit$psi) + 1)
-    # MCMC = log(exp(santaclara.dat$out.mcmc$fit$psi) + 1),
-    WT = santaclara.dat$out.wt,
-    EpiEstim = santaclara.dat$out.epi
-  ), 
-  legend.position = "top"
+tstart <- 50
+ntime <- 450
+tend <- tstart + ntime
+
+p <- plot_ts_ci_multi(
+    list(
+        LBA = log(exp(santaclara.dat$out.lba$fit$psi[tstart:tend, ]) + 1),
+        MCS = log(exp(santaclara.dat$out.mcs$fit$psi[tstart:tend,]) + 1),
+        FFBS = log(exp(santaclara.dat$out.ffbs$fit$psi[tstart:tend,]) + 1),
+        PL = log(exp(santaclara.dat$out.pl$fit$psi[tstart:tend,]) + 1),
+        # HVA = log(exp(santaclara.dat$out.hva$fit$psi[tstart:tend,]) + 1)
+        # MCMC = log(exp(santaclara.dat$out.mcmc$fit$psi[tstart:tend,]) + 1),
+        WT = santaclara.dat$out.wt[tstart:tend,],
+        EpiEstim = santaclara.dat$out.epi[tstart:tend,]
+    ),
+    legend.position = "top"
 )
 
-p = p + ylab(expression(R[t]))
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p <- p + ylab(expression(R[t]))
+p <- p + ylab(expression(R[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 plot(p)
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath_real, "posterior",
             paste0("covid-", tag, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
+
+
+```{r}
+rm(santaclara.dat)
+gc()
+```
+
 
 ## Monterey
 
@@ -1316,7 +1066,7 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-W.pdf")
         ),
         plot = p1, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -1325,7 +1075,7 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-Wt.pdf")
         ),
         plot = p2, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 
     ggsave(
@@ -1334,146 +1084,93 @@ if (save_figures) {
             paste0("covid-", tag, "-mfe-W-vs-Wt.pdf")
         ),
         plot = p3, device = "pdf", dpi = 300,
-        width = fig_width, height = fig_height
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
 
 ```{r}
-k = 10
-
-p = plot_ts_ci_multi(
-  list(
-    LBA = monterey.dat$out.lba$error$forecast$y_cast[1:(length(monterey.dat$y2) - 10),,k],
-    MCS = monterey.dat$out.mcs$error$forecast$y_cast[1:(length(monterey.dat$y2) - 10),,k],
-    FFBS = monterey.dat$out.ffbs$error$forecast$y_cast[1:(length(monterey.dat$y2) - 10),,k],
-    PL = monterey.dat$out.pl$error$forecast$y_cast[1:(length(monterey.dat$y2) - 10),,k],
-    # HVA = monterey.dat$out.hva$error$forecast$y_cast[1:(length(monterey.dat$y2) - 10),,k],
-    # MCMC = log(exp(monterey.dat$out1.mcmc$fit$psi) + 1),
-    # WT = monterey.dat$out1.wt,
-    True = cbind(monterey.dat$y2[1:(length(monterey.dat$y2) - 10)], monterey.dat$y2[1:(length(monterey.dat$y2) - 10)], monterey.dat$y2[1:(length(monterey.dat$y2) - 10)])
-  ), 
-  legend.position = "top"
-)
-
-p = p + ylab(expression(y[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
-
-plot(p)
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath_real, "forecast",
-            paste0("covid-", tag, "-", k,"step.pdf")
+tstart <- 50
+for (k in c(1, 5, 10)) {
+    p <- plot_ts_ci_multi(
+        list(
+            LBA = monterey.dat$out.lba2$error$forecast$y_cast[tstart:(length(monterey.dat$y2) - 10), , k],
+            MCS = monterey.dat$out.mcs2$error$forecast$y_cast[tstart:(length(monterey.dat$y2) - 10), , k],
+            FFBS = monterey.dat$out.ffbs2$error$forecast$y_cast[tstart:(length(monterey.dat$y2) - 10), , k],
+            PL = monterey.dat$out.pl$error$forecast$y_cast[tstart:(length(monterey.dat$y2) - 10), , k],
+            # HVA = monterey.dat$out.hva$error$forecast$y_cast[tstart:(length(monterey.dat$y2) - 10),,k],
+            # MCMC = log(exp(monterey.dat$out1.mcmc$fit$psi) + 1),
+            # WT = monterey.dat$out1.wt,
+            True = cbind(monterey.dat$y2[tstart:(length(monterey.dat$y2) - 10)], monterey.dat$y2[tstart:(length(monterey.dat$y2) - 10)], monterey.dat$y2[tstart:(length(monterey.dat$y2) - 10)])
         ),
-        plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        legend.position = "top"
     )
+
+    p <- p + ylab(expression(y[t])) +
+        guides(color = guide_legend(nrow = 1)) +
+        theme(text = element_text(size = 12))
+
+    plot(p)
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath_real, "forecast",
+                paste0("covid-", tag, "-", k, "step.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            width = fig_width_rect, height = fig_height_rect
+        )
+    }
 }
+
 ```
 
-### Posterior of W
-
-```{r}
-try({
-p1 <- ggplot(
-    data = data.frame(w = c(monterey.dat$out.hva$fit$W), idx = 1:length(monterey.dat$out.hva$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "HVA: Posterior distribution of W")
-plot(p1)
-})
-
-
-try({
-p2 <- ggplot(
-    data = data.frame(w = c(monterey.dat$out.mcmc$fit$W), idx = 1:length(monterey.dat$out.mcmc$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "MCMC: Posterior distribution of W")
-plot(p2)
-})
-
-try({
-p3 <- ggplot(
-    data = data.frame(w = c(monterey.dat$out.pl$fit$W[,length(monterey.dat$y2)]), idx = 1:length(monterey.dat$out.pl$fit$W)),
-    aes(x = w)
-) +
-    theme_light() +
-    geom_histogram(bins = 50) +
-    labs(title = "PL: Posterior distribution of W")
-plot(p3)
-})
-
-
-if (mode == "save") {
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-hva-posterior-W.pdf")
-        ),
-        plot = p1, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-mcmc-posterior-W.pdf")
-        ),
-        plot = p2, device = "pdf", dpi = 300
-    )
-  
-  ggsave(
-        file.path(
-            opath_real, "W",
-            paste0("covid-", tag, "-pl-posterior-W.pdf")
-        ),
-        plot = p3, device = "pdf", dpi = 300
-    )
-}
-```
 
 
 ### Posterior of Rt
 
 ```{r}
-p = plot_ts_ci_multi(
-  list(
-    LBA = log(exp(monterey.dat$out.lba2$fit$psi) + 1),
-    MCS = log(exp(monterey.dat$out.mcs2$fit$psi) + 1),
-    FFBS = log(exp(monterey.dat$out.ffbs2$fit$psi) + 1),
-    PL = log(exp(monterey.dat$out.pl$fit$psi) + 1),
-    # HVA = log(exp(monterey.dat$out.hva$fit$psi) + 1)
-    # MCMC = log(exp(monterey.dat$out.mcmc$fit$psi) + 1),
-    WT = monterey.dat$out.wt,
-    EpiEstim = monterey.dat$out.epi
-  ), 
-  legend.position = "top"
+tstart <- 50
+ntime <- 140
+tend <- tstart + ntime
+
+p <- plot_ts_ci_multi(
+    list(
+        LBA = log(exp(monterey.dat$out.lba2$fit$psi[tstart:tend, ]) + 1),
+        MCS = log(exp(monterey.dat$out.mcs2$fit$psi[tstart:tend, ]) + 1),
+        FFBS = log(exp(monterey.dat$out.ffbs2$fit$psi[tstart:tend, ]) + 1),
+        PL = log(exp(monterey.dat$out.pl$fit$psi[tstart:tend, ]) + 1),
+        # HVA = log(exp(monterey.dat$out.hva$fit$psi[tstart:tend,]) + 1),
+        MCMC = log(exp(monterey.dat$out.mcmc$fit$psi[tstart:tend,]) + 1),
+        WT = monterey.dat$out.wt[tstart:tend, ],
+        EpiEstim = monterey.dat$out.epi[tstart:tend, ]
+    ),
+    legend.position = "top"
 )
 
-p = p + ylab(expression(R[t]))
-p = p + ylab(expression(R[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+p <- p + ylab(expression(R[t]))
+p <- p + ylab(expression(R[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 12))
 
 plot(p)
 
-if (mode == "save") {
-  ggsave(
+if (save_figures) {
+    ggsave(
         file.path(
             opath_real, "posterior",
             paste0("covid-", tag, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = 11.5, height = 4
+        width = fig_width_rect, height = fig_height_rect
     )
 }
 ```
 
 
+
+```{r}
+rm(monterey.dat)
+gc()
+```

@@ -118,9 +118,9 @@ namespace MCMC
             double res = arma::accu(arma::pow(wt.tail(wt.n_elem - 2), 2.));
 
             // double bw_prior = prior_params.at(1); // eta_prior_val.at(1, 0)
-            std::map<std::string, AVAIL::Dist> W_prior_list = AVAIL::W_prior_list;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
 
-            switch (W_prior_list[W_prior.name])
+            switch (dist_list[W_prior.name])
             {
             case AVAIL::Dist::gamma:
             {
@@ -318,37 +318,6 @@ namespace MCMC
         }
 
 
-        static void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List &opts)
-        {
-            Rcpp::List param_opts = opts;
-
-            if (param_opts.containsElementNamed("infer"))
-            {
-                infer = Rcpp::as<bool>(param_opts["infer"]);
-            }
-
-            if (param_opts.containsElementNamed("init"))
-            {
-                init = Rcpp::as<double>(param_opts["init"]);
-            }
-
-            std::string prior_name = "invgamma";
-            if (param_opts.containsElementNamed("prior_name"))
-            {
-                prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
-            }
-
-
-            Rcpp::NumericVector param = {0.01, 0.01};
-            if (param_opts.containsElementNamed("prior_param"))
-            {
-                param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
-            }
-
-            prior.init(prior_name, param[0], param[1]);
-        }
-
-
         static Rcpp::List default_settings()
         {    
             Rcpp::List Wopts;
@@ -422,8 +391,9 @@ namespace MCMC
 
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
+            arma::mat y_width_cast = y_cov_cast;
             arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
-            arma::vec y_loss_all(kstep, arma::fill::zeros);
 
             Rcpp::NumericVector lag_param = {
                 model.transfer.dlag.par1,
@@ -503,7 +473,13 @@ namespace MCMC
                 for (unsigned int j = 0; j < kstep; j++)
                 {
                     ycast.slice(j).row(t) = ynew.row(j);                                      // 1 x nsample
-                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
+                    double ymin = arma::min(ynew.row(j));
+                    double ymax = arma::max(ynew.row(j));
+                    double ytrue = yall.at(t + 1 + j);
+
+                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - ytrue); // 1 x nsample
+                    y_width_cast.at(t, j) = std::abs(ymax - ymin);
+                    y_cov_cast.at(t, j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
                 }
 
                 if (verbose)
@@ -533,8 +509,20 @@ namespace MCMC
             arma::cube ycast_qt(ntime + 1, 3, kstep);
             std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
 
+            arma::vec y_loss_all(kstep, arma::fill::zeros);
+            arma::vec y_covered_all = y_loss_all;
+            arma::vec y_width_all = y_loss_all;
+
             for (unsigned int j = 0; j < kstep; j++)
             {
+                arma::vec ycov_tmp0 = y_cov_cast.col(j);
+                arma::vec ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
+                y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
+
+                ycov_tmp0 = y_width_cast.col(j);
+                ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
+                y_width_all.at(j) = arma::mean(ycov_tmp);
+
                 arma::mat ycast_qtmp = arma::quantile(ycast.slice(j), qprob, 1); // (nT + 1) x nsample x k
                 ycast_qt.slice(j) = ycast_qtmp;
                 arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
@@ -584,6 +572,8 @@ namespace MCMC
             output["y"] = Rcpp::wrap(yall);
             output["y_loss"] = Rcpp::wrap(y_loss);
             output["y_loss_all"] = Rcpp::wrap(y_loss_all);
+            output["y_covered_all"] = Rcpp::wrap(y_covered_all);
+            output["y_width_all"] = Rcpp::wrap(y_width_all);
 
             output["tstart"] = tstart;
             output["tend"] = (ntime - kstep);

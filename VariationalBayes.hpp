@@ -201,34 +201,6 @@ namespace VB
             if (m > 0) { update_static = true; }
         }
 
-        static void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List &param_opts)
-        {
-            if (param_opts.containsElementNamed("infer"))
-            {
-                infer = Rcpp::as<bool>(param_opts["infer"]);
-            }
-
-            if (param_opts.containsElementNamed("init"))
-            {
-                init = Rcpp::as<double>(param_opts["init"]);
-            }
-
-            std::string prior_name = "invgamma";
-            if (param_opts.containsElementNamed("prior_name"))
-            {
-                prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
-            }
-
-            Rcpp::NumericVector prior_param = {0.01, 0.01};
-            if (param_opts.containsElementNamed("prior_param"))
-            {
-                prior_param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
-            }
-
-            prior.init(prior_name, prior_param[0], prior_param[1]);
-
-            return;
-        }
 
         static Rcpp::List default_settings()
         {
@@ -555,7 +527,7 @@ namespace VB
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma")
         {
-            std::map <std::string, AVAIL::Dist> W_prior_list = AVAIL::W_prior_list;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map <std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
             arma::vec eta_tilde = eta;
@@ -566,7 +538,7 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
-                    switch (W_prior_list[tolower(W_prior)])
+                    switch (dist_list[tolower(W_prior)])
                     {
                     case AVAIL::Dist::invgamma:
                     {
@@ -617,7 +589,7 @@ namespace VB
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma")
         {
-            std::map<std::string, AVAIL::Dist> W_prior_list = AVAIL::W_prior_list;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
             arma::vec eta = eta_tilde;
@@ -628,7 +600,7 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
-                    switch (W_prior_list[tolower(W_prior)])
+                    switch (dist_list[tolower(W_prior)])
                     {
                     case AVAIL::Dist::invgamma:
                     {
@@ -696,7 +668,7 @@ namespace VB
             const double W,       // evolution variance conditional on V
             const Dist &W_prior)
         { // 0 - Gamma(aw=shape,bw=rate); 1 - Half-Cauchy(aw=location=0, bw=scale); 2 - Inverse-Gamma(aw=shape,bw=rate)
-            std::map<std::string, AVAIL::Dist> W_prior_list = AVAIL::W_prior_list;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             
             double aw = W_prior.par1;
             double bw = W_prior.par2;
@@ -721,7 +693,7 @@ namespace VB
             bound_check(rdw, "dlogJoint_dWtilde: rdw");
 
             double deriv;
-            switch (W_prior_list[W_prior.name])
+            switch (dist_list[W_prior.name])
             {
             case AVAIL::Dist::invgamma:
             {
@@ -794,14 +766,14 @@ namespace VB
             const double &Wtilde, // evolution variance conditional on V
             const Dist &W_prior)
         {
-            std::map<std::string, AVAIL::Dist> W_prior_list = AVAIL::W_prior_list;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
 
             double InvGamma_cnst = W_prior.par1;
             InvGamma_cnst *= std::log(W_prior.par2);
             InvGamma_cnst -= std::lgamma(W_prior.par1);
 
             double logp = -16.;
-            switch (W_prior_list[W_prior.name])
+            switch (dist_list[W_prior.name])
             {
             case AVAIL::Dist::invgamma:
             {
@@ -1211,7 +1183,7 @@ namespace VB
         {
             arma::vec grid = arma::regspace(from, delta, to);
             unsigned int nelem = grid.n_elem;
-            arma::mat stats(nelem, 3, arma::fill::zeros);
+            arma::mat stats(nelem, 4, arma::fill::zeros);
 
 
             for (unsigned int i = 0; i < nelem; i ++)
@@ -1240,12 +1212,15 @@ namespace VB
                 infer(model);
 
                 double forecast_loss = 0.;
-                Model::forecast_error(forecast_loss, psi_stored, y, model, loss, false);
+                double forecast_cover = 0.;
+                double forecast_width = 0.;
+                Model::forecast_error(forecast_loss, forecast_cover, forecast_width, psi_stored, y, model, loss, false);
                 stats.at(i, 1) = forecast_loss;
 
-                double fit_loss = 0.;
-                Model::fitted_error(fit_loss, psi_stored, y, model, loss, false);
-                stats.at(i, 2) = fit_loss;
+                // double fit_loss = 0.;
+                // Model::fitted_error(fit_loss, psi_stored, y, model, loss, false);
+                stats.at(i, 2) = forecast_cover;
+                stats.at(i, 3) = forecast_width;
 
                 if (verbose)
                 {
@@ -1268,7 +1243,7 @@ namespace VB
             const bool &verbose = VERBOSE)
         {
             unsigned int nelem = step_size_grid.n_elem;
-            arma::mat stats(nelem, 3, arma::fill::zeros);
+            arma::mat stats(nelem, 4, arma::fill::zeros);
 
 
             for (unsigned int i = 0; i < nelem; i++)
@@ -1297,12 +1272,15 @@ namespace VB
                 infer(model);
 
                 double forecast_loss = 0.;
-                Model::forecast_error(forecast_loss, psi_stored, y, model, loss, false);
+                double forecast_cover = 0.;
+                double forecast_width = 0.;
+                Model::forecast_error(forecast_loss, forecast_cover, forecast_width, psi_stored, y, model, loss, false);
                 stats.at(i, 1) = forecast_loss;
 
-                double fit_loss = 0.;
-                Model::fitted_error(fit_loss, psi_stored, y, model, loss, false);
-                stats.at(i, 2) = fit_loss;
+                // double fit_loss = 0.;
+                // Model::fitted_error(fit_loss, psi_stored, y, model, loss, false);
+                stats.at(i, 2) = forecast_cover;
+                stats.at(i, 3) = forecast_width;
 
                 if (verbose)
                 {
@@ -1342,12 +1320,15 @@ namespace VB
                 infer(model);
 
                 double err_forecast = 0.;
-                Model::forecast_error(err_forecast, psi_stored, y, model, loss, false);
+                double forecast_cover = 0.;
+                double forecast_width = 0.;
+                Model::forecast_error(err_forecast, forecast_cover, forecast_width, psi_stored, y, model, loss, false);
                 stats.at(i, 1) = err_forecast;
 
-                double err_fit = 0.;
-                Model::fitted_error(err_fit, psi_stored, y, model, loss, false);
-                stats.at(i, 2) = err_fit;
+                // double err_fit = 0.;
+                // Model::fitted_error(err_fit, psi_stored, y, model, loss, false);
+                stats.at(i, 2) = forecast_cover;
+                stats.at(i, 3) = forecast_width;
 
                 if (verbose)
                 {
@@ -1379,8 +1360,10 @@ namespace VB
 
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
+            arma::mat y_width_cast = y_cov_cast;
+
             arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
-            arma::vec y_loss_all(kstep, arma::fill::zeros);
 
             Rcpp::NumericVector lag_param = {
                 model.transfer.dlag.par1,
@@ -1462,7 +1445,13 @@ namespace VB
                 for (unsigned int j = 0; j < kstep; j++)
                 {
                     ycast.slice(j).row(t) = ynew.row(j); // 1 x nsample
-                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - yall.at(t + 1 + j)); // 1 x nsample
+                    double ymin = arma::min(ynew.row(j));
+                    double ymax = arma::max(ynew.row(j));
+                    double ytrue = yall.at(t + 1 + j);
+
+                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - ytrue); // 1 x nsample
+                    y_width_cast.at(t, j) = std::abs(ymax - ymin);
+                    y_cov_cast.at(t, j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
                 }
 
 
@@ -1493,9 +1482,20 @@ namespace VB
             arma::cube ycast_qt = arma::zeros<arma::cube>(ntime + 1, 3, kstep);
             std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
 
+            arma::vec y_loss_all(kstep, arma::fill::zeros);
+            arma::vec y_covered_all = y_loss_all;
+            arma::vec y_width_all = y_loss_all;
 
             for (unsigned int j = 0; j < kstep; j++)
             {
+                arma::vec ycov_tmp0 = y_cov_cast.col(j);
+                arma::vec ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
+                y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
+
+                ycov_tmp0 = y_width_cast.col(j);
+                ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
+                y_width_all.at(j) = arma::mean(ycov_tmp);
+
                 arma::mat ycast_qtmp = arma::quantile(ycast.slice(j), qprob, 1); // (nT + 1) x nsample x k
                 ycast_qt.slice(j) = ycast_qtmp;
                 arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
@@ -1550,6 +1550,8 @@ namespace VB
             output["y"] = Rcpp::wrap(yall);
             output["y_loss"] = Rcpp::wrap(y_loss);
             output["y_loss_all"] = Rcpp::wrap(y_loss_all);
+            output["y_covered_all"] = Rcpp::wrap(y_covered_all);
+            output["y_width_all"] = Rcpp::wrap(y_width_all);
 
             output["tstart"] = tstart;
             output["tend"] = (ntime - kstep);
@@ -1585,7 +1587,7 @@ namespace VB
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
                 
-                mcs.W = W;
+                mcs.prior_W.val = W;
                 mcs.infer(model);
                 arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
                 psi = arma::median(psi_all, 1);

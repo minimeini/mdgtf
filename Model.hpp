@@ -743,6 +743,24 @@ public:
             }
         } // loop over nsample
 
+        arma::mat y_cov_cast(model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
+        arma::mat y_width_cast = y_cov_cast;
+        for (unsigned int t = 1; t < model.dim.nT; t++)
+        {
+            arma::mat ycast_tmp = ycast.row_as_mat(t); // k x nsample
+            arma::vec ymin = arma::vectorise(arma::min(ycast_tmp, 1));
+            arma::vec ymax = arma::vectorise(arma::max(ycast_tmp, 1));
+
+            unsigned int ncast = std::min(k, model.dim.nT - t);
+            for (unsigned int j = 0; j < ncast; j ++)
+            {
+                double ytrue = y.at(t + j + 1);
+                double covered = (ytrue >= ymin.at(j) && ytrue <= ymax.at(j)) ? 1. : 0.;
+                y_cov_cast.at(t, j) = covered;
+                y_width_cast.at(t, j) = std::abs(ymax.at(j) - ymin.at(j));
+            }
+        }
+
         
         arma::vec qprob = {0.025, 0.5, 0.975};
         std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
@@ -753,16 +771,27 @@ public:
 
         arma::mat y_loss(model.dim.nT + 1, k, arma::fill::zeros);
         arma::vec y_loss_all(k, arma::fill::zeros);
+        arma::vec y_covered_all = y_loss_all;
+        arma::vec y_width_all = y_loss_all;
         arma::cube yqt = arma::zeros<arma::cube>(model.dim.nT + 1, qprob.n_elem, k);
 
+        unsigned int tstart = std::max(k, model.dim.nP);
         for (unsigned int i = 0; i < k; i ++)
         {
+            unsigned int tend = model.dim.nT - i - 1;
+
             arma::mat ycast_qt = arma::quantile(ycast.slice(i), qprob, 1);
             yqt.slice(i) = ycast_qt;
             arma::mat y_loss_tmp0 = y_err_cast.slice(i);
-            arma::mat y_loss_tmp = y_loss_tmp0.submat(1, 0, model.dim.nT - i - 1, nsample - 1);
+            arma::mat y_loss_tmp = y_loss_tmp0.submat(tstart, 0, tend, nsample - 1);
             y_loss_tmp = arma::abs(y_loss_tmp);
             arma::vec ytmp;
+
+            arma::vec ycov_tmp = arma::vectorise(y_cov_cast(arma::span(tstart, tend), arma::span(i)));
+            y_covered_all.at(i) = arma::mean(ycov_tmp) * 100.;
+
+            ycov_tmp = arma::vectorise(y_width_cast(arma::span(tstart, tend), arma::span(i)));
+            y_width_all.at(i) = arma::mean(ycov_tmp);
 
             // arma::mat psi_cast_qt = arma::quantile(psi_cast.slice(i), qprob, 1);
             // psi_qt.slice(i) = psi_cast_qt;
@@ -781,7 +810,7 @@ public:
                 // psi_loss_all.at(i) = arma::mean(psi_tmp);
 
                 ytmp = arma::mean(y_loss_tmp, 1);
-                y_loss.submat(1, i, model.dim.nT - i - 1, i) = ytmp;
+                y_loss.submat(tstart, i, tend, i) = ytmp;
                 y_loss_all.at(i) = arma::mean(ytmp);
                 
 
@@ -800,7 +829,7 @@ public:
                 y_loss_tmp = arma::square(y_loss_tmp);
 
                 ytmp = arma::mean(y_loss_tmp, 1);      // (nT - i) x 1
-                y_loss.submat(1, i, model.dim.nT - i - 1, i) = arma::sqrt(ytmp);
+                y_loss.submat(tstart, i, tend, i) = arma::sqrt(ytmp);
 
                 y_loss_all.at(i) = arma::mean(ytmp);
                 y_loss_all.at(i) = std::sqrt(y_loss_all.at(i));
@@ -826,6 +855,8 @@ public:
         out["y"] = Rcpp::wrap(y);
         out["y_loss"] = Rcpp::wrap(y_loss);
         out["y_loss_all"] = Rcpp::wrap(y_loss_all);
+        out["y_covered_all"] = Rcpp::wrap(y_covered_all);
+        out["y_width_all"] = Rcpp::wrap(y_width_all);
 
         
         return out;
@@ -833,6 +864,8 @@ public:
 
     static void forecast_error(
         double &y_loss_all,
+        double &y_cover,
+        double &y_width,
         const arma::mat &psi, // (nT + 1) x nsample
         const arma::vec &y,   // (nT + 1) x 1
         const Model &model,
@@ -841,13 +874,14 @@ public:
     {
         unsigned int nsample = psi.n_cols;
 
-        arma::mat psi_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
-        arma::mat ft_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
+        // arma::mat psi_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
+        // arma::mat ft_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
         arma::mat ycast(model.dim.nT + 1, nsample, arma::fill::zeros);
         arma::mat y_err_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
-        arma::mat psi_err_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
+        
+        // arma::mat psi_err_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
 
-        psi_cast.row(1) = psi.row(1);
+        // psi_cast.row(1) = psi.row(1);
 
 
         for (unsigned int i = 0; i < nsample; i++)
@@ -866,8 +900,8 @@ public:
             {
                 arma::vec psi_tmp = psi_vec;
                 psi_tmp.at(t + 1) = psi_tmp.at(t);
-                psi_cast.at(t + 1, i) = psi_tmp.at(t + 1);
-                psi_err_cast.at(t + 1, i) = psi.at(t + 1, i) - psi_cast.at(t + 1, i);
+                // psi_cast.at(t + 1, i) = psi_tmp.at(t + 1);
+                // psi_err_cast.at(t + 1, i) = psi.at(t + 1, i) - psi_cast.at(t + 1, i);
 
                 arma::vec ft_tmp = ft_vec;
                 ft_tmp.at(t + 1) = TransFunc::func_ft(
@@ -875,10 +909,10 @@ public:
                     model.transfer.dlag,
                     model.transfer.fgain.name,
                     model.transfer.name);
-                ft_cast.at(t + 1, i) = ft_tmp.at(t + 1);
+                // ft_cast.at(t + 1, i) = ft_tmp.at(t + 1);
 
                 ycast.at(t + 1, i) = LinkFunc::ft2mu(ft_tmp.at(t + 1), model.flink.name, model.dobs.par1);
-                y_err_cast.at(t + 1, i) = y.at(t + 1, i) - ycast.at(t + 1, i);
+                y_err_cast.at(t + 1, i) = y.at(t + 1) - ycast.at(t + 1, i);
             }
 
             if (verbose)
@@ -892,8 +926,25 @@ public:
             Rcpp::Rcout << std::endl;
         }
 
+        arma::vec y_cover_cast(model.dim.nT, arma::fill::zeros);
+        arma::vec y_width_cast = y_cover_cast;
+        for (unsigned int t = 1; t < model.dim.nT; t++)
+        {
+            arma::rowvec ycast_tmp = ycast.row(t + 1); // 1 x nsample
+            double ymin = arma::min(ycast_tmp);
+            double ymax = arma::max(ycast_tmp);
+            double ytrue = y.at(t + 1);
+
+            double covered = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+            y_cover_cast.at(t) = covered;
+            y_width_cast.at(t) = std::abs(ymax - ymin);
+        }
+
+        y_cover = arma::mean(y_cover_cast.tail(model.dim.nT - 1)) * 100.;
+        y_width = arma::mean(y_width_cast.tail(model.dim.nT - 1));
+
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
-        arma::vec psi_loss(model.dim.nT + 1, arma::fill::zeros);
+        // arma::vec psi_loss(model.dim.nT + 1, arma::fill::zeros);
 
         y_loss_all = 0;
 
@@ -1201,7 +1252,7 @@ public:
      * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
      *
      * @param model
-     * @param t  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
+     * @param t  time index of theta_cur; yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
      * @param theta_cur theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
      * @param yall
      * @return double
@@ -1410,11 +1461,14 @@ public:
     {
         unsigned int p = theta.n_rows;
         unsigned int nsample = theta.n_cols;
+        unsigned int tstart = std::max(k, model.dim.nP);
 
         // arma::cube psi_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
         arma::cube ycast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
         arma::cube y_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k); // (nT + 1) x nsample x k
+        arma::mat y_cov_cast(model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
         // arma::cube psi_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
+        arma::mat y_width_cast = y_cov_cast;
 
         double mu0 = 0.;
         if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
@@ -1446,6 +1500,19 @@ public:
                 }
             }
 
+            for (unsigned int j = 0; j < ncast; j ++)
+            {
+                arma::vec ytmp = arma::vectorise(ycast.slice(j).row(t));
+                double ymin = arma::min(ytmp);
+                double ymax = arma::max(ytmp);
+                double ytrue = y.at(t + j + 1);
+
+                double covered = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+                y_cov_cast.at(t, j) = covered;
+                y_width_cast.at(t, j) = std::abs(ymax - ymin);
+            }
+
+
             if (verbose)
             {
                 Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
@@ -1462,6 +1529,8 @@ public:
 
         arma::mat y_loss(model.dim.nT + 1, k, arma::fill::zeros);
         arma::vec y_loss_all(k, arma::fill::zeros);
+        arma::vec y_covered_all = y_loss_all;
+        arma::vec y_width_all = y_loss_all;
         arma::cube yqt = arma::zeros<arma::cube>(model.dim.nT + 1, qprob.n_elem, k);
 
         // arma::mat psi_loss(model.dim.nT + 1, k, arma::fill::zeros);
@@ -1474,6 +1543,7 @@ public:
 
         for (unsigned int j = 0; j < k; j ++)
         {
+            unsigned int tend = model.dim.nT - j - 1;
             arma::mat ycast_qt = arma::quantile(ycast.slice(j), qprob, 1);
             yqt.slice(j) = ycast_qt;
             arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
@@ -1481,8 +1551,12 @@ public:
             // arma::mat psi_cast_qt = arma::quantile(psi_cast.slice(j), qprob, 1);
             // psi_qt.slice(j) = psi_cast_qt;
             // arma::mat psi_tmp = arma::abs(psi_err_cast.slice(j));
+            arma::vec ycov_tmp = arma::vectorise(y_cov_cast.submat(arma::span(tstart, tend), arma::span(j)));
+            y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
+            y_covered_all.at(j) *= 100.;
 
-
+            ycov_tmp = arma::vectorise(y_width_cast.submat(arma::span(tstart, tend), arma::span(j)));
+            y_width_all.at(j) = arma::mean(ycov_tmp);
 
             switch (loss_list[tolower(loss_func)])
             {
@@ -1491,7 +1565,7 @@ public:
                 arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
                 y_loss.col(j) = y_loss_tmp;
 
-                arma::vec y_loss_tmp2 = y_loss_tmp.subvec(1, model.dim.nT - j - 1);
+                arma::vec y_loss_tmp2 = y_loss_tmp.subvec(tstart, tend);
                 y_loss_all.at(j) = arma::mean(y_loss_tmp2);
 
                 // arma::vec psi_loss_tmp = arma::mean(psi_tmp, 1); // (nT + 1) x 1
@@ -1505,7 +1579,7 @@ public:
             {
                 ytmp = arma::square(ytmp); 
                 arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                arma::vec y_loss_tmp2 = y_loss_tmp.subvec(1, model.dim.nT - j - 1);
+                arma::vec y_loss_tmp2 = y_loss_tmp.subvec(tstart, tend);
                 y_loss_all.at(j) = arma::mean(y_loss_tmp2);
                 
                 y_loss.col(j) = arma::sqrt(y_loss_tmp);
@@ -1529,7 +1603,6 @@ public:
             } // switch by loss
         }
         
-
         Rcpp::List out;
         // out["psi_cast"] = Rcpp::wrap(psi_qt);
         // out["psi_cast_all"] = Rcpp::wrap(psi_cast);
@@ -1542,13 +1615,18 @@ public:
         out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
         out["y_loss"] = Rcpp::wrap(y_loss);
+
         out["y_loss_all"] = Rcpp::wrap(y_loss_all);
+        out["y_covered_all"] = Rcpp::wrap(y_covered_all);
+        out["y_width_all"] = Rcpp::wrap(y_width_all);
 
         return out;
     }
 
     static void forecast_error(
         double &y_loss_all,
+        double &y_cover,
+        double &y_width,
         const arma::cube &theta, // p x nsample x (nT + 1)
         const arma::vec &y,      // (nT + 1) x 1
         const Model &model,
@@ -1558,10 +1636,10 @@ public:
         unsigned int p = theta.n_rows;
         unsigned int nsample = theta.n_cols;
 
-        arma::mat psi_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
         arma::mat ycast(model.dim.nT + 1, nsample, arma::fill::zeros);
         arma::mat y_err_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
-        arma::mat psi_err_cast(model.dim.nT + 1, nsample, arma::fill::zeros);
+        arma::vec y_cover_cast(model.dim.nT, arma::fill::zeros);
+        arma::vec y_width_cast = y_cover_cast;
 
         double mu0 = 0.;
         if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
@@ -1573,15 +1651,20 @@ public:
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec theta_next = func_gt(model, theta.slice(t).col(i), y.at(t));
-                psi_cast.at(t + 1, i) = theta_next.at(0);
-
                 double ft_next = func_ft(model, t + 1, theta_next, y);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink.name, mu0);
                 ycast.at(t + 1, i) = lambda;
 
                 y_err_cast.at(t + 1, i) = y.at(t + 1) - ycast.at(t + 1, i);
-                psi_err_cast.at(t + 1, i) = theta.at(0, i, t + 1) - theta_next.at(0);
             }
+
+            double ymin = arma::min(ycast.row(t + 1));
+            double ymax = arma::max(ycast.row(t + 1));
+            if (y.at(t + 1) >= ymin && y.at(t + 1) <= ymax)
+            {
+                y_cover_cast.at(t) = 1.;
+            }
+            y_width_cast.at(t) = std::abs(ymax - ymin);
 
 
             if (verbose)
@@ -1590,6 +1673,8 @@ public:
             }
         }
 
+        y_cover = arma::mean(y_cover_cast.subvec(model.dim.nP, model.dim.nT - 2)) * 100.;
+        y_width = arma::mean(y_width_cast.subvec(model.dim.nP, model.dim.nT - 2));
 
         if (verbose)
         {
@@ -1597,7 +1682,6 @@ public:
         }
 
         arma::vec y_loss(model.dim.nT + 1, arma::fill::zeros);
-        arma::vec psi_loss(model.dim.nT + 1, arma::fill::zeros);
 
         y_loss_all = 0;
 

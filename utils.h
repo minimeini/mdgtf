@@ -255,4 +255,34 @@ inline arma::vec randdraw(double d, int n)
 	return out;
 }
 
+inline void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List &opts)
+{
+	Rcpp::List param_opts = opts;
+
+	if (param_opts.containsElementNamed("infer"))
+	{
+		infer = Rcpp::as<bool>(param_opts["infer"]);
+	}
+
+	if (param_opts.containsElementNamed("init"))
+	{
+		init = Rcpp::as<double>(param_opts["init"]);
+	}
+
+	std::string prior_name = "invgamma";
+	if (param_opts.containsElementNamed("prior_name"))
+	{
+		prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
+		tolower(prior_name);
+	}
+
+	Rcpp::NumericVector param = {0.01, 0.01};
+	if (param_opts.containsElementNamed("prior_param"))
+	{
+		param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
+	}
+
+	prior.init(prior_name, param[0], param[1]);
+}
+
 #endif

@@ -20,4 +20,11 @@ inline constexpr double NB_DELTA = 30;
 inline constexpr bool DEBUG = false;
 inline constexpr bool VERBOSE = true;
 
+
+/**
+ * @brief Default settings of linear Bayes
+ * 
+ */
+inline constexpr bool LBA_FILL_ZERO = true;
+
 #endif

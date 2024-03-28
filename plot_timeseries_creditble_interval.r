@@ -228,6 +228,14 @@ plot_output <- function(
 
 
   if ("W" %in% names(out_list$fit)) {
+    nd = length(dim(out_list$fit$W))
+    if (nd == 1) {
+      Wtmp = c(out_list$fit$W)
+    } else if (nd == 2) {
+      Wtmp = out_list$fit$W[, ncol(out_list$fit$w)]
+    } else {
+      Wtmp = NULL
+    }
     posterior_W <- ggplot(
       data = data.frame(w = c(out_list$fit$W), idx = 1:length(out_list$fit$W)),
       aes(x = w)
@@ -475,7 +483,7 @@ print_loss_all <- function(out_list) {
 }
 
 
-get_dat_sim_loss_all = function(dat_env) {
+get_dat_sim_loss_all = function(dat_env, type = "loss") {
   kstep = length(c(dat_env$out1.lba$error$forecast$y_loss_all))
 
   if ("mu0" %in% names(dat_env$out1.lba2$fit)) {
@@ -485,10 +493,18 @@ get_dat_sim_loss_all = function(dat_env) {
   }
   discount_factor = dat_env$opts1.lba$custom_discount_factor
   W = dat_env$opts1.lba$W
-  
+  ytmp = rep(NA, kstep)
+  if (type == "loss") {
+    ytmp = dat_env$out1.lba$error$forecast$y_loss_all
+  } else if (type == "coverage") {
+    ytmp = dat_env$out1.lba$error$forecast$y_covered_all
+  } else if (type == "width") {
+    ytmp = dat_env$out1.lba$error$forecast$y_width_all
+  }
+
   dat = data.frame(
     k = factor(c(1:kstep, "discount", "W", "mu0"), levels = c(1:kstep, "discount", "W", "mu0")),
-    LBA.DF = c(dat_env$out1.lba$error$forecast$y_loss_all, discount_factor, W, mu0)
+    LBA.DF = c(ytmp, discount_factor, W, mu0)
   )
 
   if (exists("out1.lba2", dat_env)) {
@@ -498,7 +514,16 @@ get_dat_sim_loss_all = function(dat_env) {
       mu0 = NA
     }
     
-    dat$LBA.W = c(dat_env$out1.lba2$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out1.lba2$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out1.lba2$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out1.lba2$error$forecast$y_width_all
+    }
+    
+    dat$LBA.W = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out1.mcs", dat_env)) {
@@ -510,7 +535,16 @@ get_dat_sim_loss_all = function(dat_env) {
     discount_factor = dat_env$opts1.mcs$custom_discount_factor
     W = dat_env$opts1.mcs$W
 
-    dat$MCS.DF = c(dat_env$out1.mcs$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out1.mcs$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out1.mcs$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out1.mcs$error$forecast$y_width_all
+    }
+
+    dat$MCS.DF = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out1.mcs2", dat_env)) {
@@ -520,7 +554,16 @@ get_dat_sim_loss_all = function(dat_env) {
       mu0 = NA
     }
 
-    dat$MCS.W = c(dat_env$out1.mcs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out1.mcs2$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out1.mcs2$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out1.mcs2$error$forecast$y_width_all
+    }
+
+    dat$MCS.W = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out1.ffbs", dat_env)) {
@@ -532,7 +575,16 @@ get_dat_sim_loss_all = function(dat_env) {
       mu0 = NA
     }
     
-    dat$FFBS.DF = c(dat_env$out1.ffbs$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out1.ffbs$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out1.ffbs$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out1.ffbs$error$forecast$y_width_all
+    }
+
+    dat$FFBS.DF = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out1.ffbs2", dat_env)) {
@@ -542,7 +594,16 @@ get_dat_sim_loss_all = function(dat_env) {
       mu0 = NA
     }
     
-    dat$FFBS.W = c(dat_env$out1.ffbs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out1.ffbs2$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out1.ffbs2$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out1.ffbs2$error$forecast$y_width_all
+    }
+
+    dat$FFBS.W = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out1.pl", dat_env)) {
@@ -554,7 +615,16 @@ get_dat_sim_loss_all = function(dat_env) {
     discount_factor = NA
     W = median(dat_env$out1.pl$fit$W[, ncol(dat_env$out1.pl$fit$W)])
     
-    dat$PL = c(dat_env$out1.pl$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out1.pl$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out1.pl$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out1.pl$error$forecast$y_width_all
+    }
+
+    dat$PL = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out1.hva", dat_env)) {
@@ -565,10 +635,18 @@ get_dat_sim_loss_all = function(dat_env) {
     }
     discount_factor = NA
     W = median(dat_env$out1.hva$fit$W)
+
     yloss = rep(NA, kstep)
     if ("error" %in% names(dat_env$out1.hva)) {
       if ("forecast" %in% names(dat_env$out1.hva)) {
-        yloss = c(dat_env$out1.hva$error$forecast$y_loss_all)
+        yloss = rep(NA, kstep)
+        if (type == "loss") {
+          yloss = dat_env$out1.hva$error$forecast$y_loss_all
+        } else if (type == "coverage") {
+          yloss = dat_env$out1.hva$error$forecast$y_covered_all
+        } else if (type == "width") {
+          yloss = dat_env$out1.hva$error$forecast$y_width_all
+        }
       }
     }
     
@@ -583,10 +661,18 @@ get_dat_sim_loss_all = function(dat_env) {
     }
     discount_factor = NA
     W = median(dat_env$out1.mcmc$fit$W)
+
     yloss = rep(NA, kstep)
     if ("error" %in% names(dat_env$out1.mcmc)) {
       if ("forecast" %in% names(dat_env$out1.mcmc)) {
-        yloss = c(dat_env$out1.mcmc$error$forecast$y_loss_all)
+        yloss = rep(NA, kstep)
+        if (type == "loss") {
+          yloss = dat_env$out1.mcmc$error$forecast$y_loss_all
+        } else if (type == "coverage") {
+          yloss = dat_env$out1.mcmc$error$forecast$y_covered_all
+        } else if (type == "width") {
+          yloss = dat_env$out1.mcmc$error$forecast$y_width_all
+        }
       }
     }
     
@@ -597,13 +683,31 @@ get_dat_sim_loss_all = function(dat_env) {
     discount_factor = NA
     W = NA
     mu0 = NA
-    dat$EPI = c(dat_env$forecast1.epi$y_loss_all, discount_factor, W, mu0)
+
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$forecast1.epi$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$forecast1.epi$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$forecast1.epi$y_width_all
+    }
+    dat$EPI = c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("forecast1.wt", dat_env)) {
     discount_factor = NA
     W = NA
     mu0 = NA
+
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$forecast1.wt$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$forecast1.wt$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$forecast1.wt$y_width_all
+    }
     dat$WT = c(dat_env$forecast1.wt$y_loss_all, discount_factor, W, mu0)
   }
 
@@ -611,7 +715,7 @@ get_dat_sim_loss_all = function(dat_env) {
 }
 
 
-get_dat_real_loss_all <- function(dat_env) {
+get_dat_real_loss_all <- function(dat_env, type = "loss") {
   kstep <- length(c(dat_env$out.lba$error$forecast$y_loss_all))
 
   if ("mu0" %in% names(dat_env$out.lba2$fit)) {
@@ -622,9 +726,18 @@ get_dat_real_loss_all <- function(dat_env) {
   discount_factor <- dat_env$opts.lba$custom_discount_factor
   W <- dat_env$opts.lba$W
 
+  ytmp = rep(NA, kstep)
+  if (type == "loss") {
+    ytmp = dat_env$out.lba$error$forecast$y_loss_all
+  } else if (type == "coverage") {
+    ytmp = dat_env$out.lba$error$forecast$y_covered_all
+  } else if (type == "width") {
+    ytmp = dat_env$out.lba$error$forecast$y_width_all
+  }
+
   dat <- data.frame(
     k = factor(c(1:kstep, "discount", "W", "mu0"), levels = c(1:kstep, "discount", "W", "mu0")),
-    LBA.DF = c(dat_env$out.lba$error$forecast$y_loss_all, discount_factor, W, mu0)
+    LBA.DF = c(ytmp, discount_factor, W, mu0)
   )
 
   if (exists("out.lba2", dat_env)) {
@@ -634,7 +747,15 @@ get_dat_real_loss_all <- function(dat_env) {
       mu0 <- NA
     }
 
-    dat$LBA.W <- c(dat_env$out.lba2$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out.lba2$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out.lba2$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out.lba2$error$forecast$y_width_all
+    }
+    dat$LBA.W <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out.mcs", dat_env)) {
@@ -646,7 +767,15 @@ get_dat_real_loss_all <- function(dat_env) {
     discount_factor <- dat_env$opts.mcs$custom_discount_factor
     W <- dat_env$opts.mcs$W
 
-    dat$MCS.DF <- c(dat_env$out.mcs$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out.mcs$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out.mcs$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out.mcs$error$forecast$y_width_all
+    }
+    dat$MCS.DF <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out.mcs2", dat_env)) {
@@ -656,7 +785,15 @@ get_dat_real_loss_all <- function(dat_env) {
       mu0 <- NA
     }
 
-    dat$MCS.W <- c(dat_env$out.mcs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out.mcs2$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out.mcs2$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out.mcs2$error$forecast$y_width_all
+    }
+    dat$MCS.W <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out.ffbs", dat_env)) {
@@ -668,7 +805,15 @@ get_dat_real_loss_all <- function(dat_env) {
       mu0 <- NA
     }
 
-    dat$FFBS.DF <- c(dat_env$out.ffbs$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out.ffbs$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out.ffbs$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out.ffbs$error$forecast$y_width_all
+    }
+    dat$FFBS.DF <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out.ffbs2", dat_env)) {
@@ -678,7 +823,15 @@ get_dat_real_loss_all <- function(dat_env) {
       mu0 <- NA
     }
 
-    dat$FFBS.W <- c(dat_env$out.ffbs2$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out.ffbs2$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out.ffbs2$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out.ffbs2$error$forecast$y_width_all
+    }
+    dat$FFBS.W <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out.pl", dat_env)) {
@@ -690,7 +843,15 @@ get_dat_real_loss_all <- function(dat_env) {
     discount_factor <- NA
     W <- median(dat_env$out.pl$fit$W[, ncol(dat_env$out.pl$fit$W)])
 
-    dat$PL <- c(dat_env$out.pl$error$forecast$y_loss_all, discount_factor, W, mu0)
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$out.pl$error$forecast$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$out.pl$error$forecast$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$out.pl$error$forecast$y_width_all
+    }
+    dat$PL <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("out.hva", dat_env)) {
@@ -704,7 +865,13 @@ get_dat_real_loss_all <- function(dat_env) {
     yloss <- rep(NA, kstep)
     if ("error" %in% names(dat_env$out.hva)) {
       if ("forecast" %in% names(dat_env$out.hva)) {
-        yloss <- c(dat_env$out.hva$error$forecast$y_loss_all)
+        if (type == "loss") {
+          yloss = dat_env$out.hva$error$forecast$y_loss_all
+        } else if (type == "coverage") {
+          yloss = dat_env$out.hva$error$forecast$y_covered_all
+        } else if (type == "width") {
+          yloss = dat_env$out.hva$error$forecast$y_width_all
+        }
       }
     }
 
@@ -722,7 +889,13 @@ get_dat_real_loss_all <- function(dat_env) {
     yloss <- rep(NA, kstep)
     if ("error" %in% names(dat_env$out.mcmc)) {
       if ("forecast" %in% names(dat_env$out.mcmc)) {
-        yloss <- c(dat_env$out.mcmc$error$forecast$y_loss_all)
+        if (type == "loss") {
+          yloss = dat_env$out.mcmc$error$forecast$y_loss_all
+        } else if (type == "coverage") {
+          yloss = dat_env$out.mcmc$error$forecast$y_covered_all
+        } else if (type == "width") {
+          yloss = dat_env$out.mcmc$error$forecast$y_width_all
+        }
       }
     }
 
@@ -733,14 +906,32 @@ get_dat_real_loss_all <- function(dat_env) {
     discount_factor <- NA
     W <- NA
     mu0 <- NA
-    dat$EPI <- c(dat_env$forecast.epi$y_loss_all, discount_factor, W, mu0)
+
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$forecast.epi$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$forecast.epi$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$forecast.epi$y_width_all
+    }
+    dat$EPI <- c(ytmp, discount_factor, W, mu0)
   }
 
   if (exists("forecast.wt", dat_env)) {
     discount_factor <- NA
     W <- NA
     mu0 <- NA
-    dat$WT <- c(dat_env$forecast.wt$y_loss_all, discount_factor, W, mu0)
+
+    ytmp = rep(NA, kstep)
+    if (type == "loss") {
+      ytmp = dat_env$forecast.wt$y_loss_all
+    } else if (type == "coverage") {
+      ytmp = dat_env$forecast.wt$y_covered_all
+    } else if (type == "width") {
+      ytmp = dat_env$forecast.wt$y_width_all
+    }
+    dat$WT <- c(ytmp, discount_factor, W, mu0)
   }
 
   return(dat)

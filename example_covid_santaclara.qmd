@@ -485,7 +485,7 @@ if (save_figures) {
 # mod$model$obs_dist = "poisson"
 
 opts.mcs <- dgtf_default_algo_settings("mcs")
-opts.mcs$num_particle <- 50000
+opts.mcs$num_particle <- 100000
 opts.mcs$num_step_ahead_forecast <- 10
 
 opts.mcs$W <- 0.002
@@ -496,9 +496,13 @@ opts.mcs$custom_discount_factor <- 0.92
 
 opts.mcs$num_backward <- 10
 
+# opts.mcs$mu0 <- list(
+#     prior_name = "uniform",
+#     prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+# )
 opts.mcs$mu0 <- list(
-    prior_name = "uniform",
-    prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+    prior_name = "gamma",
+    prior_param = c(1, 1)
 )
 ```
 
@@ -765,7 +769,7 @@ if (save_data) {
 ```{r}
 #| label: run dgtf_infer with pl
 #| include: false
-opts.pl <- dgtf_d #| efault_algo_settings("pl")
+opts.pl <- dgtf_default_algo_settings("pl")
 opts.pl$num_particle <- 50000
 opts.pl$num_smooth <- 1000
 opts.pl$num_step_ahead_forecast <- 10
@@ -1526,9 +1530,9 @@ if (save_data) {
 #| label: forecasting and fitting error of mcmc
 #| include: false
 opts.mcmc <- dgtf_default_algo_settings("mcmc")
-opts.mcmc$nsample <- 2000
-opts.mcmc$nthin <- 2
-opts.mcmc$nburnin <- 5000
+opts.mcmc$nsample <- 5000
+opts.mcmc$nthin <- 5
+opts.mcmc$nburnin <- 10000
 opts.mcmc$num_step_ahead_forecast <- 10
 
 opts.mcmc$mh_sd <- 0.1
