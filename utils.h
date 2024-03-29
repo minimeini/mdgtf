@@ -283,6 +283,71 @@ inline void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List 
 	}
 
 	prior.init(prior_name, param[0], param[1]);
+	prior.init_param(infer, init);
 }
+
+inline void init_dist(Dist &dist, const Rcpp::List &opts)
+{
+	Rcpp::List param_opts = opts;
+
+	std::string dist_name = "invgamma";
+	if (param_opts.containsElementNamed("prior_name"))
+	{
+		dist_name = Rcpp::as<std::string>(param_opts["prior_name"]);
+	}
+	else if (param_opts.containsElementNamed("name"))
+	{
+		dist_name = Rcpp::as<std::string>(param_opts["name"]);
+	}
+	tolower(dist_name);
+
+	Rcpp::NumericVector param = {0.01, 0.01};
+	if (param_opts.containsElementNamed("prior_param"))
+	{
+		param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
+	}
+	else if (param_opts.containsElementNamed("param"))
+	{
+		param = Rcpp::as<Rcpp::NumericVector>(param_opts["param"]);
+	}
+
+	dist.init(dist_name, param[0], param[1]);
+}
+
+inline void init_prior(Prior &prior, const Rcpp::List &opts)
+    {
+        Rcpp::List param_opts = opts;
+
+        std::string prior_name = "invgamma";
+        if (param_opts.containsElementNamed("prior_name"))
+        {
+            prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
+            tolower(prior_name);
+        }
+
+        Rcpp::NumericVector param = {1, 1};
+        if (param_opts.containsElementNamed("prior_param"))
+        {
+            param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
+        }
+
+        prior.init(prior_name, param[0], param[1]);
+
+        bool infer = false;
+        if (param_opts.containsElementNamed("infer"))
+        {
+            infer = Rcpp::as<bool>(param_opts["infer"]);
+        }
+
+        double init = 0.;
+        if (param_opts.containsElementNamed("init"))
+        {
+            init = Rcpp::as<double>(param_opts["init"]);
+        }
+
+        prior.init_param(infer, init);
+
+        return;
+    }
 
 #endif

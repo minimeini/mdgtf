@@ -697,6 +697,7 @@ public:
     std::string name = "undefined"; // name of the distribution
     double par1 = 0.; // first parameter of the distribution
     double par2 = 0.; // second parameter of the distribution
+
     bool infer = false; // if the corresponding parameter is unknown
     double val = 0.; // initial value of the corresponding parameter
 
@@ -752,9 +753,41 @@ public:
         par2 = par2_new;
     }
 
+};
 
 
-    
+class Prior : public Dist
+{
+public:
+    bool infer = false;
+    double val = 0.;
+
+    Prior() : Dist()
+    {
+        infer = false;
+        val = 0.;
+        return;
+    }
+
+    Prior(
+        const std::string &name_,   // name of the distribution
+        const double &par1_,        // first parameter of the distribution
+        const double &par2_,        // second parameter of the distribution
+        const bool &infer_ = false, // if the corresponding parameter is unknown
+        const double &init_val_ = 0.) : Dist(name_, par1_, par2_)
+    {
+        infer = infer_;
+        val = init_val_;
+        return;
+    }
+
+    void init_param(const bool &param_infer, const double &param_init)
+    {
+        infer = param_infer;
+        val = param_init;
+        return;
+    }
+
 };
 
 

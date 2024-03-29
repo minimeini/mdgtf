@@ -44,6 +44,11 @@ public:
         _name = obs_dist;
         _par1 = par1;
         _par2 = par2;
+
+        if (obs_list[obs_dist] == AVAIL::Dist::poisson)
+        {
+            _par2 = 1.;
+        }
         return;
     }
 
@@ -53,6 +58,11 @@ public:
         _name = "nbinom";
         _par1 = 0.;  // mu0
         _par2 = 30.; // delta_nb
+
+        if (obs_list[_name] == AVAIL::Dist::poisson)
+        {
+            _par2 = 1.;
+        }
         return;
     }
 

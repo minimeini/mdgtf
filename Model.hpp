@@ -2037,7 +2037,7 @@ public:
     }
 
     static arma::vec func_Vt_approx( // Checked. OK.
-        const arma::vec lambda, // (nT + 1) x 1
+        const arma::vec &lambda, // (nT + 1) x 1
         const ObsDist &obs_dist,
         const std::string &link_func)
     {
@@ -2099,8 +2099,76 @@ public:
         }
         } // switch by observation distribution.
 
-        bound_check(Vt, "func_Vt_approx: Vt", true, true);
+        bound_check<arma::vec>(Vt, "func_Vt_approx: Vt", true, true);
         Vt.elem(arma::find(Vt < EPS8)).fill(EPS8);
+        return Vt;
+    }
+
+    static double func_Vt_approx( // Checked. OK.
+        const double &lambda,      // (nT + 1) x 1
+        const ObsDist &obs_dist,
+        const std::string &link_func)
+    {
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        double Vt = lambda;
+
+        switch (obs_list[obs_dist.name])
+        {
+        case AVAIL::Dist::poisson:
+        {
+            switch (link_list[tolower(link_func)])
+            {
+            case AVAIL::Func::identity:
+            {
+                Vt = lambda;
+                break;
+            }
+            case AVAIL::Func::exponential:
+            {
+                // Vt = 1 / lambda = exp( - log(lambda) )
+                Vt = -std::log(std::abs(lambda) + EPS);
+                Vt = std::exp(Vt);
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            } // switch by link
+            break; // Done case poisson
+        }
+        case AVAIL::Dist::nbinomm:
+        {
+            switch (link_list[tolower(link_func)])
+            {
+            case AVAIL::Func::identity:
+            {
+                Vt = lambda * (lambda + obs_dist.par2);
+                Vt = Vt / obs_dist.par2;
+                break;
+            }
+            case AVAIL::Func::exponential:
+            {
+                double nom = (lambda + obs_dist.par2);
+                double denom = obs_dist.par2 * lambda;
+                Vt = nom / denom;
+                break;
+            }
+            default:
+            {
+                break;
+            }
+            } // switch by link
+            break; // case nbinom
+        }
+        default:
+        {
+        }
+        } // switch by observation distribution.
+
+        bound_check(Vt, "func_Vt_approx<double>: Vt", true, true);
+        Vt = std::max(Vt, EPS);
         return Vt;
     }
 

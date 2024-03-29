@@ -203,6 +203,13 @@ public:
         return sample(alpha, beta);
     }
 
+    /**
+     * @brief Draw one sample from the inverse-gamma distribution.
+     * 
+     * @param alpha shape parameter
+     * @param beta rate parameter of the corresponding gamma distribution; scale parameter for inverse-gamma distribution.
+     * @return double 
+     */
     static double sample(const double &alpha, const double &beta)
     {
         double out = 1. / R::rgamma(alpha, 1. / beta);

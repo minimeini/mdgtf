@@ -987,3 +987,73 @@ plot_mfe <- function(dat, upbnd = NULL, fontsize = 16) {
 
   return(p)
 }
+
+
+get_samples = function(prior_name, prior_param, nsample, cnst_val = 0.) {
+  if (prior_name == "gamma") {
+    samples = rgamma(nsample, prior_param[1], rate = prior_param[2])
+  } else if (prior_name == "invgamma") {
+    samples = 1. / rgamma(nsample, prior_param[1], rate = prior_param[2])
+  } else if (prior_name == "uniform") {
+    samples = runif(nsample, prior_param[1], prior_param[2])
+  } else if (prior_name == "normal") {
+    samples = rnorm(nsample, prior_param[1], prior_param[2])
+  } else if (prior_name == "constant") {
+    samples = rep(cnst_val, nsample)
+  }
+
+  return(samples)
+}
+
+
+get_prior_sensitivity_dat_pl = function(out, opts, par_name, upbnd = 1.e3) {
+  stopifnot(par_name %in% names(out$fit))
+
+  samples = c(out$fit[[par_name]])
+  samples[!is.finite(samples)] = NA
+  nsample = length(samples)
+
+  cnst_val = opts[[par_name]]$init
+
+  prior_name = opts[[par_name]]$prior_name
+  prior_param = opts[[par_name]]$prior_param
+  priors = get_samples(prior_name, prior_param, nsample, cnst_val)
+  priors[!is.finite(priors)] = NA
+  priors[priors > upbnd] = NA
+  priors[priors < 0] = NA
+
+  opts_name = paste0(par_name, "_init")
+  prior_name = opts[[opts_name]]$prior_name
+  prior_param = opts[[opts_name]]$prior_param
+  inits = get_samples(prior_name, prior_param, nsample, cnst_val)
+  inits[!is.finite(inits)] = NA
+  inits[inits > upbnd] = NA
+  inits[inits < 0] = NA
+
+  dat <- data.frame(
+    val = c(samples, priors, inits),
+    label = c(
+      rep("sample", nsample),
+      rep("prior", nsample),
+      rep("init", nsample)
+    )
+  )
+
+  return(dat)
+}
+
+plot_prior_sensitivity_pl = function(out, opts, par_name, upbnd = 1.e3, plot_init = TRUE) {
+  dat = get_prior_sensitivity_dat_pl(out, opts, par_name, upbnd)
+  dat = dat[!is.na(dat$val),]
+
+  p <- ggplot(dat, aes(x = val)) +
+    geom_bar(stat = "bin", data = subset(dat, label == "sample"), fill = "red", alpha = 0.2, bins = 100) +
+    geom_bar(stat = "bin", data = subset(dat, label == "prior"), fill = "gray", alpha = 0.6, bins = 100) +
+    theme_minimal()
+  
+  if (plot_init) {
+    p = p + geom_bar(stat = "bin", data = subset(dat, label == "init"), fill = "royalblue", alpha = 0.2, bins = 100)
+  }
+
+  return(p)
+}
