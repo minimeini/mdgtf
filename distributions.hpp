@@ -44,12 +44,34 @@ public:
     {
         arma::mat prec = inverse(Sigma, false, true);
         double logdet = arma::log_det_sympd(prec);
-        double cnst = static_cast<double>(mu.n_elem) * std::log(2. * arma::datum::pi);
+        double cnst = static_cast<double>(mu.n_elem) * LOG2PI;
         
         arma::vec diff = x - mu;
         double dist = arma::as_scalar(diff.t() * prec * diff);
 
         double logprob = - cnst + logdet - dist;
+        logprob *= 0.5;
+
+        if (return_log)
+        {
+            return logprob;
+        }
+        else
+        {
+            logprob = std::min(logprob, UPBND);
+            return std::exp(logprob);
+        }
+    }
+
+    static double dmvnorm2(const arma::vec &x, const arma::vec &mu, const arma::mat &Prec, const bool &return_log = true)
+    {
+        double logdet = arma::log_det_sympd(Prec);
+        double cnst = static_cast<double>(mu.n_elem) * LOG2PI;
+
+        arma::vec diff = x - mu;
+        double dist = arma::as_scalar(diff.t() * Prec * diff);
+
+        double logprob = -cnst + logdet - dist;
         logprob *= 0.5;
 
         if (return_log)
@@ -215,6 +237,12 @@ public:
         double out = 1. / R::rgamma(alpha, 1. / beta);
         bound_check(out, "InverseGamma::sample: out");
         return out;
+    }
+
+
+    static double dinvgamma(const double &x, const double &alpha, const double &beta)
+    {
+        
     }
 };
 

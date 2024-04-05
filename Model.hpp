@@ -2023,7 +2023,7 @@ public:
     }
 
     /**
-     * @brief Get the regressor eta[1], ..., eta[nT]. If mu = 0, it is equal to only the transfer effect, f[1], ..., f[nT]. Must set Fphi before using this function.
+     * @brief Get the regressor eta[1], ..., eta[nT] as a function of {w[t]}, evolution errors of the latent state. If mu = 0, it is equal to only the transfer effect, f[1], ..., f[nT]. Must set Fphi before using this function.
      *
      * @param wt
      * @param y (nT + 1) x 1, only use the past values before each t
@@ -2031,10 +2031,12 @@ public:
      */
     arma::vec get_eta_approx(const double &mu0 = 0.)
     {
-        arma::vec ft = mu0 + f0 + Fn * wt.tail(nT); // nT x 1
-        bound_check(ft, "func_eta_approx: ft");
-        return ft;
+        arma::vec eta = mu0 + f0 + Fn * wt.tail(nT); // nT x 1
+        bound_check(eta, "func_eta_approx: eta");
+        return eta;
     }
+
+
 
     static arma::vec func_Vt_approx( // Checked. OK.
         const arma::vec &lambda, // (nT + 1) x 1

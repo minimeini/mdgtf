@@ -133,7 +133,7 @@ dim <- list(
     nlag = 16,
     ntime = length(y2) - 1,
     truncated = TRUE,
-    regressor_baseline = TRUE
+    regressor_baseline = FALSE
 )
 
 mod <- list(
@@ -762,14 +762,20 @@ opts.pl$num_smooth <- 1000
 opts.pl$num_step_ahead_forecast <- 10
 opts.pl$do_smoothing <- TRUE
 
-opts.pl$W$init <- 0.01
-opts.pl$W$infer <- TRUE
 
 opts.pl$mu0 <- list(
+    init = mod1$param$obs[1],
+    infer = FALSE,
     prior_name = "uniform",
-    prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+    prior_param = c(0., median(sim1$y))
 )
 
+opts.pl$W <- list(
+    init = 0.01,
+    infer = TRUE,
+    prior_name = "invgamma",
+    prior_param = c(0.1, 0.1)
+)
 out.pl <- dgtf_infer(
     mod, y2 + 1,
     "pl", opts.pl,

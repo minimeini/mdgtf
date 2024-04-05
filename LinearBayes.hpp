@@ -202,7 +202,7 @@ namespace LBA
     static arma::vec func_Ft(
         const Model &model,
         const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
-        const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
+        const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,       // y[0], y[1], ..., y[nT]
         const bool &fill_zero = LBA_FILL_ZERO
     )
@@ -1414,6 +1414,16 @@ namespace LBA
             }
 
             return output;
+        }
+
+        arma::mat get_mt()
+        {
+            return _mt;
+        }
+
+        arma::cube get_Ct()
+        {
+            return _Ct;
         }
     
     private:

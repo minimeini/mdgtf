@@ -230,11 +230,47 @@ inline arma::mat inverse(
 			}
 			else
 			{
-				throw std::invalid_argument("\nError: matrice is not invertible.");
+				throw std::runtime_error("\nError: matrice is not invertible.");
 			}
 		}
 	}
 	
+
+	return mat_inv;
+}
+
+inline arma::mat inverse(
+	arma::mat &Rchol,
+	const arma::mat &matrice,
+	const bool &force_pseudo = false,
+	const bool &try_pseudo = false)
+{
+	arma::mat mat_inv;
+	if (force_pseudo)
+	{
+		mat_inv = arma::pinv(matrice);
+	}
+	else
+	{
+		try
+		{
+			Rchol = arma::chol(matrice);
+			arma::mat mat_Rinv = arma::inv(arma::trimatu(Rchol));
+			mat_inv = mat_Rinv * mat_Rinv.t();
+		}
+		catch (...)
+		{
+			if (try_pseudo)
+			{
+				std::cout << "\nWarning: matrice is not invertible, use pseudo inverse instead.\n\n";
+				mat_inv = arma::pinv(matrice);
+			}
+			else
+			{
+				throw std::runtime_error("\nError: matrice is not invertible.");
+			}
+		}
+	}
 
 	return mat_inv;
 }
@@ -315,39 +351,62 @@ inline void init_dist(Dist &dist, const Rcpp::List &opts)
 }
 
 inline void init_prior(Prior &prior, const Rcpp::List &opts)
-    {
-        Rcpp::List param_opts = opts;
+{
+	Rcpp::List param_opts = opts;
 
-        std::string prior_name = "invgamma";
-        if (param_opts.containsElementNamed("prior_name"))
-        {
-            prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
-            tolower(prior_name);
-        }
+	std::string prior_name = "invgamma";
+	if (param_opts.containsElementNamed("prior_name"))
+	{
+		prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
+		tolower(prior_name);
+	}
 
-        Rcpp::NumericVector param = {1, 1};
-        if (param_opts.containsElementNamed("prior_param"))
-        {
-            param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
-        }
+	Rcpp::NumericVector param = {1, 1};
+	if (param_opts.containsElementNamed("prior_param"))
+	{
+		param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
+	}
 
-        prior.init(prior_name, param[0], param[1]);
+	prior.init(prior_name, param[0], param[1]);
 
-        bool infer = false;
-        if (param_opts.containsElementNamed("infer"))
-        {
-            infer = Rcpp::as<bool>(param_opts["infer"]);
-        }
+	bool infer = false;
+	if (param_opts.containsElementNamed("infer"))
+	{
+		infer = Rcpp::as<bool>(param_opts["infer"]);
+	}
 
-        double init = 0.;
-        if (param_opts.containsElementNamed("init"))
-        {
-            init = Rcpp::as<double>(param_opts["init"]);
-        }
+	double init = 0.;
+	if (param_opts.containsElementNamed("init"))
+	{
+		init = Rcpp::as<double>(param_opts["init"]);
+	}
 
-        prior.init_param(infer, init);
+	prior.init_param(infer, init);
 
-        return;
-    }
+	return;
+}
+
+
+/**
+ * @brief Get the exponential for each element of the input vector. The vector is shifted by plus/minus a constant, such that the maximum value is below a specific upper bound, and we can ensure the exponential is finite.
+ * 
+ * @param input 
+ * @param upbnd 
+ * @return arma::vec 
+ */
+inline arma::vec safe_exp_proportional(const arma::vec &input, const double &upbnd = 100)
+{
+	arma::vec output = input;
+	double bnd = output.max() - upbnd;
+	
+	if (bnd > 0 )
+	{
+		output.for_each([&bnd](arma::vec::elem_type &val)
+						{ val -= bnd; });
+	}
+
+	output = arma::exp(output);
+	return output;
+}
 
 #endif
