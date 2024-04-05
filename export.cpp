@@ -63,6 +63,11 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
         opts = SMC::FFBS::default_settings();
         break;
     }
+    case AVAIL::Algo::TFS:
+    {
+        opts = SMC::TFS::default_settings();
+        break;
+    }
     case AVAIL::Algo::ParticleLearning:
     {
         opts = SMC::PL::default_settings();
@@ -357,6 +362,37 @@ Rcpp::List dgtf_infer(
 
         break;
     } // case FFBS
+    case AVAIL::Algo::TFS:
+    {
+        SMC::TFS tfs(model, y);
+        tfs.init(method_settings);
+
+        auto start = std::chrono::high_resolution_clock::now();
+        tfs.infer(model);
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
+
+        output = tfs.get_output();
+
+        if (nforecast > 0)
+        {
+            forecast = tfs.forecast(model);
+        }
+
+        if (forecast_error)
+        {
+            Rcpp::List tmp = tfs.forecast_error(model, loss_func, k);
+            error["forecast"] = tmp;
+        }
+        if (fitted_error)
+        {
+            Rcpp::List tmp = tfs.fitted_error(model, loss_func);
+            error["fitted"] = tmp;
+        }
+
+        break;
+    } // case TFS
     case AVAIL::Algo::ParticleLearning:
     {
         SMC::PL pl(model, y);

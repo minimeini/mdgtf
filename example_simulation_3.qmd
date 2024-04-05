@@ -80,7 +80,7 @@ dim <- list(
     nlag = 16,
     ntime = 200,
     truncated = TRUE,
-    regressor_baseline = TRUE
+    regressor_baseline = FALSE
 )
 
 mod1 <- list(

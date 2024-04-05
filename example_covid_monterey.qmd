@@ -136,7 +136,7 @@ dim <- list(
     nlag = 16,
     ntime = length(y2) - 1,
     truncated = TRUE,
-    regressor_baseline = TRUE
+    regressor_baseline = FALSE
 )
 
 mod <- list(
@@ -668,19 +668,26 @@ if (save_figures) {
 #| label: optimal settings of ffbs
 
 opts.ffbs <- dgtf_default_algo_settings("ffbs")
-opts.ffbs$num_particle <- 50000
+opts.ffbs$num_particle <- 10000
 opts.ffbs$num_smooth <- 1000
 opts.ffbs$do_smoothing <- TRUE
+opts.ffbs$do_backward = TRUE
 
 opts.ffbs$num_step_ahead_forecast <- 10
 
 opts.ffbs$W <- 0.0001
+opts.ffbs$W = list(
+    init = 0.0001,
+    infer = FALSE
+)
 
 opts.ffbs$use_discount <- TRUE
 opts.ffbs$use_custom <- TRUE
 opts.ffbs$custom_discount_factor <- 0.996
 
 opts.ffbs$mu0 <- list(
+    init = 1,
+    infer = FALSE,
     prior_name = "uniform",
     prior_param = c(0., min(100, quantile(c(y2), 0.25)))
 )
@@ -706,6 +713,8 @@ out.ffbs <- dgtf_infer(
 ```{r}
 #| label: run dgtf_infer with ffbs with W
 #| include: false
+
+mod$param$obs = c(1, 5)
 opts.ffbs$use_discount <- FALSE
 out.ffbs2 <- dgtf_infer(
     mod, y2,

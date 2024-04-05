@@ -684,7 +684,10 @@ opts1.ffbs$do_smoothing <- TRUE
 
 opts1.ffbs$num_step_ahead_forecast <- 10
 
-opts1.ffbs$W$init <- 0.006
+opts1.ffbs$W = list(
+    init = 0.006,
+    infer = FALSE
+)
 opts1.ffbs$mu0$init = mod1$param$obs[1]
 
 opts1.ffbs$use_discount <- TRUE
@@ -713,6 +716,8 @@ out1.ffbs <- dgtf_infer(
 #| label: run dgtf_infer with ffbs with W
 #| include: false
 
+opts1.ffbs$do_smoothing <- TRUE
+opts1.ffbs$do_backward <- TRUE
 opts1.ffbs$use_discount <- FALSE
 out1.ffbs2 <- dgtf_infer(
     mod1, sim1$y,
@@ -781,6 +786,69 @@ if (save_data) {
         )
     )
 }
+```
+
+
+### Two-filter Smoothing
+
+#### Optimal Settings
+
+```{r}
+#| label: optimal settings of tfs
+
+opts1.tfs <- dgtf_default_algo_settings("tfs")
+opts1.tfs$num_particle <- 100000
+opts1.tfs$num_smooth <- 1000
+opts1.tfs$do_smoothing <- TRUE
+
+opts1.tfs$num_step_ahead_forecast <- 10
+
+opts1.tfs$W <- list(
+    init = 0.01,
+    infer = FALSE
+)
+opts1.tfs$mu0 <- list(
+    init = mod1$param$obs[1],
+    infer = FALSE
+)
+
+opts1.tfs$use_discount <- TRUE
+opts1.tfs$use_custom <- TRUE
+opts1.tfs$custom_discount_factor <- 0.91
+
+```
+
+#### Inference
+
+```{r}
+#| label: run dgtf_infer with tfs with discount factor
+#| include: false
+opts1.tfs$use_discount <- TRUE
+out1.tfs <- dgtf_infer(
+    mod1, sim1$y,
+    "tfs", opts1.tfs,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+```
+
+```{r}
+#| label: run dgtf_infer with tfs with W
+#| include: false
+
+opts1.tfs$do_backward <- TRUE
+opts1.tfs$use_discount <- FALSE
+out1.tfs2 <- dgtf_infer(
+    mod1, sim1$y,
+    "tfs", opts1.tfs,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+
 ```
 
 

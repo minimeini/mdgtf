@@ -12,6 +12,7 @@ class AVAIL
 public:
     enum Algo {
         LinearBayes,
+        TFS, // Two-filter Smoothing
         FFBS,
         MCS,
         ParticleLearning,

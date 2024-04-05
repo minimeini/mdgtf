@@ -52,6 +52,18 @@ namespace LBA
         return Gt;
     }
 
+
+    static arma::mat func_Ht(const Model &model)
+    {
+        arma::mat Ht = model.transfer.H0;
+        if (model.transfer.trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
+        {
+            throw std::invalid_argument("Ht for iterative transfer function: not defined yet.");
+        }
+
+        return Ht;
+    }
+
     enum DiscountType
     {
         all_elems,

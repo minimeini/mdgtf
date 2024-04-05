@@ -394,7 +394,7 @@ inline void init_prior(Prior &prior, const Rcpp::List &opts)
  * @param upbnd 
  * @return arma::vec 
  */
-inline arma::vec safe_exp_proportional(const arma::vec &input, const double &upbnd = 100)
+inline arma::vec safe_exp_proportional(const arma::vec &input, const double &upbnd = 100, const double &lobnd = -100)
 {
 	arma::vec output = input;
 	double bnd = output.max() - upbnd;
@@ -405,7 +405,15 @@ inline arma::vec safe_exp_proportional(const arma::vec &input, const double &upb
 						{ val -= bnd; });
 	}
 
+	bnd = output.min() - lobnd;
+	if (bnd < 0)
+	{
+		output.for_each([&bnd](arma::vec::elem_type &val)
+						{ val -= bnd; });
+	}
+
 	output = arma::exp(output);
+	bound_check<arma::vec>(output, "safe_exp_proportional: output");
 	return output;
 }
 

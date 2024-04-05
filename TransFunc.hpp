@@ -29,18 +29,20 @@ private:
     arma::vec _ft; // (nT + r) x 1, r = 1 if using sliding transfer function.
     arma::vec _F0; // nP x 1
     arma::mat _G0; // nP x nP
+    arma::mat _H0; // nP x nP
     
 public:
     LagDist dlag;
     GainFunc fgain;
     const arma::mat &G0;
     const arma::vec &F0;
+    const arma::mat &H0;
     std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
     const std::string &name;
     const arma::vec &iter_coef;
     const double &coef_now;
 
-    TransFunc() : G0(_G0), F0(_F0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+    TransFunc() : G0(_G0), F0(_F0), H0(_H0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init_default();
         return;
@@ -50,7 +52,7 @@ public:
         const std::string &trans_func = "sliding",
         const std::string &gain_func = "softplus",
         const std::string &lag_dist = "lognorm",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : G0(_G0), F0(_F0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : G0(_G0), F0(_F0), H0(_H0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
     {
         init(dim, trans_func, gain_func, lag_dist, lag_param);
         return;
@@ -64,6 +66,7 @@ public:
         _name = "sliding";
         G0_sliding();
         F0_sliding();
+        H0_sliding();
 
         dlag.init_default();
         dlag.get_Fphi(_dim.nL);
@@ -126,6 +129,7 @@ public:
             _ft.set_size(dim.nT + 1);
             G0_sliding();
             F0_sliding();
+            H0_sliding();
         }
 
         _ft.zeros();
@@ -289,6 +293,51 @@ public:
         // G0.diag(-1).ones();
 
         return G0;
+    }
+
+    void H0_sliding()
+    {
+        // arma::mat G0(_dim.nP, _dim.nP, arma::fill::zeros);
+        _H0.set_size(_dim.nP, _dim.nP);
+        _H0.zeros();
+        _H0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
+
+        unsigned int nr = _dim.nP - 1;
+        if (_dim.regressor_baseline)
+        {
+            // nr -= 1;
+            // _G0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
+            throw std::invalid_argument("H0_sliding with mu0 in state vector: not defined yet.");
+        }
+
+        for (unsigned int i = 1; i <= nr; i++)
+        {
+            _H0.at(i - 1, i) = 1.;
+        }
+        // G0.diag(-1).ones();
+
+        return;
+    }
+
+    static arma::mat H0_sliding(const Dim &dim) // Tested. OK.
+    {
+        arma::mat H0(dim.nP, dim.nP, arma::fill::zeros);
+        H0.at(dim.nP - 1, dim.nP - 1) = 1.;
+
+        unsigned int nr = dim.nP - 1;
+        if (dim.regressor_baseline)
+        {
+            // nr -= 1;
+            // H0.at(dim.nP - 1, dim.nP - 1) = 1.;
+            throw std::invalid_argument("H0_sliding with mu0 in state vector: not defined yet.");
+        }
+        for (unsigned int i = 1; i <= nr; i++)
+        {
+            H0.at(i - 1, i) = 1.;
+        }
+        // G0.diag(-1).ones();
+
+        return H0;
     }
 
     /**
