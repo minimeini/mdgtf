@@ -154,7 +154,7 @@ public:
         const std::string &link_func,
         const double &mu0 = 0.)
     {
-        double eta;
+        double eta = 0.;
 
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
         switch (link_list[tolower(link_func)])
@@ -175,6 +175,39 @@ public:
         double ft = eta - mu0;
 
         return ft;
+    }
+
+
+    static double dlambda_deta(double &lambda, const double &eta, const std::string &link_func)
+    {
+        double deriv = 0.;
+        lambda = 0.;
+        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        switch (link_list[link_func])
+        {
+        case AVAIL::Func::exponential:
+        {
+            lambda = std::exp(lambda);
+            deriv = lambda;
+            break;
+        }
+        case AVAIL::Func::logistic:
+        {
+            double tmp = std::exp(eta);
+            lambda = tmp / (1. + tmp);
+            deriv = tmp / std::pow(1. + tmp, 2.);
+        }
+        default:
+        {
+            // Identity link
+            lambda = eta;
+            deriv = 1.;
+            break;
+        }
+        }
+
+        bound_check(deriv, "LinkFunc::dlambda_deta: deriv");
+        return deriv;
     }
 };
 

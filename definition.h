@@ -22,6 +22,17 @@ public:
         MeanFieldVariation
     };
 
+    enum Filter {
+        BootstrapFilter,
+        AuxiliaryParticleFilter
+    };
+
+    enum Smoother {
+        FilterSmoother,
+        BackwardSmoother,
+        TwoFilterSmoother
+    };
+
     enum Dist {
         lognorm,
         nbinomm,
@@ -30,6 +41,7 @@ public:
         gaussian,
         invgamma,
         gamma,
+        beta,
         halfcauchy,
         uniform,
         constant
@@ -39,7 +51,8 @@ public:
         identity,
         exponential,
         softplus,
-        ramp
+        ramp,
+        logistic
     };
 
     enum Transfer
@@ -112,6 +125,10 @@ private:
 
         ALGO_MAP["ffbs"] = Algo::FFBS;
 
+        ALGO_MAP["tfs"] = Algo::TFS;
+        ALGO_MAP["two_filter"] = Algo::TFS;
+        ALGO_MAP["twofilter"] = Algo::TFS;
+
         ALGO_MAP["pl"] = Algo::ParticleLearning;
         ALGO_MAP["particlelearning"] = Algo::ParticleLearning;
         ALGO_MAP["particle_learning"] = Algo::ParticleLearning;
@@ -154,6 +171,7 @@ private:
 
         LINK_MAP["identity"] = Func::identity;
         LINK_MAP["exponential"] = Func::exponential;
+        LINK_MAP["logistic"] = Func::logistic;
         return LINK_MAP;
     }
 
@@ -165,6 +183,7 @@ private:
         GAIN_MAP["exponential"] = Func::exponential;
         GAIN_MAP["identity"] = Func::identity;
         GAIN_MAP["softplus"] = Func::softplus;
+        GAIN_MAP["logistic"] = Func::logistic;
         return GAIN_MAP;
     }
 
@@ -230,8 +249,11 @@ private:
 
         OBS_MAP["nbinom"] = Dist::nbinomm; // negative-binomial characterized by mean and location.
         OBS_MAP["nbinomm"] = Dist::nbinomm;
+
         OBS_MAP["nbinomp"] = Dist::nbinomp;
+
         OBS_MAP["poisson"] = Dist::poisson;
+
         OBS_MAP["gaussian"] = Dist::gaussian;
         OBS_MAP["normal"] = Dist::gaussian;
         return OBS_MAP;
@@ -242,6 +264,8 @@ private:
         std::map<std::string, Dist> ERR_MAP;
 
         ERR_MAP["gaussian"] = Dist::gaussian;
+        ERR_MAP["normal"] = Dist::gaussian;
+
         ERR_MAP["constant"] = Dist::constant;
         return ERR_MAP;
     }
@@ -642,30 +666,29 @@ public:
     }
 
 
-    /**
-     * @brief Check if there is any conflicts in the dimension settings.
-     * 
-     */
-    static void validate(
-        const Dim &dim, 
-        const std::string &dlag_name, 
-        const double &dlag_par2)
+    void update_nL(const unsigned int &nlag)
     {
-        std::map<std::string, AVAIL::Dist> _lag_list = AVAIL::lag_list;
-        if (_lag_list[dlag_name] == AVAIL::Dist::lognorm && !dim.truncated)
-        {
-            throw std::invalid_argument("Error: non-truncated form should only be used with a negative-binomial lag distribution");
-        } else if (!dim.truncated)
-        {
-            // A negative-binomial lag distribution with no truncation.
-            unsigned int nP_ = static_cast<unsigned int>(dlag_par2) + 1;
-            if (dim.nP != nP_)
-            {
-                throw std::invalid_argument("Error: dimension of non-truncated negative-binomial lags should be (r + 1)");
-            }
-        }
+        nL = nlag;
+    }
 
-        return;
+    void update_nL(const unsigned int &nlag, const std::string &trans_func = "sliding")
+    {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        nL = nlag;
+        if (trans_list[trans_func] == AVAIL::Transfer::sliding)
+        {
+            nP = nL;
+        }
+    }
+
+    void update_nP(const unsigned int &np, const std::string &trans_func = "sliding")
+    {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        nP = np;
+        if (trans_list[trans_func] == AVAIL::Transfer::sliding)
+        {
+            nL = nP;
+        }
     }
 };
 
@@ -754,6 +777,142 @@ public:
         par2 = par2_new;
     }
 
+    static double dprior(const double &val, const Dist &prior, const bool &return_log = true, const double &jacobian = false)
+    {
+        std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+        double out = 0.;
+        switch (dist_list[prior.name]) // switch by prior distribution
+        {
+        case AVAIL::Dist::gamma: // non-negative
+        {
+            out = R::dgamma(val, prior.par1, 1. / prior.par2, return_log);
+            break;
+        }
+        case AVAIL::Dist::invgamma: // non-negative
+        {
+            double tau2 = std::abs(1. / val); // tau2 ~ Gamma
+            double logtau2 = std::log(tau2 + EPS); // log jacobian
+
+            out = R::dgamma(tau2, prior.par1, 1. / prior.par2, true);
+            if (jacobian) // plus jacobian
+            {
+                out += logtau2;
+            }
+
+            if (!return_log)
+            {
+                out = std::exp(out);
+            }
+
+            break;
+        }
+        case AVAIL::Dist::gaussian: // whole real line
+        {
+            out = R::dnorm4(val, prior.par1, prior.par2, return_log);
+            break;
+        }
+        case AVAIL::Dist::nbinomm: // non-negative
+        {
+            double prob_succ = prior.par2 / (prior.par1 + prior.par2);
+            out = R::dnbinom(val, prior.par2, prob_succ, return_log);
+            break;
+        }
+        case AVAIL::Dist::nbinomp: // non-negative
+        {
+            out = R::dnbinom(val, prior.par2, 1. - prior.par1, return_log);
+            break;
+        }
+        case AVAIL::Dist::lognorm: // non-negative
+        {
+            out = R::dlnorm(val, prior.par1, std::sqrt(prior.par2), return_log);
+            break;
+        }
+        case AVAIL::Dist::poisson: // non-negative
+        {
+            out = R::dpois(val, prior.par1, return_log);
+            break;
+        }
+        case AVAIL::Dist::beta:
+        {
+            out = R::dbeta(val, prior.par1, prior.par2, return_log);
+            break;
+        }
+        default: // uniform or other types
+        {
+            out = return_log ? 0 : 1;
+            break;
+        }
+        }
+
+        return out;
+    }
+
+    static double val2real(const double &val, const std::string &dist_name, const bool &inverse_transform = false)
+    {
+        std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+        double out = val;
+
+        switch (dist_list[dist_name]) // switch by prior distribution
+        {
+        case AVAIL::Dist::gamma: // non-negative
+        {
+            if (inverse_transform)
+            {
+                out = std::exp(val);
+            }
+            else
+            {
+                out = std::log(std::abs(val) + EPS);
+            }
+            break;
+        }
+        case AVAIL::Dist::invgamma: // non-negative
+        {
+            if (inverse_transform)
+            {
+                out = std::exp(val);
+            }
+            else
+            {
+                out = std::log(std::abs(val) + EPS);
+            }
+            break;
+        }
+        case AVAIL::Dist::lognorm: // non-negative
+        {
+            if (inverse_transform)
+            { // exponential
+                out = std::exp(val);
+            }
+            else
+            { // logarithm
+                out = std::log(std::abs(val) + EPS);
+            }
+            break;
+        }
+        case AVAIL::Dist::beta:
+        {
+            if (inverse_transform)
+            { // logistic
+                double tmp = std::exp( - val);
+                out = 1. / (1. + tmp);
+            }
+            else
+            { // logit
+                double odd = std::abs(val / (1. - val));
+                out = std::log(odd + EPS);
+            }
+            
+            break;
+        }
+        default: // gaussian or other types
+        {
+            break;
+        }
+        }
+
+        return out;
+    }
 };
 
 
@@ -789,6 +948,8 @@ public:
         return;
     }
 
+
+    
 };
 
 

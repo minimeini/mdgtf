@@ -344,16 +344,12 @@ public:
         }
     }
 
-    void update_dlag(const double &value, const unsigned int &iloc)
+    unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30)
     {
-        if (iloc == 0)
-        {
-            _transfer.dlag.update_par1(value);
-        }
-        else
-        {
-            _transfer.dlag.update_par2(value);
-        }
+        unsigned int nlag = transfer.update_dlag(par1, par2, max_lag);
+        dim.update_nL(nlag, transfer.name);
+
+        return nlag;
     }
 
     void set_dim(
@@ -1145,6 +1141,92 @@ public:
         return lambda;
     }
 
+    static double dloglik_deta(
+        const double &eta, 
+        const double &yt, 
+        const double &obs_par2, 
+        const std::string &obs_dist = "nbinomm", 
+        const std::string &link_func = "identity")
+    {
+        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+
+        double lambda;
+        double dlam_deta = LinkFunc::dlambda_deta(lambda, eta, link_func);
+
+        double dloglik_dlam = 0.;
+        switch (obs_list[obs_dist])
+        {
+        case AVAIL::Dist::nbinomm:
+        {
+            dloglik_dlam = nbinomm::dlogp_dlambda(lambda, yt, obs_par2);
+            break;
+        }
+        case AVAIL::Dist::poisson:
+        {
+            dloglik_dlam = Poisson::dlogp_dlambda(lambda, yt);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument("Model::dloglik_deta: observation distribution must be nbinomm or poisson.");
+        }
+        }
+
+        double dloglik_deta = dloglik_dlam * dlam_deta;
+        bound_check(dloglik_deta, "Model::dloglik_deta: dloglik_deta");
+        return dloglik_deta;
+    }
+
+    /**
+     * @brief Parameter must be first mapped to real line.
+     * 
+     * @param y 
+     * @param eta 
+     * @param psi 
+     * @param nlag 
+     * @param lag_dist 
+     * @param lag_par1 
+     * @param lag_par2 
+     * @param dobs 
+     * @param link_func 
+     * @return arma::vec 
+     */
+    static arma::vec dloglik_dpar(
+        arma::vec &Fphi,
+        const arma::vec &y, 
+        const arma::vec &hpsi,
+        const unsigned int &nlag,
+        const std::string &lag_dist,
+        const double &lag_par1,
+        const double &lag_par2,
+        const ObsDist &dobs,
+        const std::string &link_func)
+    {
+        Fphi.clear();
+        Fphi = LagDist::get_Fphi(nlag, lag_dist, lag_par1, lag_par2);
+        arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, lag_dist, lag_par1, lag_par2);
+
+        arma::mat grad(y.n_elem, 2, arma::fill::zeros);
+        for (unsigned int t = 1; t < y.n_elem; t ++)
+        {
+            double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
+            eta += dobs.par1;
+            double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
+
+            double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
+            double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
+
+            grad.at(t, 0) = dll_deta * deta_dpar1;
+            grad.at(t, 1) = dll_deta * deta_dpar2;
+        }
+
+        bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+        arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
+        return grad_out;
+    }
+
+
+
 private:
     ObsDist _dobs; // Observation distribution
     TransFunc _transfer;
@@ -1165,6 +1247,34 @@ private:
 class StateSpace
 {
 public:
+    /**
+     * @brief Only for sliding transfer function and regressor with zero baseline intensity.
+     * 
+     * @param psi 
+     * @param model 
+     * @return arma::mat 
+     */
+    static arma::mat psi2theta(
+        const arma::vec &psi, // (nT + 1) x 1
+        const Model &model)
+    {
+        if (model.dim.regressor_baseline)
+        {
+            throw std::invalid_argument("psi2theta: only for regression with zero mean.");
+        }
+
+        unsigned int nr = model.dim.nP - 1;
+        arma::mat Theta(model.dim.nP, model.dim.nT + 1, arma::fill::zeros);
+
+        Theta.at(0, 0) = psi.at(0);
+        for (unsigned int t = 0; t < model.dim.nT; t++)
+        {
+            Theta.submat(1, t + 1, nr, t + 1) = Theta.submat(0, t, nr - 1, t);
+            Theta.at(0, t + 1) = psi.at(t + 1);
+        }
+
+        return Theta;
+    }
     /**
      * @brief Expected state evolution equation for the DLM form model. Expectation of theta[t + 1] = g(theta[t]).
      *
@@ -1911,15 +2021,40 @@ public:
         dhpsi = psi;
     }
 
-    void set_Fphi(const LagDist &dlag, const unsigned int &nlag)
+    void update_dlag(const LagDist &dlag)
+    {
+        unsigned int nlag = dlag.Fphi.n_elem;
+        set_Fphi(dlag, nlag);
+        return;
+    }
+
+    void update_dlag(const LagDist &dlag, const arma::vec &y)
+    {
+        unsigned int nlag = dlag.Fphi.n_elem;
+        set_Fphi(dlag, nlag);
+
+        update_f0(y);
+        update_Fn(y);
+        
+        return;
+    }
+
+    void set_Fphi(const LagDist &dlag, const unsigned int &nlag) // (nT + 1)
     {
         Fphi.zeros();
-        arma::vec tmp = LagDist::get_Fphi(nT, dlag.name, dlag.par1, dlag.par2);
+        arma::vec tmp = LagDist::get_Fphi(nT, dlag.name, dlag.par1, dlag.par2); // nT x 1
         if (nlag < nT)
         {
             tmp.subvec(nlag, nT - 1).zeros();
         }
-        Fphi.tail(nT) = tmp;
+        Fphi.tail(nT) = tmp; // fill Fphi[1:nT], leave Fphi[0] = 0.
+    }
+
+    void set_Fphi(const arma::vec &Fphi_new)
+    {
+        unsigned int n_elem = Fphi_new.n_elem;
+        Fphi.zeros(); // Fphi: (nT + 1) x 1
+        Fphi.subvec(1, n_elem) = Fphi_new;
     }
 
     void set_psi(const arma::vec &psi_in)
@@ -1961,6 +2096,12 @@ public:
         update_Fn(y);
     }
 
+    void update_data(const arma::vec &y)
+    {
+        update_f0(y);
+        update_Fn(y);
+    }
+
     /**
      * @brief Need to run `set_psi` before using this function. Fphi must be initialized.
      * 
@@ -1973,14 +2114,25 @@ public:
         const arma::vec &y     // (nT + 1) X 1, y[0], y[1], ..., y[nT], only use the past values before t
         )
     {
-        arma::vec phi = Fphi.subvec(1, t);
-        // t x 1, phi[1], ..., phi[nlag], phi[nlag + 1], ..., phi[t]
-        //      = phi[1], ..., phi[nlag],       0,       ..., 0 (at time t)
-        arma::vec yt = y.subvec(0, t - 1);        // y[0], y[1], ..., y[t-1]
-        arma::vec dhpsi_tmp = dhpsi.subvec(1, t); // t x 1, h'(psi[1]), ..., h'(psi[t])
 
-        arma::vec increment_row = arma::reverse(yt % dhpsi_tmp); // t x 1
-        increment_row = increment_row % phi;
+        arma::vec increment_row;
+        try
+        {
+            arma::vec phi = Fphi.subvec(1, t);
+            // t x 1, phi[1], ..., phi[nlag], phi[nlag + 1], ..., phi[t]
+            //      = phi[1], ..., phi[nlag],       0,       ..., 0 (at time t)
+            arma::vec yt = y.subvec(0, t - 1);        // y[0], y[1], ..., y[t-1]
+            arma::vec dhpsi_tmp = dhpsi.subvec(1, t); // t x 1, h'(psi[1]), ..., h'(psi[t])
+
+            increment_row = arma::reverse(yt % dhpsi_tmp); // t x 1
+            increment_row = increment_row % phi;
+        }
+        catch(const std::exception& e)
+        {
+            std::cout << "\n t = " << t << ", Fphi len = " << Fphi.n_elem << ", y len = " << y.n_elem << ", dhpsi len = " << dhpsi.n_elem;
+            throw std::runtime_error(e.what());
+        }
+        
         return increment_row;
     }
 
@@ -2034,6 +2186,14 @@ public:
         arma::vec eta = mu0 + f0 + Fn * wt.tail(nT); // nT x 1
         bound_check(eta, "func_eta_approx: eta");
         return eta;
+    }
+
+
+    void get_lambda_eta_approx(arma::vec &lambda, arma::vec &eta, Model &model, const arma::vec &y)
+    {
+        eta = get_eta_approx(model.dobs.par1);
+        lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.);
+        return;
     }
 
 

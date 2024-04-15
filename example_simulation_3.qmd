@@ -44,7 +44,6 @@ fig_width <- 13.8
 
 ```{r}
 #| label: source code
-
 library(ggplot2)
 library(gridExtra)
 
@@ -72,12 +71,12 @@ component <- list(
     err_dist = "gaussian"
 )
 param <- list(
-    obs = c(1, 5),
-    lag = c(0.4, 6), # mode = 2.8969
+    obs = c(1, 60),
+    lag = c(0.4, 6), # (kappa, r): mode = 2.8969
     err = c(0.01, 0)
 )
 dim <- list(
-    nlag = 16,
+    nlag = qnbinom(0.99, param$lag[2], 1 - param$lag[1]),
     ntime = 200,
     truncated = TRUE,
     regressor_baseline = FALSE
@@ -1121,13 +1120,17 @@ opts1.mcmc$num_step_ahead_forecast <- 10
 
 opts1.mcmc$mh_sd <- 0.1
 
-opts1.mcmc$mu0$init <- mod1$param$obs[1]
-opts1.mcmc$mu0$infer <- TRUE
-opts1.mcmc$mu0$mh_sd <- 1
 
-opts1.mcmc$W$init <- 0.01
+opts1.mcmc$mu0$init <- mod1$param$obs[1]
+opts1.mcmc$mu0$infer = FALSE
+opts1.mcmc$mu0$mh_sd = 1
+
+opts1.mcmc$W$init <- mod1$param$err[1]
 opts1.mcmc$W$infer <- TRUE
 
+opts1.mcmc$rho$init = mod1$param$obs[2]
+opts1.mcmc$rho$infer = TRUE
+opts1.mcmc$rho$mh_sd = 0.5
 
 
 out1.mcmc <- dgtf_infer(
@@ -1271,6 +1274,38 @@ mod1$model$obs_dist = "nbinom"
 mod1$param$obs[2] = 50
 ```
 
+### Misspecification of Observation Dispersion
+
+```{r}
+#| label: dispersion 5 smaller than true 60
+mod1x <- mod1
+mod1x$param$obs <- c(1, 100)
+mod1x$param$dim$nlag <- qnbinom(0.99, mod1x$param$lag[2], 1 - mod1x$param$lag[1])
+opts1.lbax <- dgtf_default_algo_settings("lba")
+opts1.lbax$W <- 0.01
+opts1.lbax$use_discount <- FALSE
+
+out1.lbax <- dgtf_infer(
+    mod1x, sim1$y,
+    "lba", opts1.lbax,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+
+
+if (exists("out1.lbax")) {
+    tag <- paste0("sim-", seed, "-lbax-")
+    plots <- plot_output(
+        out1.lbax, sim1$y,
+        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
+```
+
 ### Optimal Lag Distribution
 
 ```{r}
@@ -1407,6 +1442,107 @@ if (save_data) {
     )
 }
 ```
+
+
+### Misspecification of Lag Distribution
+
+```{r}
+#| label: Using a smaller kappa
+
+
+mod1x <- mod1
+mod1x$param$lag <- c(0.1, 6)
+mod1x$param$dim$nlag = qnbinom(0.99, mod1x$param$lag[2], 1-mod1x$param$lag[1])
+opts1.lbax <- dgtf_default_algo_settings("lba")
+opts1.lbax$W <- 0.01
+opts1.lbax$use_discount <- FALSE
+
+out1.lbax <- dgtf_infer(
+    mod1x, sim1$y,
+    "lba", opts1.lbax,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+
+
+if (exists("out1.lbax")) {
+    tag <- paste0("sim-", seed, "-lbax-")
+    plots <- plot_output(
+        out1.lbax, sim1$y,
+        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
+```
+
+
+```{r}
+#| label: Using a larger kappa
+
+
+mod1x <- mod1
+mod1x$param$lag <- c(0.8, 6)
+mod1x$dim$nlag <- qnbinom(0.99, mod1x$param$lag[2], 1 - mod1x$param$lag[1])
+
+opts1.lbax <- dgtf_default_algo_settings("lba")
+opts1.lbax$W <- 0.01
+opts1.lbax$use_discount <- FALSE
+
+out1.lbax <- dgtf_infer(
+    mod1x, sim1$y,
+    "lba", opts1.lbax,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+
+
+if (exists("out1.lbax")) {
+    tag <- paste0("sim-", seed, "-lbax-")
+    plots <- plot_output(
+        out1.lbax, sim1$y,
+        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
+```
+
+
+```{r}
+#| label: Using the true kappa
+
+
+mod1x <- mod1
+opts1.lbax <- dgtf_default_algo_settings("lba")
+opts1.lbax$W <- 0.01
+opts1.lbax$use_discount <- FALSE
+
+out1.lbax <- dgtf_infer(
+    mod1x, sim1$y,
+    "lba", opts1.lbax,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+
+
+if (exists("out1.lbax")) {
+    tag <- paste0("sim-", seed, "-lbax-")
+    plots <- plot_output(
+        out1.lbax, sim1$y,
+        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
+```
+
 
 ## External Methods
 

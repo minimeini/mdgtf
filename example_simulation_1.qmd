@@ -77,7 +77,7 @@ param <- list(
     err = c(0.01, 0)
 )
 dim <- list(
-    nlag = 16,
+    nlag = round(qlnorm(0.99, param$lag[1], sqrt(param$lag[2])) + 0.5),
     ntime = 200,
     truncated = TRUE,
     regressor_baseline = FALSE
@@ -797,14 +797,14 @@ if (save_data) {
 #| label: optimal settings of tfs
 
 opts1.tfs <- dgtf_default_algo_settings("tfs")
-opts1.tfs$num_particle <- 100000
+opts1.tfs$num_particle <- 10000
 opts1.tfs$num_smooth <- 1000
 opts1.tfs$do_smoothing <- TRUE
 
 opts1.tfs$num_step_ahead_forecast <- 10
 
 opts1.tfs$W <- list(
-    init = 0.01,
+    init = mod1$param$err[1],
     infer = FALSE
 )
 opts1.tfs$mu0 <- list(
@@ -862,38 +862,38 @@ out1.tfs2 <- dgtf_infer(
 opts1.pl <- dgtf_default_algo_settings("pl")
 
 opts1.pl$num_particle <- 10000
-opts1.pl$num_smooth <- 500
+opts1.pl$num_smooth <- 10000
 opts1.pl$num_step_ahead_forecast <- 0
 opts1.pl$do_smoothing <- TRUE
 
-opts1.pl$max_iter = 100
+opts1.pl$max_iter <- 100
 
 opts1.pl$mu0 <- list(
-    init = 0,
-    infer = TRUE,
+    init = mod1$param$obs[1],
+    infer = FALSE,
     prior_name = "normal",
     prior_param = c(0, 10.)
 )
 
 opts1.pl$mu0_init <- list(
     prior_name = "constant",
-    prior_param = c(0., 10.)
+    prior_param = c(mod1$param$obs[1], 10.)
 )
 
 opts1.pl$W <- list(
-    init = 0.01,
+    init = mod1$param$err[1],
     infer = TRUE,
     prior_name = "invgamma",
-    prior_param = c(0.1, 0.1)
+    prior_param = c(1, 1)
 )
 
 opts1.pl$W_init <- list(
-    prior_name = "gamma",
-    prior_param = c(0.1, 0.1)
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
 )
 
 out1.pl <- dgtf_infer(
-    mod1, sim1$y + 1,
+    mod1, sim1$y,
     "pl", opts1.pl,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
@@ -903,24 +903,25 @@ out1.pl <- dgtf_infer(
 
 ```{r}
 #| label: evaluation of pl
-#|
-print(print_loss_all(out1.pl))
 
-if ("W" %in% names(out1.pl$fit)) {
-    print(summary(c(out1.pl$fit$W)))
-    p <- plot_prior_sensitivity_pl(out1.pl, opts1.pl, "W", 1, TRUE)
-    if (plot_figures) {
-        plot(p) + labs(title = "prior of W, IG(0.1, 0.1), is in gray; posterior of W is in red; initial values in blue")
-    }
-}
+out1.pl.loss_all = print_loss_all(out1.pl)
+print(out1.pl.loss_all)
 
-if ("mu0" %in% names(out1.pl$fit)) {
-    print(summary(c(out1.pl$fit$mu0)))
-    p <- plot_prior_sensitivity_pl(out1.pl, opts1.pl, "mu0", 2, TRUE)
-    if (plot_figures) {
-        plot(p) + labs(title = "prior of a, N(0, 10), is in gray; posterior of a is in red; initial values in blue")
-    }
-}
+# if ("W" %in% names(out1.pl$fit)) {
+#     print(summary(c(out1.pl$fit$W)))
+#     p <- plot_prior_sensitivity_pl(out1.pl, opts1.pl, "W", 1, FALSE)
+#     if (plot_figures) {
+#         plot(p) + labs(title = "prior of W, IG(0.1, 0.1), is in gray; posterior of W is in red; initial values in blue")
+#     }
+# }
+
+# if ("mu0" %in% names(out1.pl$fit)) {
+#     print(summary(c(out1.pl$fit$mu0)))
+#     p <- plot_prior_sensitivity_pl(out1.pl, opts1.pl, "mu0", 2, FALSE)
+#     if (plot_figures) {
+#         plot(p) + labs(title = "prior of a, N(0, 10), is in gray; posterior of a is in red; initial values in blue")
+#     }
+# }
 ```
 
 ```{r}
@@ -949,6 +950,9 @@ if (save_data) {
     )
 }
 ```
+
+
+#### Prior Sensitivity
 
 
 ### HVA
@@ -1185,6 +1189,10 @@ if (exists("out1.hva") && exists("out1.hva2")) {
 
 #### Inference
 
+If inferring both $W$ and `par1`, the correlation of two trajectories is -0.87.
+If inferring both $W$ and `par2`, the correlation of two trajectories is -0.5.
+If inferring both `par1` and `par2`
+
 ```{r}
 #| label: run dgtf_infer with mcmc
 #| include: false
@@ -1193,19 +1201,40 @@ if (exists("out1.hva") && exists("out1.hva2")) {
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
 opts1.mcmc$nsample <- 5000
 opts1.mcmc$nthin <- 2
-opts1.mcmc$nburnin <- 50000
+opts1.mcmc$nburnin <- 1000
 opts1.mcmc$num_step_ahead_forecast <- 10
 
-opts1.mcmc$mh_sd <- 0.1
+opts1.mcmc$mh_sd <- 1
+opts1.mcmc$epsilon = 0.005  
+opts1.mcmc$L = 10
+opts1.mcmc$m = c(0.1, 0.1)
 
 opts1.mcmc$mu0$init <- mod1$param$obs[1]
-opts1.mcmc$mu0$infer = TRUE
-opts1.mcmc$mu0$mh_sd = 1
+opts1.mcmc$mu0$infer <- FALSE
+opts1.mcmc$mu0$mh_sd <- 1
 
-opts1.mcmc$W$init <- 0.01
+opts1.mcmc$W$init <- mod1$param$err[1]
 opts1.mcmc$W$infer <- TRUE
 
+opts1.mcmc$rho$init <- mod1$param$obs[2]
+opts1.mcmc$rho$infer <- TRUE
+opts1.mcmc$rho$mh_sd <- 0.5
 
+opts1.mcmc$par1 <- list(
+    infer = TRUE,
+    init = 2,
+    prior_name = "gaussian",
+    prior_param = c(0., 1.),
+    mh_sd = 0.2
+)
+
+opts1.mcmc$par2 <- list(
+    infer = TRUE,
+    init = mod1$param$lag[2],
+    prior_name = "invgamma",
+    prior_param = c(1, 1),
+    mh_sd = 0.2
+)
 
 out1.mcmc <- dgtf_infer(
     mod1, sim1$y,
@@ -1459,6 +1488,27 @@ if (save_data) {
         )
     )
 }
+```
+
+
+### Misspecification of Lag Distribution
+
+```{r}
+opts1.lba <- dgtf_default_algo_settings("lba")
+opts1.lba$W <- 0.01
+opts1.lba$use_discount <- FALSE
+
+
+
+out1.lba2 <- dgtf_infer(
+    mod1, sim1$y,
+    "lba", opts1.lba,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss
+)
+
 ```
 
 

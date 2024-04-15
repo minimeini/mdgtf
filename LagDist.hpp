@@ -70,6 +70,7 @@ public:
         _isnbinom = (lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
     }
 
+
     const double &par1;
     const double &par2;
     const arma::vec &Fphi;
@@ -83,6 +84,8 @@ public:
     {
         _Fphi.set_size(nlag);
         _Fphi.zeros();
+        
+        double nlag2 = nlag;
 
         switch (lag_list[_name])
         {
@@ -159,6 +162,127 @@ public:
 
         bound_check<arma::vec>(Fphi, "arma::vec get_Fphi: Fphi");
         return Fphi;
+    }
+
+
+    /**
+     * @brief Fist-order derivative of the P.M.F of the lag distribution w.r.t. its two parameters (mapped to the whole real lines). For non-negative parameters, we take its logarithm. For parameters in (0, 1), we takes its logit.
+     * 
+     * @return arma::mat (nlag x 2) 
+     */
+    static arma::mat get_Fphi_grad(
+        const unsigned int &nlag,
+        const std::string &lag_dist,
+        const double &lag_par1,
+        const double &lag_par2)
+    {
+        arma::mat Fphi_deriv(nlag, 2, arma::fill::zeros);
+        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+
+        for (unsigned int d = 1; d <= nlag; d++)
+        {
+            switch (lag_list[lag_dist])
+            {
+            case AVAIL::Dist::lognorm:
+            {
+                arma::vec dlag_grad = lognorm::dlag_dpar(d, lag_par1, lag_par2);
+                Fphi_deriv.row(d - 1) = dlag_grad.t();
+                break;
+            }
+            case AVAIL::Dist::nbinomp:
+            {
+                double dlag_dlogitkappa = nbinom::dlag_dlogitkappa(d, lag_par1, lag_par2);
+                Fphi_deriv.at(d - 1, 0) = dlag_dlogitkappa;
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
+            }
+            }
+        }
+
+        return Fphi_deriv;
+    }
+
+
+    unsigned int update_param(const double &par1_new, const double &par2_new, const unsigned int &max_lag = 30)
+    {
+        _par1 = par1_new;
+        _par2 = par2_new;
+        unsigned int nlag = update_nlag(_name, _par1, _par2, 0.99, max_lag);
+        get_Fphi(nlag);
+
+        return nlag;
+    }
+
+    /**
+     * @brief If number of lags changes, just run `get_nlag` and then run `get_Fphi` to update lag distribution.
+     * 
+     * @param lag_dist 
+     * @param lag_par1 
+     * @param lag_par2 
+     * @param prob 
+     * @return unsigned int 
+     */
+    static unsigned int update_nlag(
+        const std::string &lag_dist, 
+        const double &lag_par1, 
+        const double &lag_par2, 
+        const double &prob = 0.99,
+        const unsigned int &max_lag = 30)
+    {
+        if (prob < 0 || prob > 1)
+        {
+            throw std::invalid_argument("LagDist::update_nlag: probability must in (0, 1).");
+        }
+        double nlag_ = 1;
+        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+
+        switch (lag_list[lag_dist])
+        {
+        case AVAIL::Dist::lognorm:
+        {
+            nlag_ = R::qlnorm(prob, lag_par1, std::sqrt(lag_par2), 1, 0);
+            break;
+        }
+        case AVAIL::Dist::nbinomp:
+        {
+            // par1: kappa; par2: r
+            nlag_ = R::qnbinom(prob, lag_par2, 1. - lag_par1, true, false);
+            break;
+        }
+        case AVAIL::Dist::nbinomm:
+        {
+            // double prob_succ = par2 / (par1 + par2);
+            // return R::rnbinom(par2, prob_succ);
+            double prob_succ = lag_par2 / (lag_par1 + lag_par2);
+            nlag_ = R::qnbinom(prob, lag_par2, prob_succ, true, false);
+            break;
+        }
+        case AVAIL::Dist::gamma:
+        {
+            nlag_ = R::qgamma(prob, lag_par1, 1./lag_par2, true, false);
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom', 'nbinomm', 'gamma'.");
+        }
+        }
+
+        bound_check(nlag_, "LagDist::update_nlag: nlag_");
+        unsigned int nlag = static_cast<unsigned int>(nlag_);
+
+        nlag = std::max(nlag, (unsigned int)1);
+        nlag = std::min(nlag, max_lag);
+        return nlag;
+    }
+
+    void update_Fphi(const arma::vec &Fphi_new)
+    {
+        _Fphi = Fphi_new;
+        return;
     }
 
     /**

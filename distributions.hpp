@@ -91,6 +91,8 @@ private:
 };
 
 
+
+
 class Beta : public Dist
 {
 public: 
@@ -240,9 +242,31 @@ public:
     }
 
 
-    static double dinvgamma(const double &x, const double &alpha, const double &beta)
+    static double dinvgamma(
+        const double &x, 
+        const double &alpha, 
+        const double &beta, 
+        const bool &logx = true, // if true, return the density of log(x), IG x Jacobian
+        const bool &logp = true) // if true, return the logarithm of the density
     {
+        double tau2 = std::abs(1. / x); // tau2 ~ Gamma
+        double logtau2 = std::log(tau2 + EPS);
+
+        double out = R::dgamma(tau2, alpha, 1./beta, true);
+        if (logx) // plus jacobian
+        {
+            out += logtau2;
+        }
         
+        
+        if (!logp)
+        {
+            out = std::exp(out);
+        }
+
+        bound_check(out, "InverseGamma::dinvgamma: out");
+
+        return out;
     }
 };
 
@@ -349,6 +373,30 @@ public:
     {
         return 1. / std::abs(alpha);
     }
+
+
+    static double dgamma_discrete(const double &lag, const double &alpha, const double &beta)
+    {
+        if (lag < 0)
+        {
+            throw std::invalid_argument("Gamma::dgamma_discrete: lag must be nonnegative");
+        }
+
+        double out = 0.;
+        if (lag > 0)
+        {
+            out += R::pgamma(lag, alpha, 1./beta, true, false);
+        }
+        if (lag > 1)
+        {
+            out -= R::pgamma(lag - 1, alpha, 1./beta, true, false);
+        }
+
+        bound_check(out, "Gamma::dgamma_discrete: out");
+
+        return out;
+    }
+
 };
 
 class Poisson : public Dist
@@ -443,6 +491,14 @@ public:
         lambda_var = Gamma::var(alpha, beta);
 
         return;
+    }
+
+
+    static double dlogp_dlambda(const double &lambda, const double &yt)
+    {
+        double output = (yt / lambda) - 1.;
+        bound_check(output, "Poisson::dlogp_dlambda: output");
+        return output;
     }
 
 
@@ -622,6 +678,23 @@ public:
     }
 
 
+    static double dlogp_dlambda(const double &lambda, const double &yt, const double &par2)
+    {
+        if (lambda < 0 || par2 < 0)
+        {
+            throw std::invalid_argument("nbinomm::dlogp_dlambda: lambda and rho must be positive.");
+        }
+        double c1 = yt / lambda;
+        double nom = yt + par2;
+        double denom = lambda + par2;
+        double c2 = nom / denom;
+
+        double output = c1 - c2;
+        bound_check(output, "nbinomm::dlogp_dlambda: output");
+        return output;
+    }
+
+
 private:
     double _nu;
 };
@@ -629,9 +702,9 @@ private:
 /**
  * @brief Negative-binomial distribution, characterized by `nbinomp`: probability (kappa, r).
  *
- * @param _name "nbinomp"
- * @param _par1 kappa
- * @param _par2 r
+ * @param _name "nbinomp" (1-kappa)^r * kappa^y
+ * @param _par1 kappa: probability of failures (y is number of failures)
+ * @param _par2 r: number of successes.
  */
 class nbinom : public Dist
 {
@@ -811,6 +884,25 @@ public:
         return output;
     }
 
+    static double dlag_dlogitkappa(const double &y, const double &kappa, const double &r)
+    {
+        if (r < 1)
+        {
+            throw std::invalid_argument("nbinom::dlag_dlogitkappa only valid if r >= 1.");
+        }
+        double dkappa_dlogit = kappa * (1. - kappa);
+        double c1 = std::pow(kappa, y - 1);
+        double c2 = std::pow(1. - kappa, r - 1);
+        double c3 = c1 * c2;
+
+        c1 = (1. - kappa) * y;
+        c2 = - r * kappa;
+        double dlag_dkappa = (c2 + c1) * c3;
+        double out = dlag_dkappa * dkappa_dlogit;
+        bound_check(out, "nbinom::dlag_dlogitkappa: out");
+        return out;
+    }
+
     double sample()
     {
         return R::rnbinom(par2, 1. - par1);
@@ -973,7 +1065,6 @@ public:
         const double &mu,
         const double &sd2)
     {
-        lognorm lg;
         arma::vec output(nL);
         for (unsigned int d = 0; d < nL; d++)
         {
@@ -981,6 +1072,61 @@ public:
         }
 
         return output;
+    }
+
+    /**
+     * @brief Derivative of discretized log-normal P.M.F w.r.t v := (log(lag) - mu) / sd.
+     *
+     * @param lag
+     * @param mu
+     * @param sd2
+     * @return arma::vec
+     */
+    static arma::vec dlag_dpar(
+        const double &lag,
+        const double &mu,
+        const double &sd2)
+    {
+        if (lag < EPS)
+        {
+            throw std::invalid_argument("deriv_dlognorm: lag must be nonnegative.");
+        }
+
+        double sig = std::sqrt(sd2 + EPS);
+        double dv_dmu = -1. / sig;
+
+        double v = (std::log(lag + EPS) - mu) / sig;
+        double dlag_dv = R::dnorm4(v, 0., 1., false);
+        double dv_dlogsig2 = -0.5 * v;
+
+        double dlag_dmu = dlag_dv * dv_dmu;
+        double dlag_dlogsig2 = dlag_dv * dv_dlogsig2;
+
+        if (lag > 1)
+        {
+            double lag2 = lag - 1;
+            v = (std::log(lag2 + EPS) - mu) / sig;
+            dlag_dv = R::dnorm4(v, 0., 1., false);
+            dv_dlogsig2 = -0.5 * v;
+
+            dlag_dmu -= dlag_dv * dv_dmu;
+            dlag_dlogsig2 -= dlag_dv * dv_dlogsig2;
+        }
+
+        arma::vec out = {dlag_dmu, dlag_dlogsig2};
+
+        try
+        {
+            bound_check<arma::vec>(out, "lognorm::dlag_dpar: out");
+        }
+        catch(const std::exception& e)
+        {
+            std::cout << "\n mu = " << mu << ", sd2 = " << sd2 << ", lag = " << lag;
+            throw std::runtime_error(e.what());
+        }
+        
+        
+        return out;
     }
 
 private:
@@ -1015,7 +1161,11 @@ private:
         const double &mu,
         const double &sd2)
     {
-        double output = plognorm(lag, mu, sd2) - plognorm(lag - 1., mu, sd2);
+        double output = plognorm(lag, mu, sd2);
+        if (lag > 1) 
+        {
+            output -= plognorm(lag - 1., mu, sd2);
+        }
         bound_check(output, "dlognorm0", false, true);
         return output;
     }

@@ -83,6 +83,7 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
         opts = VB::Hybrid::default_settings();
     }
     default:
+        throw std::invalid_argument("dgtf_default_algo_settings: Invalid algorithm.");
         break;
     }
 
@@ -237,6 +238,7 @@ Rcpp::List dgtf_simulate(
     
     return output;
 }
+
 
 //' @export
 // [[Rcpp::export]]

@@ -340,6 +340,64 @@ public:
         return H0;
     }
 
+
+    void update_nlag(const unsigned int &nlag)
+    {
+        _dim.nL = nlag;
+
+        if (trans_list[_name] == AVAIL::Transfer::iterative)
+        {
+            _r = static_cast<unsigned int>(dlag.par2);
+            _iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            _coef_now = std::pow(1. - dlag.par1, dlag.par2);
+
+            _ft.set_size(_dim.nT + _r);
+            G0_iterative();
+            F0_iterative();
+        }
+        else
+        {
+            _dim.nP = nlag;
+            _G0.reset();
+            _F0.reset();
+            _H0.reset();
+            G0_sliding();
+            F0_sliding();
+            H0_sliding();
+
+            dlag.get_Fphi(_dim.nL);
+        }
+    }
+
+
+    unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30)
+    {
+        unsigned int nlag = dlag.update_param(par1, par2, max_lag);
+
+        if (trans_list[_name] == AVAIL::Transfer::iterative)
+        {
+            _r = static_cast<unsigned int>(dlag.par2);
+            _iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            _coef_now = std::pow(1. - dlag.par1, dlag.par2);
+
+            _ft.set_size(_dim.nT + _r);
+            G0_iterative();
+            F0_iterative();
+        }
+        else
+        {
+            _dim.update_nL(nlag, name);
+            _G0.reset();
+            _F0.reset();
+            _H0.reset();
+            G0_sliding();
+            F0_sliding();
+            H0_sliding();
+        }
+
+        return nlag;
+    }
+
     /**
      * @brief Exact method that transfers psi[t] to g[t](theta[t]) = f[t](psi[t], f[t-1], ..., f[t-r]) using the iterative formula: f[t] is a sum of past transfer effects f[0:(t-1)], and current gain h(psi[t]) + previous observation (ancestor) y[t-1]. Only works for non-truncated negative-binomial lag distribution.
      *
@@ -621,6 +679,7 @@ public:
 
         return ft_now;
     }
+
 };
 
 #endif

@@ -128,7 +128,7 @@ component <- list(
     err_dist = "gaussian"
 )
 param <- list(
-    obs = c(0, 5),
+    obs = c(1, 5),
     lag = c(0.4, 6), # mode = 2.8969
     err = c(0.01, 0)
 )
@@ -760,6 +760,116 @@ if (save_data) {
     )
 }
 ```
+
+
+### TFS
+
+#### Optimal Settings
+
+```{r}
+#| label: optimal settings of ffbs
+
+opts.tfs <- dgtf_default_algo_settings("tfs")
+opts.tfs$num_particle <- 10000
+opts.tfs$num_smooth <- 1000
+opts.tfs$do_smoothing <- TRUE
+opts.tfs$do_backward <- TRUE
+
+opts.tfs$num_step_ahead_forecast <- 10
+
+opts.tfs$W <- list(
+    init = 0.01,
+    infer = FALSE
+)
+
+opts.tfs$use_discount <- TRUE
+opts.tfs$use_custom <- TRUE
+opts.tfs$custom_discount_factor <- 0.996
+
+opts.tfs$mu0 <- list(
+    init = 0,
+    infer = FALSE,
+    prior_name = "uniform",
+    prior_param = c(0., min(100, quantile(c(y2), 0.25)))
+)
+```
+
+#### Inference
+
+```{r}
+#| label: run dgtf_infer with ffbs with discount factor
+#| include: false
+opts.tfs$use_discount <- TRUE
+out.tfs <- dgtf_infer(
+    mod, y2,
+    "tfs", opts.tfs,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss)
+
+```
+
+
+```{r}
+#| label: run dgtf_infer with ffbs with W
+#| include: false
+
+# mod$param$obs = c(1, 5)
+opts.tfs$use_discount <- FALSE
+out.tfs2 <- dgtf_infer(
+    mod, y2,
+    "tfs", opts.tfs,
+    forecast_error = eval_forecast_err,
+    fitted_error = eval_fitted_err,
+    k = kstep_forecast_err,
+    loss_func = loss)
+
+```
+
+```{r}
+#| error: true
+#| label: evaluation of ffbs
+
+if (exists("out.tfs")) {
+    print(print_loss_all(out.tfs))
+}
+
+if (exists("out.tfs2"))
+{
+    print(print_loss_all(out.tfs2))
+}
+
+
+```
+
+
+```{r}
+#| label: figure of ffbs inference
+
+plots <- plot_output(
+    out.tfs, y2,
+    save_figures = save_figures,
+    tag = paste0(tag, "-tfs-"), opath = opath,
+    plot_figures = plot_figures
+)
+```
+
+
+```{r}
+#| label: save ffbs data
+
+if (save_data) {
+    save(
+        out.tfs, out.tfs2, opts.tfs, delta.tfs, W.tfs,
+        file = file.path(
+            opath, "data",
+            paste0(tag, "-tfs.RData")
+        )
+    )
+}
+```
+
 
 
 ### Particle Learning

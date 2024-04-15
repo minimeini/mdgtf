@@ -387,34 +387,6 @@ inline void init_prior(Prior &prior, const Rcpp::List &opts)
 }
 
 
-/**
- * @brief Get the exponential for each element of the input vector. The vector is shifted by plus/minus a constant, such that the maximum value is below a specific upper bound, and we can ensure the exponential is finite.
- * 
- * @param input 
- * @param upbnd 
- * @return arma::vec 
- */
-inline arma::vec safe_exp_proportional(const arma::vec &input, const double &upbnd = 100, const double &lobnd = -100)
-{
-	arma::vec output = input;
-	double bnd = output.max() - upbnd;
-	
-	if (bnd > 0 )
-	{
-		output.for_each([&bnd](arma::vec::elem_type &val)
-						{ val -= bnd; });
-	}
 
-	bnd = output.min() - lobnd;
-	if (bnd < 0)
-	{
-		output.for_each([&bnd](arma::vec::elem_type &val)
-						{ val -= bnd; });
-	}
-
-	output = arma::exp(output);
-	bound_check<arma::vec>(output, "safe_exp_proportional: output");
-	return output;
-}
 
 #endif

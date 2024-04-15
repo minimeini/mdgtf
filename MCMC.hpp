@@ -47,10 +47,8 @@ namespace MCMC
                 Metropolis-Hastings
                 */
                 approx_dlm.update_by_wt(y, wt);
-
                 arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1); // nT x 1, f0, Fn and psi is updated
                 arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.); // nT x 1
-
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink.name); // nT x 1
 
@@ -73,7 +71,6 @@ namespace MCMC
                 /*
                 Metropolis-Hastings
                 */
-
 
                 wt.at(t) = wt_new;
                 lam = model.wt2lambda(y, wt); // Checked. OK.
@@ -155,29 +152,29 @@ namespace MCMC
             return W;
         } // func update_W
 
-        static double update_mu0(
+        static double update_mu0( // flat prior
             double &mu0_accept,
-            ApproxDisturbance &approx_dlm,
-            const double &mu0_old,
+            Model &model,
             const arma::vec &y, // nobs x 1
-            const arma::vec &wt,
-            const Model &model,
+            const arma::vec &hpsi,
             const double &mh_sd = 1.)
         {
             // double mu0_old = mu0;
+            double mu0_old = model.dobs.par1;
             double mu0 = mu0_old;
 
-            approx_dlm.update_by_wt(y, wt);
-            arma::vec eta = approx_dlm.get_eta_approx(mu0_old); // f0, Fn and psi is updated
-            arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.);
+            arma::vec Vt_hat(model.dim.nT + 1, arma::fill::zeros);
+            arma::vec lambda(model.dim.nT + 1, arma::fill::zeros);
+            arma::vec eta(model.dim.nT + 1, arma::fill::zeros);
 
-            arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink.name);
-
-            
             double logp_old = 0.;
-            for (unsigned int i = 0; i <= model.dim.nT; i++)
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
-                logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lambda.at(i), model.dobs.par2, true);
+                eta.at(t) = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
+                lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink.name, mu0_old);
+
+                logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+                Vt_hat.at(t) = ApproxDisturbance::func_Vt_approx(lambda.at(t), model.dobs, model.flink.name);
             }
 
             arma::vec tmp = 1. / Vt_hat;
@@ -190,19 +187,18 @@ namespace MCMC
             if (mu0_new > -EPS) // non-negative
             {
                 mu0_new = std::abs(mu0_new);
-                eta = approx_dlm.get_eta_approx(mu0_new); // f0, Fn and psi is updated
-                // arma::vec lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
-                lambda = eta;
                 double logp_new = 0.;
-                for (unsigned int i = 0; i <= model.dim.nT; i++)
+                for (unsigned int t = 1; t <= model.dim.nT; t++)
                 {
-                    logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lambda.at(i), model.dobs.par2, true);
+                    lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink.name, mu0_new);
+                    logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
                 }
+
                 double logratio = std::min(0., logp_new - logp_old);
 
-                
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
+                    model.dobs.update_par1(mu0_new);
                     mu0 = mu0_new;
                     mu0_accept += 1.;
                     // logp_mu0 = logp_new;
@@ -212,7 +208,334 @@ namespace MCMC
             bound_check(mu0, "Posterior::update_mu0");
             return mu0;
         } // func update_mu0
+
+        static double update_dispersion( // Checked. OK.
+            double &rho_accept,
+            Model &model,
+            const arma::vec &y, // nobs x 1
+            const arma::vec &hpsi,
+            const Dist &rho_prior,
+            const double &mh_sd = 1.)
+        {
+            double rho_old = model.dobs.par2;
+            double logp_old = R::dgamma(rho_old, rho_prior.par1, 1. / rho_prior.par2, true);
+            arma::vec lambda(model.dim.nT + 1, arma::fill::zeros);
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            {
+                double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
+                lambda.at(t) = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+
+                logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_old, true);
+            }
+
+            // double log_rho_old = std::log(std::abs(rho_old) + EPS);
+            // double log_rho_new;
+            // bool success = false;
+            // unsigned int cnt = 0;
+            // while (!success && cnt < MAX_ITER)
+            // {
+            //     log_rho_new = R::rnorm(log_rho_old, mh_sd);
+            //     success = (log_rho_new < UPBND) ? true : false;
+            // }
+
+            // double rho_new = std::exp(log_rho_new);
+
+            bool success = false;
+            double rho_new;
+            unsigned int cnt = 0;
+            while (!success && cnt < MAX_ITER)
+            {
+                rho_new = R::rnorm(rho_old, mh_sd * rho_old); // mh_sd here is the coefficient of variation, i.e., sd/mean.
+                success = (rho_new > 0) ? true : false;
+                cnt ++;
+            }
+
+            double logp_new = R::dgamma(rho_new, rho_prior.par1, 1. / rho_prior.par2, true);
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            {
+                logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_new, true);
+            }
+            double logratio = std::min(0., logp_new - logp_old);
+
+            double rho = rho_old;
+            if (std::log(R::runif(0., 1.)) < logratio)
+            { // accept
+                rho = rho_new;
+                model.dobs.update_par2(rho_new);
+                rho_accept += 1.;
+                // logp_mu0 = logp_new;
+            }
+
+            bound_check(rho, "Posterior::update_mu0");
+            return rho;
+        } // func update_dispersion
+
+        static arma::vec update_dlag(
+            double &par1_accept,
+            double &par2_accept,
+            Model &model,
+            const arma::vec &y, // nobs x 1
+            const arma::vec &hpsi,
+            const Dist &par1_prior,
+            const Dist &par2_prior,
+            const double &par1_mh_sd = 0.1,
+            const double &par2_mh_sd = 0.1,
+            const unsigned int &max_lag = 30)
+        {
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+            double par1_old = model.transfer.dlag.par1;
+            double par2_old = model.transfer.dlag.par2;
+
+            double loglik_old = 0.;
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            {
+                double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
+                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                loglik_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+            }
+            double logp_old = loglik_old;
+
+            double logp_new = 0.;
+            double par1_new = par1_old;
+            double logprior_par1_old = 0.;
+            double logprior_par1_new = 0.;
+            if (par1_prior.infer)
+            {
+                logprior_par1_old = Prior::dprior(par1_old, par1_prior, true, false);
+                logp_old += logprior_par1_old;
+
+                bool non_gaussian = !dist_list[par1_prior.name] == AVAIL::Dist::gaussian;
+                bool non_beta = !dist_list[par1_prior.name] == AVAIL::Dist::beta;
+                if (non_gaussian && non_beta) // non-negative
+                {
+                    bool success = false;
+                    unsigned int cnt = 0;
+                    while (!success && cnt < MAX_ITER)
+                    {
+                        par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                        success = (par1_new > 0) ? true : false;
+                        cnt ++;
+                    }
+                } else if (!non_beta) // beta
+                {
+                    bool success = false;
+                    unsigned int cnt = 0;
+                    while (!success && cnt < MAX_ITER)
+                    {
+                        par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                        success = (par1_new > 0 && par1_new < 1) ? true : false;
+                        cnt++;
+                    }
+                } else // gaussian
+                {
+                    par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                }
+
+                logprior_par1_new = Prior::dprior(par1_new, par1_prior, true, false);
+                logp_new += logprior_par1_new;
+            } // par1
+
+
+            double par2_new = par2_old;
+            double logprior_par2_old = 0.;
+            double logprior_par2_new = 0.;
+            if (par2_prior.infer)
+            {
+                logprior_par2_old = Prior::dprior(par2_old, par2_prior, true, false);
+                logp_old += logprior_par2_old;
+
+                bool non_gaussian = !dist_list[par2_prior.name] == AVAIL::Dist::gaussian;
+                bool non_beta = !dist_list[par2_prior.name] == AVAIL::Dist::beta;
+                if (non_gaussian && non_beta) // non-negative
+                {
+                    bool success = false;
+                    unsigned int cnt = 0;
+                    while (!success && cnt < MAX_ITER)
+                    {
+                        par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                        success = (par2_new > 0) ? true : false;
+                        cnt++;
+                    }
+                }
+                else if (!non_beta) // beta
+                {
+                    bool success = false;
+                    unsigned int cnt = 0;
+                    while (!success && cnt < MAX_ITER)
+                    {
+                        par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                        success = (par2_new > 0 && par2_new < 1) ? true : false;
+                        cnt++;
+                    }
+                }
+                else // gaussian
+                {
+                    par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                }
+
+                logprior_par2_new = Prior::dprior(par2_new, par2_prior, true, false);
+                logp_new += logprior_par2_new;
+
+            } // par2
+
+            unsigned int nlag = LagDist::update_nlag(model.transfer.dlag.name, par1_new, par2_new, 0.99, max_lag);
+            arma::vec Fphi_new = LagDist::get_Fphi(nlag, model.transfer.dlag.name, par1_new, par2_new);
+
+            double loglik_new = 0.;
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            {
+                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
+                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                loglik_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+            }
+            logp_new += loglik_new;
+
+            double logratio = std::min(0., logp_new - logp_old);
+
+            arma::vec par = {par1_old, par2_old};
+            if (std::log(R::runif(0., 1.)) < logratio)
+            { // accept
+                par1_accept += 1;
+                par2_accept += 1;
+
+                nlag = model.update_dlag(par1_new, par2_new, max_lag);
+                par.at(0) = par1_new;
+                par.at(1) = par2_new;
+
+                // logp_mu0 = logp_new;
+            }
+
+            return par;
+
+        } // update_lag
+
+
+        static arma::vec update_dlag_hmc(
+            double &par1_accept,
+            double &par2_accept,
+            Model &model,
+            const arma::vec &y,
+            const arma::vec &hpsi,
+            const Dist &par1_prior,
+            const Dist &par2_prior,
+            const double &epsilon = 0.01,
+            const unsigned int &L = 10,
+            const Rcpp::NumericVector &m = Rcpp::NumericVector::create(1., 1.),
+            const unsigned int &max_lag = 30)
+        {
+            std::string lag_dist = model.transfer.dlag.name;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+
+            double par1_old = model.transfer.dlag.par1;
+            double par2_old = model.transfer.dlag.par2;
+
+
+            // log of conditional posterior of lag parameters.
+            double logp_old = 0.;
+            logp_old += Prior::dprior(par1_old, par1_prior, true, true); // TODO: check it
+            logp_old += Prior::dprior(par2_old, par2_prior, true, true); // TODO: check it
+
+            for (unsigned int t = 1; t <= model.dim.nT; t ++)
+            {
+                double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
+                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+
+                logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+            }
+
+            double current_U = -logp_old;
+
+            // map parameters of the lag distribution to the whole real line
+            arma::vec q(2, arma::fill::zeros);
+            q.at(0) = Prior::val2real(par1_old, par1_prior.name, false);
+            q.at(1) = Prior::val2real(par2_old, par2_prior.name, false);
+
+            // sample an initial momentum
+            arma::vec p = arma::randn(2);
+            p.at(0) *= std::sqrt(m[0]);
+            p.at(1) *= std::sqrt(m[1]);
+
+            // Kinetic: negative logprob of the momentum distribution
+            double current_K = 0.5 * (std::pow(p.at(0), 2.) / m[0]);
+            current_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
+
+            // half step update of momentum
+            unsigned int nlag = model.dim.nL;
+            arma::vec Fphi_new = model.transfer.dlag.Fphi;
+
+            arma::vec grad_U = Model::dloglik_dpar(
+                Fphi_new, y, hpsi, nlag,
+                lag_dist, par1_old, par2_old,
+                model.dobs, model.flink.name);
+
+            double par1_new = 0.;
+            double par2_new = 0.;
+            p = p - (0.5 * epsilon) * grad_U;
+
+            for (unsigned int i = 1; i <= L; i++)
+            {
+                // full step update for position
+                q = q + epsilon * p;
+                par1_new = Prior::val2real(q.at(0), par1_prior.name, true);
+                par2_new = Prior::val2real(q.at(1), par2_prior.name, true);
+
+                nlag = LagDist::update_nlag(lag_dist, par1_new, par2_new, 0.99, max_lag);
+                grad_U = Model::dloglik_dpar(
+                    Fphi_new, y, hpsi, nlag,
+                    lag_dist, par1_new, par2_new,
+                    model.dobs, model.flink.name);
+
+                // full step update for momentum
+                if (i != L)
+                {
+                    p = p - epsilon * grad_U;
+                }
+            }
+
+            // half step update for momentum
+            p = p - (0.5 * epsilon) * grad_U;
+            p = -p; // negate momentum for symmetry
+
+
+            // log of conditional posterior for the proposed lag parameters.
+            double logp_new = 0.;
+            for (unsigned int t = 1; t <= model.dim.nT; t ++)
+            {
+                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
+                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+
+                logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+            }
+            logp_new += Prior::dprior(par1_new, par1_prior, true, true);
+            logp_new += Prior::dprior(par2_new, par2_prior, true, true);
+
+            double proposed_U = -logp_new;
+            double proposed_K = 0.5 * (std::pow(p.at(0), 2.) / m[0]);
+            proposed_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
+
+            // accept / reject
+            double logratio = current_U + current_K;
+            logratio -= (proposed_U + proposed_K);
+
+            arma::vec par = {par1_old, par2_old};
+            if (std::log(R::runif(0., 1.)) < logratio)
+            { // accept
+                par1_accept += 1;
+                par2_accept += 1;
+
+                nlag = model.update_dlag(par1_new, par2_new, max_lag);
+                par.at(0) = par1_new;
+                par.at(1) = par2_new;
+
+                // logp_mu0 = logp_new;
+            }
+
+            return par;
+        }
+
     }; // class Posterior
+
+    
 
     class Disturbance
     {
@@ -236,6 +559,30 @@ namespace MCMC
         {
             Rcpp::List opts = mcmc_settings;
 
+            epsilon = 0.01;
+            if (opts.containsElementNamed("epsilon"))
+            {
+                epsilon = Rcpp::as<double>(opts["epsilon"]);
+            }
+
+            L = 10;
+            if (opts.containsElementNamed("L"))
+            {
+                L = Rcpp::as<unsigned int>(opts["L"]);
+            }
+
+            m = Rcpp::NumericVector::create(1., 1.);
+            if (opts.containsElementNamed("m"))
+            {
+                m = Rcpp::as<Rcpp::NumericVector>(opts["m"]);
+            }
+
+            max_lag = 30;
+            if (opts.containsElementNamed("max_lag"))
+            {
+                max_lag = Rcpp::as<unsigned int>(opts["max_lag"]);
+            }
+
             mh_sd = 0.01;
             if (opts.containsElementNamed("mh_sd"))
             {
@@ -247,7 +594,6 @@ namespace MCMC
             {
                 nburnin = Rcpp::as<unsigned int>(opts["nburnin"]);
             }
-
             nthin = 1;
             if (opts.containsElementNamed("nthin"))
             {
@@ -297,6 +643,58 @@ namespace MCMC
                 }
             }
 
+            rho = 30.;
+            rho_stored.set_size(nsample);
+            infer_rho = false;
+            rho_prior.init("gamma", 0.1, 0.1);
+            rho_accept = 0.;
+            rho_mh_sd = 0.1;
+            if (opts.containsElementNamed("rho"))
+            {
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
+                init_param(infer_rho, rho, rho_prior, param_opts);
+
+                if (param_opts.containsElementNamed("mh_sd"))
+                {
+                    rho_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
+                }
+            }
+
+            par1 = 0.;
+            par1_stored.set_size(nsample);
+            infer_par1 = false;
+            par1_prior.init("gamma", 0.1, 0.1);
+            par1_accept = 0.;
+            par1_mh_sd = 0.1;
+            if (opts.containsElementNamed("par1"))
+            {
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
+                init_param(infer_par1, par1, par1_prior, param_opts);
+
+                if (param_opts.containsElementNamed("mh_sd"))
+                {
+                    par1_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
+                }
+            }
+
+
+            par2 = 0.;
+            par2_stored.set_size(nsample);
+            infer_par2 = false;
+            par2_prior.init("gamma", 0.1, 0.1);
+            par2_accept = 0.;
+            par2_mh_sd = 0.1;
+            if (opts.containsElementNamed("par2"))
+            {
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
+                init_param(infer_par2, par2, par2_prior, param_opts);
+
+                if (param_opts.containsElementNamed("mh_sd"))
+                {
+                    par2_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
+                }
+            }
+
             wt = arma::randn(dim.nT + 1) * 0.01;
             wt.at(0) = 0.;
             wt.subvec(1, dim.nP) = arma::abs(wt.subvec(1, dim.nP));
@@ -331,10 +729,39 @@ namespace MCMC
             mu0_opts["init"] = 0.;
             mu0_opts["mh_sd"] = 1.;
 
+            Rcpp::List rho_opts;
+            rho_opts["infer"] = false;
+            rho_opts["init"] = 30;
+            rho_opts["mh_sd"] = 1.;
+            rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            rho_opts["prior_name"] = "gamma";
+
+            Rcpp::List par1_opts;
+            par1_opts["infer"] = false;
+            par1_opts["init"] = 30;
+            par1_opts["mh_sd"] = 1.;
+            par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            par1_opts["prior_name"] = "gamma";
+
+            Rcpp::List par2_opts;
+            par2_opts["infer"] = false;
+            par2_opts["init"] = 30;
+            par2_opts["mh_sd"] = 1.;
+            par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            par2_opts["prior_name"] = "gamma";
+
             Rcpp::List opts;
             opts["W"] = Wopts;
             opts["mu0"] = mu0_opts;
+            opts["rho"] = rho_opts;
+            opts["par1"] = par1_opts;
+            opts["par2"] = par2_opts;
             
+            opts["epsilon"] = 0.01;
+            opts["L"] = 10;
+            opts["m"] = Rcpp::NumericVector::create(1., 1.);
+            opts["max_lag"] = 30;
+
             opts["mh_sd"] = 0.1;
             opts["nburnin"] = 100;
             opts["nthin"] = 1;
@@ -365,6 +792,18 @@ namespace MCMC
             output["infer_mu0"] = infer_mu0;
             output["mu0"] = Rcpp::wrap(mu0_stored);
             output["mu0_accept"] = mu0_accept / ntotal;
+
+            output["infer_rho"] = infer_rho;
+            output["rho"] = Rcpp::wrap(rho_stored);
+            output["rho_accept"] = rho_accept / ntotal;
+
+            output["infer_par1"] = infer_par1;
+            output["par1"] = Rcpp::wrap(par1_stored);
+            output["par1_accept"] = par1_accept / ntotal;
+
+            output["infer_par2"] = infer_par2;
+            output["par2"] = Rcpp::wrap(par2_stored);
+            output["par2_accept"] = par2_accept / ntotal;
 
             output["model"] = model_info;
 
@@ -605,6 +1044,27 @@ namespace MCMC
         {
             model_info = model.info();
 
+            if (!mu0_prior.infer)
+            {
+                mu0 = model.dobs.par1;
+            }
+            if (!rho_prior.infer)
+            {
+                rho = model.dobs.par2;
+            }
+            if (!par1_prior.infer)
+            {
+                par1 = model.transfer.dlag.par1;
+            }
+            if (!par2_prior.infer)
+            {
+                par2 = model.transfer.dlag.par2;
+            }
+            if (!W_prior.infer)
+            {
+                W = model.derr.par1;
+            }
+
             // LBA::LinearBayes linear_bayes(model, y);
             // linear_bayes.filter();
             // linear_bayes.smoother();
@@ -614,15 +1074,17 @@ namespace MCMC
             // wt.tail(wt_init.n_elem) = wt_init;
 
             ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
-            approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 Rcpp::checkUserInterrupt();
 
+                approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
                 Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, mh_sd);
+                arma::vec psi = arma::cumsum(wt);
+                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain.name);
 
-                if (infer_W)
+                if (W_prior.infer)
                 {
                     double W_old = W;
                     W = Posterior::update_W(W_accept, W_old, wt, W_prior, mh_sd);
@@ -630,11 +1092,30 @@ namespace MCMC
                     model.derr.update_par1(W);
                 }
 
-                if (infer_mu0)
+                if (par1_prior.infer || par2_prior.infer)
                 {
-                    double mu0_old = mu0;
-                    mu0 = Posterior::update_mu0(mu0_accept, approx_dlm, mu0_old, y, wt, model, mu0_mh_sd);
-                    model.dobs.update_par1(mu0);
+                    // arma::vec out = Posterior::update_dlag(
+                    //     par1_accept, par2_accept, model,
+                    //     y, hpsi, par1_prior, par2_prior, 
+                    //     par1_mh_sd, par2_mh_sd, max_lag);
+                    arma::vec out = Posterior::update_dlag_hmc(
+                        par1_accept, par2_accept, model, y, hpsi, 
+                        par1_prior, par2_prior, epsilon, L, m, max_lag);
+
+                    par1 = out.at(0);
+                    par2 = out.at(1);
+                }
+
+                if (mu0_prior.infer)
+                {
+                    mu0 = Posterior::update_mu0(mu0_accept, model, y, hpsi, mu0_mh_sd);
+                    
+                }
+
+                if (rho_prior.infer)
+                {
+                    double rho_old = rho;
+                    rho = Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior, rho_mh_sd);
                 }
 
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
@@ -653,6 +1134,9 @@ namespace MCMC
                     wt_stored.col(idx_run) = wt;
                     W_stored.at(idx_run) = W;
                     mu0_stored.at(idx_run) = mu0;
+                    rho_stored.at(idx_run) = rho;
+                    par1_stored.at(idx_run) = par1;
+                    par2_stored.at(idx_run) = par2;
                 }
 
                 if (verbose)
@@ -673,12 +1157,18 @@ namespace MCMC
         
 
     private:
+        double epsilon = 0.01;
+        unsigned int L = 10;
+        Rcpp::NumericVector m;
+
         double mh_sd = 0.1;
         unsigned int nburnin = 100;
         unsigned int nthin = 1;
         unsigned int nsample = 100;
         unsigned int ntotal = 200;
         unsigned int nforecast = 0;
+
+        unsigned int max_lag = 30;
 
         Rcpp::List model_info;
 
@@ -696,6 +1186,27 @@ namespace MCMC
         arma::vec mu0_stored;
         double mu0_accept = 0.;
         double mu0_mh_sd = 1.;
+
+        Dist rho_prior;
+        bool infer_rho = false;
+        double rho = 0.;
+        arma::vec rho_stored;
+        double rho_accept = 0.;
+        double rho_mh_sd = 1.;
+
+        Dist par1_prior;
+        bool infer_par1 = false;
+        double par1 = 0.;
+        arma::vec par1_stored;
+        double par1_accept = 0.;
+        double par1_mh_sd = 1.;
+
+        Dist par2_prior;
+        bool infer_par2 = false;
+        double par2 = 0.;
+        arma::vec par2_stored;
+        double par2_accept = 0.;
+        double par2_mh_sd = 1.;
 
         Dist W_prior;
         bool infer_W = false;
