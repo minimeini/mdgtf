@@ -45,7 +45,7 @@ namespace SMC
         {
             Rcpp::List opts;
             opts["num_particle"] = 1000;
-            opts["num_smooth"] = 500;
+            opts["num_smooth"] = 1000;
             opts["num_backward"] = 1;
             opts["num_step_ahead_forecast"] = 0;
             opts["use_discount"] = false;
@@ -71,10 +71,7 @@ namespace SMC
             return opts;
         }
 
-
-        void infer(const Model &model){return;}
-
-
+        void infer(const Model &model) { return; }
 
         void init(const Rcpp::List &smc_settings)
         {
@@ -88,12 +85,11 @@ namespace SMC
             weights.ones();
             lambda = weights;
 
-            M = 500;
+            M = N;
             if (settings.containsElementNamed("num_smooth"))
             {
                 M = Rcpp::as<unsigned int>(settings["num_smooth"]);
             }
-            
 
             B = 1;
             if (settings.containsElementNamed("num_backward"))
@@ -109,7 +105,6 @@ namespace SMC
 
             // psi_smooth.set_size(dim.nT + B, M);
             // psi_smooth.zeros();
-
 
             use_discount = false;
             if (settings.containsElementNamed("use_discount"))
@@ -174,7 +169,6 @@ namespace SMC
             mu0_filter.set_size(N);
             mu0_filter.fill(prior_mu0.val);
 
-
             par_name = "W";
             prior_W.init("invgamma", 1., 1.);
             prior_W.init_param(false, 0.01);
@@ -186,16 +180,15 @@ namespace SMC
 
             W_filter.set_size(N);
             W_filter.fill(prior_W.val);
+            Wt.fill(prior_W.val);
 
             return;
         }
 
-
         static void init_param_def(
             Rcpp::List &opts,
             std::string &par_name,
-            Prior &prior
-        )
+            Prior &prior)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
 
@@ -218,7 +211,7 @@ namespace SMC
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             arma::vec par_init(N, arma::fill::zeros);
 
-            for (unsigned int i = 0; i < N; i ++)
+            for (unsigned int i = 0; i < N; i++)
             {
                 double val = 0.;
                 switch (dist_list[init_dist.name])
@@ -231,9 +224,9 @@ namespace SMC
                     {
                         val = 1. / R::rgamma(init_dist.par1, 1. / init_dist.par2);
                         success = std::isfinite(val) && (val > EPS);
-                        cnt ++;
+                        cnt++;
                     }
-                    
+
                     break;
                 }
                 case AVAIL::Dist::gamma:
@@ -244,9 +237,9 @@ namespace SMC
                     {
                         val = R::rgamma(init_dist.par1, 1. / init_dist.par2);
                         success = std::isfinite(val) && (val > EPS);
-                        cnt ++;
+                        cnt++;
                     }
-                    
+
                     break;
                 }
                 case AVAIL::Dist::uniform:
@@ -269,15 +262,25 @@ namespace SMC
                 bound_check<arma::vec>(par_init, "draw_param_init:: par_init");
             }
 
-            
-
             return par_init;
+        }
+
+        void update_np(const unsigned int &np)
+        {
+            dim.nP = np;
+            Theta_stored.reset();
+            Theta_stored.set_size(np, N, dim.nT + B);
+            Theta_stored.zeros();
+
+            Theta_smooth.reset();
+            Theta_smooth.set_size(np, M, dim.nT + B);
+            Theta_smooth.zeros();
         }
 
         arma::mat get_psi_filter()
         {
-            arma::mat psi_tmp = Theta_stored.row_as_mat(0);             // (nT + B) x N
-            arma::mat psi_filter = psi_tmp.tail_rows(dim.nT + 1);       // (nT + 1) x N
+            arma::mat psi_tmp = Theta_stored.row_as_mat(0);       // (nT + B) x N
+            arma::mat psi_filter = psi_tmp.tail_rows(dim.nT + 1); // (nT + 1) x N
 
             return psi_filter; // (nT + 1) x N
         }
@@ -297,13 +300,13 @@ namespace SMC
                 throw std::invalid_argument("SMC::SequentialMonteCarlo::get_mu0 - Error: mu0 is not included in the state vector");
             }
             arma::vec mu0 = arma::vectorise(Theta_smooth.slice(Theta_smooth.n_slices - 1).row(Theta_smooth.n_rows - 1));
-            return mu0;   
+            return mu0;
         }
 
         static double discount_W(
             const arma::mat &Theta_now,
-            const double &custom_discount_factor = 0.95, 
-            const bool &use_custom = false, 
+            const double &custom_discount_factor = 0.95,
+            const bool &use_custom = false,
             const double &default_discount_factor = 0.99)
         {
             double W;
@@ -332,25 +335,20 @@ namespace SMC
             return W;
         }
 
-        
-
-        
-
-    /**
-     * @brief Propagate from now theta[t] to theta[t + 1] following the evolution distribution. Theta_now = Theta_stored.slice(t + B - 1), Theta_new = Theta_stored.slice(t + B). Input: theta[t] (old theta at t), variance W[t] (true value or estimated value at time t), previous observation y[0:t], new observation theta[t + 1]. Output: theta[t + 1] (new theta at t + 1) and corresponding importance weights.
-     * 
-     * @param ynow y[t], where t is the index the old time.
-     * @param Wsqrt N x 1
-     * @param model 
-     * @return arma::mat theta[t + 1]
-     */
+        /**
+         * @brief Propagate from now theta[t] to theta[t + 1] following the evolution distribution. Theta_now = Theta_stored.slice(t + B - 1), Theta_new = Theta_stored.slice(t + B). Input: theta[t] (old theta at t), variance W[t] (true value or estimated value at time t), previous observation y[0:t], new observation theta[t + 1]. Output: theta[t + 1] (new theta at t + 1) and corresponding importance weights.
+         *
+         * @param ynow y[t], where t is the index the old time.
+         * @param Wsqrt N x 1
+         * @param model
+         * @return arma::mat theta[t + 1]
+         */
         static arma::mat propagate(
-            const double &ynow, // y[t]
-            const arma::vec &Wsqrt, // N x 1
+            const double &ynow,         // y[t]
+            const arma::vec &Wsqrt,     // N x 1
             const arma::mat &Theta_now, // p x N
             const Model &model,
-            const bool &positive_noise = false
-        )
+            const bool &positive_noise = false)
         {
             arma::mat Theta_next = Theta_now; // For t + B
 
@@ -390,48 +388,24 @@ namespace SMC
         } // func propagate
 
         static arma::vec imp_weights_likelihood(
-            const unsigned int &t_next, // (t + 1)
-            const arma::mat &Theta_next, // p x N
-            const arma::vec &yall,
-            const Model &model
-        )
-        {
-            unsigned int N = Theta_next.n_cols;
-            arma::vec weights(N, arma::fill::zeros);
-            double mu0 = 0.;
-            if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
-
-            for (unsigned int i = 0; i < N; i++)
-            {
-                arma::vec theta_next = Theta_next.col(i);
-                double ft = StateSpace::func_ft(model, t_next, theta_next, yall); // use y[t], ..., y[t + 1 - nelem]
-                double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0); // conditional mean of the observations
-
-                weights.at(i) = ObsDist::loglike(
-                    yall.at(t_next),
-                    model.dobs.name,
-                    lambda, model.dobs.par2,
-                    false);
-            }
-
-            return weights;            
-        }
-
-        static arma::vec imp_weights_likelihood(
             const unsigned int &t_next,  // (t + 1)
             const arma::mat &Theta_next, // p x N
-            const arma::vec &mu0, // N x 1
             const arma::vec &yall,
             const Model &model)
         {
             unsigned int N = Theta_next.n_cols;
             arma::vec weights(N, arma::fill::zeros);
+            double mu0 = 0.;
+            if (!model.dim.regressor_baseline)
+            {
+                mu0 = model.dobs.par1;
+            }
 
             for (unsigned int i = 0; i < N; i++)
             {
                 arma::vec theta_next = Theta_next.col(i);
                 double ft = StateSpace::func_ft(model, t_next, theta_next, yall); // use y[t], ..., y[t + 1 - nelem]
-                double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0.at(i));       // conditional mean of the observations
+                double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0);       // conditional mean of the observations
 
                 weights.at(i) = ObsDist::loglike(
                     yall.at(t_next),
@@ -443,6 +417,31 @@ namespace SMC
             return weights;
         }
 
+        static arma::vec imp_weights_likelihood(
+            const unsigned int &t_next,  // (t + 1)
+            const arma::mat &Theta_next, // p x N
+            const arma::vec &mu0,        // N x 1
+            const arma::vec &yall,
+            const Model &model)
+        {
+            unsigned int N = Theta_next.n_cols;
+            arma::vec weights(N, arma::fill::zeros);
+
+            for (unsigned int i = 0; i < N; i++)
+            {
+                arma::vec theta_next = Theta_next.col(i);
+                double ft = StateSpace::func_ft(model, t_next, theta_next, yall); // use y[t], ..., y[t + 1 - nelem]
+                double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0.at(i)); // conditional mean of the observations
+
+                weights.at(i) = ObsDist::loglike(
+                    yall.at(t_next),
+                    model.dobs.name,
+                    lambda, model.dobs.par2,
+                    false);
+            }
+
+            return weights;
+        }
 
         static double effective_sample_size(const arma::vec &weights)
         {
@@ -456,7 +455,6 @@ namespace SMC
 
             return ess;
         }
-
 
         static double log_conditional_marginal(const arma::vec &unnormalised_weights)
         {
@@ -479,7 +477,6 @@ namespace SMC
             return pmarg;
         }
 
-
         /**
          * @brief At time t, importance weights of forward filtering particles z[t-1] = (theta[t-1], W[t-1], mu0[t-1]), based on conditional predictive distribution y[t] | z[t-1], y[1:t-1].
          *
@@ -493,16 +490,16 @@ namespace SMC
          * @return arma::vec
          */
         static arma::vec imp_weights_forecast(
-            arma::mat &mu, // p x N
-            arma::cube &Prec, // p x p x N
+            arma::mat &mu,          // p x N
+            arma::cube &Prec,       // p x p x N
             arma::cube &Sigma_chol, // p x p x N
-            arma::vec &logq, // N x 1
+            arma::vec &logq,        // N x 1
             arma::uvec &updated,
             const Model &model,
-            const unsigned int &t_new, // current time t. The following inputs come from time t-1.
+            const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
             const arma::mat &Theta_old, // p x N, {theta[t-1]}
-            const arma::vec &W_old, // N x 1, {W[t-1]} samples of latent variance
-            const arma::vec &mu0_old, // N x 1, samples of baseline
+            const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
+            const arma::vec &mu0_old,   // N x 1, samples of baseline
             const arma::vec &y,
             const arma::vec &yhat // y[t]
         )
@@ -525,9 +522,9 @@ namespace SMC
             for (unsigned int i = 0; i < N; i++)
             {
                 arma::vec gtheta_old_i = StateSpace::func_gt(model, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-                double ft_gtheta = StateSpace::func_ft(model, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
-                arma::vec Ft_gtheta = LBA::func_Ft(model, t_new, gtheta_old_i, y);     // Ft evaluated at a[t_new]
-                double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
+                double ft_gtheta = StateSpace::func_ft(model, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+                arma::vec Ft_gtheta = LBA::func_Ft(model, t_new, gtheta_old_i, y);            // Ft evaluated at a[t_new]
+                double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i);  // (eq 3.8)
 
                 double eta = mu0_old.at(i) + ft_gtheta;
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
@@ -561,7 +558,7 @@ namespace SMC
                 } // One-step-ahead predictive density
                 else
                 {
-                    arma::mat Prec_i = FFt_norm + Ieps; // nP x nP, function of mu0[i, t]
+                    arma::mat Prec_i = FFt_norm + Ieps;  // nP x nP, function of mu0[i, t]
                     Prec_i.at(0, 0) += 1. / W_old.at(i); // (eq 3.21)
 
                     Prec_i = arma::symmatu(Prec_i);
@@ -573,14 +570,14 @@ namespace SMC
                     {
                         Sigma_i = inverse(Rchol, Prec_i);
                     }
-                    catch(const std::exception& e)
+                    catch (const std::exception &e)
                     {
                         double det_prec = arma::det(Prec_i);
                         std::cout << "\n Determinant of Prec_i is: " << det_prec << "; ";
                         std::cout << "Determinant of Ft * Ft.t() / Vt is: " << FFt_det << std::endl;
                         std::cerr << e.what() << '\n';
                     }
-                    
+
                     Sigma_i = arma::symmatu(Sigma_i);
                     Sigma_chol.slice(i) = Rchol;
 
@@ -599,7 +596,7 @@ namespace SMC
                     loglik += delta2 / Vt;
                     loglik += std::pow(gtheta_old_i.at(0), 2.) / W_old.at(i);
                     loglik -= arma::as_scalar(mu_i.t() * Prec_i * mu_i); // minus (-)
-                    loglik *= -0.5; // (eq 3.24 - 3.25)
+                    loglik *= -0.5;                                      // (eq 3.24 - 3.25)
 
                     try
                     {
@@ -620,13 +617,12 @@ namespace SMC
                     logq.at(i) += loglik;
 
                     updated.at(i) = 1;
-                } // one-step-ahead predictive density 
-
-                
+                } // one-step-ahead predictive density
             }
 
             double logq_max = logq.max();
-            logq.for_each([&logq_max](arma::vec::elem_type & val) { val -= logq_max; });
+            logq.for_each([&logq_max](arma::vec::elem_type &val)
+                          { val -= logq_max; });
 
             // double logm = arma::mean(logq);
             // if (logq.max() > 100)
@@ -641,12 +637,12 @@ namespace SMC
             {
                 bound_check<arma::vec>(weights, "imp_weights_forecast");
             }
-            catch(const std::exception& e)
+            catch (const std::exception &e)
             {
                 logq.t().brief_print("\n logarithm of weights: ");
                 throw std::runtime_error(e.what());
             }
-            
+
             return weights;
         } // func: imp_weights_forecast
 
@@ -663,26 +659,24 @@ namespace SMC
          * @return arma::vec
          */
         static arma::vec imp_weights_backcast(
-            arma::mat &mu,          // p x N
-            arma::cube &Prec,       // p x p x N
-            arma::cube &Sigma_chol, // p x p x N
+            arma::mat &mu,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+            arma::cube &Prec,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+            arma::cube &Sigma_chol, // p x p x N, right cholesky of the variance of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
             arma::vec &logq,        // N x 1
-            arma::uvec &updated, // N x 1
+            arma::uvec &updated,    // N x 1
             const Model &model,
-            const unsigned int &t_cur,  // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
-            const arma::mat &Theta_next, // p x N, {theta[t+1]}
-            const arma::vec &W_next,     // N x 1, {W[t+1]} samples of latent variance
-            const arma::vec &mu0_next,   // N x 1, {mu0[t+1]} samples of baseline
+            const unsigned int &t_cur,     // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
+            const arma::mat &Theta_next,   // p x N, {theta[t+1]}
+            const arma::vec &W_filter, // N x 1, {inv(W[T])} samples of latent variance
+            const arma::vec &mu0_filter,   // N x 1, {mu0[T]} samples of baseline
+            const arma::cube &vt,        // nP x (nT + 1) x N, v[t]
+            const arma::cube &Vt,        // nP*nP x (nT + 1) x N, V[t]
             const arma::vec &y,
             const arma::vec &yhat // y[t]
         )
         {
 
             std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-            if (trans_list[model.transfer.name] == AVAIL::iterative)
-            {
-                throw std::invalid_argument("imp_weights_backcast: not implemented for iterative transfer function yet.");
-            }
 
             unsigned int N = Theta_next.n_cols;
             unsigned int nP = Theta_next.n_rows;
@@ -700,73 +694,270 @@ namespace SMC
             updated.set_size(N);
             updated.zeros();
 
-
-            arma::mat Hcur = LBA::func_Ht(model); // (eq 3.48)
-            arma::vec rcur(model.dim.nP, arma::fill::zeros); // (eq 3.52)
-
-
             for (unsigned int i = 0; i < N; i++)
             {
-                double ldet_Vcur = std::log(std::abs(W_next.at(i)) + EPS);
+                arma::vec v_cur = vt.slice(i).col(t_cur);
+                arma::vec Vtmp = Vt.slice(i).col(t_cur);
+                arma::mat V_cur = arma::reshape(Vtmp, model.dim.nP, model.dim.nP);
 
-                arma::vec htheta = Hcur * Theta_next.col(i) + rcur;
-                double ft_htheta = StateSpace::func_ft(model, t_cur, htheta, y);
-                arma::vec Ft_htheta = LBA::func_Ft(model, t_cur, htheta, y);
-                double ft_tilde = ft_htheta - arma::as_scalar(Ft_htheta.t() * htheta);
+                arma::vec v_next = vt.slice(i).col(t_next);
+                Vtmp = Vt.slice(i).col(t_next);
+                arma::mat V_next = arma::reshape(Vtmp, model.dim.nP, model.dim.nP);
+                arma::mat Vprec_next = inverse(V_next);
 
+                arma::mat G_next = LBA::func_Gt(model, v_cur, y.at(t_cur));
 
-                double eta = mu0_next.at(i) + ft_htheta;
+                arma::mat K_cur(model.dim.nP, model.dim.nP, arma::fill::zeros); // evolution matrix
+                arma::mat U_cur = K_cur; // mean of conditional backward evolution
+                arma::mat Uprec_cur = K_cur;
+                arma::mat Urchol_cur = K_cur;
+                double ldetU = 0.;
+
+                if (trans_list[model.transfer.name] == AVAIL::sliding)
+                {
+                    for (unsigned int i = 0; i < model.dim.nP - 1; i++)
+                    {
+                        K_cur.at(i, i + 1) = 1.;
+                    }
+
+                    K_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1.;
+                    U_cur.at(model.dim.nP - 1, model.dim.nP - 1) = W_filter.at(i);
+                    Uprec_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1. / W_filter.at(i);
+                    Urchol_cur.at(model.dim.nP - 1, model.dim.nP - 1) = std::sqrt(W_filter.at(i));
+                    ldetU = std::log(W_filter.at(i));
+                }
+                else
+                {
+                    K_cur = V_cur * G_next.t() * Vprec_next;
+                    U_cur = V_cur - V_cur * G_next.t() * Vprec_next * G_next * V_cur;
+                    U_cur = arma::symmatu(U_cur);
+                    Uprec_cur = inverse(Urchol_cur, U_cur);
+                    ldetU = arma::log_det_sympd(U_cur);
+                }
+                arma::vec r_cur = v_cur - K_cur * v_next;
+
+                arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
+                arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
+
+                double ft_ut = StateSpace::func_ft(model, t_cur, u_cur, y);
+                double eta = mu0_filter.at(i) + ft_ut;
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
-                double Vt = ApproxDisturbance::func_Vt_approx(
+                double Vtilde = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink.name); // (eq 3.59)
+                Vtilde = std::abs(Vtilde) + EPS;
+                double ldetV = std::log(Vtilde);
 
-
-                double delta = yhat.at(t_cur) - mu0_next.at(i) - ft_tilde;
+                double delta = yhat.at(t_cur) - eta;
+                delta += arma::as_scalar(F_cur.t() * u_cur);
                 double delta2 = delta * delta;
 
-                arma::mat FFt_norm = Ft_htheta * Ft_htheta.t() / Vt;
+                arma::mat FFt_norm = arma::symmatu(F_cur * F_cur.t() / Vtilde);
                 double FFt_det = arma::det(FFt_norm);
 
                 if (FFt_det < EPS8)
                 {
-                    Ft_htheta.zeros();
+                    // No information from data, degenerates to the backward evolution
+                    F_cur.zeros();
                     FFt_norm.zeros();
 
+                    mu.col(i) = u_cur;
+                    Prec.slice(i) = Uprec_cur;
+                    Sigma_chol.slice(i) = Urchol_cur;
 
-                    mu.col(i) = htheta;
-                    Prec.at(nP - 1, nP - 1, i) = 1. / W_next.at(i);
-                    Sigma_chol.at(nP - 1, nP - 1, i) = std::sqrt(W_next.at(i));
-                    logq.at(i) = R::dnorm4(yhat.at(t_cur), eta, std::sqrt(Vt), true);
-
+                    logq.at(i) = R::dnorm4(yhat.at(t_cur), eta, std::sqrt(Vtilde), true);
                     updated.at(i) = 0;
                 } // one-step backcasting
                 else
                 {
-                    arma::mat Prec_i = FFt_norm + Ieps;
-                    Prec_i.at(nP - 1, nP - 1) += 1. / W_next.at(i);
-                    Prec_i = arma::symmatu(Prec_i);
-                    Prec.slice(i) = Prec_i;
-                    double ldetPrec = arma::log_det_sympd(Prec_i);
+                    Prec.slice(i) = arma::symmatu(FFt_norm + Uprec_cur + Ieps);
+                    double ldetPrec;
+                    ldetPrec = arma::log_det_sympd(Prec.slice(i));
 
-                    arma::mat Rchol, Sigma_i;
-                    Sigma_i = inverse(Rchol, Prec_i);
+                    arma::mat Rchol;
+                    arma::mat Sig = inverse(Rchol, Prec.slice(i));
                     Sigma_chol.slice(i) = Rchol;
 
-                    arma::vec y_scaled = Ft_htheta * (delta / Vt);
-                    y_scaled.at(nP - 1) = htheta.at(nP - 1) / W_next.at(i);
-                    arma::vec mu_i = Sigma_i * y_scaled;
-                    mu.col(i) = mu_i;
+                    arma::vec mu_tmp = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
+                    mu.col(i) = Sig * mu_tmp;
 
-                    double ldetV = std::log(std::abs(Vt) + EPS);
-                    double ldetW = std::log(std::abs(W_next.at(i)) + EPS);
+                    double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
+                    logq_pred += delta2 / Vtilde;
+                    logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
+                    logq_pred -= arma::as_scalar(mu.col(i).t() * Prec.slice(i) * mu.col(i));
+                    logq_pred *= -0.5;
 
-                    double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.63)
-                    loglik += delta2 / Vt;
-                    loglik += std::pow(htheta.at(nP - 1), 2.) / W_next.at(i);
-                    loglik -= arma::as_scalar(mu_i.t() * Prec_i * mu_i);
-                    loglik *= -0.5;
+                    logq.at(i) += logq_pred;
+                    updated.at(i) = 1;
+                }
+            } // loop over particles
 
-                    logq.at(i) += loglik;
+            double logq_max = logq.max();
+            logq.for_each([&logq_max](arma::vec::elem_type &val)
+                          { val -= logq_max; });
+            arma::vec weights = arma::exp(logq);
+
+            try
+            {
+                bound_check<arma::vec>(weights, "imp_weights_forecast");
+            }
+            catch (const std::exception &e)
+            {
+                logq.t().brief_print("\n logarithm of weights: ");
+                throw std::runtime_error(e.what());
+            }
+
+            return weights;
+        } // func: imp_weights_backcast
+
+        /**
+         * @brief
+         *
+         * @param mu p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+         * @param Prec p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+         * @param Sigma_chol p x p x N, right cholesky of the variance of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+         * @param logq
+         * @param updated
+         * @param model
+         * @param t_cur
+         * @param Theta_next p x N, {theta[t+1]}
+         * @param v_cur nP x 1, v[t]
+         * @param V_cur nP x nP, V[t]
+         * @param W_next Variance of forward evolution: theta[t_next] | theta[t_cur], W_next
+         * @param y
+         * @param yhat
+         * @return arma::vec
+         */
+        static arma::vec imp_weights_backcast(
+            arma::mat &mu,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+            arma::cube &Prec,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+            arma::cube &Sigma_chol, // p x p x N, right cholesky of the variance of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+            arma::vec &logq,        // N x 1
+            arma::uvec &updated,
+            const Model &model,
+            const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
+            const arma::mat &Theta_next, // p x N, {theta[t+1]}
+            const arma::mat &vt,      // nP x (nT + 1), v[t], mean of artificial prior for theta[t_cur]
+            const arma::cube &Vt,      // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
+            const arma::vec &y,
+            const arma::vec &yhat // y[t]
+        )
+        {
+            std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+
+            unsigned int N = Theta_next.n_cols;
+            unsigned int nP = Theta_next.n_rows;
+            unsigned int t_next = t_cur + 1;
+
+            arma::mat Ieps(model.dim.nP, model.dim.nP, arma::fill::eye);
+            Ieps.diag().fill(EPS);
+
+            mu.set_size(nP, N);
+            mu.zeros();
+
+            Prec = arma::zeros<arma::cube>(nP, nP, N);
+            Sigma_chol = Prec;
+
+            updated.set_size(N);
+            updated.zeros();
+
+            arma::mat G_next = LBA::func_Gt(model, vt.col(t_cur), y.at(t_cur));
+            arma::mat Vprec_next = inverse(Vt.slice(t_next));
+
+            arma::mat K_cur(model.dim.nP, model.dim.nP, arma::fill::zeros);
+            arma::mat U_cur = K_cur;
+            arma::mat Uprec_cur = K_cur;
+            arma::mat Urchol_cur = K_cur;
+            double ldetU = 0.;
+            
+            if (trans_list[model.transfer.name] == AVAIL::sliding)
+            {
+                for (unsigned int i = 0; i < model.dim.nP - 1; i ++)
+                {
+                    K_cur.at(i, i + 1) = 1.;
+                }
+
+                K_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1.;
+                double W = std::abs(Vt.at(0, 0, t_next) - Vt.at(0, 0, t_cur));
+                U_cur.at(model.dim.nP - 1, model.dim.nP - 1) = W;
+                Uprec_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1. / W;
+                Urchol_cur.at(model.dim.nP - 1, model.dim.nP - 1) = std::sqrt(W);
+                ldetU = std::log(W);
+            }
+            else
+            {
+                arma::mat V_cur = Vt.slice(t_cur);
+                K_cur = V_cur * G_next.t() * Vprec_next;
+                U_cur = V_cur - V_cur * G_next.t() * Vprec_next * G_next * V_cur;
+                U_cur = arma::symmatu(U_cur);
+                Uprec_cur = inverse(Urchol_cur, U_cur);
+                ldetU = arma::log_det_sympd(U_cur);
+            }
+            
+            arma::vec r_cur = vt.col(t_cur) - K_cur * vt.col(t_next);
+            for (unsigned int i = 0; i < N; i++)
+            {
+                /**
+                 * @brief This is special case for sliding window transfer function. In this case we don't need artificial prior (v[t], V[t]) since we can derive (u[t], U[t]) directly. Advantage is that this is exact, the general backcast is an approximation
+                 *
+                 */
+                arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
+                arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
+
+                double ft_ut = StateSpace::func_ft(model, t_cur, u_cur, y);
+                double eta = model.dobs.par1 + ft_ut;
+                double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
+                double Vtilde = ApproxDisturbance::func_Vt_approx(
+                    lambda, model.dobs, model.flink.name); // (eq 3.59)
+                Vtilde = std::abs(Vtilde) + EPS;
+                double ldetV = std::log(Vtilde);
+
+                double delta = yhat.at(t_cur) - eta;
+                delta += arma::as_scalar(F_cur.t() * u_cur);
+                double delta2 = delta * delta;
+
+                arma::mat FFt_norm = arma::symmatu(F_cur * F_cur.t() / Vtilde);
+                double FFt_det = arma::det(FFt_norm);
+
+                if (FFt_det < EPS8)
+                {
+                    // No information from data, degenerates to the backward evolution
+                    F_cur.zeros();
+                    FFt_norm.zeros();
+
+                    mu.col(i) = u_cur;
+                    Prec.slice(i) = Uprec_cur;
+                    Sigma_chol.slice(i) = Urchol_cur;
+
+                    logq.at(i) = R::dnorm4(yhat.at(t_cur), eta, std::sqrt(Vtilde), true);
+                    updated.at(i) = 0;
+                } // one-step backcasting
+                else
+                {
+                    Prec.slice(i) = arma::symmatu(FFt_norm + Uprec_cur + Ieps);
+                    double ldetPrec;
+                    try
+                    {
+                        ldetPrec = arma::log_det_sympd(Prec.slice(i));
+                    }
+                    catch (const std::exception &e)
+                    {
+                        throw std::runtime_error("log_det_sympd failed at ldetU");
+                    }
+
+                    arma::mat Rchol;
+                    arma::mat Sig = inverse(Rchol, Prec.slice(i));
+                    Sigma_chol.slice(i) = Rchol;
+
+                    arma::vec mu_tmp = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
+                    mu.col(i) = Sig * mu_tmp;
+
+                    double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
+                    logq_pred += delta2 / Vtilde;
+                    logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
+                    logq_pred -= arma::as_scalar(mu.col(i).t() * Prec.slice(i) * mu.col(i));
+                    logq_pred *= -0.5;
+
+                    logq.at(i) += logq_pred;
                     updated.at(i) = 1;
                 }
             }
@@ -787,9 +978,10 @@ namespace SMC
             }
 
             return weights;
-        } // func: imp_weights_forecast
+        } // func: imp_weights_forecast (no unknown statics)
 
-        static arma::uvec get_resample_index( const arma::vec &weights_in)
+
+        static arma::uvec get_resample_index(const arma::vec &weights_in)
         {
             unsigned int N = weights_in.n_elem;
             double wsum = arma::accu(weights_in);
@@ -844,8 +1036,8 @@ namespace SMC
         }
 
         Rcpp::List forecast_error(
-            const Model &model, 
-            const std::string &loss_func = "quadratic", 
+            const Model &model,
+            const std::string &loss_func = "quadratic",
             const unsigned int &k = 1)
         {
             arma::cube th_filter = Theta_stored.tail_slices(dim.nT + 1); // p x N x (nT + 1)
@@ -898,7 +1090,7 @@ namespace SMC
 
         Dim dim;
 
-        arma::vec y, Wt; // (nT + 1) x 1
+        arma::vec y, Wt;           // (nT + 1) x 1
         arma::vec weights, lambda; // N x 1
         arma::vec log_cond_marginal;
 
@@ -911,9 +1103,9 @@ namespace SMC
         unsigned int B = 1;
         unsigned int nforecast = 0;
 
-        arma::mat psi_forward; // (nT + B) x N
+        arma::mat psi_forward;  // (nT + B) x N
         arma::mat psi_backward; // (nT + B) x N
-        arma::mat psi_smooth; // (nT + B) x M
+        arma::mat psi_smooth;   // (nT + B) x M
 
         Prior prior_W;
         arma::vec W_filter; // N x 1
@@ -931,20 +1123,19 @@ namespace SMC
 
     }; // class Sequential Monte Carlo
 
-
     class MCS : public SequentialMonteCarlo
     {
     public:
         MCS(
             const Model &dgtf_model,
             const arma::vec &y_in) : SequentialMonteCarlo(dgtf_model, y_in) { smoothing = false; }
-        
+
         Rcpp::List get_output(const bool &summarize = true)
         {
             arma::vec ci_prob = {0.025, 0.5, 0.975};
             Rcpp::List output;
-            arma::mat psi_filter = get_psi_filter();
-            arma::mat psi_smooth = get_psi_smooth();
+            // arma::mat psi_filter = get_psi_filter();
+            // arma::mat psi_smooth = get_psi_smooth();
 
             if (DEBUG)
             {
@@ -954,16 +1145,16 @@ namespace SMC
 
             if (summarize)
             {
-                arma::mat psi1 = arma::quantile(psi_filter, ci_prob, 1); // (nT + 1) x 3
+                arma::mat psi1 = arma::quantile(psi_forward.tail_rows(dim.nT + 1), ci_prob, 1); // (nT + 1) x 3
                 output["psi_filter"] = Rcpp::wrap(psi1);
 
-                arma::mat psi2 = arma::quantile(psi_smooth, ci_prob, 1); // (nT + 1) x 3
+                arma::mat psi2 = arma::quantile(psi_smooth.tail_rows(dim.nT + 1), ci_prob, 1); // (nT + 1) x 3
                 output["psi"] = Rcpp::wrap(psi2);
             }
             else
             {
-                output["psi_filter"] = Rcpp::wrap(psi_filter);
-                output["psi"] = Rcpp::wrap(psi_smooth);
+                output["psi_filter"] = Rcpp::wrap(psi_forward.tail_rows(dim.nT + 1));
+                output["psi"] = Rcpp::wrap(psi_smooth.tail_rows(dim.nT + 1));
             }
 
             if (dim.regressor_baseline)
@@ -972,20 +1163,17 @@ namespace SMC
                 output["mu0"] = Rcpp::wrap(mu0);
             }
 
-
             output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return output;
         }
-
 
         void init(const Rcpp::List &opts_in)
         {
             Rcpp::List opts = opts_in;
             SequentialMonteCarlo::init(opts);
 
-            prior_W.infer = false;
-            prior_mu0.infer = false;
+            M = N;
 
             Wt.set_size(dim.nT + 1);
             Wt.fill(prior_W.val);
@@ -994,6 +1182,10 @@ namespace SMC
 
             Theta_smooth.clear();
             Theta_smooth = Theta_stored;
+
+            psi_smooth.reset();
+            psi_smooth.set_size(dim.nT + B, N);
+            psi_smooth.zeros();
         }
 
         static Rcpp::List default_settings()
@@ -1201,7 +1393,6 @@ namespace SMC
         //     return stats;
         // }
 
-
         // arma::mat optimal_W(
         //     const Model &model,
         //     const arma::vec &grid,
@@ -1233,35 +1424,40 @@ namespace SMC
 
         //     return stats;
         // }
-        
 
         void infer(const Model &model, const bool &verbose = VERBOSE)
         {
+            prior_mu0.init_param(prior_mu0.infer, model.dobs.par1);
+            if (!prior_W.infer)
+            {
+                Wt.fill(model.derr.par1);
+            }
+            else
+            {
+                Wt.fill(prior_W.val);
+            }
+
             // y: (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
 
-                if (use_discount)
+                if (use_discount && prior_W.infer)
                 { // Use discount factor if W is not given
                     bool use_custom_val = (use_custom && t > B) ? true : false;
                     prior_W.val = SequentialMonteCarlo::discount_W(
                         Theta_smooth.slice(t + B - 1),
                         custom_discount_factor,
-                        use_custom_val, 
+                        use_custom_val,
                         default_discount_factor);
-                }
 
-                Wt.at(t + 1) = prior_W.val;
+                    Wt.at(t + 1) = prior_W.val;
+                }
 
                 arma::vec Wsqrt(N, arma::fill::zeros);
                 Wsqrt.fill(std::sqrt(Wt.at(t + 1)) + EPS);
 
-
-                bound_check<arma::vec>(Wsqrt, "SMC::propagate: Wsqrt", true, true);
-
                 arma::mat Theta_now = Theta_smooth.slice(t + B - 1);
-
                 bool positive_noise = (t < Theta_now.n_rows) ? true : false;
                 arma::mat Theta_next = propagate(y.at(t), Wsqrt, Theta_now, model, positive_noise);
                 weights = imp_weights_likelihood(t + 1, Theta_next, y, model);
@@ -1275,11 +1471,11 @@ namespace SMC
                 {
                     arma::mat theta_tmp = Theta_smooth.slice(b);
                     Theta_smooth.slice(b) = theta_tmp.cols(resample_idx);
+                    psi_smooth.row(b) = Theta_smooth.slice(b).row(0);
                 }
 
                 Theta_stored.slice(t + 1) = Theta_next.cols(resample_idx);
-
-
+                psi_forward.row(t + B) = Theta_smooth.slice(t + B).row(0);
 
                 // Theta_stored.slice(t + B) = Theta_next.cols(resample_idx);
 
@@ -1300,25 +1496,20 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
         }
-
-
     };
-
 
     class FFBS : public SequentialMonteCarlo
     {
     private:
-        arma::vec eff_forward; // (nT + 1) x 1
+        arma::vec eff_forward;  // (nT + 1) x 1
         arma::vec eff_backward; // (nT + 1) x 1
 
-        arma::mat weights_forward; // (nT + 1) x N
-        arma::mat weights_backward; // (nT + 1) x N
-        arma::mat weights_prop_forward; // (nT + 1) x N
+        arma::mat weights_forward;       // (nT + 1) x N
+        arma::mat weights_backward;      // (nT + 1) x N
+        arma::mat weights_prop_forward;  // (nT + 1) x N
         arma::mat weights_prop_backward; // (nT + 1) x N
-        arma::cube Theta_backward; // p x N x (nT + 1)
+        arma::cube Theta_backward;       // p x N x (nT + 1)
 
-
-    
     public:
         FFBS(
             const Model &dgtf_model,
@@ -1341,8 +1532,6 @@ namespace SMC
             weights_backward = weights_forward;
             weights_prop_forward = weights_forward;
             weights_prop_backward = weights_forward;
-
-
 
             Theta_backward = Theta_stored;
 
@@ -1374,21 +1563,6 @@ namespace SMC
 
             output["eff_forward"] = Rcpp::wrap(eff_forward);
 
-            if (backward)
-            {
-                if (summarize)
-                {
-                    arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
-                    output["psi_backward"] = Rcpp::wrap(psi_b);
-                }
-                else
-                {
-                    output["psi_backward"] = Rcpp::wrap(psi_backward);
-                }
-
-                output["eff_backward"] = Rcpp::wrap(eff_backward);
-            }
-
             if (smoothing)
             {
                 if (summarize)
@@ -1408,13 +1582,10 @@ namespace SMC
                 }
             }
 
-
             output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return output;
         }
-
-        
 
         Rcpp::List forecast(const Model &model)
         {
@@ -1572,13 +1743,13 @@ namespace SMC
                 arma::mat Theta_old = Theta_stored.slice(t_old); // p x N, theta[t]
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu; // nP x N
+                arma::mat mu;                // nP x N
                 arma::cube Prec, Sigma_chol; // nP x nP x N
                 arma::uvec updated(N, arma::fill::zeros);
 
                 weights = imp_weights_forecast(
                     mu, Prec, Sigma_chol, logq, updated, // sufficient statistics
-                    model, t_new, 
+                    model, t_new,
                     Theta_old, // theta needs to be resampled
                     W_filter, mu0_filter, y, yhat);
                 // eff.at(t, 0) = effective_sample_size(weights, false);
@@ -1601,7 +1772,6 @@ namespace SMC
                 arma::rowvec wetmp = weights_prop_forward.row(t_old);
                 weights_prop_forward.row(t_old) = wetmp.elem(resample_idx).t();
 
-
                 if (use_discount)
                 { // Use discount factor if W is not given
                     bool use_custom_val = (use_custom && t > 1) ? true : false;
@@ -1615,11 +1785,10 @@ namespace SMC
                 Wt.at(t + 1) = prior_W.val;
                 W_filter.fill(prior_W.val);
 
-
                 // Propagate
                 arma::mat Theta_new(dim.nP, N, arma::fill::zeros);
                 arma::vec logp(N, arma::fill::zeros);
-                for (unsigned int i = 0; i < N; i ++)
+                for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
                     Theta_new.col(i) = theta_new;
@@ -1645,11 +1814,9 @@ namespace SMC
                     // weights.at(i) = logp.at(i);
                 }
 
-
                 // weights = safe_exp_proportional(weights);
-                eff_forward.at(t_new) = effective_sample_size(weights); 
+                eff_forward.at(t_new) = effective_sample_size(weights);
                 log_cond_marginal.at(t_new) = log_conditional_marginal(weights);
-
 
                 if (eff_forward.at(t_new) < 0.95 * N)
                 {
@@ -1679,192 +1846,6 @@ namespace SMC
 
             return;
         }
-
-        void backward_filter(const Model &model, const bool &verbose = VERBOSE)
-        {
-
-            arma::vec yhat = y; // (nT + 1) x 1
-            for (unsigned int t = 0; t < y.n_elem; t++)
-            {
-                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            }
-
-            Theta_backward = Theta_stored;
-
-            mu0_filter.fill(model.dobs.par1); // N x 1
-
-            arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
-            arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
-            arma::cube Prec_marginal = Sigma_marginal;
-            Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
-
-
-            arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
-            Ieps.for_each([](arma::mat::elem_type &val){val *= EPS;});
-            for (unsigned int t = 1; t <= dim.nT; t++)
-            {
-                mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += Wt.at(t);
-                Sig = arma::symmatu(Sig + Ieps);
-                Sigma_marginal.slice(t) = Sig;
-                try
-                {
-                    Prec_marginal.slice(t) = inverse(Sig);
-                }
-                catch(const std::exception& e)
-                {
-                    arma::vec eigval = arma::eig_sym(Sig);
-                    eigval.t().print("\n Eigen values of Sigma: ");
-                    Sig.brief_print("\n Sig t = " + std::to_string(t));
-                    Sigma_marginal.slice(t - 1).brief_print("\n Sig t - 1: ");
-                    Gt.brief_print("\n Gt: ");
-
-                    throw std::runtime_error("Matrix inversion failed at backward filter - prec_marginal initializing");
-                }
-                
-                
-            }
-
-
-            arma::vec log_marg(N, arma::fill::zeros);
-            for (unsigned int i = 0; i < N; i ++)
-            {
-                arma::vec theta = Theta_backward.slice(dim.nT).col(i);
-                log_marg.at(i) = MVNorm::dmvnorm2(
-                    theta, mu_marginal.col(dim.nT), Prec_marginal.slice(dim.nT), true);
-            }
-
-
-            for (unsigned int t = dim.nT - 1; t > 0; t -- )
-            {
-                Rcpp::checkUserInterrupt();
-
-                unsigned int t_cur = t;
-                unsigned int t_next = t + 1;
-                arma::mat Theta_next = Theta_backward.slice(t_next); // p x N, theta[t]
-
-                /**
-                 * @brief Resampling using conditional one-step-ahead predictive distribution as weights.
-                 *
-                 */
-
-                arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu;                // nP x N
-                arma::cube Prec, Sigma_chol; // nP x nP x N
-                arma::uvec updated(N, arma::fill::zeros);
-                weights = imp_weights_backcast(
-                    mu, Prec, Sigma_chol, logq, updated,
-                    model, t_cur, Theta_next,
-                    W_filter, mu0_filter, y, yhat);
-
-                arma::uvec resample_idx = get_resample_index(weights);
-
-                Theta_next = Theta_next.cols(resample_idx); // theta[t]
-                Theta_backward.slice(t_next) = Theta_next;
-
-                logq = logq.elem(resample_idx);
-                mu = mu.cols(resample_idx);
-                Prec = Prec.slices(resample_idx);
-                Sigma_chol = Sigma_chol.slices(resample_idx);
-                log_marg = log_marg.elem(resample_idx);
-                updated = updated.elem(resample_idx);
-
-                weights = weights.elem(resample_idx);
-                weights_backward.row(t_next) = weights.t();
-
-                arma::rowvec wetmp = weights_prop_backward.row(t_next);
-                weights_prop_backward.row(t_next) = wetmp.elem(resample_idx).t();
-
-                W_filter.fill(Wt.at(t_next));
-
-
-                // NEED TO CHANGE PROPAGATE STEP
-                // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
-                arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
-                arma::vec logp(N, arma::fill::zeros);
-                for (unsigned int i = 0; i < N; i++)
-                {
-                    arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
-                    Theta_cur.col(i) = theta_cur;
-
-                    double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
-                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_filter.at(i));
-                    double logp_tmp = R::dnorm4(theta_cur.at(0), Theta_next.at(0, i), std::sqrt(W_filter.at(i)), true);
-
-                    if (updated.at(i) == 1)
-                    {
-                        logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                    }
-                    else
-                    {
-                        logq.at(i) = logp_tmp;
-                    }
-
-                    logp.at(i) = logp_tmp;
-                    logp.at(i) += ObsDist::loglike(
-                        y.at(t_cur), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
-                    
-                    logp.at(i) -= log_marg.at(i);
-                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t_cur), Prec_marginal.slice(t_cur), true);
-                    logp.at(i) += log_marg.at(i);
-
-                    double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
-                    weights.at(i) = std::exp(logp.at(i) - logq.at(i) + logw_next);
-                } // loop over i, index of particles
-
-                // NEED TO CHANGE IMPORTANCE WEIGHT
-
-                // weights = imp_weights_likelihood(t_new, Theta_new, mu0_filter, y, model);
-                // log_cond_marginal.at(t_new) = log_conditional_marginal(weights);
-                
-                // weights = safe_exp_proportional(weights);
-                
-                try
-                {
-                    eff_backward.at(t_cur) = effective_sample_size(weights);
-                }
-                catch(const std::exception& e)
-                {
-                    weights.t().brief_print("\n weights: ");
-                    std::cout << "\n sum = " << arma::accu(weights) << ", sum of square = " << arma::accu(weights % weights) << std::endl;
-                    throw std::runtime_error(e.what());
-                }
-                
-
-                if (eff_backward.at(t_cur) < 0.95 * N)
-                {
-                    resample_idx = get_resample_index(weights);
-                    Theta_backward.slice(t_cur) = Theta_cur.cols(resample_idx);
-                    log_marg = log_marg.elem(resample_idx);
-                    weights.ones();
-                }
-                else
-                {
-                    Theta_backward.slice(t_cur) = Theta_cur;
-                }
-
-                weights_prop_backward.row(t_cur) = weights.t();
-
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rBackward Filtering: " << dim.nT - t + 1 << "/" << dim.nT;
-                }
-
-            } // propagate and resample
-
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
-
-            psi_backward = Theta_backward.row_as_mat(0); // (nT + 1) x N
-            return;
-        }
-
-
 
         void smoother(const Model &model, const bool &verbose = VERBOSE)
         {
@@ -1909,15 +1890,9 @@ namespace SMC
             return;
         }
 
-
         void infer(const Model &model, const bool &verbose = VERBOSE)
         {
             forward_filter(model, verbose);
-
-            if (backward)
-            {
-                backward_filter(model, verbose);
-            }
 
             if (smoothing)
             {
@@ -1928,10 +1903,9 @@ namespace SMC
         }
     };
 
-
     /**
      * @brief Two-filter smoothing
-     * 
+     *
      */
     class TFS : public SequentialMonteCarlo
     {
@@ -2222,8 +2196,6 @@ namespace SMC
                 arma::rowvec wetmp = weights_prop_forward.row(t_old);
                 weights_prop_forward.row(t_old) = wetmp.elem(resample_idx).t();
 
-                
-
                 if (use_discount)
                 { // Use discount factor if W is not given
                     bool use_custom_val = (use_custom && t > 1) ? true : false;
@@ -2266,7 +2238,8 @@ namespace SMC
                 }
 
                 double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val) { val -= wmax; });
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
                 weights = arma::exp(weights);
 
                 eff_forward.at(t_new) = effective_sample_size(weights);
@@ -2303,7 +2276,9 @@ namespace SMC
 
         void backward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
-            Theta_backward = Theta_stored;
+            Theta_backward = Theta_stored; // p x N x (nT + B)
+            double WT = W_filter.at(0);
+            double Wsqrt = std::sqrt(WT);
 
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < y.n_elem; t++)
@@ -2311,7 +2286,6 @@ namespace SMC
                 yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
             }
 
-            mu0_filter.fill(model.dobs.par1); // N x 1
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
             arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
@@ -2327,18 +2301,13 @@ namespace SMC
                 mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
                 arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
                 arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += Wt.at(t);
+                Sig.at(0, 0) += WT;
                 Sig = arma::symmatu(Sig + Ieps);
                 Sigma_marginal.slice(t) = Sig;
-                try
-                {
-                    Prec_marginal.slice(t) = inverse(Sig);
-                }
-                catch (const std::exception &e)
-                {
-                    throw std::runtime_error("Matrix inversion failed at backward filter - prec_marginal initializing");
-                }
+                arma::mat Prec = inverse(Sig);
+                Prec_marginal.slice(t) = arma::symmatu(Prec);
             }
+
 
             arma::vec log_marg(N, arma::fill::zeros);
             for (unsigned int i = 0; i < N; i++)
@@ -2362,33 +2331,34 @@ namespace SMC
                  */
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu;                // nP x N
-                arma::cube Prec, Sigma_chol; // nP x nP x N
                 arma::uvec updated(N, arma::fill::zeros);
+                arma::mat mu;                // nP x N, mean of the posterior (propagation dist.) of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+                arma::cube Prec, Sigma_chol; // nP x nP x N, related to posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
 
                 weights = imp_weights_backcast(
                     mu, Prec, Sigma_chol, logq, updated,
                     model, t_cur, Theta_next,
-                    W_filter, mu0_filter, y, yhat);
+                    mu_marginal, Sigma_marginal, y, yhat);
+                
 
                 arma::uvec resample_idx = get_resample_index(weights);
 
                 Theta_next = Theta_next.cols(resample_idx); // theta[t]
                 Theta_backward.slice(t_next) = Theta_next;
 
-                logq = logq.elem(resample_idx);
                 mu = mu.cols(resample_idx);
                 Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
-                log_marg = log_marg.elem(resample_idx);
-                updated = updated.elem(resample_idx);
 
                 weights = weights.elem(resample_idx);
                 weights_backward.row(t_next) = weights.t();
                 arma::rowvec wetmp = weights_prop_backward.row(t_next);
                 weights_prop_backward.row(t_next) = wetmp.elem(resample_idx).t();
 
-                W_filter.fill(Wt.at(t_next));
+                log_marg = log_marg.elem(resample_idx);
+                logq = logq.elem(resample_idx);
+                updated = updated.elem(resample_idx);
+
 
                 // NEED TO CHANGE PROPAGATE STEP
                 // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
@@ -2398,24 +2368,19 @@ namespace SMC
                 {
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                     Theta_cur.col(i) = theta_cur;
-
-                    double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
-                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_filter.at(i));
-                    double logp_tmp = R::dnorm4(theta_cur.at(0), Theta_next.at(0, i), std::sqrt(W_filter.at(i)), true);
-
                     if (updated.at(i) == 1)
                     {
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                    }
-                    else
-                    {
-                        logq.at(i) = logp_tmp;
+                        logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(WT), true);
                     }
 
-                    logp.at(i) = logp_tmp;
+                    double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
+                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_filter.at(i));
+
+                    
                     logp.at(i) += ObsDist::loglike(
                         y.at(t_cur), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
-
+                    // logp.at(i) -= log_marg.at(i);
                     logp.at(i) -= log_marg.at(i);
                     log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t_cur), Prec_marginal.slice(t_cur), true);
                     logp.at(i) += log_marg.at(i);
@@ -2423,6 +2388,7 @@ namespace SMC
                     double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
                     weights.at(i) = logp.at(i) - logq.at(i) + logw_next;
                 } // loop over i, index of particles
+
 
                 double wmax = weights.max();
                 weights.for_each([&wmax](arma::vec::elem_type &val)
@@ -2458,6 +2424,7 @@ namespace SMC
             psi_backward = Theta_backward.row_as_mat(0); // (nT + 1) x N
             return;
         }
+
 
         void smoother(const Model &model, const bool &verbose = VERBOSE)
         {
@@ -2498,8 +2465,6 @@ namespace SMC
                 }
             }
 
-
-
             for (unsigned int t = 1; t < dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
@@ -2521,7 +2486,7 @@ namespace SMC
                 arma::vec logp(N, arma::fill::zeros);
                 arma::vec logq = arma::log(wfor + EPS) + arma::log(wback + EPS);
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
-                for (unsigned int i = 0; i < N; i ++)
+                for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec gtheta = StateSpace::func_gt(model, Theta_prev.col(i), y.at(t_prev));
                     arma::vec Ft = LBA::func_Ft(model, t_cur, gtheta, y);
@@ -2532,7 +2497,7 @@ namespace SMC
                     double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
                         lambda, model.dobs, model.flink.name); // (eq 3.11)
-                    
+
                     double delta = yhat.at(t_cur) - mu0_filter.at(i) - ft_tilde;
                     double delta2 = delta * delta;
 
@@ -2628,7 +2593,6 @@ namespace SMC
                 smoother(model, verbose);
             }
 
-
             return;
         }
     };
@@ -2636,9 +2600,7 @@ namespace SMC
     class PL : public SequentialMonteCarlo
     {
     public:
-
-        PL(const Model &dgtf_model, const arma::vec &y_in) : SequentialMonteCarlo(dgtf_model, y_in){}
-
+        PL(const Model &dgtf_model, const arma::vec &y_in) : SequentialMonteCarlo(dgtf_model, y_in) {}
 
         void init(const Rcpp::List &opts_in)
         {
@@ -2664,59 +2626,169 @@ namespace SMC
 
             eff_forward.set_size(dim.nT + 1);
             eff_forward.zeros();
+            eff_filter = eff_forward;
             eff_backward = eff_forward;
 
-
-            aw_forward.set_size(N);
-            aw_forward.fill(prior_W.par1);
-            bw_forward.set_size(N);
-            bw_forward.fill(prior_W.par2);
-            W_smooth.set_size(N);
-            W_smooth.zeros();
-
-
-            // aw_backward = aw_forward;
-            // bw_backward = bw_forward;
-            // W_backward = W_backward;
-            // W_filter = W_stored.col(0);
-            if (prior_W.infer)
             {
-                std::string par_name = "W_init";
-                Dist dist_W_init;
-                dist_W_init.init("gamma", 1., 1.);
-                if (opts.containsElementNamed("W_init"))
-                {
-                    Rcpp::List W_init_opts = Rcpp::as<Rcpp::List>(opts["W_init"]);
-                    init_dist(dist_W_init, W_init_opts);
-                }
+                aw_forward.set_size(N);
+                aw_forward.fill(prior_W.par1);
+                bw_forward.set_size(N);
+                bw_forward.fill(prior_W.par2);
 
-                W_filter = draw_param_init(dist_W_init, N);
+                W_backward.set_size(N);
+                W_backward.zeros();
+                W_forward = W_backward;
+
+                if (prior_W.infer)
+                {
+                    std::string par_name = "W_init";
+                    Dist dist_W_init;
+                    dist_W_init.init("gamma", 1., 1.);
+                    if (opts.containsElementNamed("W_init"))
+                    {
+                        Rcpp::List W_init_opts = Rcpp::as<Rcpp::List>(opts["W_init"]);
+                        init_dist(dist_W_init, W_init_opts);
+                    }
+
+                    W_filter = draw_param_init(dist_W_init, N);
+                    use_discount = false;
+                }
             }
 
-            
-
-            amu_forward.set_size(N);
-            amu_forward.fill(prior_mu0.par1);
-            bmu_forward.set_size(N);
-            bmu_forward.fill(prior_mu0.par2);
-            mu0_smooth.set_size(N);
-            mu0_smooth.zeros();
-            // amu_backward = amu_forward;
-            // bmu_backward = bmu_forward;
-            // mu0_backward = mu0_backward;
-            if (prior_mu0.infer)
             {
-                std::string par_name = "mu0_init";
-                Dist dist_mu0_init;
-                dist_mu0_init.init("gamma", 1., 1.);
-                if (opts.containsElementNamed("mu0_init"))
+                amu_forward.set_size(N);
+                amu_forward.fill(prior_mu0.par1);
+                bmu_forward.set_size(N);
+                bmu_forward.fill(prior_mu0.par2);
+                mu0_smooth.set_size(N);
+                mu0_smooth.zeros();
+                mu0_backward = mu0_smooth;
+                mu0_forward = mu0_smooth;
+
+                if (prior_mu0.infer)
                 {
-                    Rcpp::List mu0_init_opts = Rcpp::as<Rcpp::List>(opts["mu0_init"]);
-                    init_dist(dist_mu0_init, mu0_init_opts);
+                    std::string par_name = "mu0_init";
+                    Dist dist_mu0_init;
+                    dist_mu0_init.init("gamma", 1., 1.);
+                    if (opts.containsElementNamed("mu0_init"))
+                    {
+                        Rcpp::List mu0_init_opts = Rcpp::as<Rcpp::List>(opts["mu0_init"]);
+                        init_dist(dist_mu0_init, mu0_init_opts);
+                    }
+                    mu0_filter = draw_param_init(dist_mu0_init, N);
                 }
-                mu0_filter = draw_param_init(dist_mu0_init, N);
             }
 
+            {
+                std::string par_name = "rho";
+                prior_rho.init("gaussiaN", 1., 1.);
+                prior_rho.init_param(false, 0.01);
+                rho_mh_sd = 0.1;
+                if (opts.containsElementNamed("rho"))
+                {
+                    init_param_def(opts, par_name, prior_rho);
+                    Rcpp::List opts_rho = Rcpp::as<Rcpp::List>(opts["rho"]);
+                    if (opts_rho.containsElementNamed("mh_sd"))
+                    {
+                        rho_mh_sd = Rcpp::as<double>(opts_rho["mh_sd"]);
+                    }
+                }
+                rho_filter.set_size(N);
+                rho_filter.fill(prior_rho.val);
+                rho_backward = rho_filter;
+                rho_forward = rho_filter;
+            }
+
+            {
+                std::string par_name = "par1";
+                prior_par1.init("gamma", 0.1, 0.1);
+                prior_par1.init_param(false, 0.01);
+                par1_mh_sd = 0.1;
+                if (opts.containsElementNamed("par1"))
+                {
+                    init_param_def(opts, par_name, prior_par1);
+                    Rcpp::List opts_tmp = Rcpp::as<Rcpp::List>(opts["par1"]);
+                    if (opts_tmp.containsElementNamed("mh_sd"))
+                    {
+                        par1_mh_sd = Rcpp::as<double>(opts_tmp["mh_sd"]);
+                    }
+                }
+                par1_filter.set_size(N);
+                par1_filter.fill(prior_par1.val);
+                par1_backward = par1_filter;
+                par1_forward = par1_filter;
+            }
+
+            {
+                std::string par_name = "par2";
+                prior_par2.init("gamma", 0.1, 0.1);
+                prior_par2.init_param(false, 0.01);
+                par2_mh_sd = 0.1;
+                if (opts.containsElementNamed("par2"))
+                {
+                    init_param_def(opts, par_name, prior_par2);
+                    Rcpp::List opts_tmp = Rcpp::as<Rcpp::List>(opts["par2"]);
+                    if (opts_tmp.containsElementNamed("mh_sd"))
+                    {
+                        par2_mh_sd = Rcpp::as<double>(opts_tmp["mh_sd"]);
+                    }
+                }
+                par2_filter.set_size(N);
+                par2_filter.fill(prior_par2.val);
+                par2_backward = par2_filter;
+                par2_forward = par2_filter;
+            }
+
+            bool infer_lag = prior_par1.infer || prior_par2.infer;
+            prior_par1.infer = infer_lag;
+            prior_par2.infer = infer_lag;
+
+
+            mu_marginal.set_size(dim.nP, dim.nT + 1, N);
+            mu_marginal.zeros();
+            mu_marg_init.set_size(dim.nP);
+            mu_marg_init.zeros();
+            if (opts.containsElementNamed("mu_marg_init"))
+            {
+                arma::vec tmp = Rcpp::as<arma::vec>(opts["mu_marg_init"]);
+                unsigned int nelem = std::min(tmp.n_elem, dim.nP);
+                mu_marg_init.head(nelem) = tmp.head(nelem);
+                if (dim.nP > nelem)
+                {
+                    mu_marg_init.subvec(nelem, dim.nP - 1).fill(tmp.at(nelem - 1));
+                }
+            }
+
+            Sigma_marginal.set_size(dim.nP * dim.nP, dim.nT + 1, N);
+            Sigma_marginal.zeros();
+            Prec_marginal = Sigma_marginal;
+
+            Sig_marg_init.set_size(dim.nP, dim.nP);
+            Sig_marg_init.eye();
+            Sig_marg_init.diag() *= 2.;
+            if (opts.containsElementNamed("Sig_diag_marg_init"))
+            {
+                arma::vec Sig_diag_marg_init(dim.nP, arma::fill::ones);
+                Sig_diag_marg_init.fill(2.);
+
+                arma::vec tmp = Rcpp::as<arma::vec>(opts["Sig_diag_marg_init"]);
+                unsigned int nelem = std::min(tmp.n_elem, dim.nP);
+
+                Sig_diag_marg_init.head(nelem) = tmp.head(nelem);
+                if (dim.nP > nelem)
+                {
+                    Sig_diag_marg_init.subvec(nelem, dim.nP - 1).fill(tmp.at(nelem - 1));
+                }
+
+                Sig_marg_init.diag() = Sig_diag_marg_init;
+            }
+
+            if (!Sig_marg_init.is_sympd())
+            {
+                throw std::invalid_argument("PL::init: initial variance matrix of the artificial marginal should be sympd.");
+            }
+
+            filter_pass = false;
             return;
         }
 
@@ -2744,28 +2816,44 @@ namespace SMC
         //     return;
         // }
 
-
         static Rcpp::List default_settings()
         {
             Rcpp::List opts;
             opts = SequentialMonteCarlo::default_settings();
             opts["max_iter"] = 10;
 
-            // Rcpp::List W_init_opts;
-            // W_init_opts["prior_name"] = "gamma";
-            // W_init_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
+            arma::vec mu_marg_init(2, arma::fill::zeros);
+            arma::vec Sig_diag_marg_init(2, arma::fill::ones);
 
-            // opts["W_init"] = W_init_opts;
+            opts["mu_marg_init"] = Rcpp::wrap(mu_marg_init.t());
+            opts["Sig_diag_marg_init"] = Rcpp::wrap(Sig_diag_marg_init.t());
 
-            // Rcpp::List mu0_init_opts;
-            // mu0_init_opts["prior_name"] = "constant";
-            // mu0_init_opts["prior_param"] = Rcpp::NumericVector::create(0., 0.);
+            Rcpp::List rho_opts;
+            rho_opts["infer"] = false;
+            rho_opts["init"] = 30;
+            rho_opts["mh_sd"] = 0.1;
+            rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            rho_opts["prior_name"] = "gamma";
+            opts["rho"] = rho_opts;
 
-            // opts["mu0_init"] = mu0_init_opts;
+            Rcpp::List par1_opts;
+            par1_opts["infer"] = false;
+            par1_opts["init"] = 1;
+            par1_opts["mh_sd"] = 0.1;
+            par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            rho_opts["prior_name"] = "invgamma";
+            opts["par1"] = par1_opts;
+
+            Rcpp::List par2_opts;
+            par2_opts["infer"] = false;
+            par2_opts["init"] = 1;
+            par2_opts["mh_sd"] = 0.1;
+            par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            par2_opts["prior_name"] = "invgamma";
+            opts["par2"] = par2_opts;
 
             return opts;
         }
-
 
         Rcpp::List get_output(const bool &summarize = TRUE)
         {
@@ -2791,21 +2879,55 @@ namespace SMC
             if (prior_W.infer)
             {
                 // arma::vec W_filter = W_stored.col(dim.nT);
-                output["W"] = Rcpp::wrap(W_filter);
+                output["W"] = Rcpp::wrap(W_forward.t());
+                if (smoothing)
+                {
+                    output["W_forward2"] = Rcpp::wrap(W_filter.t());
+                    output["W_backward"] = Rcpp::wrap(W_backward.t());
+                }
             }
 
             if (prior_mu0.infer)
             {
-                output["mu0"] = Rcpp::wrap(mu0_filter);
+                output["mu0"] = Rcpp::wrap(mu0_forward.t());
+                if (smoothing)
+                {
+                    output["mu0_forward2"] = Rcpp::wrap(mu0_filter.t());
+                    output["mu0_backward"] = Rcpp::wrap(mu0_backward.t());
+                }
+            }
+
+            if (prior_rho.infer)
+            {
+                output["rho"] = Rcpp::wrap(rho_forward.t());
+                if (smoothing)
+                {
+                    output["rho_forward2"] = Rcpp::wrap(rho_filter.t());
+                    output["rho_backward"] = Rcpp::wrap(rho_backward.t());
+                }
+            }
+
+            if (prior_par1.infer || prior_par2.infer)
+            {
+                output["par1"] = Rcpp::wrap(par1_forward.t());
+                output["par2"] = Rcpp::wrap(par2_forward.t());
+                if (smoothing)
+                {
+                    output["par1_forward2"] = Rcpp::wrap(par1_filter.t());
+                    output["par1_backward"] = Rcpp::wrap(par1_backward.t());
+
+                    output["par2_forward2"] = Rcpp::wrap(par2_filter.t());
+                    output["par2_backward"] = Rcpp::wrap(par2_backward.t());
+                }
             }
 
             output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
-            output["eff_forward"] = Rcpp::wrap(eff_forward);
+            output["eff_forward1"] = Rcpp::wrap(eff_forward.t());
 
             if (smoothing)
             {
                 arma::mat psi_smooth = get_psi_smooth(); // (nT + 1) x M
-                
+
                 if (summarize)
                 {
                     arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
@@ -2825,13 +2947,13 @@ namespace SMC
                     output["mu0"] = Rcpp::wrap(mu0_smooth);
                 }
 
-                output["eff_backward"] = Rcpp::wrap(eff_backward);
+                output["eff_forward2"] = Rcpp::wrap(eff_filter.t());
+                output["eff_backward"] = Rcpp::wrap(eff_backward.t());
             }
 
             return output;
         }
 
-     
         Rcpp::List forecast(const Model &model)
         {
 
@@ -2848,22 +2970,50 @@ namespace SMC
             return out;
         }
 
-
-        void forward_filter(const Model &model, const bool &verbose = VERBOSE)
+        void forward_filter(Model &model, const bool &verbose = VERBOSE)
         {
             if (arma::any(W_filter < EPS))
             {
                 throw std::invalid_argument("PL::forward_filter: W_filter should not be zero.");
             }
 
+            if (!prior_W.infer)
+            {
+                prior_W.val = model.derr.par1;
+                W_filter.fill(prior_W.val);
+            }
+
+            if (!prior_mu0.infer)
+            {
+                prior_mu0.val = model.dobs.par1;
+                mu0_filter.fill(prior_mu0.val);
+            }
+
+            if (!prior_rho.infer)
+            {
+                prior_rho.val = model.dobs.par2;
+                rho_filter.fill(prior_rho.val);
+            }
+
+            if (!prior_par1.infer && !prior_par2.infer)
+            {
+                prior_par1.val = model.transfer.dlag.par1;
+                prior_par2.val = model.transfer.dlag.par2;
+            }
+
             std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+            bool nonnegative_par1 = (dist_list[prior_par1.name] != AVAIL::Dist::gaussian) ;
+            bool withinone_par1 = (dist_list[prior_par1.name] == AVAIL::Dist::beta);
+
+            bool nonnegative_par2 = (dist_list[prior_par2.name] != AVAIL::Dist::gaussian);
+            bool withinone_par2 = (dist_list[prior_par2.name] == AVAIL::Dist::beta);
 
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
             {
                 yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
             }
-
 
             for (unsigned int t = 0; t < dim.nT; t++)
             {
@@ -2874,26 +3024,23 @@ namespace SMC
                 unsigned int t_new = t + 1;
                 arma::mat Theta_old = Theta_stored.slice(t_old); // p x N, theta[t]
 
-
                 /**
                  * @brief Resampling using conditional one-step-ahead predictive distribution as weights.
                  *
                  */
-                
+
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu; // nP x N
+                arma::mat mu;                // nP x N
                 arma::cube Prec, Sigma_chol; // nP x nP x N
                 arma::uvec updated(N, arma::fill::zeros);
 
                 weights = imp_weights_forecast(
-                    mu, Prec, Sigma_chol, logq, updated, 
-                    model, t_new, 
-                    Theta_old, 
+                    mu, Prec, Sigma_chol, logq, updated,
+                    model, t_new,
+                    Theta_old,
                     W_filter, mu0_filter, y, yhat);
 
-
                 arma::uvec resample_idx = get_resample_index(weights);
-
 
                 Theta_old = Theta_old.cols(resample_idx); // theta[t]
                 Theta_stored.slice(t_old) = Theta_old;
@@ -2910,35 +3057,47 @@ namespace SMC
                 arma::rowvec wetmp = weights_prop_forward.row(t_old);
                 weights_prop_forward.row(t_old) = wetmp.elem(resample_idx).t();
 
-                
-
+                // No need to update static parameters if we already inferred them during forward filtering once with the same data (filter_pass = true).
                 if (prior_W.infer)
                 {
-                    W_filter = W_filter.elem(resample_idx); // gamma[t]
+                    W_filter = W_filter.elem(resample_idx);     // gamma[t]
                     aw_forward = aw_forward.elem(resample_idx); // s[t]
                     bw_forward = bw_forward.elem(resample_idx); // s[t]
                 }
 
                 if (prior_mu0.infer)
                 {
-                    mu0_filter = mu0_filter.elem(resample_idx); // gamma[t]
+                    mu0_filter = mu0_filter.elem(resample_idx);   // gamma[t]
                     amu_forward = amu_forward.elem(resample_idx); // s[t]
                     bmu_forward = bmu_forward.elem(resample_idx); // s[t]
                 }
 
+                if (prior_rho.infer)
+                {
+                    rho_filter = rho_filter.elem(resample_idx);   // gamma[t]
+                }
+
+                if (prior_par1.infer || prior_par2.infer)
+                {
+                    par1_filter = par1_filter.elem(resample_idx);
+                    par2_filter = par2_filter.elem(resample_idx);
+                }
 
                 // arma::vec Wsqrt = arma::sqrt(W_stored.col(t));
                 arma::vec Wsqrt = arma::sqrt(W_filter);
                 bool positive_noise = (t_old < Theta_old.n_rows) ? true : false;
-
 
                 // NEED TO CHANGE PROPAGATE STEP
                 // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
                 arma::mat Theta_new(model.dim.nP, N, arma::fill::zeros);
                 arma::vec logp(N, arma::fill::zeros);
 
-                for (unsigned int i = 0; i < N; i ++)
+                for (unsigned int i = 0; i < N; i++)
                 {
+                    if (prior_par1.infer || prior_par2.infer)
+                    {
+                        unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
+                    }
                     arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
                     Theta_new.col(i) = theta_new;
 
@@ -2959,16 +3118,23 @@ namespace SMC
                     logq.at(i) += logq_theta;
 
                     double wtmp = prior_W.val;
-                    if ((prior_W.infer && burnin) || use_discount)
+                    if (filter_pass || (prior_W.infer && !burnin))
                     {
+                        // If filter_pass = true, we already have estimates of W
+                        // if burnin = false with prior_W.infer = true, it means we have particles of W from previous time
+                        wtmp = W_filter.at(i);
+                    }
+                    else if ((prior_W.infer && burnin) || use_discount)
+                    {
+                        // If burnin = true with prior_W.infer = true, we generate samples from the discount factor approach
+                        // If use_discount = true, we assume W is changing dynamically and be accounted for with a discount factor.
                         wtmp = SequentialMonteCarlo::discount_W(
                             Theta_stored.slice(t),
                             custom_discount_factor,
                             use_custom, default_discount_factor);
-                    }
+                    } // else, we have prior_W.infer = false && use_discount = false. In this case we assume the prior value as the "true" value of W.
 
-                    double logq_W = 0.;
-                    if (prior_W.infer)
+                    if (prior_W.infer && !filter_pass)
                     {
                         double err = theta_new.at(0) - Theta_old.at(0, i);
                         double sse = std::pow(err, 2.);
@@ -2978,94 +3144,172 @@ namespace SMC
                         if (!burnin)
                         {
                             wtmp = InverseGamma::sample(aw_forward.at(i), bw_forward.at(i));
-                            logq_W =  R::dgamma(1. / wtmp, aw_forward.at(i), 1. / bw_forward.at(i), true);
-                        }                     
+                            logq.at(i) += R::dgamma(1. / wtmp, aw_forward.at(i), 1. / bw_forward.at(i), true);
+                        }
                     } // Propagate W
-                    logq.at(i) += logq_W;
-
                     W_filter.at(i) = wtmp;
 
-                    double ft_new = StateSpace::func_ft(model, t_new, theta_new, y); // ft(theta[t+1])
+                    if (prior_W.infer)
+                    {
+                        model.derr._par1 = W_filter.at(i);
+                    }
+
+                    double ft_new = StateSpace::func_ft(model, t_new, theta_new, y);                 // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, mu0_filter.at(i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
-
-                    double logq_mu0 = 0.;
-                    if (prior_mu0.infer)
                     {
-                        double Vt_old = ApproxDisturbance::func_Vt_approx(lambda_old, model.dobs, model.flink.name);
-                        double amu_scl = amu_forward.at(i) / bmu_forward.at(i);
-                        double prec = 1. / bmu_forward.at(i) + 1. / Vt_old;
-                        bmu_forward.at(i) = 1. / prec;
-
-                        // double nom = bmu.at(i, t) * amu.at(i, t); // prior precision x mean
-                        double eps = yhat.at(t_new) - ft_new;
-                        double eps_scl = eps / Vt_old;
-                        amu_forward.at(i) = bmu_forward.at(i) * (amu_scl + eps_scl);
-
-                        double sd = std::sqrt(bmu_forward.at(i));
-                        double mu0 = R::rnorm(amu_forward.at(i), sd);
-
-                        if (link_list[model.flink.name] == AVAIL::Func::identity)
+                        if (prior_mu0.infer && !filter_pass)
                         {
-                            unsigned int cnt = 0;
-                            while (mu0 < 0 && cnt < max_iter)
+                            double Vt_old = ApproxDisturbance::func_Vt_approx(lambda_old, model.dobs, model.flink.name);
+                            double amu_scl = amu_forward.at(i) / bmu_forward.at(i);
+                            double prec = 1. / bmu_forward.at(i) + 1. / Vt_old;
+                            bmu_forward.at(i) = 1. / prec;
+
+                            // double nom = bmu.at(i, t) * amu.at(i, t); // prior precision x mean
+                            double eps = yhat.at(t_new) - ft_new;
+                            double eps_scl = eps / Vt_old;
+                            amu_forward.at(i) = bmu_forward.at(i) * (amu_scl + eps_scl);
+
+                            double sd = std::sqrt(bmu_forward.at(i));
+                            double mu0 = R::rnorm(amu_forward.at(i), sd);
+
+                            if (link_list[model.flink.name] == AVAIL::Func::identity)
                             {
-                                mu0 = R::rnorm(amu_forward.at(i), sd);
-                                cnt++;
+                                unsigned int cnt = 0;
+                                while (mu0 < 0 && cnt < max_iter)
+                                {
+                                    mu0 = R::rnorm(amu_forward.at(i), sd);
+                                    cnt++;
+                                }
+
+                                if (mu0 < 0)
+                                {
+                                    throw std::invalid_argument("SMC::PL::filter - negative mu0 when using identity link.");
+                                }
                             }
 
-                            if (mu0 < 0)
+                            mu0_filter.at(i) = mu0;
+                            logq.at(i) += R::dnorm4(mu0, amu_forward.at(i), sd, true);
+
+                        } // inference of mu0
+
+                        if (prior_mu0.infer)
+                        {
+                            model.dobs._par1 = mu0_filter.at(i);
+                        }
+                    } // mu0
+
+                    {
+                        if (!prior_rho.infer)
+                        {
+                            rho_filter.at(i) = prior_rho.val;
+                        }
+                        else if (!filter_pass)
+                        {
+                            double rho_old = rho_filter.at(i);
+                            rho_filter.at(i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
+                            unsigned int cnt = 0;
+                            while (rho_filter.at(i) < 0 && cnt < max_iter)
                             {
-                                throw std::invalid_argument("SMC::PL::filter - negative mu0 when using identity link.");
+                                rho_filter.at(i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
+                                cnt ++;
                             }
+                            logq.at(i) += R::dnorm4(rho_filter.at(i), rho_old, rho_mh_sd * rho_old, 1);
                         }
 
-                        mu0_filter.at(i) = mu0;
-                        logq_mu0 = R::dnorm4(mu0, amu_forward.at(i), sd, true);
-                        
-                    } // inference of mu0
-                    logq.at(i) += logq_mu0;
+                        if (prior_rho.infer)
+                        {
+                            model.dobs._par2 = rho_filter.at(i);
+                        }
+                    } // rho
 
+                    {
+                        if (!prior_par1.infer && !prior_par2.infer)
+                        {
+                            par1_filter.at(i) = prior_par1.val;
+                            par2_filter.at(i) = prior_par2.val;
+                        }
+                        else if (!filter_pass)
+                        {
+                            double par1_old = par1_filter.at(i);
+                            par1_filter.at(i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
+
+                            if (nonnegative_par1)
+                            {
+                                unsigned int cnt = 0;
+                                if (withinone_par1)
+                                {
+                                    while ((par1_filter.at(i) < 0 || par1_filter.at(i) > 1) && cnt < max_iter)
+                                    {
+                                        par1_filter.at(i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                                        cnt ++;
+                                    }
+                                }
+                                else
+                                {
+                                    while (par1_filter.at(i) < 0 && cnt < max_iter)
+                                    {
+                                        par1_filter.at(i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                                        cnt++;
+                                    }
+                                }
+                                
+                            }
+                            
+                            logq.at(i) += R::dnorm4(par1_filter.at(i), par1_old, par1_mh_sd * par1_old, 1);
+
+                            double par2_old = par2_filter.at(i);
+                            par2_filter.at(i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
+
+                            if (nonnegative_par2)
+                            {
+                                unsigned int cnt = 0;
+                                if (withinone_par2)
+                                {
+                                    while ((par2_filter.at(i) < 0 || par2_filter.at(i) > 1) && cnt < max_iter)
+                                    {
+                                        par2_filter.at(i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                                        cnt++;
+                                    }
+                                }
+                                else
+                                {
+                                    while (par2_filter.at(i) < 0 && cnt < max_iter)
+                                    {
+                                        par2_filter.at(i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                                        cnt++;
+                                    }
+                                }
+                            }
+
+                            logq.at(i) += R::dnorm4(par2_filter.at(i), par2_old, par2_mh_sd * par2_old, 1);
+                        }
+
+                        if (prior_par1.infer || prior_par2.infer)
+                        {
+                            unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
+                        }
+                    } // rho
 
                     double lambda_new = LinkFunc::ft2mu(ft_new, model.dobs.name, mu0_filter.at(i));
                     logp.at(i) = ObsDist::loglike(
-                        y.at(t_new), model.dobs.name, lambda_new, model.dobs.par2, true); // observation density
-                    logp.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0,i), std::sqrt(W_filter.at(i)), true);
+                        y.at(t_new), model.dobs.name, lambda_new, rho_filter.at(i), true); // observation density
+                    logp.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
 
                     double logw_old = std::log(weights_prop_forward.at(t_old, i) + EPS);
                     weights.at(i) = logp.at(i) - logq.at(i) + logw_old;
-
-                    if (weights.at(i) > UPBND)
-                    {
-                        std::cerr << "\n t = " << t_old << ", logq_theta = " << logq_theta << ", logq_mu0 = " << logq_mu0 << ", logq_W = " << logq_W << ", mu0 = " << mu0_filter.at(i) << ", W = " << W_filter.at(i) << ", logw_old = " << logw_old << ", logp = " << logp.at(i) << ", logq = " << logq.at(i);
-
-                        throw std::runtime_error("\nInfinite weights.");
-                    }
                 } // loop over i, index of particles
 
                 double wmax = weights.max();
                 weights.for_each([&wmax](arma::vec::elem_type &val)
                                  { val -= wmax; });
                 weights = arma::exp(weights);
-                
-                try
-                {
-                    bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t_old));
-                }
-                catch(const std::exception& e)
-                {
-                    mu0_filter.t().brief_print("\n mu0_filter: ");
-                    W_filter.t().brief_print("\n W_filter: ");
-                    
-                    throw std::runtime_error(e.what());
-                }
-                
+                bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t_old));
 
-
-                eff_forward.at(t_new) = effective_sample_size(weights);
+                eff_filter.at(t_new) = effective_sample_size(weights);
                 log_cond_marginal.at(t_new) = log_conditional_marginal(weights);
 
-                if (eff_forward.at(t_new) < 0.95 * N)
+                if (eff_filter.at(t_new) < 0.95 * N)
                 {
                     arma::uvec resample_idx = get_resample_index(weights);
                     Theta_stored.slice(t_new) = Theta_new.cols(resample_idx);
@@ -3078,11 +3322,22 @@ namespace SMC
                         bw_forward = bw_forward.elem(resample_idx);
                     }
 
-                    if (prior_mu0.infer)
+                    if (prior_mu0.infer && !filter_pass)
                     {
                         mu0_filter = mu0_filter.elem(resample_idx);
                         amu_forward = amu_forward.elem(resample_idx);
                         bmu_forward = bmu_forward.elem(resample_idx);
+                    }
+
+                    if (prior_rho.infer && !filter_pass)
+                    {
+                        rho_filter = rho_filter.elem(resample_idx);
+                    }
+
+                    if (prior_par1.infer || prior_par2.infer)
+                    {
+                        par1_filter = par1_filter.elem(resample_idx);
+                        par2_filter = par2_filter.elem(resample_idx);
                     }
                 }
                 else
@@ -3091,9 +3346,6 @@ namespace SMC
                 }
 
                 weights_prop_forward.row(t_new) = weights.t();
-
-
-                
 
                 if (verbose)
                 {
@@ -3107,13 +3359,36 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-
             psi_forward = Theta_stored.row_as_mat(0); // (nT + 1) x N
+            if (!filter_pass)
+            {
+                W_forward = W_filter;
+                mu0_forward = mu0_filter;
+                rho_forward = rho_filter;
+                par1_forward = par1_filter;
+                par2_forward = par2_filter;
+
+                eff_forward = eff_filter;
+            }
+            filter_pass = true;
+            return;
         }
 
-        void backward_filter(const Model &model, const bool &verbose = VERBOSE)
+
+        void backward_filter(Model &model, const bool &verbose = VERBOSE)
         {
+            if (!filter_pass)
+            {
+                throw std::runtime_error("SMC::PL: you need to run a forward filtering pass before running backward filtering.");
+            }
+            forward_filter(model, VERBOSE);
+
             Theta_backward = Theta_stored;
+            W_backward = W_filter;
+            mu0_backward = mu0_filter;
+            rho_backward = rho_filter;
+            par1_backward = par1_filter;
+            par2_backward = par2_filter;
 
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < y.n_elem; t++)
@@ -3123,45 +3398,55 @@ namespace SMC
 
             // mu0_filter.fill(model.dobs.par1); // N x 1
 
-            arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
-            arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
-            arma::cube Prec_marginal = Sigma_marginal;
-            Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
-
+            arma::mat Prec_marg_init = Sig_marg_init;  // nP x nP
+            Prec_marg_init.diag() = 1. / Sig_marg_init.diag();
+            for (unsigned int i = 0; i < N; i++)
+            {
+                mu_marginal.slice(i).col(0) = mu_marg_init; // nP x 1
+                Sigma_marginal.slice(i).col(0) = Sig_marg_init.as_col(); // np^{2} x 1
+                Prec_marginal.slice(i).col(0) = Prec_marg_init.as_col();
+            }
 
             arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
             Ieps.for_each([](arma::mat::elem_type &val)
                           { val *= EPS; });
-            
-            double What = arma::median(W_filter);
+
+            arma::vec Wprec = 1. / W_backward;
+
             for (unsigned int t = 1; t <= dim.nT; t++)
             {
-                mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += What;
-                Sig = arma::symmatu(Sig + Ieps);
-                Sigma_marginal.slice(t) = Sig;
-                try
+                Rcpp::checkUserInterrupt();
+
+                for (unsigned int i = 0; i < N; i++)
                 {
-                    Prec_marginal.slice(t) = inverse(Sig);
+                    mu_marginal.slice(i).col(t) = StateSpace::func_gt(model, mu_marginal.slice(i).col(t-1), y.at(t - 1));
+
+                    arma::mat Gt = LBA::func_Gt(model, mu_marginal.slice(i).col(t-1), y.at(t - 1));
+                    arma::mat Vt = arma::reshape(Sigma_marginal.slice(i).col(t-1), model.dim.nP, model.dim.nP);
+                    arma::mat Sig = Gt * Vt * Gt.t();
+                    Sig.at(0, 0) += W_backward.at(i);
+                    Sig = arma::symmatu(Sig + Ieps);
+                    arma::mat Prec = inverse(Sig);
+
+                    Sigma_marginal.slice(i).col(t) = Sig.as_col();
+                    Prec_marginal.slice(i).col(t) = Prec.as_col();
                 }
-                catch (const std::exception &e)
+
+                if (verbose)
                 {
-                    throw std::runtime_error("Matrix inversion failed at backward filter - prec_marginal initializing");
+                    Rcpp::Rcout << "\rArtificial marginal: " << t << "/" << dim.nT;
                 }
             }
-
+            Rcpp::Rcout << std::endl;
 
             arma::vec log_marg(N, arma::fill::zeros);
             for (unsigned int i = 0; i < N; i++)
             {
                 arma::vec theta = Theta_backward.slice(dim.nT).col(i);
+                arma::mat Prec = arma::reshape(Prec_marginal.slice(i).col(dim.nT), dim.nP, dim.nP);
                 log_marg.at(i) = MVNorm::dmvnorm2(
-                    theta, mu_marginal.col(dim.nT), Prec_marginal.slice(dim.nT), true);
+                    theta, mu_marginal.slice(i).col(dim.nT), Prec, true);
             }
-
 
             for (unsigned int t = dim.nT - 1; t > 0; t--)
             {
@@ -3184,24 +3469,35 @@ namespace SMC
                 weights = imp_weights_backcast(
                     mu, Prec, Sigma_chol, logq, updated,
                     model, t_cur, Theta_next,
-                    W_filter, mu0_filter, y, yhat);
+                    W_backward, mu0_backward, mu_marginal, Sigma_marginal, y, yhat);
 
                 arma::uvec resample_idx = get_resample_index(weights);
 
                 Theta_next = Theta_next.cols(resample_idx); // theta[t]
                 Theta_backward.slice(t_next) = Theta_next;
 
-                logq = logq.elem(resample_idx);
                 mu = mu.cols(resample_idx);
                 Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
-                log_marg = log_marg.elem(resample_idx);
-                updated = updated.elem(resample_idx);
 
                 weights = weights.elem(resample_idx);
                 weights_backward.row(t_next) = weights.t();
                 arma::rowvec wetmp = weights_prop_backward.row(t_next);
                 weights_prop_backward.row(t_next) = wetmp.elem(resample_idx).t();
+
+                log_marg = log_marg.elem(resample_idx);
+                logq = logq.elem(resample_idx);
+                updated = updated.elem(resample_idx);
+
+                W_backward = W_backward.elem(resample_idx);
+                mu0_backward = mu0_backward.elem(resample_idx);
+                rho_backward = rho_backward.elem(resample_idx);
+                par1_backward = par1_backward.elem(resample_idx);
+                par2_backward = par2_backward.elem(resample_idx);
+
+                mu_marginal = mu_marginal.slices(resample_idx);
+                Sigma_marginal = Sigma_marginal.slices(resample_idx);
+                
 
                 // W_filter.fill(Wt.at(t_next));
 
@@ -3211,28 +3507,42 @@ namespace SMC
                 arma::vec logp(N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
+                    if (prior_W.infer)
+                    {
+                        model.derr._par1 = W_backward.at(i);
+                    }
+                    if (prior_mu0.infer)
+                    {
+                        model.dobs._par1 = mu0_backward.at(i);
+                    }
+                    if (prior_rho.infer)
+                    {
+                        model.dobs._par2 = rho_backward.at(i);
+                    }
+                    if (prior_par1.infer || prior_par2.infer)
+                    {
+                        unsigned int nlag = model.update_dlag(par1_backward.at(i), par2_backward.at(i), model.dim.nL, false);
+                    }
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                     Theta_cur.col(i) = theta_cur;
 
                     double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
-                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_filter.at(i));
-                    double logp_tmp = R::dnorm4(theta_cur.at(0), Theta_next.at(0, i), std::sqrt(W_filter.at(i)), true);
+                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_backward.at(i));
 
                     if (updated.at(i) == 1)
                     {
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                    }
-                    else
-                    {
-                        logq.at(i) = logp_tmp;
+                        logp.at(i) += R::dnorm4(theta_cur.at(0), Theta_next.at(0, i), std::sqrt(W_backward.at(i)), true);
                     }
 
-                    logp.at(i) = logp_tmp;
                     logp.at(i) += ObsDist::loglike(
-                        y.at(t_cur), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
+                        y.at(t_cur), model.dobs.name, lambda_cur, rho_backward.at(i), true); // observation density
 
                     logp.at(i) -= log_marg.at(i);
-                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t_cur), Prec_marginal.slice(t_cur), true);
+                    arma::vec Vprec = Prec_marginal.slice(i).col(t_cur);
+                    arma::mat Vprec_cur = arma::reshape(Vprec, model.dim.nP, model.dim.nP);
+                    arma::vec v_cur = mu_marginal.slice(i).col(t_cur);
+                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, v_cur, Vprec_cur, true);
                     logp.at(i) += log_marg.at(i);
 
                     double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
@@ -3245,22 +3555,37 @@ namespace SMC
                 weights = arma::exp(weights);
                 bound_check<arma::vec>(weights, "PL::backward_filter: propagation weights at t = " + std::to_string(t_cur));
 
-
                 eff_backward.at(t_cur) = effective_sample_size(weights);
                 if (eff_backward.at(t_cur) < 0.95 * N)
                 {
                     resample_idx = get_resample_index(weights);
                     Theta_backward.slice(t_cur) = Theta_cur.cols(resample_idx);
                     log_marg = log_marg.elem(resample_idx);
+
+                    weights = weights.elem(resample_idx);
+                    weights_backward.row(t_cur) = weights.t();
+
+                    arma::rowvec wetmp = weights_prop_backward.row(t_cur);
+                    weights_prop_backward.row(t_cur) = wetmp.elem(resample_idx).t();
+
+                    W_backward = W_backward.elem(resample_idx);
+                    mu0_backward = mu0_backward.elem(resample_idx);
+                    rho_backward = rho_backward.elem(resample_idx);
+                    par1_backward = par1_backward.elem(resample_idx);
+                    par2_backward = par2_backward.elem(resample_idx);
+
+                    mu_marginal = mu_marginal.slices(resample_idx);
+                    Sigma_marginal = Sigma_marginal.slices(resample_idx);
+
                     weights.ones();
                 }
                 else
                 {
                     Theta_backward.slice(t_cur) = Theta_cur;
+                    weights_prop_backward.row(t_cur) = weights.t();
                 }
 
-                weights_prop_backward.row(t_cur) = weights.t();
-
+                
 
                 if (verbose)
                 {
@@ -3294,7 +3619,7 @@ namespace SMC
 
             // arma::vec wtmp = W_stored.col(dim.nT);
             // W_smooth.col(dim.nT) = wtmp.elem(idx);
-            W_smooth = W_filter.elem(idx);              // M x 1
+            W_smooth = W_filter.elem(idx);          // M x 1
             arma::vec Wsqrt = arma::sqrt(W_smooth); // M x 1
 
             for (unsigned int t = dim.nT; t > 0; t--)
@@ -3337,7 +3662,7 @@ namespace SMC
             psi_smooth = Theta_smooth.row_as_mat(0);
         }
 
-        void two_filter_smoother(const Model &model, const bool &verbose = VERBOSE)
+        void two_filter_smoother(Model &model, const bool &verbose = VERBOSE)
         {
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < y.n_elem; t++)
@@ -3348,34 +3673,10 @@ namespace SMC
             Theta_smooth.clear();
             Theta_smooth = Theta_stored;
 
-            arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
-            arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
-            arma::cube Prec_marginal = Sigma_marginal;
-            Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
-
             arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
             Ieps.for_each([](arma::mat::elem_type &val)
                           { val *= EPS; });
-            
-            double What = arma::median(W_filter);
-            for (unsigned int t = 1; t <= dim.nT; t++)
-            {
-                mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += What;
-                Sig = arma::symmatu(Sig + Ieps);
-                Sigma_marginal.slice(t) = Sig;
-                try
-                {
-                    Prec_marginal.slice(t) = inverse(Sig);
-                }
-                catch (const std::exception &e)
-                {
-                    throw std::runtime_error("Matrix inversion failed at backward filter - prec_marginal initializing");
-                }
-            }
+
 
             for (unsigned int t = 1; t < dim.nT; t++)
             {
@@ -3389,28 +3690,67 @@ namespace SMC
                 arma::uvec resample_idx = get_resample_index(wfor);
                 arma::mat Theta_prev = Theta_stored.slice(t_prev); // p x N
                 Theta_stored.slice(t_prev) = Theta_prev.cols(resample_idx);
+                arma::vec W_filter_new = W_filter.elem(resample_idx);
+                arma::vec mu0_filter_new = mu0_filter.elem(resample_idx);
+
+                wfor = wfor.elem(resample_idx);
+                weights_forward.row(t_prev) = wfor.t();
+
+                arma::vec w_prop = arma::vectorise(weights_prop_forward.row(t_prev));
+                w_prop = w_prop.elem(resample_idx);
+                weights_prop_forward.row(t_prev) = w_prop.t();
 
                 arma::vec wback = arma::vectorise(weights_backward.row(t_next));
                 resample_idx = get_resample_index(wback);
                 arma::mat Theta_next = Theta_backward.slice(t_next);
                 Theta_backward.slice(t_next) = Theta_next.cols(resample_idx);
+                arma::vec W_backward_new = W_backward.elem(resample_idx);
+                arma::vec mu0_backward_new = mu0_backward.elem(resample_idx);
+                arma::vec rho_backward_new = rho_backward.elem(resample_idx);
+                arma::vec par1_backward_new = par1_backward.elem(resample_idx);
+                arma::vec par2_backward_new = par2_backward.elem(resample_idx);
+
+                wback = wback.elem(resample_idx);
+                weights_backward.row(t_next) = wback.t();
+
+                w_prop = arma::vectorise(weights_prop_backward.row(t_next));
+                w_prop = w_prop.elem(resample_idx);
+                weights_prop_backward.row(t_next) = w_prop.t();
+
+                arma::mat prec_tmp = Prec_marginal.col_as_mat(t_next); // nP^2 x N
+                arma::mat Prec_marg = prec_tmp.cols(resample_idx);     // nP^2 x N
+                arma::mat mu_marg = mu_marginal.col_as_mat(t_next); // nP x N
+                mu_marg = mu_marg.cols(resample_idx);
 
                 arma::vec logp(N, arma::fill::zeros);
                 arma::vec logq = arma::log(wfor + EPS) + arma::log(wback + EPS);
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
+                    if (prior_W.infer)
+                    {
+                        model.derr._par1 = W_backward_new.at(i);
+                    }
+                    if (prior_mu0.infer)
+                    {
+                        model.dobs._par1 = mu0_backward_new.at(i);
+                    }
+                    if (prior_rho.infer)
+                    {
+                        model.dobs._par2 = rho_backward_new.at(i);
+                    }
+
                     arma::vec gtheta = StateSpace::func_gt(model, Theta_prev.col(i), y.at(t_prev));
                     arma::vec Ft = LBA::func_Ft(model, t_cur, gtheta, y);
                     double ft = StateSpace::func_ft(model, t_cur, gtheta, y);
                     double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
 
-                    double eta = mu0_filter.at(i) + ft;
+                    double eta = mu0_backward_new.at(i) + ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
                         lambda, model.dobs, model.flink.name); // (eq 3.11)
 
-                    double delta = yhat.at(t_cur) - mu0_filter.at(i) - ft_tilde;
+                    double delta = yhat.at(t_cur) - mu0_backward_new.at(i) - ft_tilde;
                     double delta2 = delta * delta;
 
                     arma::mat FFt_norm = Ft * Ft.t() / Vt;
@@ -3420,16 +3760,16 @@ namespace SMC
                     if (FFt_det < EPS8)
                     {
                         theta_cur = gtheta;
-                        theta_cur.at(0) += R::rnorm(0., std::sqrt(W_filter.at(i)));
-                        logq.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_filter.at(i)), true);
+                        theta_cur.at(0) += R::rnorm(0., std::sqrt(W_backward_new.at(i)));
+                        logq.at(i) += R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_backward_new.at(i)), true);
                     }
                     else
                     {
                         arma::mat Gt = LBA::func_Gt(model, gtheta, y.at(t_cur));
                         arma::mat Wprec(model.dim.nP, model.dim.nP, arma::fill::zeros);
-                        Wprec.at(0, 0) = 1. / W_filter.at(i);
+                        Wprec.at(0, 0) = 1. / W_backward_new.at(i);
                         arma::mat prec_part1 = Gt.t() * Wprec * Gt;
-                        prec_part1.at(0, 0) += 1. / W_filter.at(i);
+                        prec_part1.at(0, 0) += 1. / W_backward_new.at(i);
 
                         arma::mat prec = prec_part1 + FFt_norm;
                         arma::mat Rchol, Sigma;
@@ -3447,7 +3787,7 @@ namespace SMC
                         }
 
                         arma::vec mu_part1 = Gt.t() * Wprec * Theta_next.col(i);
-                        mu_part1.at(0) += gtheta.at(0) / W_filter.at(i);
+                        mu_part1.at(0) += gtheta.at(0) / W_backward_new.at(i);
 
                         arma::vec mu = Ft * (delta / Vt);
                         mu = Sigma * (mu_part1 + mu);
@@ -3458,15 +3798,21 @@ namespace SMC
 
                     Theta_cur.col(i) = theta_cur;
 
-                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_filter.at(i)), true);
+                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_filter_new.at(i)), true);
+
+                    if (prior_par1.infer || prior_par2.infer)
+                    {
+                        unsigned int nlag = model.update_dlag(par1_backward_new.at(i), par2_backward_new.at(i), model.dim.nL, false);
+                    }
                     gtheta = StateSpace::func_gt(model, theta_cur, y.at(t_cur));
-                    logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(W_filter.at(i)), true);
+                    logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(W_backward_new.at(i)), true);
 
                     ft = StateSpace::func_ft(model, t_cur, theta_cur, y);
-                    lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
-                    logp.at(i) += ObsDist::loglike(y.at(t_cur), model.dobs.name, lambda, model.dobs.par2, true);
+                    lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_backward_new.at(i));
+                    logp.at(i) += ObsDist::loglike(y.at(t_cur), model.dobs.name, lambda, rho_backward_new.at(i), true);
 
-                    logp.at(i) -= MVNorm::dmvnorm2(Theta_next.col(i), mu_marginal.col(t_next), Prec_marginal.slice(t_next), true);
+                    arma::mat pmarg = arma::reshape(Prec_marg.col(i), model.dim.nP, model.dim.nP);
+                    logp.at(i) -= MVNorm::dmvnorm2(Theta_next.col(i), mu_marg.col(i), pmarg, true);
 
                     double log_forward = std::log(weights_prop_forward.at(t_prev, i) + EPS);
                     double log_backward = std::log(weights_prop_backward.at(t_next, i) + EPS);
@@ -3478,7 +3824,6 @@ namespace SMC
                                  { val -= wmax; });
                 weights = arma::exp(weights);
                 bound_check<arma::vec>(weights, "PL::two_filter_smoother: propagation weights at t = " + std::to_string(t_cur));
-
 
                 resample_idx = get_resample_index(weights);
                 Theta_smooth.slice(t_cur) = Theta_cur.cols(resample_idx);
@@ -3498,8 +3843,12 @@ namespace SMC
             return;
         }
 
-        void infer(const Model &model, const bool &verbose = VERBOSE)
+        void infer(Model &model, const bool &verbose = VERBOSE)
         {
+            if (prior_W.infer && use_discount)
+            {
+                use_discount = false;
+            }
             forward_filter(model, verbose);
 
             if (smoothing)
@@ -3511,10 +3860,19 @@ namespace SMC
             } // opts.smoothing
         } // Particle Learning inference
 
-    
     private:
+        bool filter_pass = false;
+
+        arma::vec mu_marg_init;  // nP x 1
+        arma::mat Sig_marg_init; // nP x nP
+
+        arma::cube mu_marginal; // nP x (nT + 1) x N
+        arma::cube Sigma_marginal; // nP^2 x (nT + 1) x N
+        arma::cube Prec_marginal; // nP^2 x (nT + 1) x N
+
         arma::vec eff_forward;  // (nT + 1) x 1
         arma::vec eff_backward; // (nT + 1) x 1
+        arma::vec eff_filter;
 
         arma::mat weights_forward;       // (nT + 1) x N
         arma::mat weights_backward;      // (nT + 1) x N
@@ -3531,6 +3889,8 @@ namespace SMC
         // arma::mat W_stored; // N x (nT + 1)
         // arma::vec W_backward; // N x 1
         arma::vec W_smooth; // M x 1
+        arma::vec W_backward;
+        arma::vec W_forward; // N x 4, 1st filter, 2nd filter, backward filter, smoothing
 
         // arma::mat amu; // N x (nT + 1), mean of normal
         // arma::mat bmu; // N x (nT + 1), precision of normal
@@ -3541,12 +3901,31 @@ namespace SMC
         // arma::mat mu0_stored; // N x (nT + 1)
         // arma::vec mu0_backward; // N x 1
         arma::vec mu0_smooth; // M x 1
+        arma::vec mu0_backward;
+        arma::vec mu0_forward;
+
+        Prior prior_rho;
+        double rho_mh_sd = 1.;
+        arma::vec rho_filter; // N x 1
+        arma::vec rho_backward;
+        arma::vec rho_forward;
+
+        Prior prior_par1;
+        double par1_mh_sd = 1.;
+        arma::vec par1_filter; // N x 1
+        arma::vec par1_backward;
+        arma::vec par1_forward;
+
+        Prior prior_par2;
+        double par2_mh_sd = 1.;
+        arma::vec par2_filter; // N x 1
+        arma::vec par2_backward;
+        arma::vec par2_forward;
 
         arma::mat e11; // N x (nT + 1)
 
         unsigned int max_iter = 10;
     };
 }
-
 
 #endif

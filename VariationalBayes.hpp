@@ -40,25 +40,19 @@ namespace VB
         arma::vec psi; // (nT + 1) x 1
         arma::mat psi_stored; // (nT + 1) x nsample
 
-        bool infer_W = true;
-        bool infer_mu0 = false;
-        bool infer_delta = false;
-        bool infer_kappa = false;
-        bool infer_r = false;
-
         double W = 0.01;
         double mu0 = 0.;
-        double delta = 30;
-        double kappa = 0.4;
-        double r = 6;
+        double rho = 30;
+        double par1 = 0.4;
+        double par2 = 6;
 
-        Dist W_prior, mu0_prior, delta_prior, kappa_prior, r_prior;
+        Dist W_prior, mu0_prior, rho_prior, par1_prior, par2_prior;
 
         arma::vec W_stored; // nsample x 1
         arma::vec mu0_stored; // nsample x 1
-        arma::vec delta_stored; // nsample x 1
-        arma::vec kappa_stored; // nsample x 1
-        arma::vec r_stored; // nsample x 1
+        arma::vec rho_stored; // nsample x 1
+        arma::vec par1_stored; // nsample x 1
+        arma::vec par2_stored; // nsample x 1
 
         VariationalBayes()
         {
@@ -123,7 +117,7 @@ namespace VB
 
             W_stored.set_size(nsample);
             W_stored.zeros();
-            infer_W = true;
+            bool infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
             W = 0.01;
             if (opts.containsElementNamed("W"))
@@ -138,7 +132,7 @@ namespace VB
             }
 
             mu0_stored = W_stored;
-            infer_mu0 = false;
+            bool infer_mu0 = false;
             mu0_prior.init("gaussian", 0., 10.);
             mu0 = 0.;
             if (opts.containsElementNamed("mu0"))
@@ -152,48 +146,48 @@ namespace VB
                 m += 1;
             }
 
-            delta_stored = W_stored;
-            infer_delta = false;
-            delta_prior.init("gaussian", 0., 10.);
-            delta = 30.;
-            if (opts.containsElementNamed("delta"))
+            rho_stored = W_stored;
+            bool infer_rho = false;
+            rho_prior.init("gamma", 0.1, 0.1);
+            rho = 30.;
+            if (opts.containsElementNamed("rho"))
             {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["delta"]);
-                init_param(infer_delta, delta, delta_prior, param_opts);
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
+                init_param(infer_rho, rho, rho_prior, param_opts);
             }
-            if (infer_delta)
+            if (rho_prior.infer)
             {
-                param_selected.push_back("delta");
+                param_selected.push_back("rho");
                 m += 1;
             }
 
-            kappa_stored = W_stored;
-            infer_kappa = false;
-            kappa_prior.init("beta", 1., 1.);
-            kappa = 0.4;
-            if (opts.containsElementNamed("kappa"))
+            par1 = 0.;
+            par1_stored.set_size(nsample);
+            bool infer_par1 = false;
+            par1_prior.init("gamma", 0.1, 0.1);
+            if (opts.containsElementNamed("par1"))
             {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["kappa"]);
-                init_param(infer_kappa, kappa, kappa_prior, param_opts);
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
+                init_param(infer_par1, par1, par1_prior, param_opts);
             }
-            if (infer_kappa)
+            if (par1_prior.infer)
             {
-                param_selected.push_back("kappa");
+                param_selected.push_back("par1");
                 m += 1;
             }
 
-            r_stored = W_stored;
-            infer_r = false;
-            r_prior.init("nbinom", 1., 1.);
-            r = 6;
-            if (opts.containsElementNamed("r"))
+            par2 = 0.;
+            par2_stored.set_size(nsample);
+            bool infer_par2 = false;
+            par2_prior.init("gamma", 0.1, 0.1);
+            if (opts.containsElementNamed("par2"))
             {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["r"]);
-                init_param(infer_r, r, r_prior, param_opts);
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
+                init_param(infer_par2, par2, par2_prior, param_opts);
             }
-            if (infer_r)
+            if (par2_prior.infer)
             {
-                param_selected.push_back("r");
+                param_selected.push_back("par2");
                 m += 1;
             }
 
@@ -216,17 +210,23 @@ namespace VB
             mu0_opts["prior_name"] = "gaussian";
             mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
 
-            Rcpp::List delta_opts;
-            delta_opts["infer"] = false;
-            delta_opts["init"] = 0.;
+            Rcpp::List rho_opts;
+            rho_opts["infer"] = false;
+            rho_opts["init"] = 30;
+            rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            rho_opts["prior_name"] = "gamma";
 
-            Rcpp::List kappa_opts;
-            kappa_opts["infer"] = false;
-            kappa_opts["init"] = 0.4;
+            Rcpp::List par1_opts;
+            par1_opts["infer"] = false;
+            par1_opts["init"] = 30;
+            par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            par1_opts["prior_name"] = "gamma";
 
-            Rcpp::List r_opts;
-            r_opts["infer"] = false;
-            r_opts["init"] = 6.;
+            Rcpp::List par2_opts;
+            par2_opts["infer"] = false;
+            par2_opts["init"] = 30;
+            par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            par2_opts["prior_name"] = "gamma";
 
             Rcpp::List opts;
             opts["nsample"] = 1000;
@@ -238,9 +238,9 @@ namespace VB
 
             opts["W"] = W_opts;
             opts["mu0"] = mu0_opts;
-            opts["delta"] = delta_opts;
-            opts["kappa"] = kappa_opts;
-            opts["r"] = r_opts;
+            opts["rho"] = rho_opts;
+            opts["par1"] = par1_opts;
+            opts["par2"] = par2_opts;
 
             return opts;
         }
@@ -449,6 +449,7 @@ namespace VB
             {
                 k = Rcpp::as<unsigned int>(opts["k"]);
             }
+            k = std::min(k, m);
 
 
             gamma.set_size(m);
@@ -459,26 +460,25 @@ namespace VB
             mu.zeros();
             grad_mu.init(m, learning_rate, eps_step_size);
 
-            B.set_size(m, k);
-            B.zeros();
-            grad_vecB.init(m * k, learning_rate, eps_step_size);
-
             d.set_size(m);
             d.ones();
             grad_d.init(m, learning_rate, eps_step_size);
 
+            eps = d;
 
-            eta = init_eta(param_selected, W, mu0, kappa, r, update_static); // Checked. OK.
-            eta_tilde = eta2tilde(eta, param_selected, W_prior.name);
-
+            eta = init_eta(param_selected, W, mu0, rho, par1, par2, update_static); // Checked. OK.
+            eta_tilde = eta2tilde(eta, param_selected, W_prior.name, par1_prior.name);
 
             nu = tYJ(eta_tilde, gamma);
 
+            B.set_size(m, k);
+            B.zeros();
+            grad_vecB.init(m * k, learning_rate, eps_step_size);
+
             xi.set_size(k);
             xi.zeros();
-            eps = xi;
 
-            if (m > 1)
+            if (m > 1 && k > 1)
             {
                 B_uptri_idx = arma::trimatu_ind(arma::size(B), 1);
             }
@@ -498,7 +498,11 @@ namespace VB
             }
 
             mcs_opts["use_discount"] = false;
-            mcs_opts["W"] = W;
+            mcs_opts["num_smooth"] = Rcpp::as<unsigned int>(mcs_opts["num_particle"]);
+
+            Rcpp::List W_opts = Rcpp::List::create(
+                Rcpp::Named("infer") = false,
+                Rcpp::Named("init") = W_prior.val);
 
             unsigned int num_particle = Rcpp::as<unsigned int>(mcs_opts["num_particle"]);
             mu0_stored2.set_size(num_particle, nsample);
@@ -515,8 +519,21 @@ namespace VB
 
             Rcpp::List mcs_tmp = SMC::MCS::default_settings();
             mcs_tmp["use_discount"] = false;
-            opts["mcs"] = mcs_tmp;
+            mcs_tmp["num_backward"] = 5;
+
+            Rcpp::List W_opts = Rcpp::List::create(
+                Rcpp::Named("infer") = false,
+                Rcpp::Named("init") = 0.01);
             
+            mcs_tmp["W"] = W_opts;
+
+            Rcpp::List mu0_opts = Rcpp::List::create(
+                Rcpp::Named("infer") = false,
+                Rcpp::Named("init") = 0);
+
+            mcs_tmp["mu0"] = mu0_opts;
+
+            opts["mcs"] = mcs_tmp;
 
             return opts;
         }
@@ -525,7 +542,8 @@ namespace VB
         static arma::vec eta2tilde( // Checked. OK.
             const arma::vec &eta,         // m x 1
             const std::vector<std::string> &param_selected,
-            const std::string &W_prior = "invgamma")
+            const std::string &W_prior = "invgamma",
+            const std::string &lag_par1_prior = "gaussian")
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map <std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
@@ -552,28 +570,63 @@ namespace VB
                     }
                     default:
                     {
+                        throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined prior " + W_prior + " for W.");
                         break;
                     }
                     } // switch W prior.
                     break;
-                }
+                } // W
                 case AVAIL::Param::mu0:
                 {
                     bound_check(val, "VB::Hybrid::eta2tilde: mu0", false, true);
                     eta_tilde.at(i) = std::log(std::abs(val) + EPS);
                     break;
-                }
-                case AVAIL::Param::kappa:
+                } // mu0
+                case AVAIL::Param::rho:
                 {
-                    if (val > 1. || val < 0.)
-                    {
-                        throw std::invalid_argument("VB::Hybrid::eta2tilde: kappa should be within (0, 1)");
-                    }
-                    eta_tilde.at(i) = std::log(std::abs(val) + EPS) - std::log(std::abs(1. - val) + EPS);
+                    eta_tilde.at(i) = std::log(std::abs(val) + EPS);
                     break;
-                }
+                } // rho
+                case AVAIL::Param::lag_par1:
+                {
+                    switch (dist_list[tolower(lag_par1_prior)])
+                    {
+                    case AVAIL::Dist::gaussian:
+                    {
+                        eta_tilde.at(i) = val;
+                        break;
+                    }
+                    case AVAIL::Dist::invgamma:
+                    {
+                        eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                        break;
+                    }
+                    case AVAIL::Dist::gamma:
+                    {
+                        eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                        break;
+                    }
+                    case AVAIL::Dist::beta:
+                    {
+                        eta_tilde.at(i) = std::log(std::abs(val) + EPS) - std::log(std::abs(1. - val) + EPS);
+                        break;
+                    }
+                    default:
+                    {
+                        throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined prior " + lag_par1_prior + " for first parameter of lag distribution.");
+                        break;
+                    }
+                    } // switch prior type for lag_par1.
+                    break;
+                } // lag_par1
+                case AVAIL::Param::lag_par2:
+                {
+                    eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                    break;
+                } // lag_par2
                 default:
                 {
+                    throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined static parameter " + param_selected[i]);
                     break;
                 }
                 } // switch param
@@ -587,7 +640,8 @@ namespace VB
         static arma::vec tilde2eta( // Checked. OK.
             const arma::vec &eta_tilde, // m x 1
             const std::vector<std::string> &param_selected,
-            const std::string &W_prior = "invgamma")
+            const std::string &W_prior = "invgamma",
+            const std::string &lag_par1_prior = "gaussian")
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
@@ -620,30 +674,66 @@ namespace VB
                         break;
                     }
                     } // switch W prior.
-                    bound_check(eta.at(i), "VB::Hybrid::tilde2eta: W", true, true);
                     break;
-                }
+                } // W
                 case AVAIL::Param::mu0:
                 {
                     val = std::min(val, UPBND);
                     eta.at(i) = std::exp(val);
-                    bound_check(eta.at(i), "VB::Hybrid::tilde2eta: mu0", false, true);
                     break;
-                }
-                case AVAIL::Param::kappa:
+                } // mu0
+                case AVAIL::Param::rho:
                 {
                     val = std::min(val, UPBND);
-                    double tmp = std::exp(val);
-                    eta.at(i) = tmp;
-                    eta.at(i) /= (1. + tmp);
-                    if (eta.at(i) > 1. || eta.at(i) < 0.)
-                    {
-                        throw std::invalid_argument("VB::Hybrid::tilde2eta: kappa should be within (0, 1)");
-                    }
+                    eta.at(i) = std::exp(val);
                     break;
-                }
+                } // rho
+                case AVAIL::Param::lag_par1:
+                {
+                    switch (dist_list[tolower(lag_par1_prior)])
+                    {
+                    case AVAIL::Dist::gaussian:
+                    {
+                        eta.at(i) = val;
+                        break;
+                    }
+                    case AVAIL::Dist::invgamma:
+                    {
+                        val = std::min(val, UPBND);
+                        eta.at(i) = std::exp(val);
+                        break;
+                    }
+                    case AVAIL::Dist::gamma:
+                    {
+                        val = std::min(val, UPBND);
+                        eta.at(i) = std::exp(val);
+                        break;
+                    }
+                    case AVAIL::Dist::beta:
+                    {
+                        val = std::min(val, UPBND);
+                        double tmp = std::exp(val);
+                        eta.at(i) = tmp;
+                        eta.at(i) /= (1. + tmp);
+                        break;
+                    }
+                    default:
+                    {
+                        throw std::invalid_argument("VB::Hybrid::tilde2eta: undefined prior " + lag_par1_prior + " for first parameter of lag distribution.");
+                        break;
+                    }
+                    } // switch prior type for lag_par1.
+                    break;
+                } // lag_par1
+                case AVAIL::Param::lag_par2:
+                {
+                    val = std::min(val, UPBND);
+                    eta.at(i) = std::exp(val);
+                    break;
+                } // lag_par2
                 default:
                 {
+                    throw std::invalid_argument("VB::Hybrid::tilde2eta: undefined static parameter " + param_selected[i]);
                     break;
                 }
                 } // switch param
@@ -907,115 +997,22 @@ namespace VB
             return logp;
         }
 
-        /**
-         * dlogJoint_dpar1: partial derivative w.r.t rho or mu.
-         *
-         * @param lag_par: either (rho, L) or (mu, sg2)
-         */
-        static double dlogJoint_dpar1( // Checked. OK.
-            const arma::vec &ypad, // (n+1) x 1
-            const arma::mat &R,    // (n+1) x 2, (psi,theta)
-            const LagDist &dlag,
-            const ObsDist &dobs,
-            const std::string &gain_func)
-        {
 
-            double aprior = 1.;
-            double bprior = 1.;
-            double par1 = dlag.par1;
-
-            const unsigned int n = ypad.n_elem - 1;
-            unsigned int L = (unsigned int)dlag.par2;
-            double L_ = dlag.par2;
-
-            arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(R.col(0), gain_func);
-            arma::vec lambda = dlag.par1 + R.col(1);    // (n+1) x 1
-
-            double c1 = 0.;
-            double c2 = 0.;
-
-            for (unsigned int t = 1; t <= n; t++)
-            {
-                double c10 = ypad.at(t) / lambda.at(t) - (ypad.at(t) + dobs.par2) / (lambda.at(t) + dobs.par2);
-                c1 += c10 * hpsi.at(t - 1) * ypad.at(t - 1);
-
-                unsigned int r = std::min(t, L);
-                double c20 = 0.;
-                double c21 = -par1;
-                for (unsigned int k = 1; k <= r; k++)
-                {
-                    c20 += static_cast<double>(k) * nbinom::binom(L, k) * c21 * R.at(t - k, 1);
-                    c21 *= -par1;
-                }
-                c2 += c10 * c20;
-            }
-
-            double deriv = -L_ * std::pow(1. - par1, L_) * par1 * c1 - (1. - par1) * c2;
-            deriv += aprior - (bprior + aprior) * par1;
-            bound_check(deriv, "dlogJoint_drho: deriv");
-            return deriv;
-        }
-
-        static double dlogJoint_dkappa2( // Checked. OK.
-            const arma::vec &y, // (nT + 1) x 1
-            const arma::mat &R, // (n+1) x 2, (psi,theta)
-            const ObsDist &dobs,
-            const LagDist &dlag,
-            const std::string &gain_func,
-            const arma::vec &rcomb, // n x 1
-            const double akappa = 1.,
-            const double bkappa = 1.)
-        {
-            double kappa = dlag.par1;
-            double r = dlag.par2;
-
-            arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(R.col(0), gain_func);
-            arma::vec hy = hpsi % y;                     // (n+1) x 1, (h(psi[0])*y[0], h(psi[1])*y[1], ...,h(psi[n])*y[n])
-            arma::vec lambda = dobs.par1 + R.col(1);              // (n+1) x 1
-
-            double c10 = 0.; // d(Loglike) / d(theta[t])
-            double c20 = 0.; // first part of d(theta[t]) / d(logit(rho)), l=0,...,t-1
-            double c30 = 0.; // second part of d(theta[t]) / d(logit(rho)), l=1,...,t-1
-            double c2 = 0.;  // first part of d(Loglike) / d(logit(rho))
-            double c3 = 0.;  // second part of d(Loglike) / d(logit(rho))
-            double crho = 1.;
-
-            for (unsigned int t = 1; t < y.n_elem; t++)
-            {
-                crho = 1.;
-                c10 = y.at(t) / lambda.at(t) - (y.at(t) + dobs.par2) / (lambda.at(t) + dobs.par2); // d(Loglike) / d(theta[t])
-                c20 = rcomb.at(0) * crho * hy.at(t - 1);
-                c30 = 0.;
-
-                for (unsigned int l = 1; l < t; l++)
-                {
-                    crho *= kappa;
-                    c20 += rcomb.at(l) * crho * hy.at(t - 1 - l);
-                    c30 += static_cast<double>(l) * rcomb.at(l) * crho * hy.at(t - 1 - l);
-                }
-
-                c2 += c10 * c20;
-                c3 += c10 * c30;
-            }
-
-            double deriv = - r * std::pow(1. - kappa, r) * kappa * c2 + std::pow(1. - kappa, r + 1.) * c3;
-            deriv += akappa - (akappa + bkappa) * kappa;
-            bound_check(deriv, "dlogJoint_drho2: deriv");
-            return deriv;
-        }
-
-        static double logprior_logitkappa(
-            double logitkappa,
-            double akappa = 1.,
-            double bkappa = 1.)
-        {
-
-            double logp = std::lgamma(akappa + bkappa) - std::lgamma(akappa) - std::lgamma(bkappa) + akappa * logitkappa - (akappa + bkappa) * std::log(1. + std::exp(logitkappa));
-            bound_check(logp, "logprior_logitrho: logp");
-            return logp;
-        }
 
         // eta_tilde = (Wtilde,logmu0)
+        /**
+         * @brief Derivative of the logarithm of joint probability with respect to parameters mapped to real-line (but before Yeo-Johnson transformation).
+         * 
+         * @param y 
+         * @param psi 
+         * @param ft 
+         * @param eta 
+         * @param param_selected 
+         * @param W_prior 
+         * @param model 
+         * @param rcomb 
+         * @return arma::vec 
+         */
         static arma::vec dlogJoint_deta( // Checked. OK.
             const arma::vec &y,  // (nT + 1) x 1
             const arma::vec &psi,   // (nT + 1) x 1
@@ -1023,11 +1020,24 @@ namespace VB
             const arma::vec &eta,   // m x 1
             const std::vector<std::string> &param_selected,
             const Dist &W_prior,
-            const Model &model,
-            const arma::vec &rcomb)
+            const Dist &lag_par1_prior,
+            const Dist &lag_par2_prior,
+            const Dist &rho_prior,
+            const Model &model)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
             arma::vec deriv(param_selected.size());
+
+            bool infer_dlag = lag_par1_prior.infer || lag_par2_prior.infer;
+            arma::vec dllk_dpar, hpsi;
+            if (infer_dlag || rho_prior.infer)
+            {
+               hpsi = GainFunc::psi2hpsi(psi, model.transfer.fgain.name);
+               if (infer_dlag)
+               {
+                   dllk_dpar = Model::dloglik_dpar(y, hpsi, model);
+               }
+            }
 
             for (unsigned int i = 0; i < param_selected.size(); i++)
             {
@@ -1047,15 +1057,25 @@ namespace VB
                     deriv.at(i) = dloglike_dmu0tilde(
                         y, ft, model.dobs, model.flink.name);
                     deriv.at(i) += logprior_mu0tilde(mu0tilde, 10.);
+
                     break;
                 }
-                case AVAIL::Param::kappa:
+                case AVAIL::Param::rho:
                 {
-                    deriv.at(i) = dlogJoint_dkappa2(
-                        y, ft, model.dobs, 
-                        model.transfer.dlag, 
-                        model.transfer.fgain.name, 
-                        rcomb, 1., 1.);
+                    deriv.at(i) = Model::dlogp_dpar2_obs(model, y, hpsi, true);
+                    deriv.at(i) += Prior::dlogprior_dpar(model.dobs.par2, rho_prior, true);
+                    break;
+                }
+                case AVAIL::Param::lag_par1:
+                {
+                    deriv.at(i) = dllk_dpar.at(0);
+                    deriv.at(i) += Prior::dlogprior_dpar(model.transfer.dlag.par1, lag_par1_prior, true);
+                    break;
+                }
+                case AVAIL::Param::lag_par2:
+                {
+                    deriv.at(i) = dllk_dpar.at(1);
+                    deriv.at(i) += Prior::dlogprior_dpar(model.transfer.dlag.par2, lag_par2_prior, true);
                     break;
                 }
                 default:
@@ -1072,8 +1092,9 @@ namespace VB
             const std::vector<std::string> &params_selected,
             const double &W,
             const double &mu0,
-            const double &kappa,
-            const double &r,
+            const double &rho,
+            const double &par1,
+            const double &par2,
             const bool &update_static)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
@@ -1098,14 +1119,19 @@ namespace VB
                     eta.at(i) = mu0;
                     break;
                 }
-                case AVAIL::Param::kappa:
+                case AVAIL::Param::rho:
                 {
-                    eta.at(i) = kappa;
+                    eta.at(i) = rho;
                     break;
                 }
-                case AVAIL::Param::r:
+                case AVAIL::Param::lag_par1:
                 {
-                    eta.at(i) = r;
+                    eta.at(i) = par1;
+                    break;
+                }
+                case AVAIL::Param::lag_par2:
+                {
+                    eta.at(i) = par2;
                     break;
                 }
                 default:
@@ -1121,14 +1147,17 @@ namespace VB
         static void update_params(
             double &W,
             double &mu0,
-            double &kappa,
-            double &r,
+            double &rho,
+            double &par1,
+            double &par2,
             Model &model,
             const std::vector<std::string> &params_selected,
             const arma::vec &eta
         )
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
+            bool update_dlag = false;
+
             for (unsigned int i = 0; i < params_selected.size(); i++)
             {
                 double val = eta.at(i);
@@ -1138,35 +1167,43 @@ namespace VB
                 {
                     W = val;
                     model.derr.update_par1(val);
-                    bound_check(val, "update_params: W", true, true);
+                    break;
                 }
-                break;
                 case AVAIL::Param::mu0: // mu0 is selected
                 {
                     mu0 = val;
                     model.dobs.update_par1(val);
-                    bound_check(val, "update_params: mu0", false, true);
+                    break;
                 }
-                break;
-                case AVAIL::Param::kappa: // par 1 is selected
+                case AVAIL::Param::rho: // rho is selected
                 {
-                    kappa = val;
-                    model.transfer.dlag.update_par1(val);
-                    bound_check(val, "update_params: par1", true, true);
+                    rho = val;
+                    model.dobs.update_par2(val);
+                    break;
                 }
-                break;
-                case AVAIL::Param::r: // par 2 is selected
+                case AVAIL::Param::lag_par1: // par 1 is selected
                 {
-                    r = val;
-                    model.transfer.dlag.update_par2(val);
-                    bound_check(val, "update_params: par2", true, true);
+                    update_dlag = true;
+                    par1 = val;
+                    break;
                 }
-                break;
+                case AVAIL::Param::lag_par2: // par 2 is selected
+                {
+                    update_dlag = true;
+                    par2 = val;
+                    break;
+                }
                 default:
                 {
+                    throw std::invalid_argument("VB::Hybrid::update_params: undefined static parameter " + params_selected[i]);
                     break;
                 }
                 }
+            }
+
+            if (update_dlag)
+            {
+                unsigned int nlag = model.update_dlag(par1, par2, 30, false);
             }
 
             return;
@@ -1564,8 +1601,9 @@ namespace VB
             Model model = model_in;
             W = model.derr.par1;
             mu0 = model.dobs.par1;
-            kappa = model.transfer.dlag.par1;
-            r = model.transfer.dlag.par2;
+            rho = model.dobs.par2;
+            par1 = model.transfer.dlag.par1;
+            par2 = model.transfer.dlag.par2;
 
             // Rcpp::List mcs_opts = SMC::MCS::default_settings();
             // mcs_opts["num_particle"]  = N;
@@ -1579,16 +1617,20 @@ namespace VB
 
             // arma::vec eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
             // arma::vec eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
-
-            
             
             for (unsigned int b = 0; b < ntotal; b ++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
                 
+                // LBA::LinearBayes lba(model, y, W, 0.95, false);
+                // lba.filter();
+                // lba.smoother();
+                // arma::mat psi_tmp = LBA::get_psi(lba.atilde, lba.Rtilde);
+                // psi = psi_tmp.col(1);
+
                 mcs.prior_W.val = W;
-                mcs.infer(model);
+                mcs.infer(model, false);
                 arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
                 psi = arma::median(psi_all, 1);
 
@@ -1607,9 +1649,8 @@ namespace VB
                 if (update_static)
                 {
                     arma::vec dlogJoint = dlogJoint_deta(
-                        y, psi, ft, eta, 
-                        param_selected,
-                        W_prior, model, rcomb); // Checked. OK.
+                        y, psi, ft, eta, param_selected,
+                        W_prior, par1_prior, par2_prior, rho_prior, model); // Checked. OK.
 
 
                     arma::mat SigInv = get_sigma_inv(B, d, k);
@@ -1621,20 +1662,32 @@ namespace VB
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
 
+
                     if (m > 1)
                     {
-                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi);                  // m x mk
+                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi); // m x mk
                         arma::mat L_B = arma::reshape(dtheta_dB.t() * ddiff, m, k); // m x k
-                        L_B.elem(B_uptri_idx).zeros();
+                        if (k > 1)
+                        {
+                            L_B.elem(B_uptri_idx).zeros();
+                        }
+                        
                         arma::vec vecL_B = arma::vectorise(L_B); // mk x 1
                         grad_vecB.update_grad(vecL_B);
 
                         arma::mat B_change2 = arma::reshape(
                             grad_vecB.change, B.n_rows, B.n_cols); // m x k
-                        B_change2.elem(B_uptri_idx).zeros();
-
+                        if (k > 1)
+                        {
+                            B_change2.elem(B_uptri_idx).zeros();
+                        }
+                        
                         B = B + B_change2;
-                        B.elem(B_uptri_idx).zeros();
+                        if (k > 1)
+                        {
+                            B.elem(B_uptri_idx).zeros();
+                        }
+                        
                     }
 
                     // d
@@ -1649,14 +1702,20 @@ namespace VB
                     tau = tau + grad_tau.change;
                     gamma = tau2gamma(tau);
 
-
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                    eta = tilde2eta(eta_tilde, param_selected, W_prior.name);
+                    eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name);
 
 
-                    update_params(W, mu0, kappa, r, model, param_selected, eta);
+                    update_params(W, mu0, rho, par1, par2, model, param_selected, eta);
 
-                }
+                    if (par1_prior.infer || par2_prior.infer)
+                    {
+                        mcs.update_np(model.dim.nP);
+                        dim.nL = model.dim.nL;
+                        dim.nP = model.dim.nP;
+                    }
+
+                } // end update_static
 
                 // bool saveiter = false;
                 // unsigned int idx_run = 0;
@@ -1680,12 +1739,12 @@ namespace VB
 
                     psi_stored.col(idx_run) = psi;
 
-                    if (infer_W)
+                    if (W_prior.infer)
                     {
                         W_stored.at(idx_run) = W;
                     }
 
-                    if (infer_mu0 || model_in.dim.regressor_baseline)
+                    if (mu0_prior.infer || model_in.dim.regressor_baseline)
                     {
                         if (model_in.dim.regressor_baseline)
                         {
@@ -1697,9 +1756,19 @@ namespace VB
                             mu0_stored.at(idx_run) = mu0;
                         }
                     }
+
+                    if (rho_prior.infer)
+                    {
+                        rho_stored.at(idx_run) = rho;
+                    }
+
+                    if (par1_prior.infer || par2_prior.infer)
+                    {
+                        par1_stored.at(idx_run) = par1;
+                        par2_stored.at(idx_run) = par2;
+                    }
                     
-                    kappa_stored.at(idx_run) = kappa;
-                    r_stored.at(idx_run) = r;
+                    
                 }
 
                 if (verbose)
@@ -1717,7 +1786,7 @@ namespace VB
 
             if (model_in.dim.regressor_baseline)
             {
-                infer_mu0 = true;
+                mu0_prior.infer = true;
             }
             
         }
@@ -1730,12 +1799,12 @@ namespace VB
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1);
             output["psi"] = Rcpp::wrap(psi_quantile);
 
-            if (infer_W)
+            if (W_prior.infer)
             {
                 output["W"] = Rcpp::wrap(W_stored);
             }
 
-            if (infer_mu0)
+            if (mu0_prior.infer)
             {
                 if (dim.regressor_baseline)
                 {
@@ -1748,17 +1817,22 @@ namespace VB
                 
             }
 
-            if (infer_kappa)
+            if (rho_prior.infer)
             {
-                output["kappa"] = Rcpp::wrap(kappa_stored);
+                output["rho"] = Rcpp::wrap(rho_stored);
             }
 
-            if (infer_r)
+            if (par1_prior.infer)
             {
-                output["r"] = Rcpp::wrap(r_stored);
+                output["par1"] = Rcpp::wrap(par1_stored);
             }
 
-            output["mcs"] = mcs_opts;
+            if (par2_prior.infer)
+            {
+                output["par2"] = Rcpp::wrap(par2_stored);
+            }
+
+            output["inferred"] = Rcpp::wrap(param_selected);
 
             return output;
         }

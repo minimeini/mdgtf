@@ -344,10 +344,14 @@ public:
         }
     }
 
-    unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30)
+    unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
-        unsigned int nlag = transfer.update_dlag(par1, par2, max_lag);
-        dim.update_nL(nlag, transfer.name);
+        unsigned int nlag = transfer.update_dlag(par1, par2, max_lag, update_num_lag);
+        if (update_num_lag)
+        {
+            dim.update_nL(nlag, transfer.name);
+        }
+        
 
         return nlag;
     }
@@ -1225,7 +1229,50 @@ public:
         return grad_out;
     }
 
+    static arma::vec dloglik_dpar(
+        const arma::vec &y,
+        const arma::vec &hpsi,
+        const Model &model)
+    {
+        unsigned int nlag = model.transfer.dlag.Fphi.n_elem;
+        arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, model.transfer.dlag.name, model.transfer.dlag.par1, model.transfer.dlag.par2);
 
+        arma::mat grad(y.n_elem, 2, arma::fill::zeros);
+        for (unsigned int t = 1; t < y.n_elem; t++)
+        {
+            double eta = TransFunc::transfer_sliding(t, nlag, y, model.transfer.dlag.Fphi, hpsi);
+            eta += model.dobs.par1;
+            double dll_deta = dloglik_deta(eta, y.at(t), model.dobs.par2, model.dobs.name, model.flink.name);
+
+            double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
+            double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
+
+            grad.at(t, 0) = dll_deta * deta_dpar1;
+            grad.at(t, 1) = dll_deta * deta_dpar2;
+        }
+
+        bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+        arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
+        return grad_out;
+    }
+
+    static double dlogp_dpar2_obs(
+        const Model &model, 
+        const arma::vec &y, 
+        const arma::vec &hpsi, 
+        const bool &jacobian = true)
+    {
+        unsigned int nT = y.n_elem - 1;
+        double out = 0.;
+        for (unsigned int t = 1; t <= nT; t ++)
+        {
+            double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
+            double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+            out += nbinomm::dlogp_dpar2(y.at(t), lambda, model.dobs.par2, jacobian);
+        }
+
+        return out;
+    }
 
 private:
     ObsDist _dobs; // Observation distribution
@@ -1264,7 +1311,7 @@ public:
         }
 
         unsigned int nr = model.dim.nP - 1;
-        arma::mat Theta(model.dim.nP, model.dim.nT + 1, arma::fill::zeros);
+        arma::mat Theta(model.dim.nP, model.dim.nT + 1, arma::fill::zeros); // nP x (nT + 1)
 
         Theta.at(0, 0) = psi.at(0);
         for (unsigned int t = 0; t < model.dim.nT; t++)
@@ -1275,6 +1322,45 @@ public:
 
         return Theta;
     }
+
+
+    /**
+     * @brief Reconstruct theta[t, 1:N] from psi[0:t, 1:N]
+     * 
+     * @param t 
+     * @param psi (nT + B) x N
+     * @param model 
+     * @return arma::mat np x N
+     */
+    static arma::mat psi2theta(
+        const unsigned int &t,
+        const arma::mat &psi, // (nT + B) x N
+        const Model &model)
+    {
+        if (model.dim.regressor_baseline)
+        {
+            throw std::invalid_argument("psi2theta: only for regression with zero mean.");
+        }
+
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        if (trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
+        {
+            throw std::invalid_argument("psi2theta: only for sliding transfer function.");
+        }
+
+        arma::mat Theta(model.dim.nP, psi.n_cols, arma::fill::zeros); // nP x N
+        for (unsigned int i = 0; i < model.dim.nP; i++)
+        {
+            if (i <= t)
+            {
+                Theta.row(i) = psi.row(t - i);
+            }
+            
+        }
+
+        return Theta;
+    }
+
     /**
      * @brief Expected state evolution equation for the DLM form model. Expectation of theta[t + 1] = g(theta[t]).
      *

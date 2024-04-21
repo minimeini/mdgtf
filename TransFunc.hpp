@@ -370,9 +370,9 @@ public:
     }
 
 
-    unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30)
+    unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
-        unsigned int nlag = dlag.update_param(par1, par2, max_lag);
+        unsigned int nlag = dlag.update_param(par1, par2, max_lag, update_num_lag);
 
         if (trans_list[_name] == AVAIL::Transfer::iterative)
         {
@@ -384,7 +384,7 @@ public:
             G0_iterative();
             F0_iterative();
         }
-        else
+        else if (update_num_lag)
         {
             _dim.update_nL(nlag, name);
             _G0.reset();

@@ -206,11 +206,17 @@ public:
     }
 
 
-    unsigned int update_param(const double &par1_new, const double &par2_new, const unsigned int &max_lag = 30)
+    unsigned int update_param(const double &par1_new, const double &par2_new, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
         _par1 = par1_new;
         _par2 = par2_new;
-        unsigned int nlag = update_nlag(_name, _par1, _par2, 0.99, max_lag);
+
+        unsigned int nlag = Fphi.n_elem;
+        if (update_num_lag)
+        {
+            nlag = update_nlag(_name, _par1, _par2, 0.99, max_lag);
+        }
+        
         get_Fphi(nlag);
 
         return nlag;

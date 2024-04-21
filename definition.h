@@ -65,7 +65,7 @@ public:
     {
         W,
         mu0,   // par1 of dobs
-        delta, // par2 of dobs
+        rho, // par2 of dobs
         kappa, // par1 of dlag - nbinom
         r,     // par2 of dlag - nbinom
         mu,    // par1 of dLag - lognorm
@@ -74,7 +74,9 @@ public:
         num_backward,
         learning_rate,
         step_size,
-        mh_sd
+        mh_sd,
+        lag_par1,
+        lag_par2
     };
 
     enum Loss
@@ -277,11 +279,16 @@ private:
         map["W"] = Param::W;
         map["w"] = Param::W;
         map["mu0"] = Param::mu0;
-        map["delta"] = Param::delta;
+        map["rho"] = Param::rho;
+        map["delta"] = Param::rho;
         map["kappa"] = Param::kappa;
         map["r"] = Param::r;
         map["mu"] = Param::mu;
         map["sd"] = Param::sd;
+        map["lag_par1"] = Param::lag_par1;
+        map["par1"] = Param::lag_par1;
+        map["lag_par2"] = Param::lag_par2;
+        map["par2"] = Param::lag_par2;
 
         return map;
     }
@@ -840,6 +847,53 @@ public:
         default: // uniform or other types
         {
             out = return_log ? 0 : 1;
+            break;
+        }
+        }
+
+        return out;
+    }
+
+    static double dlogprior_dpar(const double &val, const Dist &prior, const double &jacobian = true)
+    {
+        std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+        double out = 0.;
+        switch (dist_list[prior.name]) // switch by prior distribution
+        {
+        case AVAIL::Dist::invgamma: // non-negative
+        {
+            if (jacobian) // plus jacobian
+            {
+                out = - prior.par1 + prior.par2 / val;
+            }
+            else
+            {
+                out = - (prior.par1 + 1.) / val;
+                out += prior.par2 / std::pow(val, 2.);
+            }
+            break;
+        }
+        case AVAIL::Dist::gaussian: // whole real line
+        {
+            out = - val / prior.par2;
+            break;
+        }
+        case AVAIL::Dist::gamma: // non-negative
+        {
+            if (jacobian)
+            {
+                out = prior.par1 - prior.par2 * val;
+            }
+            else
+            {
+                out = (prior.par1 - 1.) / val;
+                out -= prior.par2;
+            }
+            break;
+        }
+        default: // uniform or other types
+        {
+            throw std::invalid_argument("Dist::dlogprior_dpar: undefined for " + prior.name + " prior.");
             break;
         }
         }

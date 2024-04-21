@@ -695,6 +695,23 @@ public:
     }
 
 
+    static double dlogp_dpar2(const double &yt, const double &lambda, const double &par2, const bool &jacobian = true)
+    {
+        double out = R::digamma(yt + par2) - R::digamma(par2);
+        out += std::log(par2 / (lambda + par2));
+        out += (lambda - yt) / (lambda + par2);
+
+        if (jacobian)
+        {
+            out *= par2;
+        }
+
+        bound_check(out, "nbinomm::dlogp_dpar2: out");
+        return out;
+    }
+
+
+
 private:
     double _nu;
 };

@@ -406,11 +406,11 @@ inline arma::mat dYJinv_dB(
     arma::mat dnu_dB = arma::kron(xi.t(),Im); // (1 x k) and (m x m)
     arma::mat dtheta_dB = dtheta_dnu * dnu_dB; // m x mk
 
-    return dtheta_dB;
+    return dtheta_dB; // m x mk
 } // Status: Checked. OK.
 
 /*
-Appendiex B.2 equation (iii)
+Section B.2 equation (iii)
 Ref: `dtheta_dBDelta.m`
 */
 inline arma::mat dYJinv_dD(

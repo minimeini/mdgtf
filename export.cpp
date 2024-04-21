@@ -81,6 +81,7 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     case AVAIL::Algo::HybridVariation:
     {
         opts = VB::Hybrid::default_settings();
+        break;
     }
     default:
         throw std::invalid_argument("dgtf_default_algo_settings: Invalid algorithm.");

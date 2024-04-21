@@ -305,8 +305,7 @@ namespace MCMC
                 logp_old += logprior_par1_old;
 
                 bool non_gaussian = !dist_list[par1_prior.name] == AVAIL::Dist::gaussian;
-                bool non_beta = !dist_list[par1_prior.name] == AVAIL::Dist::beta;
-                if (non_gaussian && non_beta) // non-negative
+                if (non_gaussian) // non-negative
                 {
                     bool success = false;
                     unsigned int cnt = 0;
@@ -315,16 +314,6 @@ namespace MCMC
                         par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
                         success = (par1_new > 0) ? true : false;
                         cnt ++;
-                    }
-                } else if (!non_beta) // beta
-                {
-                    bool success = false;
-                    unsigned int cnt = 0;
-                    while (!success && cnt < MAX_ITER)
-                    {
-                        par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
-                        success = (par1_new > 0 && par1_new < 1) ? true : false;
-                        cnt++;
                     }
                 } else // gaussian
                 {
@@ -345,8 +334,7 @@ namespace MCMC
                 logp_old += logprior_par2_old;
 
                 bool non_gaussian = !dist_list[par2_prior.name] == AVAIL::Dist::gaussian;
-                bool non_beta = !dist_list[par2_prior.name] == AVAIL::Dist::beta;
-                if (non_gaussian && non_beta) // non-negative
+                if (non_gaussian) // non-negative
                 {
                     bool success = false;
                     unsigned int cnt = 0;
@@ -354,17 +342,6 @@ namespace MCMC
                     {
                         par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
                         success = (par2_new > 0) ? true : false;
-                        cnt++;
-                    }
-                }
-                else if (!non_beta) // beta
-                {
-                    bool success = false;
-                    unsigned int cnt = 0;
-                    while (!success && cnt < MAX_ITER)
-                    {
-                        par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
-                        success = (par2_new > 0 && par2_new < 1) ? true : false;
                         cnt++;
                     }
                 }
@@ -468,6 +445,11 @@ namespace MCMC
                 lag_dist, par1_old, par2_old,
                 model.dobs, model.flink.name);
 
+            grad_U.at(0) += Prior::dlogprior_dpar(par1_old, par1_prior, true);
+            grad_U.at(0) *= -1.;
+            grad_U.at(1) += Prior::dlogprior_dpar(par2_old, par2_prior, true);
+            grad_U.at(1) *= -1;
+
             double par1_new = 0.;
             double par2_new = 0.;
             p = p - (0.5 * epsilon) * grad_U;
@@ -484,6 +466,10 @@ namespace MCMC
                     Fphi_new, y, hpsi, nlag,
                     lag_dist, par1_new, par2_new,
                     model.dobs, model.flink.name);
+                grad_U.at(0) += Prior::dlogprior_dpar(par1_new, par1_prior, true);
+                grad_U.at(0) *= -1.;
+                grad_U.at(1) += Prior::dlogprior_dpar(par2_new, par2_prior, true);
+                grad_U.at(1) *= -1;
 
                 // full step update for momentum
                 if (i != L)
@@ -617,7 +603,7 @@ namespace MCMC
             }
 
             W = 0.01;
-            infer_W = true;
+            bool infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
             W_stored.set_size(nsample);
             W_accept = 0.;
@@ -628,8 +614,9 @@ namespace MCMC
             }
 
             mu0 = 0.;
+            mu0_prior.init("gaussian", 0., 10.);
             mu0_stored.set_size(nsample);
-            infer_mu0 = false;
+            bool infer_mu0 = false;
             mu0_accept = 0.;
             mu0_mh_sd = 1.;
             if (opts.containsElementNamed("mu0"))
@@ -645,7 +632,7 @@ namespace MCMC
 
             rho = 30.;
             rho_stored.set_size(nsample);
-            infer_rho = false;
+            bool infer_rho = false;
             rho_prior.init("gamma", 0.1, 0.1);
             rho_accept = 0.;
             rho_mh_sd = 0.1;
@@ -662,7 +649,7 @@ namespace MCMC
 
             par1 = 0.;
             par1_stored.set_size(nsample);
-            infer_par1 = false;
+            bool infer_par1 = false;
             par1_prior.init("gamma", 0.1, 0.1);
             par1_accept = 0.;
             par1_mh_sd = 0.1;
@@ -680,7 +667,7 @@ namespace MCMC
 
             par2 = 0.;
             par2_stored.set_size(nsample);
-            infer_par2 = false;
+            bool infer_par2 = false;
             par2_prior.init("gamma", 0.1, 0.1);
             par2_accept = 0.;
             par2_mh_sd = 0.1;
@@ -785,23 +772,23 @@ namespace MCMC
             output["psi"] = Rcpp::wrap(psi_quantile);
             output["wt_accept"] = Rcpp::wrap(wt_accept / ntotal);
 
-            output["infer_W"] = infer_W;
+            output["infer_W"] = W_prior.infer;
             output["W"] = Rcpp::wrap(W_stored);
             output["W_accept"] = W_accept / ntotal;
 
-            output["infer_mu0"] = infer_mu0;
+            output["infer_mu0"] = mu0_prior.infer;
             output["mu0"] = Rcpp::wrap(mu0_stored);
             output["mu0_accept"] = mu0_accept / ntotal;
 
-            output["infer_rho"] = infer_rho;
+            output["infer_rho"] = rho_prior.infer;
             output["rho"] = Rcpp::wrap(rho_stored);
             output["rho_accept"] = rho_accept / ntotal;
 
-            output["infer_par1"] = infer_par1;
+            output["infer_par1"] = par1_prior.infer;
             output["par1"] = Rcpp::wrap(par1_stored);
             output["par1_accept"] = par1_accept / ntotal;
 
-            output["infer_par2"] = infer_par2;
+            output["infer_par2"] = par2_prior.infer;
             output["par2"] = Rcpp::wrap(par2_stored);
             output["par2_accept"] = par2_accept / ntotal;
 
@@ -1094,13 +1081,13 @@ namespace MCMC
 
                 if (par1_prior.infer || par2_prior.infer)
                 {
-                    // arma::vec out = Posterior::update_dlag(
-                    //     par1_accept, par2_accept, model,
-                    //     y, hpsi, par1_prior, par2_prior, 
-                    //     par1_mh_sd, par2_mh_sd, max_lag);
-                    arma::vec out = Posterior::update_dlag_hmc(
-                        par1_accept, par2_accept, model, y, hpsi, 
-                        par1_prior, par2_prior, epsilon, L, m, max_lag);
+                    arma::vec out = Posterior::update_dlag(
+                        par1_accept, par2_accept, model,
+                        y, hpsi, par1_prior, par2_prior, 
+                        par1_mh_sd, par2_mh_sd, max_lag);
+                    // arma::vec out = Posterior::update_dlag_hmc(
+                    //     par1_accept, par2_accept, model, y, hpsi, 
+                    //     par1_prior, par2_prior, epsilon, L, m, max_lag);
 
                     par1 = out.at(0);
                     par2 = out.at(1);
@@ -1181,35 +1168,30 @@ namespace MCMC
         arma::mat wt_stored; // (nT + 1) x nsample
 
         Dist mu0_prior;
-        bool infer_mu0 = false;
         double mu0 = 0.;
         arma::vec mu0_stored;
         double mu0_accept = 0.;
         double mu0_mh_sd = 1.;
 
         Dist rho_prior;
-        bool infer_rho = false;
         double rho = 0.;
         arma::vec rho_stored;
         double rho_accept = 0.;
         double rho_mh_sd = 1.;
 
         Dist par1_prior;
-        bool infer_par1 = false;
         double par1 = 0.;
         arma::vec par1_stored;
         double par1_accept = 0.;
         double par1_mh_sd = 1.;
 
         Dist par2_prior;
-        bool infer_par2 = false;
         double par2 = 0.;
         arma::vec par2_stored;
         double par2_accept = 0.;
         double par2_mh_sd = 1.;
 
         Dist W_prior;
-        bool infer_W = false;
         double W = 0.01;
         arma::vec W_stored;
         double W_accept = 0.;

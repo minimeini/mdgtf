@@ -475,7 +475,7 @@ if (save_figures) {
 # mod1$model$obs_dist = "poisson"
 
 opts1.mcs <- dgtf_default_algo_settings("mcs")
-opts1.mcs$num_particle <- 100000
+opts1.mcs$num_particle <- 10000
 opts1.mcs$num_step_ahead_forecast <- 10
 
 opts1.mcs$W <- 0.008
@@ -797,7 +797,7 @@ if (save_data) {
 #| label: optimal settings of tfs
 
 opts1.tfs <- dgtf_default_algo_settings("tfs")
-opts1.tfs$num_particle <- 10000
+opts1.tfs$num_particle <- 5000
 opts1.tfs$num_smooth <- 1000
 opts1.tfs$do_smoothing <- TRUE
 
@@ -851,6 +851,48 @@ out1.tfs2 <- dgtf_infer(
 
 ```
 
+```{r}
+#| error: true
+#| label: evaluation of tfs
+
+if (exists("out1.tfs")) {
+    print(print_loss_all(out1.tfs))
+}
+
+if (exists("out1.tfs2")) {
+    print(print_loss_all(out1.tfs2))
+}
+
+```
+
+```{r}
+#| label: figure of tfs inference
+
+if (exists("out1.tfs")) {
+    tag <- paste0("sim-", seed, "-tfs-")
+    plots <- plot_output(
+        out1.tfs, sim1$y,
+        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
+
+
+if (exists("out1.tfs2")) {
+    tag <- paste0("sim-", seed, "-tfs2-")
+    plots <- plot_output(
+        out1.tfs2, sim1$y,
+        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
+
+
+
+```
+
 
 ### Particle Learning
 
@@ -862,7 +904,7 @@ out1.tfs2 <- dgtf_infer(
 opts1.pl <- dgtf_default_algo_settings("pl")
 
 opts1.pl$num_particle <- 10000
-opts1.pl$num_smooth <- 10000
+opts1.pl$num_smooth <- 5000
 opts1.pl$num_step_ahead_forecast <- 0
 opts1.pl$do_smoothing <- TRUE
 
@@ -891,6 +933,33 @@ opts1.pl$W_init <- list(
     prior_name = "invgamma",
     prior_param = c(1, 1)
 )
+
+
+opts1.pl$rho <- list(
+    infer = TRUE,
+    init = mod1$param$obs[2],
+    mh_sd = 0.01,
+    prior_name = "gaussian",
+    prior_param = c(0., 100.)
+)
+
+opts1.pl$par1 <- list(
+    infer = TRUE,
+    init = mod1$param$lag[1],
+    mh_sd = 0.002,
+    prior_name = "gaussian",
+    prior_param = c(1, 1.)
+)
+
+
+opts1.pl$par2 <- list(
+    infer = TRUE,
+    init = mod1$param$lag[2],
+    mh_sd = 0.01,
+    prior_name = "invgamma",
+    prior_param = c(1, 1.)
+)
+
 
 out1.pl <- dgtf_infer(
     mod1, sim1$y,
@@ -1065,22 +1134,43 @@ if (save_figures) {
 #| label: optimal settings of hva
 
 opts1.hva <- dgtf_default_algo_settings("hva")
-opts1.hva$nsample <- 5000
+opts1.hva$nsample <- 1000
 opts1.hva$nthin <- 2
-opts1.hva$nburnin <- 5000
+opts1.hva$nburnin <- 1000
 opts1.hva$num_step_ahead_forecast <- 10
 
 opts1.hva$mcs$num_particle <- 100
 opts1.hva$mcs$num_backward <- 10
 
-opts1.hva$W$init <- 0.01
-opts1.hva$W$infer <- TRUE
-
-opts1.hva$mu0$infer = FALSE
 
 opts1.hva$learning_rate <- 0.02
 opts1.hva$eps_step_size <- 1.e-5
-opts1.hva$k <- 1
+opts1.hva$k <- 3
+
+
+opts1.hva$mu0$init <- mod1$param$obs[1]
+opts1.hva$mu0$infer <- FALSE
+
+opts1.hva$W$init <- mod1$param$err[1]
+opts1.hva$W$infer <- TRUE
+
+opts1.hva$rho$init <- mod1$param$obs[2]
+opts1.hva$rho$infer <- FALSE
+
+opts1.hva$par1 <- list(
+    infer = TRUE,
+    init = 2,
+    prior_name = "gaussian",
+    prior_param = c(0., 1.)
+)
+
+opts1.hva$par2 <- list(
+    infer = TRUE,
+    init = mod1$param$lag[2],
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
+)
+
 
 ```
 
@@ -1090,8 +1180,23 @@ opts1.hva$k <- 1
 #| label: run dgtf_infer with hva
 #| include: false
 #| eval: false
+opts1.hva$mu0$infer <- TRUE
+opts1.hva$W$infer <- FALSE
+opts1.hva$rho$infer <- FALSE
+opts1.hva$par1$infer <- FALSE
+opts1.hva$par2$infer <- FALSE
 
-mod1$dim$regressor_baseline = TRUE
+opts1.hva$nsample <- 1000
+opts1.hva$nthin <- 2
+opts1.hva$nburnin <- 1000
+
+opts1.hva$k = 3
+opts1.hva$learning_rate = 0.02
+opts1.hva$eps_step_size = 1.e-5;
+
+
+mod1$dim$regressor_baseline <- FALSE
+
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
     "hva", opts1.hva,
@@ -1200,8 +1305,8 @@ If inferring both `par1` and `par2`
 
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
 opts1.mcmc$nsample <- 5000
-opts1.mcmc$nthin <- 2
-opts1.mcmc$nburnin <- 1000
+opts1.mcmc$nthin <- 5
+opts1.mcmc$nburnin <- 50000
 opts1.mcmc$num_step_ahead_forecast <- 10
 
 opts1.mcmc$mh_sd <- 1
