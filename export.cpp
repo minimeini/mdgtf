@@ -245,19 +245,32 @@ Rcpp::List dgtf_simulate(
 // [[Rcpp::export]]
 Rcpp::List dgtf_infer(
     const Rcpp::List &model_settings, 
-    const arma::vec &y,
+    const arma::vec &y_in,
     const std::string &method,
     const Rcpp::List &method_settings,
     const bool &summarize = true,
     const bool &forecast_error = true,
     const bool &fitted_error = true,
     const std::string &loss_func = "quadratic",
-    const unsigned int &k = 1)
+    const unsigned int &k = 1,
+    const bool &add_y0 = false)
 {
     // Model model = dgtf_initialize(model_settings);
     Model model(model_settings);
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::string algo_name = tolower(method);
+
+    arma::vec y;
+    if (add_y0)
+    {
+        y.set_size(y_in.n_elem + 1);
+        y.at(0) = 0.;
+        y.tail(y_in.n_elem) = y_in;
+    }
+    else
+    {
+        y = y_in;
+    }
 
     unsigned int nforecast = 0;
     if (method_settings.containsElementNamed("num_step_ahead_forecast"))
@@ -409,6 +422,7 @@ Rcpp::List dgtf_infer(
 
         output = pl.get_output();
 
+
         if (nforecast > 0)
         {
             forecast = pl.forecast(model);
@@ -424,6 +438,7 @@ Rcpp::List dgtf_infer(
             Rcpp::List tmp = pl.fitted_error(model, loss_func);
             error["fitted"] = tmp;
         }
+
 
 
         break;
@@ -494,6 +509,7 @@ Rcpp::List dgtf_infer(
         break;
     }
     }// switch by algorithm
+
 
     Rcpp::List out;
     if (nforecast > 0 || forecast_error || fitted_error)

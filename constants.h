@@ -2,6 +2,11 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
+#define ARMA_64BIT_WORD 1
+#define ARMA_USE_LAPACK 1
+#define ARMA_USE_BLAS 1
+#define ARMA_USE_OPENMP 1
+
 inline constexpr double EPS = 2.220446e-16;
 inline constexpr double EPS8 = 1.e-8;
 inline constexpr double UPBND = 700.;

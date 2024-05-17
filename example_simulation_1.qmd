@@ -24,22 +24,27 @@ format:
 error: true
 ---
 
+Run `quarto render /Users/meinitang/Dropbox/Repository/poisson-dlm/example_simulation_1.qmd --to pdf` to compile.
+
 ```{r}
 #| label: global argument
-save_data = TRUE
-save_figures = FALSE
-plot_figures = TRUE
+save_data <- TRUE
+save_figures <- TRUE
+plot_figures <- TRUE
 
-seed = 3269
+seed <- 3269
 
-kstep_forecast_err = 10
-eval_forecast_err = TRUE
-eval_fitted_err = TRUE
+kstep_forecast_err <- 10
+eval_forecast_err <- TRUE
+eval_fitted_err <- TRUE
 
-loss = "quadratic"
+loss <- "quadratic"
 
-fig_height = 10.1
-fig_width = 13.8
+fig_height <- 10.1
+fig_width <- 13.8
+
+param_list <- c("mu0", "rho", "W", "par1", "par2")
+param_infer <- c("W")
 ```
 
 ```{r}
@@ -124,6 +129,43 @@ p <- arrangeGrob(grobs = list(y = p1, psi = p2), ncol = 1)
 
 if (plot_figures) {
     plot(p)
+}
+```
+
+```{r}
+p <- ggplot(data.frame(y = sim1$y[-1], x = 1:mod1$dim$ntime), aes(x = x, y = y)) +
+    geom_point() +
+    geom_line() +
+    theme_minimal() +
+    labs(x = "Time", y = "Incidents")
+
+if (save_figures) {
+    ggsave(
+        file.path(opath, paste0("sim-", seed, "-y.pdf")),
+        plot = p,
+        device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
+    )
+}
+
+p2 <- ggplot(data.frame(y = log(exp(sim1$psi[-1]) + 1), x = 1:mod1$dim$ntime), aes(x = x, y = y)) +
+    geom_point() +
+    geom_line() +
+    theme_minimal() +
+    labs(x = "Time", y = "Rt")
+
+if (plot_figures) {
+    plot(p2)
+}
+
+
+if (save_figures) {
+    ggsave(
+        file.path(opath, paste0("sim-", seed, "-Rt.pdf")),
+        plot = p2,
+        device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
+    )
 }
 ```
 
@@ -338,6 +380,7 @@ if (save_data) {
 ```{r}
 #| label: mcs tuning discount factor
 #| include: false
+#| eval: false
 
 opts1.mcs <- dgtf_default_algo_settings("mcs")
 opts1.mcs$num_backward <- 4
@@ -377,6 +420,7 @@ if (plot_figures) {
 ```{r}
 #| label: mcs tuning W
 #| include: false
+#| eval: false
 
 W_grid <- seq(from = 0.001, to = 0.05, by = 0.001)
 opts1.mcs$use_discount <- FALSE
@@ -407,6 +451,7 @@ if (plot_figures) {
 ```{r}
 #| label: mcs tuning B
 #| include: false
+#| eval: false
 
 opts1.mcs$use_discount <- TRUE
 opts1.mcs$use_custom <- TRUE
@@ -435,6 +480,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: figure of mcs tuning
+#| eval: false
 
 if (save_figures) {
     ggsave(
@@ -565,13 +611,34 @@ if (exists("out1.mcs2")) {
 #| label: save mcs data
 
 if (save_data) {
-    save(
-        out1.mcs, out1.mcs2, opts1.mcs, delta.mcs, W.mcs, B.mcs,
-        file = file.path(
-            opath, "data",
-            paste0("sim-", seed, "-mcs.RData")
+    if (exists("out1.mcs") && exists("out1.mcs2")) {
+        save(
+            out1.mcs, out1.mcs2, opts1.mcs,
+            # delta.mcs, W.mcs, B.mcs,
+            file = file.path(
+                opath, "data",
+                paste0("sim-", seed, "-mcs.RData")
+            )
         )
-    )
+    } else if (exists("out1.mcs")) {
+        save(
+            out1.mcs, opts1.mcs,
+            # delta.mcs, W.mcs, B.mcs,
+            file = file.path(
+                opath, "data",
+                paste0("sim-", seed, "-mcs.RData")
+            )
+        )
+    } else if (exists("out1.mcs2")) {
+        save(
+            out1.mcs2, opts1.mcs,
+            # delta.mcs, W.mcs, B.mcs,
+            file = file.path(
+                opath, "data",
+                paste0("sim-", seed, "-mcs.RData")
+            )
+        )
+    }
 }
 ```
 
@@ -583,6 +650,8 @@ if (save_data) {
 ```{r}
 #| label: ffbs tuning of discount factor
 #| include: false
+#| eval: false
+
 
 opts1.ffbs <- dgtf_default_algo_settings("ffbs")
 opts1.ffbs$num_particle <- 5000
@@ -621,6 +690,7 @@ if (plot_figures) {
 ```{r}
 #| label: ffbs tuning of W
 #| include: false
+#| eval: false
 
 W_grid <- seq(from = 0.001, to = 0.04, by = 0.001)
 opts1.ffbs$use_discount <- FALSE
@@ -649,6 +719,7 @@ if (plot_figures) {
 
 ```{r}
 #| label: figure of ffbs tuning
+#| eval: false
 
 if (save_figures) {
     ggsave(
@@ -676,19 +747,20 @@ if (save_figures) {
 
 ```{r}
 #| label: optimal settings of ffbs
+#| eval: false
 
 opts1.ffbs <- dgtf_default_algo_settings("ffbs")
-opts1.ffbs$num_particle <- 100000
+opts1.ffbs$num_particle <- 50000
 opts1.ffbs$num_smooth <- 1000
 opts1.ffbs$do_smoothing <- TRUE
 
 opts1.ffbs$num_step_ahead_forecast <- 10
 
-opts1.ffbs$W = list(
+opts1.ffbs$W <- list(
     init = 0.006,
     infer = FALSE
 )
-opts1.ffbs$mu0$init = mod1$param$obs[1]
+opts1.ffbs$mu0$init <- mod1$param$obs[1]
 
 opts1.ffbs$use_discount <- TRUE
 opts1.ffbs$use_custom <- TRUE
@@ -701,6 +773,9 @@ opts1.ffbs$custom_discount_factor <- 0.91
 ```{r}
 #| label: run dgtf_infer with ffbs with discount factor
 #| include: false
+#| eval: false
+
+
 opts1.ffbs$use_discount <- TRUE
 out1.ffbs <- dgtf_infer(
     mod1, sim1$y,
@@ -715,6 +790,7 @@ out1.ffbs <- dgtf_infer(
 ```{r}
 #| label: run dgtf_infer with ffbs with W
 #| include: false
+#| eval: false
 
 opts1.ffbs$do_smoothing <- TRUE
 opts1.ffbs$do_backward <- TRUE
@@ -733,6 +809,7 @@ out1.ffbs2 <- dgtf_infer(
 ```{r}
 #| error: true
 #| label: evaluation of ffbs
+#| eval: false
 
 if (exists("out1.ffbs")) {
     print(print_loss_all(out1.ffbs))
@@ -747,6 +824,7 @@ if (exists("out1.ffbs2")) {
 
 ```{r}
 #| label: figure of ffbs inference
+#| eval: false
 
 if (exists("out1.ffbs")) {
     tag <- paste0("sim-", seed, "-ffbs-")
@@ -776,10 +854,11 @@ if (exists("out1.ffbs2")) {
 
 ```{r}
 #| label: save ffbs data
+#| eval: false
 
 if (save_data) {
     save(
-        out1.ffbs, out1.ffbs2, opts1.ffbs, delta.ffbs, W.ffbs, 
+        out1.ffbs, out1.ffbs2, opts1.ffbs, delta.ffbs, W.ffbs,
         file = file.path(
             opath, "data",
             paste0("sim-", seed, "-ffbs.RData")
@@ -805,7 +884,7 @@ opts1.tfs$num_step_ahead_forecast <- 10
 
 opts1.tfs$W <- list(
     init = mod1$param$err[1],
-    infer = FALSE
+    infer = TRUE
 )
 opts1.tfs$mu0 <- list(
     init = mod1$param$obs[1],
@@ -838,7 +917,7 @@ out1.tfs <- dgtf_infer(
 #| label: run dgtf_infer with tfs with W
 #| include: false
 
-opts1.tfs$do_backward <- TRUE
+opts1.tfs$do_smoothing <- TRUE
 opts1.tfs$use_discount <- FALSE
 out1.tfs2 <- dgtf_infer(
     mod1, sim1$y,
@@ -893,6 +972,37 @@ if (exists("out1.tfs2")) {
 
 ```
 
+```{r}
+#| label: save tfs data
+
+if (save_data) {
+    if (exists("out1.tfs") & exists("out1.tfs2")) {
+        save(
+            out1.tfs, out1.tfs2, opts1.tfs,
+            file = file.path(
+                opath, "data",
+                paste0("sim-", seed, "-tfs.RData")
+            )
+        )
+    } else if (exists("out1.tfs")) {
+        save(
+            out1.tfs, opts1.tfs,
+            file = file.path(
+                opath, "data",
+                paste0("sim-", seed, "-tfs.RData")
+            )
+        )
+    } else if (exists("out1.tfs2")) {
+        save(
+            out1.tfs2, opts1.tfs,
+            file = file.path(
+                opath, "data",
+                paste0("sim-", seed, "-tfs.RData")
+            )
+        )
+    }
+}
+```
 
 ### Particle Learning
 
@@ -903,7 +1013,7 @@ if (exists("out1.tfs2")) {
 #| include: false
 opts1.pl <- dgtf_default_algo_settings("pl")
 
-opts1.pl$num_particle <- 10000
+opts1.pl$num_particle <- 30000
 opts1.pl$num_smooth <- 5000
 opts1.pl$num_step_ahead_forecast <- 0
 opts1.pl$do_smoothing <- TRUE
@@ -912,7 +1022,7 @@ opts1.pl$max_iter <- 100
 
 opts1.pl$mu0 <- list(
     init = mod1$param$obs[1],
-    infer = FALSE,
+    infer = "mu0" %in% param_infer,
     prior_name = "normal",
     prior_param = c(0, 10.)
 )
@@ -924,7 +1034,7 @@ opts1.pl$mu0_init <- list(
 
 opts1.pl$W <- list(
     init = mod1$param$err[1],
-    infer = TRUE,
+    infer = "W" %in% param_infer,
     prior_name = "invgamma",
     prior_param = c(1, 1)
 )
@@ -936,7 +1046,7 @@ opts1.pl$W_init <- list(
 
 
 opts1.pl$rho <- list(
-    infer = TRUE,
+    infer = "rho" %in% param_infer,
     init = mod1$param$obs[2],
     mh_sd = 0.01,
     prior_name = "gaussian",
@@ -944,7 +1054,7 @@ opts1.pl$rho <- list(
 )
 
 opts1.pl$par1 <- list(
-    infer = TRUE,
+    infer = "par1" %in% param_infer,
     init = mod1$param$lag[1],
     mh_sd = 0.002,
     prior_name = "gaussian",
@@ -953,7 +1063,7 @@ opts1.pl$par1 <- list(
 
 
 opts1.pl$par2 <- list(
-    infer = TRUE,
+    infer = "par2" %in% param_infer,
     init = mod1$param$lag[2],
     mh_sd = 0.01,
     prior_name = "invgamma",
@@ -972,9 +1082,11 @@ out1.pl <- dgtf_infer(
 
 ```{r}
 #| label: evaluation of pl
+if (exists("out1.pl")) {
+    out1.pl.loss_all <- print_loss_all(out1.pl)
+    print(out1.pl.loss_all)
+}
 
-out1.pl.loss_all = print_loss_all(out1.pl)
-print(out1.pl.loss_all)
 
 # if ("W" %in% names(out1.pl$fit)) {
 #     print(summary(c(out1.pl$fit$W)))
@@ -996,20 +1108,22 @@ print(out1.pl.loss_all)
 ```{r}
 #| label: figure of pl inference
 
-tag <- paste0("sim-", seed, "-pl-")
-plots <- plot_output(
-    out1.pl, sim1$y,
-    psi_true = sim1$psi, mu0_true = sim1$param$obs[1],
-    save_figures = save_figures, tag = tag, opath = opath,
-    plot_figures = plot_figures
-)
+if (exists("out1.pl")) {
+    tag <- paste0("sim-", seed, "-pl-")
+    plots <- plot_output(
+        out1.pl, sim1$y,
+        psi_true = sim1$psi, mu0_true = sim1$param$obs[1],
+        save_figures = save_figures, tag = tag, opath = opath,
+        plot_figures = plot_figures
+    )
+}
 
 ```
 
 
 ```{r}
 #| label: save pl data
-if (save_data) {
+if (save_data && exists("out1.pl")) {
     save(
         out1.pl, opts1.pl,
         file = file.path(
@@ -1134,38 +1248,38 @@ if (save_figures) {
 #| label: optimal settings of hva
 
 opts1.hva <- dgtf_default_algo_settings("hva")
-opts1.hva$nsample <- 1000
+opts1.hva$nsample <- 5000
 opts1.hva$nthin <- 2
-opts1.hva$nburnin <- 1000
+opts1.hva$nburnin <- 5000
 opts1.hva$num_step_ahead_forecast <- 10
 
-opts1.hva$mcs$num_particle <- 100
+opts1.hva$mcs$num_particle <- 500
 opts1.hva$mcs$num_backward <- 10
 
 
 opts1.hva$learning_rate <- 0.02
 opts1.hva$eps_step_size <- 1.e-5
-opts1.hva$k <- 3
+opts1.hva$k <- length(param_infer)
 
 
 opts1.hva$mu0$init <- mod1$param$obs[1]
-opts1.hva$mu0$infer <- FALSE
+opts1.hva$mu0$infer <- "mu0" %in% param_infer
 
 opts1.hva$W$init <- mod1$param$err[1]
-opts1.hva$W$infer <- TRUE
+opts1.hva$W$infer <- "W" %in% param_infer
 
 opts1.hva$rho$init <- mod1$param$obs[2]
-opts1.hva$rho$infer <- FALSE
+opts1.hva$rho$infer <- "rho" %in% param_infer
 
 opts1.hva$par1 <- list(
-    infer = TRUE,
+    infer = "par1" %in% param_infer,
     init = 2,
     prior_name = "gaussian",
     prior_param = c(0., 1.)
 )
 
 opts1.hva$par2 <- list(
-    infer = TRUE,
+    infer = "par2" %in% param_infer,
     init = mod1$param$lag[2],
     prior_name = "invgamma",
     prior_param = c(1, 1)
@@ -1179,23 +1293,10 @@ opts1.hva$par2 <- list(
 ```{r}
 #| label: run dgtf_infer with hva
 #| include: false
-#| eval: false
-opts1.hva$mu0$infer <- TRUE
-opts1.hva$W$infer <- FALSE
-opts1.hva$rho$infer <- FALSE
-opts1.hva$par1$infer <- FALSE
-opts1.hva$par2$infer <- FALSE
+#| eval: true
 
-opts1.hva$nsample <- 1000
-opts1.hva$nthin <- 2
-opts1.hva$nburnin <- 1000
-
-opts1.hva$k = 3
 opts1.hva$learning_rate = 0.02
 opts1.hva$eps_step_size = 1.e-5;
-
-
-mod1$dim$regressor_baseline <- FALSE
 
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
@@ -1206,31 +1307,6 @@ out1.hva <- dgtf_infer(
 )
 ```
 
-```{r}
-#| label: run dgtf_infer with hva (mu0 and W)
-#| include: false
-#| eval: false
-
-opts1.hva2 = opts1.hva
-opts1.hva2$mu0 <- list(
-    infer = TRUE,
-    init = mod1$param$obs[1]
-)
-
-opts1.hva2$k <- 2
-
-mod2 = mod1
-mod2$dim$regressor_baseline <- FALSE
-
-out1.hva2 <- dgtf_infer(
-    mod2, sim1$y,
-    "hva", opts1.hva2,
-    forecast_error = FALSE,
-    fitted_error = eval_fitted_err,
-    k = kstep_forecast_err
-)
-
-```
 
 ```{r}
 #| error: true
@@ -1240,10 +1316,6 @@ if (exists("out1.hva")) {
     print(out1.hva.loss_all)
 }
 
-if (exists("out1.hva2")) {
-    out1.hva2.loss_all <- print_loss_all(out1.hva2)
-    print(out1.hva2.loss_all)
-}
 ```
 
 
@@ -1260,20 +1332,12 @@ if (exists("out1.hva")) {
     )
 }
 
-if (exists("out1.hva2")) {
-    tag <- paste0("sim-", seed, "-hva2-")
-    plots <- plot_output(
-        out1.hva2, sim1$y,
-        psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
-        save_figures = save_figures, tag = tag, opath = opath,
-        plot_figures = plot_figures
-    )
-}
 
 ```
 
 ```{r}
 #| label: save hva data
+
 if (exists("out1.hva") && exists("out1.hva2")) {
     if (save_data) {
         save(
@@ -1286,6 +1350,26 @@ if (exists("out1.hva") && exists("out1.hva2")) {
             )
         )
     }
+} else if (exists("out1.hva")) {
+    save(
+        out1.hva,
+        opts1.hva,
+        out1.hva.loss_all,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-hva.RData")
+        )
+    )
+} else if (exists("out1.hva2")) {
+    save(
+        out1.hva2,
+        opts1.hva2,
+        out1.hva2.loss_all,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-hva2.RData")
+        )
+    )
 }
 ```
 
@@ -1301,12 +1385,12 @@ If inferring both `par1` and `par2`
 ```{r}
 #| label: run dgtf_infer with mcmc
 #| include: false
-#| eval: false
+#| eval: true
 
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
 opts1.mcmc$nsample <- 5000
-opts1.mcmc$nthin <- 5
-opts1.mcmc$nburnin <- 50000
+opts1.mcmc$nthin <- 2
+opts1.mcmc$nburnin <- 5000
 opts1.mcmc$num_step_ahead_forecast <- 10
 
 opts1.mcmc$mh_sd <- 1
@@ -1315,18 +1399,18 @@ opts1.mcmc$L = 10
 opts1.mcmc$m = c(0.1, 0.1)
 
 opts1.mcmc$mu0$init <- mod1$param$obs[1]
-opts1.mcmc$mu0$infer <- FALSE
+opts1.mcmc$mu0$infer <- "mu0" %in% param_infer
 opts1.mcmc$mu0$mh_sd <- 1
 
 opts1.mcmc$W$init <- mod1$param$err[1]
-opts1.mcmc$W$infer <- TRUE
+opts1.mcmc$W$infer <- "W" %in% param_infer
 
 opts1.mcmc$rho$init <- mod1$param$obs[2]
-opts1.mcmc$rho$infer <- TRUE
+opts1.mcmc$rho$infer <- "rho" %in% param_infer
 opts1.mcmc$rho$mh_sd <- 0.5
 
 opts1.mcmc$par1 <- list(
-    infer = TRUE,
+    infer = "par1" %in% param_infer,
     init = 2,
     prior_name = "gaussian",
     prior_param = c(0., 1.),
@@ -1334,7 +1418,7 @@ opts1.mcmc$par1 <- list(
 )
 
 opts1.mcmc$par2 <- list(
-    infer = TRUE,
+    infer = "par2" %in% param_infer,
     init = mod1$param$lag[2],
     prior_name = "invgamma",
     prior_param = c(1, 1),
@@ -1403,6 +1487,8 @@ if (exists("out1.mcmc")) {
 
 ```{r}
 #| label: optimal obs with lba
+#| eval: false
+
 mod1$model$obs_dist <- "nbinom"
 delta_grid <- 1:100
 out1.stats.obs <- dgtf_optimal_obs(mod1, sim1$y, "lba", opts1.lba, delta_grid)
@@ -1468,6 +1554,7 @@ plot(p)
 
 ```{r}
 #| label: optimal obs
+#| eval: false
 
 mod1$model$obs_dist = "poisson"
 ```
@@ -1476,6 +1563,8 @@ mod1$model$obs_dist = "poisson"
 
 ```{r}
 #| label: lognormal lag dist with lba
+#| eval: false
+
 mod1$model$obs_dist <- "poisson"
 mod1$model$lag_dist <- "lognorm"
 
@@ -1525,12 +1614,16 @@ if (save_figures) {
 
 ```{r}
 #| label: optimal param for lognormal lags
-lognorm_param = c(3, 3.5)
+#| eval: false
+
+lognorm_param <- c(3, 3.5)
 ```
 
 
 ```{r}
 #| label: nbinom lag dist with lba
+#| eval: false
+
 mod1$model$obs_dist <- "poisson"
 mod1$model$lag_dist <- "nbinom"
 mod1$param$lag <- c(0.395, 6)
@@ -1579,6 +1672,7 @@ if (save_figures) {
 
 ```{r}
 #| label: save model selection
+#| eval: false
 
 if (save_data) {
     save(
@@ -1599,6 +1693,8 @@ if (save_data) {
 ### Misspecification of Lag Distribution
 
 ```{r}
+#| eval: false
+
 opts1.lba <- dgtf_default_algo_settings("lba")
 opts1.lba$W <- 0.01
 opts1.lba$use_discount <- FALSE
@@ -1622,6 +1718,7 @@ out1.lba2 <- dgtf_infer(
 ```{r}
 #| label: run external methods
 #| include: false
+
 si_para <- lognorm2serial(1.386262, 0.3226017)
 out1.epi <- epi_poisson(c(sim1$y), si_para[1], si_para[2])
 out1.wt <- wt_poisson(c(sim1$y), si_para[1], si_para[2])
@@ -1721,6 +1818,7 @@ plot(p)
 ```{r}
 #| label: forecasting and fitting error of hva
 #| include: false
+#| eval: false
 
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
@@ -1742,6 +1840,7 @@ plots <- plot_output(
 ```{r}
 #| label: forecasting and fitting error of hva (mu0 and W)
 #| include: false
+#| eval: false
 
 opts1.hva2 <- opts1.hva
 opts1.hva2$mu0 <- list(
@@ -1787,6 +1886,9 @@ if (save_data) {
 ```{r}
 #| label: forecasting and fitting error of mcmc
 #| include: false
+#| eval: false
+
+
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
 opts1.mcmc$nsample <- 5000
 opts1.mcmc$nthin <- 5
