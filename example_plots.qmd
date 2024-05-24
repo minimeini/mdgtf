@@ -26,7 +26,7 @@ error: true
 
 ```{r}
 #| label: source code
-save_figures <- FALSE
+save_figures <- TRUE
 plot_figures <- TRUE
 
 fig_width_rect <- 11.5
@@ -181,11 +181,11 @@ k = 5
 p = plot_ts_ci_multi(
   list(
     LBA = sim1.dat$out1.lba$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    MCS = sim1.dat$out1.mcs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    FFBS = sim1.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
+    # MCS = sim1.dat$out1.mcs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
+    # FFBS = sim1.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
     PL = sim1.dat$out1.pl$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    # HVA = sim1.dat$out1.hva$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    # MCMC = sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
+    HVA = sim1.dat$out1.hva$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
+    MCMC = sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
     # WT = sim1.dat$out1.wt,
     True = cbind(sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)], sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)], sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)])
   ), 
@@ -214,23 +214,25 @@ if (save_figures) {
 ### Posterior of Rt
 
 ```{r}
-tstart <- 50
-ntime <- 140
+tstart <- 1
+ntime <- 200
 tend <- tstart + ntime
 
 p <- plot_ts_ci_multi(
     list(
-        LBA = log(exp(sim1.dat$out1.lba$fit$psi[tstart:tend, ]) + 1),
-        MCS = log(exp(sim1.dat$out1.mcs$fit$psi[tstart:tend, ]) + 1),
-        FFBS = log(exp(sim1.dat$out1.ffbs$fit$psi[tstart:tend, ]) + 1),
-        PL = log(exp(sim1.dat$out1.pl$fit$psi[tstart:tend, ]) + 1),
+        LBA.DF = log(exp(sim1.dat$out1.lba$fit$psi[tstart:tend, ]) + 1),
+        LBA.W = log(exp(sim1.dat$out1.lba2$fit$psi[tstart:tend, ]) + 1),
+        # TFS.W = log(exp(sim1.dat$out1.tfs2$fit$psi[tstart:tend, ]) + 1),
+        # MCS = log(exp(sim1.dat$out1.mcs$fit$psi[tstart:tend, ]) + 1),
+        # FFBS = log(exp(sim1.dat$out1.ffbs2$fit$psi[tstart:tend, ]) + 1),
+        PL = log(exp(sim1.dat$out1.tfs3$fit$psi[tstart:tend, ]) + 1),
         HVA = log(exp(sim1.dat$out1.hva$fit$psi[tstart:tend, ]) + 1),
         MCMC = log(exp(sim1.dat$out1.mcmc$fit$psi[tstart:tend, ]) + 1),
-        WT = sim1.dat$out1.wt[tstart:tend, ],
-        EpiEstim = sim1.dat$out1.epi[tstart:tend, ],
+        # WT = sim1.dat$out1.wt[tstart:tend, ],
+        # EpiEstim = sim1.dat$out1.epi[tstart:tend, ],
         True = log(exp(cbind(sim1.dat$sim1$psi[tstart:tend, ], sim1.dat$sim1$psi[tstart:tend, ], sim1.dat$sim1$psi[tstart:tend, ])) + 1)
     ),
-    legend.position = "top"
+    legend.position = "top", alpha = 0.25
 )
 
 p <- p + ylab(expression(R[t])) +
@@ -248,6 +250,75 @@ if (save_figures) {
         plot = p, device = "pdf", dpi = 300,
         width = fig_width_rect, height = fig_height_rect
     )
+}
+```
+
+
+### Posterior of Static Parameters
+
+#### W
+
+```{r}
+if ("W" %in% names(sim1.dat$out1.pl$fit)) {
+    tag <- paste0("sim-", seed, "-pl-")
+    p <- plot_param(
+        c(sim1.dat$out1.pl$fit$W),
+        data_true = NULL,
+        tag = "W", title = FALSE, plot_figures = plot_figures
+    )
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath, "posterior",
+                paste0(tag, "posterior-W.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+```{r}
+if ("W" %in% names(sim1.dat$out1.hva$fit)) {
+    tag <- paste0("sim-", seed, "-hva-")
+    p <- plot_param(
+        c(sim1.dat$out1.hva$fit$W), 
+        data_true = NULL, 
+        tag = "W", title = FALSE, plot_figures = plot_figures)
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath, "posterior",
+                paste0(tag, "posterior-W.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+```{r}
+if ("W" %in% names(sim1.dat$out1.mcmc$fit)) {
+    tag <- paste0("sim-", seed, "-mcmc-")
+    p <- plot_param(
+        c(sim1.dat$out1.mcmc$fit$W), 
+        data_true = NULL, 
+        tag = "W", title = FALSE, plot_figures = plot_figures)
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath, "posterior",
+                paste0(tag, "posterior-W.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            height = fig_height_square, width = fig_width_square
+        )
+    }
 }
 ```
 

@@ -6,11 +6,12 @@ plot_ts_ci_multi = function(
                     xlab = "Time",
                     ylab = expression(psi[t]),
                     alpha = 0.2) {
-  mlist_external = c("EpiEstim", "WT", "Koyama2021")
+  mlist_external = toupper(c("EpiEstim", "WT", "Koyama2021"))
   clist_external = c("seagreen", "orange", "burlywood4")
 
-  mlist_dgtf = c(
-    "LBA", "LBE", 
+  mlist_dgtf = toupper(c(
+    "LBA", "LBE", "LBA.DF", "LBA.W",
+    "TFS", "TFS.W", "TFS.DF", 
     "HVB", "HVA", 
     "MCMC", 
     "True", 
@@ -20,9 +21,10 @@ plot_ts_ci_multi = function(
     "APF", 
     "SMCF-BF",
     "SMCS-BS", "BS", "FFBS"
-  )
+  ))
   clist_dgtf = c(
-    rep("maroon", 2), # LBA, LBE
+    rep("maroon", 4), # LBA, LBE, LBA.DF, LBA.W
+    rep("peru", 3), # TFS
     rep("purple", 2), # HVB, HVA **
     "darkturquoise", # MCMC
     "black", # True
@@ -40,7 +42,7 @@ plot_ts_ci_multi = function(
 
   nl = length(psi_list)
   n = max(c(unlist(lapply(psi_list,function(psi){dim(psi)[1]}))))
-  nl2 = sum(names(psi_list)%in%c(mlist_dgtf, "Koyama2021"))
+  nl2 = sum(toupper(names(psi_list)) %in% c(mlist_dgtf, toupper("Koyama2021")))
   
   if (is.null(time_label)) {
     time_label = c(1:n)
@@ -50,7 +52,7 @@ plot_ts_ci_multi = function(
 
 
   for (i in 1:nl) {
-    if (names(psi_list)[i] == "Koyama2021") {
+    if (toupper(names(psi_list)[i]) == toupper("Koyama2021")) {
       psi_list[[i]] = psi_list[[i]][-1,1:3]
     }
 
@@ -60,7 +62,7 @@ plot_ts_ci_multi = function(
       hibnd=psi_list[[i]][,3],
       time=time_label[(n-dim(psi_list[[i]])[1]+1) : n]
     )
-    psi_list[[i]]$method = rep(names(psi_list)[i], dim(psi_list[[i]])[1])
+    psi_list[[i]]$method = rep(toupper(names(psi_list)[i]), dim(psi_list[[i]])[1])
   }
   
   psi_list = do.call(rbind,psi_list)
@@ -71,12 +73,21 @@ plot_ts_ci_multi = function(
   methods = unique(psi_list$method)
   # cols = sapply(methods,function(m,mlist){which(m==mlist)},mlist)
   col_tmp = NULL
+  cols = NULL
   for (m in methods) {
-    ccctmp = which(m == mlist)
-    col_tmp = c(col_tmp,ccctmp)
+    if (m %in% mlist) {
+      ccctmp = which(m == mlist)
+      col_tmp = c(col_tmp, ccctmp)
+      cols = c(cols, clist[ccctmp])
+    } else {
+       tmp = setdiff(colors(), unique(mlist))
+       idx = sample(tmp, 1)
+       cols = c(cols, tmp[idx])
+       
+    }
   }
 
-  cols = clist[col_tmp]
+  # cols = clist[col_tmp]
 
   p = ggplot(psi_list,aes(x=time,y=est,group=method)) +
     geom_line(aes(color=method),na.rm=TRUE) +
@@ -177,11 +188,39 @@ plot_ypred <- function(
 }
 
 
+plot_param = function(data, data_true = NULL, tag = "W", title = FALSE, plot_figures = TRUE) {
+
+  posterior_W <- ggplot(
+    data = data.frame(w = c(data), idx = 1:length(data)),
+    aes(x = w)
+  ) +
+    theme_light() +
+    geom_histogram(bins = 50)
+  
+  if (title) {
+    posterior_W = posterior_W + labs(title = paste0("Posterior distribution of ", tag))
+  }
+
+  if (!is.null(data_true)) {
+    posterior_W <- posterior_W + geom_vline(aes(xintercept = data_true), col = "maroon")
+  }
+
+  if (plot_figures) {
+    plot(posterior_W)
+  }
+
+  return(posterior_W)
+}
+
+
 plot_output <- function(
   out_list, ytrue, 
   psi_true = NULL, 
   W_true = NULL, 
   mu0_true = NULL, 
+  rho_true = NULL,
+  par1_true = NULL,
+  par2_true = NULL,
   save_figures = FALSE, 
   tag = NULL, 
   opath = NULL,
@@ -236,21 +275,8 @@ plot_output <- function(
     } else {
       Wtmp = NULL
     }
-    posterior_W <- ggplot(
-      data = data.frame(w = c(out_list$fit$W), idx = 1:length(out_list$fit$W)),
-      aes(x = w)
-    ) +
-      theme_light() +
-      geom_histogram(bins = 50) +
-      labs(title = "Posterior distribution of W")
 
-    if (!is.null(W_true)) {
-      posterior_W <- posterior_W + geom_vline(aes(xintercept = W_true), col = "maroon")
-    }
-
-    if (plot_figures) {
-      plot(posterior_W)
-    }
+    posterior_W = plot_param(c(out_list$fit$W), data_true = W_true, tag = "W", title = FALSE, plot_figures = plot_figures)
 
     if (return_figures) {
       plots <- append(plots, list(posterior_W = posterior_W))
@@ -270,21 +296,8 @@ plot_output <- function(
 
 
   if ("mu0" %in% names(out_list$fit)) {
-    posterior_mu0 <- ggplot(
-      data = data.frame(mu0 = c(out_list$fit$mu0), idx = 1:length(out_list$fit$mu0)),
-      aes(x = mu0)
-    ) +
-      theme_light() +
-      geom_histogram(bins = 50) +
-      labs(title = "Posterior distribution of mu0")
 
-    if (!is.null(mu0_true)) {
-      posterior_mu0 <- posterior_mu0 + geom_vline(aes(xintercept = mu0_true), col = "maroon")
-    }
-
-    if (plot_figures) {
-      plot(posterior_mu0)
-    }
+    posterior_mu0 = plot_param(c(out_list$fit$mu0), data_true = mu0_true, tag = "mu0", title = FALSE, plot_figures = plot_figures)
 
     if (return_figures) {
       plots <- append(plots, list(posterior_mu0 = posterior_mu0))
@@ -297,6 +310,64 @@ plot_output <- function(
           paste0(tag, "posterior-mu0.pdf")
         ),
         plot = posterior_mu0, device = "pdf", dpi = 300,
+        height = height, width = width
+      )
+    }
+  }
+
+
+  if ("rho" %in% names(out_list$fit)) {
+    posterior_rho = plot_param(c(out_list$fit$rho), data_true = rho_true, tag = "rho", title = FALSE, plot_figures = plot_figures)
+
+    if (return_figures) {
+      plots <- append(plots, list(posterior_rho = posterior_rho))
+    }
+
+    if (save_figures) {
+      ggsave(
+        file.path(
+          opath, "posterior",
+          paste0(tag, "posterior-rho.pdf")
+        ),
+        plot = posterior_rho, device = "pdf", dpi = 300,
+        height = height, width = width
+      )
+    }
+  }
+
+  if ("par1" %in% names(out_list$fit)) {
+    posterior_par1 = plot_param(c(out_list$fit$par1), data_true = par1_true, tag = "par1", title = FALSE, plot_figures = plot_figures)
+
+    if (return_figures) {
+      plots <- append(plots, list(posterior_par1 = posterior_par1))
+    }
+
+    if (save_figures) {
+      ggsave(
+        file.path(
+          opath, "posterior",
+          paste0(tag, "posterior-par1.pdf")
+        ),
+        plot = posterior_par1, device = "pdf", dpi = 300,
+        height = height, width = width
+      )
+    }
+  }
+
+  if ("par2" %in% names(out_list$fit)) {
+    posterior_par2 = plot_param(c(out_list$fit$par2), data_true = par2_true, tag = "par2", title = FALSE, plot_figures = plot_figures)
+
+    if (return_figures) {
+      plots <- append(plots, list(posterior_par2 = posterior_par2))
+    }
+
+    if (save_figures) {
+      ggsave(
+        file.path(
+          opath, "posterior",
+          paste0(tag, "posterior-par2.pdf")
+        ),
+        plot = posterior_par2, device = "pdf", dpi = 300,
         height = height, width = width
       )
     }

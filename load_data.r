@@ -31,6 +31,26 @@ load_dat = function(opath, seed, type = "sim") {
       envir = env
     )
   })
+
+  try({
+    load(
+      file.path(
+        opath, "data",
+        paste0(type, "-", seed, "-tfs.RData")
+      ),
+      envir = env
+    )
+  })
+
+  try({
+    load(
+      file.path(
+        opath, "data",
+        paste0(type, "-", seed, "-tfs2.RData")
+      ),
+      envir = env
+    )
+  })
   
   try({
     load(file.path(

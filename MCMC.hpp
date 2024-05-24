@@ -778,7 +778,7 @@ namespace MCMC
 
             output["infer_mu0"] = mu0_prior.infer;
             output["mu0"] = Rcpp::wrap(mu0_stored);
-            output["mu0_accept"] = mu0_accept / ntotal;
+            output["mu0_accept"] = static_cast<double>(mu0_accept / ntotal);
 
             output["infer_rho"] = rho_prior.infer;
             output["rho"] = Rcpp::wrap(rho_stored);

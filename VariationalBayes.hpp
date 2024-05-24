@@ -488,23 +488,24 @@ namespace VB
             }
 
 
-            if (opts.containsElementNamed("mcs"))
+            if (opts.containsElementNamed("smc"))
             {
-                mcs_opts = Rcpp::as<Rcpp::List>(opts["mcs"]);
+                smc_opts = Rcpp::as<Rcpp::List>(opts["smc"]);
             }
             else
             {
-                mcs_opts = SMC::MCS::default_settings();
+                // smc_opts = SMC::MCS::default_settings();
+                smc_opts = SMC::TFS::default_settings();
             }
 
-            mcs_opts["use_discount"] = false;
-            mcs_opts["num_smooth"] = Rcpp::as<unsigned int>(mcs_opts["num_particle"]);
+            smc_opts["use_discount"] = false;
+            smc_opts["num_smooth"] = Rcpp::as<unsigned int>(smc_opts["num_particle"]);
 
             Rcpp::List W_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = W_prior.val);
 
-            unsigned int num_particle = Rcpp::as<unsigned int>(mcs_opts["num_particle"]);
+            unsigned int num_particle = Rcpp::as<unsigned int>(smc_opts["num_particle"]);
             mu0_stored2.set_size(num_particle, nsample);
             mu0_stored2.zeros();
         }
@@ -517,23 +518,25 @@ namespace VB
             opts["eps_step_size"] = 1.e-6;
             opts["k"] = 1;
 
-            Rcpp::List mcs_tmp = SMC::MCS::default_settings();
-            mcs_tmp["use_discount"] = false;
-            mcs_tmp["num_backward"] = 5;
+            // Rcpp::List smc_tmp = SMC::MCS::default_settings();
+            // smc_tmp["use_discount"] = false;
+            // smc_tmp["num_backward"] = 5;
+
+            Rcpp::List smc_tmp = SMC::TFS::default_settings();
 
             Rcpp::List W_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = 0.01);
             
-            mcs_tmp["W"] = W_opts;
+            smc_tmp["W"] = W_opts;
 
             Rcpp::List mu0_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = 0);
 
-            mcs_tmp["mu0"] = mu0_opts;
+            smc_tmp["mu0"] = mu0_opts;
 
-            opts["mcs"] = mcs_tmp;
+            opts["smc"] = smc_tmp;
 
             return opts;
         }
@@ -1352,7 +1355,7 @@ namespace VB
 
                 unsigned int B = grid.at(i);
                 stats.at(i, 0) = B;
-                mcs_opts["num_backward"] = B;
+                smc_opts["num_backward"] = B;
 
                 infer(model);
 
@@ -1605,15 +1608,17 @@ namespace VB
             par1 = model.transfer.dlag.par1;
             par2 = model.transfer.dlag.par2;
 
-            // Rcpp::List mcs_opts = SMC::MCS::default_settings();
-            // mcs_opts["num_particle"]  = N;
-            // mcs_opts["num_backward"] = B;
-            // mcs_opts["W"] = W;
-            // mcs_opts["use_discount"] = false;
+            // Rcpp::List smc_opts = SMC::MCS::default_settings();
+            // smc_opts["num_particle"]  = N;
+            // smc_opts["num_backward"] = B;
+            // smc_opts["W"] = W;
+            // smc_opts["use_discount"] = false;
 
-            SMC::MCS mcs(model, y);
-            mcs.init(mcs_opts);
+            // SMC::MCS mcs(model, y);
+            // mcs.init(smc_opts);
 
+            SMC::TFS smc(model, y);
+            smc.init(smc_opts);
 
             // arma::vec eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
             // arma::vec eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
@@ -1629,10 +1634,30 @@ namespace VB
                 // arma::mat psi_tmp = LBA::get_psi(lba.atilde, lba.Rtilde);
                 // psi = psi_tmp.col(1);
 
-                mcs.prior_W.val = W;
-                mcs.infer(model, false);
-                arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
-                psi = arma::median(psi_all, 1);
+                smc.prior_W.val = W;
+                try
+                {
+                    smc.infer(model, false);
+                }
+                catch(const std::exception& e)
+                {
+                    std::cerr << "W = " << W << ", mu0 = " << mu0 << ", rho = " << rho << std::endl;
+                    throw std::runtime_error(e.what());
+                }
+                
+                
+
+                arma::mat psi_all;
+                if (smc.smoothing)
+                {
+                    psi_all = smc.psi_smooth; // (nT + B) x N
+                }
+                else
+                {
+                    psi_all = smc.psi_forward; // (nT + B) x N
+                }
+                // arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
+                psi = arma::median(psi_all.head_rows(model.dim.nT + 1), 1);
 
                 arma::vec ft  = psi;
                 ft.at(0) = 0.;
@@ -1710,7 +1735,7 @@ namespace VB
 
                     if (par1_prior.infer || par2_prior.infer)
                     {
-                        mcs.update_np(model.dim.nP);
+                        smc.update_np(model.dim.nP);
                         dim.nL = model.dim.nL;
                         dim.nP = model.dim.nP;
                     }
@@ -1748,7 +1773,7 @@ namespace VB
                     {
                         if (model_in.dim.regressor_baseline)
                         {
-                            arma::vec mu0 = mcs.get_mu0();
+                            arma::vec mu0 = smc.get_mu0();
                             mu0_stored2.col(idx_run) = mu0;
                         }
                         else
@@ -1842,7 +1867,7 @@ namespace VB
         double eps_step_size = 1.e-6;
         unsigned int k = 1; // rank of unknown static parameters.
 
-        Rcpp::List mcs_opts;
+        Rcpp::List smc_opts;
 
         // StaticParam W, mu0, delta, kappa, r;
         HybridParams grad_mu, grad_vecB, grad_d, grad_tau;
