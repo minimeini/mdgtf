@@ -2,6 +2,22 @@
 #ifndef _UTILS_H
 #define _UTILS_H
 
+#if !defined(ARMA_USE_BLAS)
+#define ARMA_USE_BLAS
+#endif
+
+#if !defined(ARMA_USE_LAPACK)
+#define ARMA_USE_LAPACK
+#endif
+
+#if !defined(ARMA_USE_64BIT_WORD)
+#define ARMA_USE_64BIT_WORD
+#endif
+
+#if !defined(ARMA_USE_OPENMP)
+#define ARMA_USE_OPENMP
+#endif
+
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -36,7 +52,6 @@ inline const char *const bool2string(bool b)
 {
 	return b ? "true" : "false";
 }
-
 
 template <typename T>
 inline void bound_check(
@@ -234,7 +249,6 @@ inline arma::mat inverse(
 			}
 		}
 	}
-	
 
 	return mat_inv;
 }
@@ -386,7 +400,54 @@ inline void init_prior(Prior &prior, const Rcpp::List &opts)
 	return;
 }
 
+/**
+ * @brief Evaluate forecasting performance with a specific loss function, calculate the width of credible interval and the covarage rate of credible interval.
+ *
+ * @param yest
+ * @param ytrue
+ * @param loss_func
+ * @param eval_covarage_width
+ * @param eval_covarage_pct
+ * @return arma::vec
+ */
+arma::vec evaluate(
+	const arma::vec &yest, // nsample x 1
+	const double &ytrue,
+	const std::string &loss_func = "quadratic",
+	const bool &eval_covarage_width = true,
+	const bool &eval_covarage_pct = true)
+{
+	std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
 
+	double ymin = arma::min(yest);
+	double ymax = arma::max(yest);
+	double ywidth = std::abs(ymax - ymin);
+	double ycov = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
 
+	arma::vec yerr = arma::abs(ytrue - yest);
+	double yloss = 0.;
+	switch (loss_list[tolower(loss_func)])
+	{
+	case AVAIL::L1:
+	{
+		yloss = arma::mean(yerr);
+		break;
+	}
+	case AVAIL::L2:
+	{
+		yerr = arma::square(yerr);
+		yloss = arma::mean(yerr);
+		break;
+	}
+	default:
+	{
+		throw std::invalid_argument("evaluate: undefined loss function");
+		break;
+	}
+	}
+
+	arma::vec out = {yloss, ywidth, ycov};
+	return out;
+}
 
 #endif
