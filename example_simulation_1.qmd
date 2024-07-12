@@ -29,7 +29,7 @@ Run `quarto render /Users/meinitang/Dropbox/Repository/poisson-dlm/example_simul
 ```{r}
 #| label: global argument
 save_data <- TRUE
-save_figures <- TRUE
+save_figures <- FALSE
 plot_figures <- TRUE
 
 seed <- 3269
@@ -43,6 +43,9 @@ loss <- "quadratic"
 fig_height <- 10.1
 fig_width <- 13.8
 
+fig_width_rect <- 11.5
+fig_height_rect <- 4
+
 param_list <- c("mu0", "rho", "W", "par1", "par2")
 param_infer <- c("W")
 ```
@@ -52,6 +55,7 @@ param_infer <- c("W")
 
 library(ggplot2)
 library(gridExtra)
+library(latex2exp)
 
 repo <- "/Users/meinitang/Dropbox/Repository/poisson-dlm"
 Rcpp::sourceCpp(file.path(repo, "export.cpp"))
@@ -97,6 +101,35 @@ mod1 <- list(
 rm(dim)
 rm(param)
 rm(component)
+```
+
+
+```{r}
+#| label: mis-specified model
+
+mod1a <- mod1
+mod1a$param$obs[2] <- 60 # less dispersion
+
+mod1b <- mod1
+mod1b$param$obs[2] <- 5 # more dispersion
+
+mod1c <- mod1
+mod1c$param$lag[1] <- 0.5 # smaller lag mean
+
+mod1d <- mod1
+mod1d$param$lag[1] <- 3 # larger lag mean
+
+mod1e <- mod1
+mod1e$param$lag[2] <- 1 # larger lag var
+
+mod1f <- mod1
+mod1f$param$lag[2] <- 0.05 # smaller lag var
+
+mod1g <- mod1
+mod1g$param$obs[1] <- 0.01 # smaller obs mean
+
+mod1h <- mod1
+mod1h$param$obs[1] <- 2 # larger obs mean
 ```
 
 
@@ -294,7 +327,7 @@ opts1.lba$use_custom <- TRUE
 
 
 opts1.lba$custom_discount_factor <- 0.87
-opts1.lba$discount_type = "first_elem"
+opts1.lba$discount_type <- "first_elem"
 
 # opts1.lba$discount_type = "all_elems"
 # opts1.lba$custom_discount_factor <- 0.8
@@ -305,13 +338,13 @@ opts1.lba$discount_type = "first_elem"
 ```{r}
 #| label: run dgtf_infer of lba with discount factor
 #| include: false
-opts1.lba$use_discount = TRUE
+opts1.lba$use_discount <- TRUE
 out1.lba <- dgtf_infer(
     mod1, sim1$y,
     "lba", opts1.lba,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err, 
+    k = kstep_forecast_err,
     loss_func = loss
 )
 
@@ -338,8 +371,8 @@ out1.lba2 <- dgtf_infer(
 #| label: evaluation of lba
 #| error: true
 
-out1.lba.loss_all = print_loss_all(out1.lba)
-out1.lba2.loss_all = print_loss_all(out1.lba2)
+out1.lba.loss_all <- print_loss_all(out1.lba)
+out1.lba2.loss_all <- print_loss_all(out1.lba2)
 
 print(out1.lba.loss_all)
 print(out1.lba2.loss_all)
@@ -545,7 +578,7 @@ opts1.mcs$custom_discount_factor <- 0.88
 
 opts1.mcs$num_backward <- 5
 
-opts1.mcs$mu0 = list(
+opts1.mcs$mu0 <- list(
     prior_name = "uniform",
     prior_param = c(0., min(100, median(sim1$y)))
 )
@@ -870,18 +903,18 @@ if (exists("out1.ffbs2")) {
 #| eval: false
 
 if (save_data) {
-    save_vars = c("out1.ffbs", "out1.ffbs2", "opts1.ffbs", "delta.ffbs", "W.ffbs")
-    save_vars = save_vars[sapply(save_vars, exists)]
+    save_vars <- c("out1.ffbs", "out1.ffbs2", "opts1.ffbs", "delta.ffbs", "W.ffbs")
+    save_vars <- save_vars[sapply(save_vars, exists)]
     save(list = save_vars, file = file.path(
         opath, "data",
         paste0("sim-", seed, "-ffbs.RData")
-        )
-    )
+    ))
 }
 ```
 
 
 ### Two-filter Smoothing
+
 
 #### Optimal Settings
 
@@ -998,7 +1031,7 @@ if (save_data) {
             )
         )
     }
-    
+
     if (exists("out1.tfs2")) {
         save(
             out1.tfs2, opts1.tfs,
@@ -1012,6 +1045,77 @@ if (save_data) {
 ```
 
 ### Particle Learning
+
+#### Profiling
+
+```{r}
+opts1.pl <- dgtf_default_algo_settings("pl")
+
+opts1.pl$num_particle <- 1000
+opts1.pl$num_step_ahead_forecast <- 0
+opts1.pl$do_smoothing <- TRUE
+
+opts1.pl$max_iter <- 100
+
+opts1.pl$mu0 <- list(
+    init = mod1$param$obs[1],
+    infer = FALSE,
+    prior_name = "normal",
+    prior_param = c(0, 10.)
+)
+
+opts1.pl$mu0_init <- list(
+    prior_name = "constant",
+    prior_param = c(mod1$param$obs[1], 10.)
+)
+
+opts1.pl$W <- list(
+    init = mod1$param$err[1],
+    infer = "W" %in% param_infer,
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
+)
+
+opts1.pl$W_init <- list(
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
+)
+
+
+opts1.pl$rho <- list(
+    infer = FALSE,
+    init = mod1$param$obs[2],
+    mh_sd = 0.01,
+    prior_name = "gaussian",
+    prior_param = c(0., 100.)
+)
+
+opts1.pl$par1 <- list(
+    infer = FALSE,
+    init = mod1$param$lag[1],
+    mh_sd = 0.002,
+    prior_name = "gaussian",
+    prior_param = c(1, 1.)
+)
+
+
+opts1.pl$par2 <- list(
+    infer = FALSE,
+    init = mod1$param$lag[2],
+    mh_sd = 0.01,
+    prior_name = "invgamma",
+    prior_param = c(1, 1.)
+)
+
+
+out1.pl <- dgtf_infer(
+    mod1, sim1$y,
+    "pl", opts1.pl,
+    forecast_error = FALSE,
+    fitted_error = FALSE,
+    k = 0
+)
+```
 
 #### Inference
 
@@ -1137,8 +1241,8 @@ if ("rho" %in% param_infer) {
 }
 
 if ("par1" %in% param_infer || "par2" %in% param_infer) {
-    mod2$param$lag[1] = median(out1.pl$fit$par1)
-    mod2$param$lag[2] = median(out1.pl$fit$par2)
+    mod2$param$lag[1] <- median(out1.pl$fit$par1)
+    mod2$param$lag[2] <- median(out1.pl$fit$par2)
 }
 
 opts1.tfs <- dgtf_default_algo_settings("tfs")
@@ -1162,7 +1266,7 @@ opts1.tfs$mu0 <- list(
 opts1.tfs$do_smoothing <- TRUE
 opts1.tfs$use_discount <- FALSE
 out1.tfs3 <- dgtf_infer(
-    mod1, sim1$y,
+    mod2, sim1$y,
     "tfs", opts1.tfs,
     forecast_error = eval_forecast_err,
     fitted_error = eval_fitted_err,
@@ -1188,13 +1292,12 @@ if (exists("out1.tfs3")) {
 ```{r}
 #| label: save pl data
 if (save_data && exists("out1.pl")) {
-    var_list = c("out1.pl", "out1.tfs3", "opts1.pl", "opts1.tfs")
-    var_list = var_list[sapply(var_list, exists)]
+    var_list <- c("out1.pl", "out1.tfs3", "opts1.pl", "opts1.tfs")
+    var_list <- var_list[sapply(var_list, exists)]
     save(list = var_list, file = file.path(
-            opath, "data",
-            paste0("sim-", seed, "-pl-all.RData")
-        )
-    )
+        opath, "data",
+        paste0("sim-", seed, "-pl-W.RData")
+    ))
 }
 ```
 
@@ -1319,7 +1422,7 @@ opts1.hva$num_step_ahead_forecast <- 10
 
 opts1.hva$smc$num_particle <- 100
 opts1.hva$smc$num_backward <- 1
-opts1.hva$smc$do_smoothing = TRUE
+opts1.hva$smc$do_smoothing <- TRUE
 
 
 opts1.hva$learning_rate <- 0.02
@@ -1327,12 +1430,12 @@ opts1.hva$eps_step_size <- 1.e-5
 opts1.hva$k <- length(param_infer)
 
 
-opts1.hva$mu0 = list(
+opts1.hva$mu0 <- list(
     infer = "mu0" %in% param_infer,
     init = mod1$param$obs[1]
 )
 
-opts1.hva$W = list(
+opts1.hva$W <- list(
     infer = "W" %in% param_infer,
     init = mod1$param$err[1],
     prior_name = "invgamma",
@@ -1366,9 +1469,8 @@ opts1.hva$par2 <- list(
 #| include: false
 #| eval: true
 
-opts1.hva$learning_rate = 0.02
-opts1.hva$eps_step_size = 1.e-5;
-
+opts1.hva$learning_rate <- 0.02
+opts1.hva$eps_step_size <- 1.e-5
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
     "hva", opts1.hva,
@@ -1410,14 +1512,15 @@ if (exists("out1.hva")) {
 #| label: save hva data
 
 if (save_data) {
-    var_list = c(
-        "out1.hva", "out1.hva2", 
-        "opts1.hva", "opts1.hva2", 
-        "out1.hva.loss_all", "out1.hva2.loss_all")
-    
-    var_list = var_list[sapply(var_list, exists)]
+    var_list <- c(
+        "out1.hva", "out1.hva2",
+        "opts1.hva", "opts1.hva2",
+        "out1.hva.loss_all", "out1.hva2.loss_all"
+    )
+
+    var_list <- var_list[sapply(var_list, exists)]
     save(list = var_list, file = file.path(
-        opath, "data", paste0("sim-", seed, "-hva.RData")
+        opath, "data", paste0("sim-", seed, "-hva-W-forecast_20pts.RData")
     ))
 }
 
@@ -1440,13 +1543,13 @@ If inferring both `par1` and `par2`
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
 opts1.mcmc$nsample <- 5000
 opts1.mcmc$nthin <- 5
-opts1.mcmc$nburnin <- 2000
+opts1.mcmc$nburnin <- 80000
 opts1.mcmc$num_step_ahead_forecast <- 10
 
 opts1.mcmc$mh_sd <- 1
-opts1.mcmc$epsilon = 0.005  
-opts1.mcmc$L = 10
-opts1.mcmc$m = c(0.1, 0.1)
+opts1.mcmc$epsilon <- 0.005
+opts1.mcmc$L <- 10
+opts1.mcmc$m <- c(0.1, 0.1)
 
 opts1.mcmc$mu0$init <- mod1$param$obs[1]
 opts1.mcmc$mu0$infer <- "mu0" %in% param_infer
@@ -1480,7 +1583,7 @@ out1.mcmc <- dgtf_infer(
     "mcmc", opts1.mcmc,
     forecast_error = FALSE,
     fitted_error = eval_fitted_err,
-    k = kstep_forecast_err
+    k = 0
 )
 ```
 
@@ -1517,14 +1620,11 @@ if (exists("out1.mcmc")) {
 
 if (exists("out1.mcmc")) {
     if (save_data) {
-        save(
-            out1.mcmc, opts1.mcmc,
-            out1.mcmc.loss_all,
-            file = file.path(
-                opath, "data",
-                paste0("sim-", seed, "-mcmc-rho.RData")
-            )
-        )
+        var_list <- c("out1.mcmc", "opts1.mcmc", "out1.mcmc.loss_all")
+        var_list <- var_list[sapply(var_list, exists)]
+        save(list = var_list, file = file.path(
+            opath, "data", paste0("sim-", seed, "-mcmc-mu0.RData")
+        ))
     }
 }
 ```
@@ -1576,7 +1676,7 @@ ramp.tfs <- dgtf_infer(
 ```
 
 ```{r}
-mod_g2 = mod1
+mod_g2 <- mod1
 mod_g2$model$gain_func <- "exponential"
 exp.tfs <- dgtf_infer(
     mod_g2, sim1$y,
@@ -1587,7 +1687,7 @@ exp.tfs <- dgtf_infer(
     loss_func = loss
 )
 
-mod_g3 = mod1
+mod_g3 <- mod1
 mod_g3$model$gain_func <- "softplus"
 softplus.tfs <- dgtf_infer(
     mod_g3, sim1$y,
@@ -1602,9 +1702,55 @@ softplus.tfs <- dgtf_infer(
 ```
 
 ```{r}
+if (!exists("exp.tfs") | !exists("softplus.tfs")) {
+    load(file.path(opath, "data", "sim-3269-gain-tfs.RData"))
+}
+
+p <- plot_ts_ci_multi(
+    psi_list = list(
+        Exponential = exp(exp.tfs$fit$psi),
+        Softplus = log(exp(softplus.tfs$fit$psi) + 1),
+        True = cbind(
+            log(exp(sim1$psi) + 1),
+            log(exp(sim1$psi) + 1),
+            log(exp(sim1$psi) + 1)
+        )
+    ),
+    legend.position = "top", ylab = expression(R[t])
+) + scale_fill_manual(
+    name = "Gain function",
+    values = c("maroon", "royalblue", "black"),
+    labels = c("Exponential", "Softplus", "True"),
+    guide = guide_legend(nrow = 1)
+) +
+    scale_color_manual(
+        name = "Gain function",
+        values = c("maroon", "royalblue", "black"),
+        labels = c("Exponential", "Softplus", "True")
+    ) +
+    theme(text = element_text(size = 16)) +
+    geom_hline(yintercept = 1, linetype = "dashed")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath,
+            paste0("sim-", seed, "-Rt-gain-function-tfs.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        height = 0.2 * fig_width_rect, width = fig_width_rect
+    )
+}
+```
+
+```{r}
 if (save_data) {
-    var_list = c("exp.tfs", "softplus.tfs", "tfs.opts", "mod_g2", "mod_g3")
-    var_list = var_list[sapply(var_list, exists)]
+    var_list <- c("exp.tfs", "softplus.tfs", "tfs.opts", "mod_g2", "mod_g3")
+    var_list <- var_list[sapply(var_list, exists)]
     save(list = var_list, file = file.path(
         opath, "data", paste0("sim-", seed, "-gain-tfs.RData")
     ))
@@ -1676,7 +1822,7 @@ p <- ggplot(out1.stats.obs2, aes(x = delta, y = `forecast-err`)) +
     geom_hline(aes(yintercept = out1.mcs2$error$forecast$y_loss_all[1]), color = "maroon") +
     ylab("RMSE of one-step-ahead forecasting") +
     xlab(expression(delta))
-    
+
 plot(p)
 ```
 
@@ -1684,7 +1830,7 @@ plot(p)
 #| label: optimal obs
 #| eval: false
 
-mod1$model$obs_dist = "poisson"
+mod1$model$obs_dist <- "poisson"
 ```
 
 ### Optimal Lag Distribution
@@ -1700,7 +1846,30 @@ mod_nbinom <- mod1
 mod_nbinom$model$lag_dist <- "nbinom"
 mod_nbinom$param$lag <- c(0.395, 6)
 
+p <- ggplot(data = data.frame(x = rnbinom(100000, 6, 1 - 0.395)), aes(x = x)) +
+    geom_histogram(alpha = 0.5, bins = 100) +
+    geom_histogram(data = data.frame(x = round(rlnorm(100000, 1.39, 0.32))), bins = 100, alpha = 0.5) +
+    theme_minimal() +
+    labs(xlab = "Lag", ylab = "Counts")
 
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath,
+            paste0("sim-", seed, "-lag-distributions.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        height = fig_height, width = fig_width
+    )
+}
+```
+
+
+```{r}
 opts.lag <- dgtf_default_algo_settings("tfs")
 opts.lag$num_particle <- 100000
 opts.lag$num_smooth <- 1000
@@ -1739,12 +1908,59 @@ nbinom.tfs <- dgtf_infer(
 
 
 if (save_data) {
-    var_list = c("mod_lognorm", "mod_nbinom", "opts.lag", "lognorm.tfs", "nbinom.tfs")
-    var_list = var_list[sapply(var_list, exists)]
+    var_list <- c("mod_lognorm", "mod_nbinom", "opts.lag", "lognorm.tfs", "nbinom.tfs")
+    var_list <- var_list[sapply(var_list, exists)]
     save(list = var_list, file = file.path(opath, "data", paste0(
         "sim-", seed, "-lag-tfs.RData"
     )))
 }
+```
+
+```{r}
+if (!exists("nbinom.tfs") | !exists("lognorm.tfs")) {
+    load(file.path(opath, "data", paste0(
+        "sim-", seed, "-lag-tfs.RData"
+    )))
+}
+
+p <- plot_ts_ci_multi(psi_list = list(
+    nbinom = log(exp(nbinom.tfs$fit$psi) + 1),
+    lognorm = log(exp(lognorm.tfs$fit$psi) + 1),
+    True = cbind(
+        log(exp(sim1$psi) + 1),
+        log(exp(sim1$psi) + 1),
+        log(exp(sim1$psi) + 1)
+    )
+), ylab = expression(R[t])) +
+    theme(legend.position = "top", text = element_text(size = 16)) +
+    scale_fill_manual(
+        name = "Lag distribution",
+        values = c("maroon", "royalblue", "black"),
+        guide = guide_legend(nrow = 1),
+        labels = c("Log-normal(1.4, 0.3)", "NB(6, 0.395)", "True")
+    ) +
+    scale_color_manual(
+        name = "Lag distribution",
+        values = c("maroon", "royalblue", "black"),
+        labels = c("Log-normal(1.4, 0.3)", "NB(6, 0.395)", "True"),
+        guide = NULL
+    ) + geom_hline(yintercept = 1, linetype = "dashed")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath,
+            paste0("sim-", seed, "-Rt-lag-distribution-tfs.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        height = 0.2 * fig_width_rect, width = fig_width_rect
+    )
+}
+
 ```
 
 
@@ -1867,7 +2083,7 @@ if (save_figures) {
 
 if (save_data) {
     save(
-        mod1, sim1, 
+        mod1, sim1,
         out1.stats.obs,
         # out1.stats.obs2,
         out1.stats.lag.nbinom,
@@ -1986,20 +2202,21 @@ if (save_data) {
 
 ```{r}
 #| label: figure of forcast comparison
-dat = data.frame(
+dat <- data.frame(
     LBA = out1.lba$error$forecast$y_loss_all,
     MCS = out1.mcs$error$forecast$y_loss_all,
     FFBS = out1.ffbs$error$forecast$y_loss_all,
     PL = out1.pl$error$forecast$y_loss_all,
     # EPI = forecast1.epi$y_loss_all,
     WT = forecast1.wt$y_loss_all,
-    k = c(1: kstep_forecast_err)
+    k = c(1:kstep_forecast_err)
 )
 
-dat2 = reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
+dat2 <- reshape2::melt(dat, id.vars = "k", value.name = "MFE", variable.name = "algo")
 
-p = ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
-    geom_line() + theme_light()
+p <- ggplot(dat2, aes(x = k, y = MFE, group = algo, color = algo)) +
+    geom_line() +
+    theme_light()
 
 plot(p)
 ```
@@ -2011,6 +2228,54 @@ plot(p)
 #| include: false
 #| eval: false
 
+
+opts1.hva <- dgtf_default_algo_settings("hva")
+opts1.hva$nsample <- 5000
+opts1.hva$nthin <- 2
+opts1.hva$nburnin <- 5000
+opts1.hva$num_step_ahead_forecast <- 10
+opts1.hva$tstart_pct <- 0.85
+opts1.hva$num_eval_forecast_error <- mod1$dim$ntime - kstep_forecast_err - mod1$dim$ntime * opts1.hva$tstart_pct + 1
+
+opts1.hva$smc$num_particle <- 100
+opts1.hva$smc$num_backward <- 1
+opts1.hva$smc$do_smoothing <- TRUE
+
+
+opts1.hva$learning_rate <- 0.02
+opts1.hva$eps_step_size <- 1.e-5
+opts1.hva$k <- length(param_infer)
+
+
+opts1.hva$mu0 <- list(
+    infer = FALSE,
+    init = mod1$param$obs[1]
+)
+
+opts1.hva$W <- list(
+    infer = TRUE,
+    init = mod1$param$err[1],
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
+)
+
+opts1.hva$rho$init <- mod1$param$obs[2]
+opts1.hva$rho$infer <- FALSE
+
+opts1.hva$par1 <- list(
+    infer = FALSE,
+    init = 2,
+    prior_name = "gaussian",
+    prior_param = c(0., 1.)
+)
+
+opts1.hva$par2 <- list(
+    infer = FALSE,
+    init = mod1$param$lag[2],
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
+)
+
 out1.hva <- dgtf_infer(
     mod1, sim1$y,
     "hva", opts1.hva,
@@ -2019,13 +2284,24 @@ out1.hva <- dgtf_infer(
     k = kstep_forecast_err
 )
 
-tag <- paste0("sim-", seed, "-hva-")
-plots <- plot_output(
-    out1.hva, sim1$y,
-    psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
-    save_figures = save_figures, tag = tag, opath = opath,
-    plot_figures = plot_figures
-)
+# tag <- paste0("sim-", seed, "-hva-")
+# plots <- plot_output(
+#     out1.hva, sim1$y,
+#     psi_true = sim1$psi, W_true = sim1$param$err[1], mu0_true = sim1$param$obs[1],
+#     save_figures = save_figures, tag = tag, opath = opath,
+#     plot_figures = plot_figures
+# )
+
+
+if (save_data) {
+    save(
+        out1.hva, opts1.hva,
+        file = file.path(
+            opath, "data",
+            paste0("sim-", seed, "-hva-W-forecast.RData")
+        )
+    )
+}
 ```
 
 ```{r}
@@ -2080,6 +2356,7 @@ if (save_data) {
 #| eval: false
 
 
+
 opts1.mcmc <- dgtf_default_algo_settings("mcmc")
 opts1.mcmc$nsample <- 5000
 opts1.mcmc$nthin <- 5
@@ -2087,18 +2364,39 @@ opts1.mcmc$nburnin <- 50000
 opts1.mcmc$num_step_ahead_forecast <- 10
 
 opts1.mcmc$mh_sd <- 0.1
+opts1.mcmc$epsilon <- 0.005
+opts1.mcmc$L <- 10
+opts1.mcmc$m <- c(0.1, 0.1)
 
 opts1.mcmc$mu0$init <- mod1$param$obs[1]
-opts1.mcmc$mu0$infer <- TRUE
-opts1.mcmc$mu0$mh_sd <- 1
+opts1.mcmc$mu0$infer <- "mu0" %in% param_infer
+opts1.mcmc$mu0$mh_sd <- 0.1
 
-opts1.mcmc$W$init <- 0.01
-opts1.mcmc$W$infer <- TRUE
+opts1.mcmc$W$init <- mod1$param$err[1]
+opts1.mcmc$W$infer <- "W" %in% param_infer
 
+opts1.mcmc$rho$init <- mod1$param$obs[2]
+opts1.mcmc$rho$infer <- "rho" %in% param_infer
+opts1.mcmc$rho$mh_sd <- 0.5
 
+opts1.mcmc$par1 <- list(
+    infer = "par1" %in% param_infer,
+    init = mod1$param$lag[1],
+    prior_name = "gaussian",
+    prior_param = c(0., 1.),
+    mh_sd = 0.1
+)
+
+opts1.mcmc$par2 <- list(
+    infer = "par2" %in% param_infer,
+    init = mod1$param$lag[2],
+    prior_name = "invgamma",
+    prior_param = c(1, 1),
+    mh_sd = 0.1
+)
 
 out1.mcmc <- dgtf_infer(
-    mod1, sim1$y + 1,
+    mod1, sim1$y,
     "mcmc", opts1.mcmc,
     forecast_error = TRUE,
     fitted_error = TRUE,
@@ -2118,7 +2416,7 @@ if (save_data) {
         out1.mcmc, opts1.mcmc,
         file = file.path(
             opath, "data",
-            paste0("sim-", seed, "-mcmc.RData")
+            paste0("sim-", seed, "-mcmc-W-forecast.RData")
         )
     )
 }

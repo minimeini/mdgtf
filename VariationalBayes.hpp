@@ -13,7 +13,6 @@
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 
-
 // [[Rcpp::depends(RcppArmadillo)]]
 
 namespace VB
@@ -26,6 +25,8 @@ namespace VB
         unsigned int nburnin = 1000;
         unsigned int ntotal = 3001;
         unsigned int nforecast = 0;
+        unsigned int nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
+        double tstart_pct = 0.9;
 
         unsigned int N = 500; // number of SMC particles
 
@@ -37,7 +38,7 @@ namespace VB
 
         arma::vec y;
 
-        arma::vec psi; // (nT + 1) x 1
+        arma::vec psi;        // (nT + 1) x 1
         arma::mat psi_stored; // (nT + 1) x nsample
 
         double W = 0.01;
@@ -48,16 +49,16 @@ namespace VB
 
         Dist W_prior, mu0_prior, rho_prior, par1_prior, par2_prior;
 
-        arma::vec W_stored; // nsample x 1
-        arma::vec mu0_stored; // nsample x 1
-        arma::vec rho_stored; // nsample x 1
+        arma::vec W_stored;    // nsample x 1
+        arma::vec mu0_stored;  // nsample x 1
+        arma::vec rho_stored;  // nsample x 1
         arma::vec par1_stored; // nsample x 1
         arma::vec par2_stored; // nsample x 1
 
         VariationalBayes()
         {
             dim.init_default();
-            psi.set_size(dim.nT + 1); 
+            psi.set_size(dim.nT + 1);
             psi.zeros();
 
             y = psi;
@@ -72,7 +73,7 @@ namespace VB
             psi.zeros();
         }
 
-        void init(const Rcpp::List & vb_opts)
+        void init(const Rcpp::List &vb_opts)
         {
             Rcpp::List opts = vb_opts;
 
@@ -108,6 +109,17 @@ namespace VB
                 nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
             }
 
+            nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
+            if (opts.containsElementNamed("num_eval_forecast_error"))
+            {
+                nforecast_err = Rcpp::as<unsigned int>(opts["num_eval_forecast_error"]);
+            }
+
+            tstart_pct = 0.9;
+            if (opts.containsElementNamed("tstart_pct"))
+            {
+                tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
+            }
 
             psi_stored.set_size(psi.n_elem, nsample);
             psi_stored.zeros();
@@ -192,9 +204,11 @@ namespace VB
             }
 
             update_static = false;
-            if (m > 0) { update_static = true; }
+            if (m > 0)
+            {
+                update_static = true;
+            }
         }
-
 
         static Rcpp::List default_settings()
         {
@@ -235,6 +249,8 @@ namespace VB
 
             opts["num_particle"] = 500;
             opts["num_step_ahead_forecast"] = 0;
+            opts["num_eval_forecast_error"] = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
+            opts["tstart_pct"] = 0.9;
 
             opts["W"] = W_opts;
             opts["mu0"] = mu0_opts;
@@ -245,23 +261,19 @@ namespace VB
             return opts;
         }
 
-
         Rcpp::List forecast(const Model &model)
         {
             Rcpp::List out = Model::forecast(y, psi_stored, W_stored, model, nforecast);
             return out;
         }
 
-
         // Rcpp::List forecast_error(
-        //     const Model &model, 
+        //     const Model &model,
         //     const std::string &loss_func = "quadratic",
         //     const unsigned int &k = 1)
         // {
         //     return Model::forecast_error(psi_stored, y, model, loss_func, k);
         // }
-
-        
 
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
         {
@@ -276,7 +288,7 @@ namespace VB
     };
     /**
      * @brief Gradient ascent.
-     * 
+     *
      */
     class HybridParams
     {
@@ -286,9 +298,9 @@ namespace VB
             learning_rate = 0.01;
             eps_step_size = 1.e-6;
         }
-        
+
         HybridParams(
-            const unsigned int &m_in, 
+            const unsigned int &m_in,
             const double &learn_rate = 0.01,
             const double &eps_size = 1.e-6) : change(par_change)
         {
@@ -339,7 +351,6 @@ namespace VB
             rho = par_change;
         }
 
-        
         void update_grad(const arma::vec &dYJinv_dVecPar) // Checked. OK.
         {
             arma::vec oldEg2 = curEg2;
@@ -349,7 +360,7 @@ namespace VB
             {
                 bound_check<arma::vec>(curEg2, "curEg2");
             }
-            catch(const std::exception& e)
+            catch (const std::exception &e)
             {
                 oldEg2.t().print("\n oldEg2");
                 dYJinv_dVecPar.t().print("\ndYJinv_dVecPar");
@@ -358,7 +369,7 @@ namespace VB
                 std::cerr << e.what() << '\n';
                 throw std::invalid_argument(e.what());
             }
-            
+
             rho = arma::sqrt(curEdelta2 + eps_step_size) / arma::sqrt(curEg2 + eps_step_size);
 
             par_change = rho % dYJinv_dVecPar;
@@ -366,7 +377,7 @@ namespace VB
             {
                 bound_check<arma::vec>(par_change, "update_grad: par_change");
             }
-            catch(const std::exception& e)
+            catch (const std::exception &e)
             {
                 dYJinv_dVecPar.t().print("\ndYJinv_dVecPar");
                 rho.t().print("\n rho");
@@ -374,13 +385,10 @@ namespace VB
                 std::cout << "\n learn rate = " << learning_rate << " eps = " << eps_step_size << std::endl;
                 throw std::invalid_argument(e.what());
             }
-            
-            
 
             arma::vec oldEdelta2 = curEdelta2;
             curEdelta2 = (1. - learning_rate) * oldEdelta2 + learning_rate * arma::pow(par_change, 2.);
 
-            
             bound_check<arma::vec>(curEdelta2, "update_grad: curEdelta2");
             return;
         }
@@ -388,7 +396,7 @@ namespace VB
         const arma::vec &change;
 
     private:
-        arma::vec curEg2; // m x 1
+        arma::vec curEg2;     // m x 1
         arma::vec curEdelta2; // m x 1
         arma::vec par_change;
 
@@ -399,11 +407,9 @@ namespace VB
         unsigned int m;
     };
 
-
     class Hybrid : public VariationalBayes
     {
     public:
-
         Hybrid(const Model &model_in, const arma::vec &y_in) : VariationalBayes(model_in, y_in)
         {
             dim = model_in.dim;
@@ -415,13 +421,6 @@ namespace VB
             k = 1;
             learning_rate = 0.01;
             eps_step_size = 1.e-6;
-
-            rcomb.set_size(dim.nT);
-            rcomb.zeros();
-            for (unsigned int l = 1; l <= dim.nT; l++)
-            {
-                rcomb.at(l - 1) = nbinom::binom((unsigned int)model_in.transfer.dlag.par2 - 2 + l, l - 1);
-            }
         }
 
         Hybrid() : VariationalBayes() {}
@@ -430,7 +429,6 @@ namespace VB
         {
             Rcpp::List opts = hvb_opts;
             VariationalBayes::init(opts);
-
 
             learning_rate = 0.01;
             if (opts.containsElementNamed("learning_rate"))
@@ -450,7 +448,6 @@ namespace VB
                 k = Rcpp::as<unsigned int>(opts["k"]);
             }
             k = std::min(k, m);
-
 
             gamma.set_size(m);
             gamma.ones();
@@ -487,7 +484,6 @@ namespace VB
                 B_uptri_idx = {0};
             }
 
-
             if (opts.containsElementNamed("smc"))
             {
                 smc_opts = Rcpp::as<Rcpp::List>(opts["smc"]);
@@ -510,7 +506,6 @@ namespace VB
             mu0_stored2.zeros();
         }
 
-
         static Rcpp::List default_settings()
         {
             Rcpp::List opts = VariationalBayes::default_settings();
@@ -527,7 +522,7 @@ namespace VB
             Rcpp::List W_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = 0.01);
-            
+
             smc_tmp["W"] = W_opts;
 
             Rcpp::List mu0_opts = Rcpp::List::create(
@@ -541,15 +536,14 @@ namespace VB
             return opts;
         }
 
-
         static arma::vec eta2tilde( // Checked. OK.
-            const arma::vec &eta,         // m x 1
+            const arma::vec &eta,   // m x 1
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma",
             const std::string &lag_par1_prior = "gaussian")
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-            std::map <std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
+            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
             arma::vec eta_tilde = eta;
             for (unsigned int i = 0; i < param_selected.size(); i++)
@@ -640,7 +634,7 @@ namespace VB
             return eta_tilde;
         }
 
-        static arma::vec tilde2eta( // Checked. OK.
+        static arma::vec tilde2eta(     // Checked. OK.
             const arma::vec &eta_tilde, // m x 1
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma",
@@ -756,13 +750,13 @@ namespace VB
         Therefore, this function remains unchanged as long as we using the same evolution equation for psi.
         */
         static double dlogJoint_dWtilde( // Checked. OK.
-            const arma::vec &psi, // (n+1) x 1, (psi[0],psi[1],...,psi[n])
-            const double G,       // evolution transition matrix
-            const double W,       // evolution variance conditional on V
+            const arma::vec &psi,        // (n+1) x 1, (psi[0],psi[1],...,psi[n])
+            const double G,              // evolution transition matrix
+            const double W,              // evolution variance conditional on V
             const Dist &W_prior)
         { // 0 - Gamma(aw=shape,bw=rate); 1 - Half-Cauchy(aw=location=0, bw=scale); 2 - Inverse-Gamma(aw=shape,bw=rate)
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-            
+
             double aw = W_prior.par1;
             double bw = W_prior.par2;
 
@@ -845,18 +839,16 @@ namespace VB
             return deriv;
         }
 
-
-
         /**
-         * @todo Move this to the corresponding distribution. 
-         * @brief 
-         * 
-         * @param Wtilde 
-         * @param W_prior 
-         * @return double 
+         * @todo Move this to the corresponding distribution.
+         * @brief
+         *
+         * @param Wtilde
+         * @param W_prior
+         * @return double
          */
         static double logprior_Wtilde( // Checked. OK.
-            const double &Wtilde, // evolution variance conditional on V
+            const double &Wtilde,      // evolution variance conditional on V
             const Dist &W_prior)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
@@ -915,8 +907,8 @@ namespace VB
             mu[0] ~ Gamma(amu,bmu)
         */
         static double dloglike_dmu0tilde( // Checked. OK.
-            const arma::vec &y,  // (nT+1) x 1
-            const arma::vec &ft, // (n+1) x 1, (f[0],f[1],...,f[nT])
+            const arma::vec &y,           // (nT+1) x 1
+            const arma::vec &ft,          // (n+1) x 1, (f[0],f[1],...,f[nT])
             const ObsDist &dobs,
             const std::string &link_func)
         { // 0 - negative binomial; 1 - poisson
@@ -1000,27 +992,26 @@ namespace VB
             return logp;
         }
 
-
-
-        // eta_tilde = (Wtilde,logmu0)
         /**
          * @brief Derivative of the logarithm of joint probability with respect to parameters mapped to real-line (but before Yeo-Johnson transformation).
-         * 
-         * @param y 
-         * @param psi 
-         * @param ft 
-         * @param eta 
-         * @param param_selected 
-         * @param W_prior 
-         * @param model 
-         * @param rcomb 
-         * @return arma::vec 
+         *
+         * @param y
+         * @param psi
+         * @param ft
+         * @param eta
+         * @param param_selected
+         * @param W_prior
+         * @param lag_par1_prior
+         * @param lag_par2_prior
+         * @param rho_prior
+         * @param model
+         * @return arma::vec
          */
         static arma::vec dlogJoint_deta( // Checked. OK.
-            const arma::vec &y,  // (nT + 1) x 1
-            const arma::vec &psi,   // (nT + 1) x 1
-            const arma::vec &ft, // (nT + 1) x 1
-            const arma::vec &eta,   // m x 1
+            const arma::vec &y,          // (nT + 1) x 1
+            const arma::vec &psi,        // (nT + 1) x 1
+            const arma::vec &ft,         // (nT + 1) x 1
+            const arma::vec &eta,        // m x 1
             const std::vector<std::string> &param_selected,
             const Dist &W_prior,
             const Dist &lag_par1_prior,
@@ -1035,11 +1026,11 @@ namespace VB
             arma::vec dllk_dpar, hpsi;
             if (infer_dlag || rho_prior.infer)
             {
-               hpsi = GainFunc::psi2hpsi(psi, model.transfer.fgain.name);
-               if (infer_dlag)
-               {
-                   dllk_dpar = Model::dloglik_dpar(y, hpsi, model);
-               }
+                hpsi = GainFunc::psi2hpsi(psi, model.transfer.fgain.name);
+                if (infer_dlag)
+                {
+                    dllk_dpar = Model::dloglik_dpar(y, hpsi, model);
+                }
             }
 
             for (unsigned int i = 0; i < param_selected.size(); i++)
@@ -1155,8 +1146,7 @@ namespace VB
             double &par2,
             Model &model,
             const std::vector<std::string> &params_selected,
-            const arma::vec &eta
-        )
+            const arma::vec &eta)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
             bool update_dlag = false;
@@ -1212,11 +1202,10 @@ namespace VB
             return;
         }
 
-
         arma::mat optimal_learning_rate(
             const Model &model,
-            const double &from, 
-            const double &to, 
+            const double &from,
+            const double &to,
             const double &delta = 0.01,
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
@@ -1225,8 +1214,7 @@ namespace VB
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 4, arma::fill::zeros);
 
-
-            for (unsigned int i = 0; i < nelem; i ++)
+            for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
 
@@ -1285,7 +1273,6 @@ namespace VB
             unsigned int nelem = step_size_grid.n_elem;
             arma::mat stats(nelem, 4, arma::fill::zeros);
 
-
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1332,7 +1319,6 @@ namespace VB
             {
                 Rcpp::Rcout << std::endl;
             }
-            
 
             return stats;
         }
@@ -1390,37 +1376,51 @@ namespace VB
         //     return;
         // }
 
+        /**
+         * @brief Perform forecasting on `nforecast_err` time points in time interval [tstart, ntime - kstep].
+         *
+         * @param model
+         * @param loss_func string
+         * @param kstep unsigned int
+         * @param verbose bool
+         * @return Rcpp::List
+         */
         Rcpp::List forecast_error(
-            const Model &model, 
+            const Model &model,
             const std::string &loss_func = "quadratic",
             const unsigned int &kstep = 1,
             const bool &verbose = VERBOSE)
         {
             const unsigned int ntime = model.dim.nT;
+            unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
+            tstart = std::max(tstart, kstep);
+            tstart += 1;
+            tstart = std::max(tstart, static_cast<unsigned int>(tstart_pct * ntime));
+
+            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, ntime - kstep);
+            /*
+            Perform forecasting on `nforecast_err` time points in time interval [tstart, ntime - kstep].
+            `time_indices` is a nforecast_err x 1 vector.
+            Set `nforecast_err = ntime - kstep - tstart + 1` to perform forecasting at every time point.
+            */
 
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
-            arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
+            // arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
+            arma::mat y_err_cast = y_cov_cast;
 
-            arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
+            // arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
 
             Rcpp::NumericVector lag_param = {
                 model.transfer.dlag.par1,
                 model.transfer.dlag.par2};
 
-            unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
-            tstart = std::max(tstart, kstep);
-            tstart += 1;
-
             arma::vec yall = y;
-            arma::vec rcomb_all = rcomb;
             arma::vec psi_all = psi;
             arma::mat psi_stored_all = psi_stored;
 
-            arma::uvec success(ntime + 1, arma::fill::ones);
-            success.head(tstart).fill(0);
-            success.tail(kstep + 2).fill(0);
+            arma::uvec success(ntime + 1, arma::fill::zeros);
 
             for (unsigned int t = 0; t < ntime; t++)
             {
@@ -1439,29 +1439,27 @@ namespace VB
                 }
             }
 
-            Model submodel = model;
-
-            for (unsigned int t = tstart; t < (ntime - kstep); t++)
+            for (unsigned int i = 0; i < time_indices.n_elem; i++)
             {
                 Rcpp::checkUserInterrupt();
 
+                unsigned int t = time_indices.at(i);
+
+                Model submodel = model;
                 submodel.dim.nT = t;
                 submodel.dim.init(
-                    submodel.dim.nT, submodel.dim.nL, 
+                    submodel.dim.nT, submodel.dim.nL,
                     submodel.dobs.par2);
-                
-                submodel.transfer.init(
-                    submodel.dim, submodel.transfer.name, 
-                    submodel.transfer.fgain.name, 
-                    submodel.transfer.dlag.name, lag_param);
 
+                submodel.transfer.init(
+                    submodel.dim, submodel.transfer.name,
+                    submodel.transfer.fgain.name,
+                    submodel.transfer.dlag.name, lag_param);
 
                 psi.clear();
                 psi = psi_all.head(t + 1);
                 y.clear();
                 y = yall.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
-                rcomb.clear();
-                rcomb = rcomb_all.head(t);
                 psi_stored.clear();
                 psi_stored = psi_stored_all.head_rows(t + 1); // (t + 1) x nsample
 
@@ -1476,24 +1474,33 @@ namespace VB
                         submodel.dim, submodel.transfer,
                         submodel.flink.name,
                         submodel.dobs.par1, kstep); // k x nsample, y[t + 1], ..., y[t + k]
+
+                    success.at(t) = 1;
                 }
-                catch(const std::exception& e)
+                catch (const std::exception &e)
                 {
+                    std::cerr << "\n Forecasting failed at t = " << t << std::endl;
                     success.at(t) = 0;
                 }
 
                 for (unsigned int j = 0; j < kstep; j++)
                 {
-                    ycast.slice(j).row(t) = ynew.row(j); // 1 x nsample
-                    double ymin = arma::min(ynew.row(j));
-                    double ymax = arma::max(ynew.row(j));
+                    arma::vec yest = arma::vectorise(ynew.row(j));
                     double ytrue = yall.at(t + 1 + j);
 
-                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - ytrue); // 1 x nsample
-                    y_width_cast.at(t, j) = std::abs(ymax - ymin);
-                    y_cov_cast.at(t, j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
-                }
+                    ycast.slice(j).row(t) = yest.t(); // 1 x nsample
+                    arma::vec tmp = evaluate(yest, ytrue, loss_func);
 
+                    // double ymin = arma::min(ynew.row(j));
+                    // double ymax = arma::max(ynew.row(j));
+
+                    // y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - ytrue); // 1 x nsample
+                    // y_width_cast.at(t, j) = std::abs(ymax - ymin);
+                    // y_cov_cast.at(t, j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+                    y_err_cast.at(t, j) = tmp.at(0);
+                    y_width_cast.at(t, j) = tmp.at(1);
+                    y_cov_cast.at(t, j) = tmp.at(2);
+                }
 
                 if (verbose)
                 {
@@ -1506,15 +1513,15 @@ namespace VB
                 Rcpp::Rcout << std::endl;
             }
 
-            submodel.dim.nT = ntime;
-            submodel.dim.init(
-                submodel.dim.nT, submodel.dim.nL,
-                submodel.dobs.par2);
+            // submodel.dim.nT = ntime;
+            // submodel.dim.init(
+            //     submodel.dim.nT, submodel.dim.nL,
+            //     submodel.dobs.par2);
 
-            submodel.transfer.init(
-                submodel.dim, submodel.transfer.name,
-                submodel.transfer.fgain.name,
-                submodel.transfer.dlag.name, lag_param);
+            // submodel.transfer.init(
+            //     submodel.dim, submodel.transfer.name,
+            //     submodel.transfer.fgain.name,
+            //     submodel.transfer.dlag.name, lag_param);
 
             arma::uvec succ_idx = arma::find(success == 1);
 
@@ -1538,63 +1545,67 @@ namespace VB
 
                 arma::mat ycast_qtmp = arma::quantile(ycast.slice(j), qprob, 1); // (nT + 1) x nsample x k
                 ycast_qt.slice(j) = ycast_qtmp;
-                arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
 
-
-                switch (loss_list[tolower(loss_func)])
+                ycov_tmp0 = y_err_cast.col(j);
+                ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
+                y_loss_all.at(j) = arma::mean(ycov_tmp);
+                if (loss_list[tolower(loss_func)] == AVAIL::L2)
                 {
-                case AVAIL::L1: // mae
-                {
-                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                    y_loss.col(j) = y_loss_tmp;
-
-                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
-                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
-
-                    break;
+                    y_loss_all.at(j) = std::sqrt(y_loss_all.at(j)); // RMSE
                 }
-                case AVAIL::L2: // rmse
-                {
-                    ytmp = arma::square(ytmp);
-                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
-                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+                // arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
 
-                    y_loss.col(j) = arma::sqrt(y_loss_tmp);
-                    y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
+                // switch (loss_list[tolower(loss_func)])
+                // {
+                // case AVAIL::L1: // mae
+                // {
+                //     // arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
+                //     // y_loss.col(j) = y_loss_tmp;
 
-                    break;
-                }
-                default:
-                {
-                    break;
-                }
-                } // switch by loss
+                //     arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
+                //     y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+
+                //     break;
+                // }
+                // case AVAIL::L2: // rmse
+                // {
+                //     ytmp = arma::square(ytmp);
+                //     arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
+                //     y_loss.col(j) = arma::sqrt(y_loss_tmp);
+
+                //     arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
+                //     y_loss_all.at(j) = arma::mean(y_loss_tmp2);
+                //     y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
+
+                //     break;
+                // }
+                // default:
+                // {
+                //     break;
+                // }
+                // } // switch by loss
 
             } // switch by kstep
 
-
-            y.clear();
-            y = yall;
-            rcomb.clear();
-            rcomb = rcomb_all;
-            psi.clear();
-            psi = psi_all;
-            psi_stored.clear();
-            psi_stored = psi_stored_all;
-
+            // y.clear();
+            // y = yall;
+            // psi.clear();
+            // psi = psi_all;
+            // psi_stored.clear();
+            // psi_stored = psi_stored_all;
 
             Rcpp::List output;
             output["y_cast"] = Rcpp::wrap(ycast_qt);
             output["y_cast_all"] = Rcpp::wrap(ycast);
-            output["y"] = Rcpp::wrap(yall);
-            output["y_loss"] = Rcpp::wrap(y_loss);
+            // output["y"] = Rcpp::wrap(yall);
+            // output["y_loss"] = Rcpp::wrap(y_loss);
             output["y_loss_all"] = Rcpp::wrap(y_loss_all);
             output["y_covered_all"] = Rcpp::wrap(y_covered_all);
             output["y_width_all"] = Rcpp::wrap(y_width_all);
 
             output["tstart"] = tstart;
             output["tend"] = (ntime - kstep);
+            output["time_indices"] = Rcpp::wrap(time_indices.t());
 
             return output;
         } // end of function
@@ -1622,12 +1633,12 @@ namespace VB
 
             // arma::vec eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
             // arma::vec eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
-            
-            for (unsigned int b = 0; b < ntotal; b ++)
+
+            for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
-                
+
                 // LBA::LinearBayes lba(model, y, W, 0.95, false);
                 // lba.filter();
                 // lba.smoother();
@@ -1639,13 +1650,11 @@ namespace VB
                 {
                     smc.infer(model, false);
                 }
-                catch(const std::exception& e)
+                catch (const std::exception &e)
                 {
                     std::cerr << "W = " << W << ", mu0 = " << mu0 << ", rho = " << rho << std::endl;
                     throw std::runtime_error(e.what());
                 }
-                
-                
 
                 arma::mat psi_all;
                 if (smc.smoothing)
@@ -1657,19 +1666,18 @@ namespace VB
                     psi_all = smc.psi_forward; // (nT + B) x N
                 }
                 // arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
-                psi = arma::median(psi_all.head_rows(model.dim.nT + 1), 1);
+                psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
 
-                arma::vec ft  = psi;
+                arma::vec ft = psi;
                 ft.at(0) = 0.;
-                for (unsigned int t = 1; t < ft.n_elem; t ++)
+                for (unsigned int t = 1; t < ft.n_elem; t++)
                 {
                     ft.at(t) = TransFunc::func_ft(
-                        t, y, ft, psi, model.dim, 
-                        model.transfer.dlag, 
-                        model.transfer.fgain.name, 
+                        t, y, ft, psi, model.dim,
+                        model.transfer.dlag,
+                        model.transfer.fgain.name,
                         model.transfer.name); // Checked. OK.
                 }
-
 
                 if (update_static)
                 {
@@ -1677,26 +1685,23 @@ namespace VB
                         y, psi, ft, eta, param_selected,
                         W_prior, par1_prior, par2_prior, rho_prior, model); // Checked. OK.
 
-
                     arma::mat SigInv = get_sigma_inv(B, d, k);
                     arma::vec dlogq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu);
                     arma::vec ddiff = dlogJoint - dlogq;
-
 
                     arma::vec L_mu = dYJinv_dnu(nu, gamma) * ddiff;
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
 
-
                     if (m > 1)
                     {
-                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi); // m x mk
+                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi);             // m x mk
                         arma::mat L_B = arma::reshape(dtheta_dB.t() * ddiff, m, k); // m x k
                         if (k > 1)
                         {
                             L_B.elem(B_uptri_idx).zeros();
                         }
-                        
+
                         arma::vec vecL_B = arma::vectorise(L_B); // mk x 1
                         grad_vecB.update_grad(vecL_B);
 
@@ -1706,13 +1711,12 @@ namespace VB
                         {
                             B_change2.elem(B_uptri_idx).zeros();
                         }
-                        
+
                         B = B + B_change2;
                         if (k > 1)
                         {
                             B.elem(B_uptri_idx).zeros();
                         }
-                        
                     }
 
                     // d
@@ -1730,7 +1734,6 @@ namespace VB
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
                     eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name);
 
-
                     update_params(W, mu0, rho, par1, par2, model, param_selected, eta);
 
                     if (par1_prior.infer || par2_prior.infer)
@@ -1747,7 +1750,7 @@ namespace VB
                 // save(saveiter, idx_run, b);
                 // if (saveiter)
                 // {
-                    
+
                 // }
 
                 if (saveiter || b == (ntotal - 1))
@@ -1792,15 +1795,12 @@ namespace VB
                         par1_stored.at(idx_run) = par1;
                         par2_stored.at(idx_run) = par2;
                     }
-                    
-                    
                 }
 
                 if (verbose)
                 {
                     Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
                 }
-                
 
             } // HVB loop
 
@@ -1813,7 +1813,6 @@ namespace VB
             {
                 mu0_prior.infer = true;
             }
-            
         }
 
         Rcpp::List get_output()
@@ -1839,7 +1838,6 @@ namespace VB
                 {
                     output["mu0"] = Rcpp::wrap(mu0_stored);
                 }
-                
             }
 
             if (rho_prior.infer)
@@ -1861,7 +1859,7 @@ namespace VB
 
             return output;
         }
-    
+
     private:
         double learning_rate = 0.01;
         double eps_step_size = 1.e-6;
@@ -1872,16 +1870,13 @@ namespace VB
         // StaticParam W, mu0, delta, kappa, r;
         HybridParams grad_mu, grad_vecB, grad_d, grad_tau;
         arma::vec mu, d, gamma, nu, eps, eta, eta_tilde; // m x 1
-        arma::vec xi; // k x 1
-        arma::mat B; // m x k
-        arma::vec vecL_B;  // mk x 1
+        arma::vec xi;                                    // k x 1
+        arma::mat B;                                     // m x k
+        arma::vec vecL_B;                                // mk x 1
         arma::uvec B_uptri_idx;
-        arma::vec rcomb;
 
         arma::mat mu0_stored2;
     }; // class Hybrid
 }
-
-
 
 #endif

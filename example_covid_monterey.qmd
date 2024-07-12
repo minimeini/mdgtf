@@ -46,7 +46,7 @@ fig_height <- 10.1
 fig_width <- 13.8
 
 param_list <- c("mu0", "rho", "W", "par1", "par2")
-param_infer <- c("W")
+param_infer <- c("W", "rho")
 ```
 
 ```{r}
@@ -83,15 +83,12 @@ y <- data$cases
 n <- length(y)
 
 data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+
 y2 <- c(0, data2$cases)
 
-y3 <- round(smooth.spline(y2, spar = 0.0001)$y)
-ggplot(
-    data = data.frame(y = y2[-1], time = data2$date),
-    aes(x = time, y = y)
-) +
-    geom_line() +
-    theme_light()
+y3 <- round(smooth.spline(y2, spar = 0.000001)$y)
+
 
 p1 <- ggplot(
     data = data.frame(y = y2, t = 0:(length(y2) - 1)),
@@ -1182,11 +1179,9 @@ opts.hva$nthin <- 2
 opts.hva$nburnin <- 5000
 opts.hva$num_step_ahead_forecast <- 10
 
-opts.hva$mcs$num_particle <- 100
-opts.hva$mcs$num_backward <- 3
-
-opts.hva$W$init <- 0.01
-opts.hva$W$infer <- TRUE
+opts.hva$smc$num_particle <- 100
+opts.hva$smc$num_backward <- 10
+opts.hva$smc$do_smoothing <- TRUE
 
 opts.hva$learning_rate <- 0.02
 opts.hva$eps_step_size <- 1.e-5
@@ -1196,8 +1191,12 @@ opts.hva$k <- length(param_infer)
 opts.hva$mu0$init <- mod$param$obs[1]
 opts.hva$mu0$infer <- "mu0" %in% param_infer
 
-opts.hva$W$init <- mod$param$err[1]
-opts.hva$W$infer <- "W" %in% param_infer
+opts.hva$W <- list(
+    infer = "W" %in% param_infer,
+    init = mod$param$err[1],
+    prior_name = "invgamma",
+    prior_param = c(1, 1)
+)
 
 opts.hva$rho$init <- mod$param$obs[2]
 opts.hva$rho$infer <- "rho" %in% param_infer
@@ -1226,10 +1225,10 @@ opts.hva$par2 <- list(
 #| include: false
 
 out.hva <- dgtf_infer(
-    mod, y2,
+    mod, y3,
     "hva", opts.hva,
     forecast_error = FALSE,
-    fitted_error = FALSE,
+    fitted_error = eval_fitted_err,
     k = 0
 )
 ```
@@ -1263,38 +1262,21 @@ if (exists("out.hva")) {
 
 ```{r}
 #| label: save hva data
-if (exists("out.hva") && exists("out.hva2")) {
-    if (save_data) {
-        save(
-            out.hva, opts.hva,
-            out.hva2, opts.hva2,
-            out.hva.loss_all,
-            out.hva2.loss_all,
-            file = file.path(
-                opath, "data",
-                paste0(tag, "-hva.RData")
-            )
-        )
-    }
-} else if (exists("out.hva")) {
-    save(
-        out.hva, opts.hva,
-        out.hva.loss_all,
-        file = file.path(
-            opath, "data",
-            paste0(tag, "-hva.RData")
-        )
+
+if (save_data) {
+    var_list <- c(
+        "out.hva", "out.hva2",
+        "opts.hva", "opts.hva2",
+        "out.hva.loss_all", "out.hva2.loss_all"
     )
-} else if (exists("out.hva2")) {
-    save(
-        out.hva2, opts.hva2,
-        out.hva2.loss_all,
-        file = file.path(
-            opath, "data",
-            paste0(tag, "-hva.RData")
-        )
-    )
+
+    var_list <- var_list[sapply(var_list, exists)]
+    save(list = var_list, file = file.path(
+        opath, "data",
+        paste0(tag, "-hva-", paste(param_infer, collapse=""),".RData")
+    ))
 }
+
 ```
 
 ### MCMC
@@ -1307,8 +1289,8 @@ if (exists("out.hva") && exists("out.hva2")) {
 #| include: false
 opts.mcmc <- dgtf_default_algo_settings("mcmc")
 opts.mcmc$nsample <- 5000
-opts.mcmc$nthin <- 2
-opts.mcmc$nburnin <- 5000
+opts.mcmc$nthin <- 5
+opts.mcmc$nburnin <- 50000
 opts.mcmc$num_step_ahead_forecast <- 10
 
 
@@ -1333,7 +1315,7 @@ opts.mcmc$par1 <- list(
     init = mod$param$lag[1],
     prior_name = "gaussian",
     prior_param = c(0., 1.),
-    mh_sd = 0.2
+    mh_sd = 0.1
 )
 
 opts.mcmc$par2 <- list(
@@ -1341,13 +1323,13 @@ opts.mcmc$par2 <- list(
     init = mod$param$lag[2],
     prior_name = "invgamma",
     prior_param = c(1, 1),
-    mh_sd = 0.2
+    mh_sd = 0.1
 )
 
 
 
 out.mcmc <- dgtf_infer(
-    mod, y2,
+    mod, y3,
     "mcmc", opts.mcmc,
     forecast_error = FALSE,
     fitted_error = eval_fitted_err,
@@ -1772,37 +1754,29 @@ plots <- plot_output(
     save_figures = save_figures, tag = paste0(tag, "-hva-"), opath = opath,
     plot_figures = plot_figures
 )
-```
 
-```{r}
-#| label: forecasting and fitting error of hva (mu0 and W)
-#| include: false
-#| eval: false
-
-out.hva2 <- dgtf_infer(
-    mod2, y2,
-    "hva", opts.hva2,
-    forecast_error = TRUE,
-    fitted_error = TRUE,
-    k = kstep_forecast_err
-)
+# out.hva2 <- dgtf_infer(
+#     mod2, y2,
+#     "hva", opts.hva2,
+#     forecast_error = TRUE,
+#     fitted_error = TRUE,
+#     k = kstep_forecast_err
+# )
 
 
-plots <- plot_output(
-    out.hva2, y2,
-    save_figures = save_figures, tag = paste0(tag, "-hva2-"), opath = opath,
-    plot_figures = plot_figures
-)
+# plots <- plot_output(
+#     out.hva2, y2,
+#     save_figures = save_figures, tag = paste0(tag, "-hva2-"), opath = opath,
+#     plot_figures = plot_figures
+# )
 
 if (save_data) {
-    save(
-        out.hva, out.hva2,
-        opts.hva, opts.hva2,
-        file = file.path(
-            opath, "data",
-            paste0(tag, "-hva.RData")
-        )
-    )
+    var_list <- c("out.hva", "out.hva2", "opts.hva", "opts.hva2")
+    var_list <- var_list[sapply(var_list, exists)]
+    save(list = var_list, file = file.path(
+        opath, "data",
+        paste0(tag, "-hva-W-forecast.RData")
+    ))
 }
 ```
 
@@ -1820,13 +1794,33 @@ opts.mcmc$num_step_ahead_forecast <- 10
 
 opts.mcmc$mh_sd <- 0.1
 
+
 opts.mcmc$mu0$init <- mod$param$obs[1]
-opts.mcmc$mu0$infer <- TRUE
+opts.mcmc$mu0$infer <- "mu0" %in% param_infer
 opts.mcmc$mu0$mh_sd <- 1
 
-opts.mcmc$W$init <- 0.01
-opts.mcmc$W$infer <- TRUE
+opts.mcmc$W$init <- mod$param$err[1]
+opts.mcmc$W$infer <- "W" %in% param_infer
 
+opts.mcmc$rho$init <- mod$param$obs[2]
+opts.mcmc$rho$infer <- "rho" %in% param_infer
+opts.mcmc$rho$mh_sd <- 0.5
+
+opts.mcmc$par1 <- list(
+    infer = "par1" %in% param_infer,
+    init = mod$param$lag[1],
+    prior_name = "gaussian",
+    prior_param = c(0., 1.),
+    mh_sd = 0.1
+)
+
+opts.mcmc$par2 <- list(
+    infer = "par2" %in% param_infer,
+    init = mod$param$lag[2],
+    prior_name = "invgamma",
+    prior_param = c(1, 1),
+    mh_sd = 0.1
+)
 
 
 out.mcmc <- dgtf_infer(
@@ -1851,5 +1845,236 @@ if (save_data) {
             paste0(tag, "-mcmc.RData")
         )
     )
+}
+```
+
+
+## Forecasting
+
+### MCMC settings
+
+```{r}
+opts.mcmc <- dgtf_default_algo_settings("mcmc")
+opts.mcmc$nsample <- 5000
+opts.mcmc$nthin <- 5
+opts.mcmc$nburnin <- 10000
+opts.mcmc$num_step_ahead_forecast <- 10
+
+opts.mcmc$mh_sd <- 0.1
+
+
+opts.mcmc$mu0$init <- mod$param$obs[1]
+opts.mcmc$mu0$infer <- "mu0" %in% param_infer
+opts.mcmc$mu0$mh_sd <- 1
+
+opts.mcmc$W$init <- mod$param$err[1]
+opts.mcmc$W$infer <- "W" %in% param_infer
+
+opts.mcmc$rho$init <- mod$param$obs[2]
+opts.mcmc$rho$infer <- "rho" %in% param_infer
+opts.mcmc$rho$mh_sd <- 0.5
+
+opts.mcmc$par1 <- list(
+    infer = "par1" %in% param_infer,
+    init = mod$param$lag[1],
+    prior_name = "gaussian",
+    prior_param = c(0., 1.),
+    mh_sd = 0.2
+)
+
+opts.mcmc$par2 <- list(
+    infer = "par2" %in% param_infer,
+    init = mod$param$lag[2],
+    prior_name = "invgamma",
+    prior_param = c(1, 1),
+    mh_sd = 0.2
+)
+
+```
+
+### Multi-step-ahead forecasting (bi-monthly)
+
+```{r}
+ddate0 <- c(
+    "2020-09-01", "2020-11-01",
+    "2021-01-01", "2021-03-01", "2021-05-01",
+    "2021-07-01", "2021-09-01", "2021-11-01"
+)
+
+idx0 <- which(ddate %in% as.Date(ddate0))
+ytrue = y2[idx0]
+
+kstep <- c(1:10)
+
+ycast = array(0, dim = c(length(idx0), length(kstep), opts.mcmc$nsample))
+
+for (ik in 1:length(kstep)) {
+    k <- kstep[ik]
+
+    opts.mcmc$num_step_ahead_forecast <- k
+
+    for (ii in 1:length(idx0)) {
+        idx <- idx0[ii]
+
+        ytrain <- y2[1:(idx - k)]
+        mod$dim$ntime <- length(ytrain) - 1
+
+        out.forecast <- dgtf_infer(
+            mod, ytrain, "mcmc", opts.mcmc,
+            forecast_error = FALSE,
+            fitted_error = TRUE,
+            k = k
+        )
+
+        ycast[ii, ik, ] = out.forecast$pred$ypred[k,]
+    }
+}
+```
+
+
+### Forecasting the waves
+
+`second_wave` and `third_wave` is a vector of (start, peak, end) dates.
+
+Two-weeks-ahead forecasting (`k = 14`)
+One-week-ahead forecasting (`k = 7`)
+
+```{r}
+second_wave_date <- as.Date(c("2020-10-01", "2020-11-15", "2021-01-01"))
+second_wave_idx <- which(ddate %in% second_wave_date) + 1
+second_wave_ytrue <- y2[second_wave_idx]
+
+kstep <- c(1:14)
+
+second_wave_ycast <- array(0, dim = c(length(second_wave_idx), length(kstep), opts.mcmc$nsample))
+
+for (ik in 1:length(kstep)) {
+    k <- kstep[ik]
+
+    opts.mcmc$num_step_ahead_forecast <- k
+
+    for (ii in 1:length(second_wave_idx)) {
+        idx <- second_wave_idx[ii]
+
+        ytrain <- y2[1:(idx - k)]
+        mod$dim$ntime <- length(ytrain) - 1
+
+        out.forecast <- dgtf_infer(
+            mod, ytrain, "mcmc", opts.mcmc,
+            forecast_error = FALSE,
+            fitted_error = TRUE,
+            k = k
+        )
+
+        second_wave_ycast[ii, ik, ] <- out.forecast$pred$ypred[k, ]
+    }
+}
+```
+
+```{r}
+third_wave_date <- as.Date(c("2021-06-01", "2021-07-10", "2021-08-15"))
+third_wave_idx <- which(ddate %in% third_wave_date) + 1
+third_wave_ytrue <- y2[third_wave_idx]
+
+kstep <- c(1:14)
+
+third_wave_ycast <- array(0, dim = c(length(third_wave_idx), length(kstep), opts.mcmc$nsample))
+
+for (ik in 1:length(kstep)) {
+    k <- kstep[ik]
+
+    opts.mcmc$num_step_ahead_forecast <- k
+
+    for (ii in 1:length(third_wave_idx)) {
+        idx <- third_wave_idx[ii]
+
+        ytrain <- y2[1:(idx - k)]
+        mod$dim$ntime <- length(ytrain) - 1
+
+        out.forecast <- dgtf_infer(
+            mod, ytrain, "mcmc", opts.mcmc,
+            forecast_error = FALSE,
+            fitted_error = TRUE,
+            k = k
+        )
+
+        third_wave_ycast[ii, ik, ] <- out.forecast$pred$ypred[k, ]
+    }
+}
+```
+
+
+### Policy related scenes
+
+2020-03-04 State of emergency declared.
+2020-03-12 Social gatherings banned.
+2020-03-19 California state-wide stay-at-home order issued.
+
+2020-05-07 State 2 reopening
+**2020-06-18 The Governor of California issued a mandate requiring residents to wear face coverings in common and public indoor spaces and outdoors when physical distancing is not possible.**
+
+
+2020-07-14 CDC again calls on all people to wear cloth face masks.
+**2020-12-14 Beginning of COVID-19 vaccination program.**
+2020-12-17 Regional stay-at-home order went into effect for the Bay Area region.
+2020-12-24 More than 1 million COVID-19 vaccine doses have been administered in the U.S. in just 10 days.
+
+2020-01-25 Regional stay-at-home order lifted.
+
+2021-02-02 CDC requires face masks to be worn by all travelers while on public transportation and inside transportation hubs.
+
+By April 7 2021, the Alpha variant had become the dominant COVID-19 strain in the U.S.[132] On April 12, the U.S. reported its first cases of a new "double mutant" SARS-CoV-2 variant from India, later called Delta, in California.
+
+**2021-04-21 More than 200 million COVID-19 vaccine doses have been administered in the U.S.**
+April 2021 California mask mandate for vaccinated people lifted.
+
+2021-05-13 CDC changed its guidance and said that fully vaccinated individuals do not need to wear masks in most situations.
+
+**2021-06-15 California fully reopen.**
+
+2021-11-19 Concerns of Omicron variant.
+2021-12-01 The first case of Omicron variant in the US is detected by the California and San Francisco Departments of Public Health.
+
+|             | Initial       | 2020-09-08 | 2020-10-13 | 2020-10-27 | 2020-11-10 | 2020-11-16    | 2021-03-02 | 2021-03-09 | 2021-03-16    |  
+| ----------- | ------------- | ---------- | ---------- | ---------- | ---------- | ------------- | ---------- | ---------- | ------------- |
+| Widespread  | SCL, SCZ, MON | MON        | MON        | MON        | MON        | SCL, SCZ, MON | SCZ, MON   | MON        |
+| Substantial |               | SCL, SCZ   | SCZ        |            | SCZ        |               | SCL        | SCL, SCZ   | SCL, SCZ, MON | 
+| Moderate    |               |            | SCL        | SCL, SCZ   | SCL        |               |
+| Minimal     |               |            |            |            |            |               |
+
+2021-03-02 Santa Clara is reassigned to Moderate.
+2021-03-30 Santa Cruz is reassigned to Moderate.
+2021-04-06 Monterey is reassigned to Moderate.
+2021-05-18 Santa Cruz and Santa Clara is reassigned to Minimal.
+2021-06-01 Monterey is reassigned to Minimal.
+
+```{r}
+key_date <- as.Date(c("2020-06-18", "2020-12-14", "2021-04-21", "2021-06-15"))
+key_idx <- which(ddate %in% key_date) + 1
+
+kstep <- c(1:14)
+key_ycast <- array(0, dim = c(length(key_idx), length(kstep), opts.mcmc$nsample))
+key_ytrue <- matrix(0, nrow = length(key_idx), ncol = length(kstep))
+
+for (ii in 1:length(key_idx)) {
+    idx <- key_idx[ii]
+    ytrain <- y2[1:idx]
+    mod$dim$ntime <- length(ytrain) - 1
+
+    key_ytrue[ii,] = y2[idx + kstep]
+
+    for (ik in 1:length(kstep)) {
+        k <- kstep[ik]
+        opts.mcmc$num_step_ahead_forecast <- k
+
+        out.forecast <- dgtf_infer(
+            mod, ytrain, "mcmc", opts.mcmc,
+            forecast_error = FALSE,
+            fitted_error = TRUE,
+            k = k
+        )
+
+        key_ycast[ii, ik, ] <- out.forecast$pred$ypred[k, ]
+    }
 }
 ```

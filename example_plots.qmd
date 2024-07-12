@@ -26,7 +26,7 @@ error: true
 
 ```{r}
 #| label: source code
-save_figures <- TRUE
+save_figures <- FALSE
 plot_figures <- TRUE
 
 fig_width_rect <- 11.5
@@ -37,9 +37,10 @@ fig_height_square <- 10.1
 
 kstep_forecast_err <- 10
 
-
 library(ggplot2)
 library(gridExtra)
+library(latex2exp)
+library(kableExtra)
 
 repo <- "/Users/meinitang/Dropbox/Repository/poisson-dlm"
 Rcpp::sourceCpp(file.path(repo, "export.cpp"))
@@ -51,6 +52,126 @@ source(file.path(repo, "external_methods.r"))
 dpath <- "/Users/meinitang/Dropbox/Research/Project1"
 opath <- "/Users/meinitang/Dropbox/Research/Project1/simulation"
 opath_real <- "/Users/meinitang/Dropbox/Research/Project1/real"
+param_infer <- c("W")
+```
+
+## Lag distributions
+
+```{r}
+point_size <- 3
+line_width <- 1.5
+font_size <- 60
+
+p1 <- ggplot(
+    data.frame(x = 1:30, y = dlognorm(30, 1.4, 0.3)),
+    aes(x = x, y = y)
+) +
+    theme_minimal() +
+    xlab("Lag") +
+    ylab(TeX("PMF $\\;\\phi_{l}$")) +
+    geom_point(size = point_size) +
+    geom_segment(aes(x = x, xend = x, y = 0, yend = y), linewidth = line_width) +
+    theme(text = element_text(size = font_size))
+
+p2 <- ggplot(
+    data.frame(x = 1:30, y = dnbinom(30, 0.395, 6)),
+    aes(x = x, y = y)
+) +
+    theme_minimal() +
+    xlab("Lag") +
+    ylab(TeX("PMF $\\;\\phi_{l}$")) +
+    geom_point(size = point_size) +
+    geom_segment(aes(x = x, xend = x, y = 0, yend = y), linewidth = line_width) +
+    theme(text = element_text(size = font_size))
+
+p3 <- ggplot(
+    data.frame(x = 1:30, y = dgeom(1:30, 0.2)),
+    aes(x = x, y = y)
+) +
+    theme_minimal() +
+    xlab("Lag") +
+    ylab(TeX("PMF $\\;\\phi_{l}$")) +
+    geom_point(size = point_size) +
+    geom_segment(aes(x = x, xend = x, y = 0, yend = y), linewidth = line_width) +
+    theme(text = element_text(size = font_size))
+
+p4 <- ggplot(
+    data.frame(x = 1:30, y = dgamma(1:30, 2.632, rate = 0.56)),
+    aes(x = x, y = y)
+) +
+    theme_minimal() +
+    xlab("Lag") +
+    ylab(TeX("PMF $\\;\\phi_{l}$")) +
+    geom_point(size = point_size) +
+    geom_segment(aes(x = x, xend = x, y = 0, yend = y), linewidth = line_width) +
+    theme(text = element_text(size = font_size))
+
+if (save_figures) {
+    ggsave(file.path(opath, "lag_lognorm.pdf"),
+        plot = p1, dpi = 300, device = "pdf",
+        width = fig_width_square,
+        height = fig_height_square
+    )
+
+    ggsave(file.path(opath, "lag_nbinom.pdf"),
+        plot = p2, dpi = 300, device = "pdf",
+        width = fig_width_square,
+        height = fig_height_square
+    )
+
+    ggsave(file.path(opath, "lag_geom.pdf"),
+        plot = p3, dpi = 300, device = "pdf",
+        width = fig_width_square,
+        height = fig_height_square
+    )
+
+    ggsave(file.path(opath, "lag_gamma.pdf"),
+        plot = p4, dpi = 300, device = "pdf",
+        width = fig_width_square,
+        height = fig_height_square
+    )
+}
+```
+
+## Gain functions
+
+```{r}
+xrange <- seq(from = -2.5, to = 2.5, by = 0.01)
+hexp <- exp(xrange)
+hramp <- sapply(xrange, function(x) {
+    max(c(x, 0))
+})
+hsoftplus <- log(exp(xrange) + 1)
+
+dat <- data.frame(
+    x = xrange,
+    Exponential = hexp,
+    Ramp = hramp,
+    Softplus = hsoftplus
+)
+
+dat <- reshape2::melt(dat, id.vars = "x", variable.name = "Gain function")
+p <- ggplot(
+    dat,
+    aes(x = x, group = `Gain function`, color = `Gain function`, y = value)
+) +
+    geom_line(linewidth = 1.5) +
+    theme_minimal() +
+    theme(legend.position = "top", text = element_text(size = 40)) +
+    scale_color_discrete(guide = guide_legend(nrow = 1), name = "") +
+    xlab(TeX("$\\theta_{t,l}$")) +
+    ylab(TeX("$R_{t} = h(\\theta_{t,l})$"))
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath, "gain_functions.pdf"
+        ),
+        plot = p, dpi = 300, device = "pdf",
+        width = fig_width_square,
+        height = fig_height_square
+    )
+}
 ```
 
 
@@ -61,7 +182,7 @@ opath_real <- "/Users/meinitang/Dropbox/Research/Project1/real"
 #| label: load data
 seed <- 3269
 
-sim1.dat <- load_dat(opath, seed)
+sim1.dat <- load_dat(opath, seed, param_infer = param_infer)
 sim1.dat <- load_sim(seed, sim1.dat)
 print(ls(envir = sim1.dat))
 
@@ -73,31 +194,87 @@ print(dat)
 
 ```{r}
 p1 <- ggplot(
-    data = data.frame(y = sim1.dat$sim1$y, t = 0:(length(sim1.dat$sim1$y) - 1)),
-    aes(x = t, y = y)
+    data = data.frame(y = sim1.dat$sim1$y, Time = 0:(length(sim1.dat$sim1$y) - 1)),
+    aes(x = Time, y = y)
 ) +
     geom_line() +
-    theme_light() +
-    xlab("Time t") +
-    ylab("Observed Count Values y")
+    theme_minimal() +
+    ylab(expression(y[t]))
 
 p2 <- ggplot(
-    data = data.frame(psi = sim1.dat$sim1$psi, t = 0:(length(sim1.dat$sim1$psi) - 1)),
-    aes(x = t, y = psi)
+    data = data.frame(Rt = log(exp(sim1.dat$sim1$psi) + 1), Time = 0:(length(sim1.dat$sim1$psi) - 1)),
+    aes(x = Time, y = Rt)
 ) +
     geom_line() +
-    theme_light() +
-    xlab("Time t") +
-    ylab("Latent State psi")
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    theme_minimal() +
+    ylab(expression(R[t]))
 
 
 p <- arrangeGrob(grobs = list(y = p1, psi = p2), ncol = 1)
 
-plot(p)
+if (plot_figures) {
+    plot(p)
+}
 
+
+if (save_figures) {
+    ggsave(file.path(opath, paste0("sim-", seed, "-y.pdf")),
+        dpi = 300, device = "pdf", plot = p1,
+        height = fig_height_rect * 0.8, width = fig_width_rect
+    )
+
+    ggsave(file.path(opath, paste0("sim-", seed, "-Rt.pdf")),
+        dpi = 300, device = "pdf", plot = p2,
+        height = fig_height_rect * 0.8, width = fig_width_rect
+    )
+}
 ```
 
+### Fitting and forecasting error (numeric values)
+
+#### All static parameters are known except W
+
+```{r}
+param_infer <- "W"
+algo_list <- c("LBA.DF", "LBA.W", "PL", "HVA", "MCMC")
+out_list <- c("out1.lba", "out1.lba2", "out1.tfs3", "out1.hva", "out1.mcmc")
+nalgo <- length(algo_list)
+
+fit_err <- data.frame(Rt = rep(0, nalgo), y = rep(0, nalgo))
+Rt_true <- log(exp(c(sim1.dat$sim1$psi)) + 1)
+for (i in 1:nalgo) {
+    eval(parse(text = paste0("Rt = sim1.dat$", out_list[i], "$fit$psi")))
+    Rt <- log(exp(Rt) + 1)[, 2]
+    fit_err$Rt[i] <- sqrt(mean((Rt_true - Rt)^2)) # RMSE
+
+    yfit_path <- paste0("sim1.dat$", out_list[i], "$error$fitted")
+    eval(parse(text = paste0("yfit_flag = 'y_loss_all' %in% names(", yfit_path, ")")))
+    if (yfit_flag) {
+        eval(parse(text = paste0("fit_err$y[i] = ", yfit_path, "$y_loss_all")))
+    } else {
+        eval(parse(text = paste0("fit_err$y[i] = ", yfit_path, "$smooth$y_loss_all")))
+    }
+}
+
+rownames(fit_err) <- algo_list
+
+
+forecast_err <- matrix(0, nrow = nalgo, ncol = 10)
+for (i in 1:nalgo) {
+    eval(parse(text = paste0("forecast_flag = 'forecast' %in% names(sim1.dat$", out_list[i], "$error)")))
+    if (forecast_flag) {
+        eval(parse(text = paste0("forecast_err[", i, ",] = c(sim1.dat$", out_list[i], "$error$forecast$y_loss_all)")))
+    }
+}
+
+colnames(forecast_err) <- paste0("k", 1:10)
+rownames(forecast_err) <- algo_list
+```
+
+
 ### k-step forecasting error
+
 
 ```{r}
 dat1 <- subset_dat_loss_all(dat, kstep_forecast_err, "W")
@@ -176,79 +353,201 @@ dat
 
 
 ```{r}
-k = 5
+kmin <- 1
+kmax <- 10
+kstep <- kmin:kmax
 
-p = plot_ts_ci_multi(
-  list(
-    LBA = sim1.dat$out1.lba$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    # MCS = sim1.dat$out1.mcs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    # FFBS = sim1.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    PL = sim1.dat$out1.pl$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    HVA = sim1.dat$out1.hva$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    MCMC = sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - 10),,k],
-    # WT = sim1.dat$out1.wt,
-    True = cbind(sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)], sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)], sim1.dat$sim1$y[1:(length(sim1.dat$sim1$y) - 10)])
-  ), 
-  legend.position = "top"
+algo <- "mcmc"
+
+for (k in kstep) {
+    p <- plot_ts_ci_multi(
+        list(
+            # LBA.DF = sim1.dat$out1.lba$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k), , k],
+            # LBA.W = sim1.dat$out1.lba2$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k), , k],
+            # MCS = sim1.dat$out1.mcs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k),,k],
+            # FFBS = sim1.dat$out1.ffbs$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k),,k],
+            # PL = sim1.dat$out1.pl$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k), , k],
+            # HVA = sim1.dat$out1.tfs3$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k - kmax + 1), , k]
+            # ,
+            MCMC = sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k - kmax + 1), , k]
+            # ,
+            # WT = sim1.dat$out1.wt,
+            # True = cbind(
+            #     sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y) - kmax + 1)],
+            #     sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y) - kmax + 1)],
+            #     sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y) - kmax + 1)]
+            # )
+        ),
+        legend.position = "top"
+    )
+
+    p <- p + geom_point(
+        data = data.frame(
+            y = sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y) - kmax + 1)],
+            x = 1:length(sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y) - kmax + 1)]),
+            method = rep("True", length(sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y) - kmax + 1)]))
+        ),
+        aes(x = x, y = y)
+    )
+
+    p <- p + ylab(expression(y[t])) +
+        guides(color = guide_legend(nrow = 1)) +
+        theme(text = element_text(size = 16), legend.position = "none")
+
+    if (plot_figures) {
+        plot(p)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(
+                opath, "forecast",
+                paste0("sim-", seed, "-", algo, "-", k, "step.pdf")
+            ),
+            plot = p, device = "pdf", dpi = 300,
+            width = fig_width_rect, height = 0.25 * fig_width_rect
+        )
+    }
+}
+
+```
+
+```{r}
+kstep <- 1:10
+dat <- array(0, dim = c(length(sim1.dat$sim1$y), 3, 2, length(kstep)))
+dimnames(dat) <- list(
+    1:length(sim1.dat$sim1$y),
+    c("0.025", "median", "0.975"),
+    c("Estimate", "True"),
+    kstep
 )
 
-p = p + ylab(expression(y[t])) + 
-  guides(color = guide_legend(nrow = 1)) +
-  theme(text = element_text(size = 12))
+for (k in kstep) {
+    dat[(k + 1):length(sim1.dat$sim1$y), , 1, k] <-
+        sim1.dat$out1.mcmc$error$forecast$y_cast[1:(length(sim1.dat$sim1$y) - k), , k]
 
-plot(p)
+    dat[(k + 1):length(sim1.dat$sim1$y), , 2, k] <-
+        cbind(
+            sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y))],
+            sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y))],
+            sim1.dat$sim1$y[(k + 1):(length(sim1.dat$sim1$y))]
+        )
+}
+
+dat <- apply(dat, 2, function(d) {
+    d <- reshape2::melt(d)
+})
+
+dat <- cbind(dat[[1]][, 1:3], dat[[1]]$value, dat[[2]]$value, dat[[3]]$value)
+colnames(dat) <- c("Time", "Method", "kstep", "lobnd", "Median", "hibnd")
+
+
+p_gif <- ggplot(dat[dat$kstep == 1, ], aes(x = Time, y = Median, group = Method)) +
+    geom_line(aes(color = Method)) +
+    geom_ribbon(aes(ymin = lobnd, ymax = hibnd, fill = Method), alpha = 0.2) +
+    scale_color_manual(values = c("darkturquoise", "black")) +
+    scale_fill_manual(values = c("darkturquoise", "black")) +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    transition_time(kstep) +
+    enter_fade() +
+    exit_fade() +
+    ease_aes("linear")
+
+p_gif <- animate(p_gif, width = fig_width_rect, height = fig_height_rect, wrap = FALSE)
+plot(p_gif)
+
+ggsave(
+    file.path(opath, "posterior", paste0("sim-", seed, "-mcmc-Rt.pdf")),
+    plot = p_gif, device = "pdf", dpi = 300,
+    height = fig_height_rect,
+    width = fig_width_rect
+)
+```
+
+### Fitted y
+
+```{r}
+algo <- "HVA"
+
+p <- plot_ts_ci_multi(
+    list(
+        HVA = sim1.dat$out1.hva$error$fitted$yhat
+        # ,
+        # MCMC = sim1.dat$out1.mcmc$error$fitted$yhat
+        # ,
+        # True = cbind(
+        #     sim1.dat$sim1$y,
+        #     sim1.dat$sim1$y,
+        #     sim1.dat$sim1$y
+        # )
+    ),
+    ylab = expression(y[t])
+)
+
+p <- p + geom_point(aes(y = y, x = x), size = 1,
+    data = data.frame(
+        y = sim1.dat$sim1$y, 
+        x = 1:length(sim1.dat$sim1$y), 
+        method = rep("True", length(sim1.dat$sim1$y))))
+
+if (plot_figures) {
+    plot(p)
+}
+
 
 if (save_figures) {
-  ggsave(
+    ggsave(
         file.path(
-            opath, "forecast",
-            paste0("sim-", seed, "-", k,"step.pdf")
+            opath, "posterior",
+            paste0("sim-", seed, "-", algo, "-yt-all-but-mu0.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = fig_width_rect, height = fig_height_rect
+        width = fig_width_rect, height = 0.25 * fig_width_rect
     )
 }
 ```
-
 
 ### Posterior of Rt
 
 ```{r}
 tstart <- 1
 ntime <- 200
-tend <- tstart + ntime
+tend <- min(tstart + ntime, sim1.dat$mod1$dim$ntime + 1)
 
 p <- plot_ts_ci_multi(
     list(
-        LBA.DF = log(exp(sim1.dat$out1.lba$fit$psi[tstart:tend, ]) + 1),
-        LBA.W = log(exp(sim1.dat$out1.lba2$fit$psi[tstart:tend, ]) + 1),
+        # LBA.DF = log(exp(sim1.dat$out1.lba$fit$psi[tstart:tend, ]) + 1),
+        # LBA.W = log(exp(sim1.dat$out1.lba2$fit$psi[tstart:tend, ]) + 1),
         # TFS.W = log(exp(sim1.dat$out1.tfs2$fit$psi[tstart:tend, ]) + 1),
         # MCS = log(exp(sim1.dat$out1.mcs$fit$psi[tstart:tend, ]) + 1),
         # FFBS = log(exp(sim1.dat$out1.ffbs2$fit$psi[tstart:tend, ]) + 1),
-        PL = log(exp(sim1.dat$out1.tfs3$fit$psi[tstart:tend, ]) + 1),
+        # PL = log(exp(sim1.dat$out1.tfs3$fit$psi[tstart:tend, ]) + 1),
         HVA = log(exp(sim1.dat$out1.hva$fit$psi[tstart:tend, ]) + 1),
         MCMC = log(exp(sim1.dat$out1.mcmc$fit$psi[tstart:tend, ]) + 1),
-        # WT = sim1.dat$out1.wt[tstart:tend, ],
-        # EpiEstim = sim1.dat$out1.epi[tstart:tend, ],
+        # WT = sim1.dat$out1.wt[tstart:tend - 10, ],
+        # EpiEstim = sim1.dat$out1.epi[tstart:tend - 10, ],
         True = log(exp(cbind(sim1.dat$sim1$psi[tstart:tend, ], sim1.dat$sim1$psi[tstart:tend, ], sim1.dat$sim1$psi[tstart:tend, ])) + 1)
     ),
-    legend.position = "top", alpha = 0.25
+    legend.position = "bottom", alpha = 0.25
 )
 
 p <- p + ylab(expression(R[t])) +
     guides(color = guide_legend(nrow = 1)) +
-    theme(text = element_text(size = 12))
+    theme(text = element_text(size = 20))
 
-plot(p)
+if (plot_figures) {
+    plot(p)
+}
 
 if (save_figures) {
     ggsave(
         file.path(
             opath, "posterior",
-            paste0("sim-", seed, "-Rt.pdf")
+            paste0("sim-", seed, "-Rt-all-but-mu0.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = fig_width_rect, height = fig_height_rect
+        width = fig_width_rect, height = 0.4 * fig_width_rect
     )
 }
 ```
@@ -259,72 +558,582 @@ if (save_figures) {
 #### W
 
 ```{r}
-if ("W" %in% names(sim1.dat$out1.pl$fit)) {
-    tag <- paste0("sim-", seed, "-pl-")
-    p <- plot_param(
-        c(sim1.dat$out1.pl$fit$W),
-        data_true = NULL,
-        tag = "W", title = FALSE, plot_figures = plot_figures
+if ("W" %in% param_infer) {
+    if ("W" %in% names(sim1.dat$out1.pl$fit)) {
+        tag <- paste0("sim-", seed, "-pl-")
+        p <- plot_param_single(
+            c(sim1.dat$out1.pl$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (plot_figures) {
+            plot(p)
+        }
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(sim1.dat$out1.hva$fit)) {
+        tag <- paste0("sim-", seed, "-hva-")
+        p <- plot_param_single(
+            c(sim1.dat$out1.hva$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (plot_figures) {
+            plot(p)
+        }
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(sim1.dat$out1.mcmc$fit)) {
+        tag <- paste0("sim-", seed, "-mcmc-")
+        p <- plot_param(
+            c(sim1.dat$out1.mcmc$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (plot_figures) {
+            plot(p)
+        }
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+}
+
+```
+
+
+```{r}
+if ("W" %in% param_infer) {
+    dat_tmp <- list(
+        # PL = sim1.dat$out1.pl$fit$W - 0.02
+        # ,
+        HVA = c(sim1.dat$out1.hva$fit$W - 0.02),
+        MCMC = c(sim1.dat$out1.mcmc$fit$W)
     )
 
+    nsample <- min(unlist(lapply(dat_tmp, length)))
+    dat_tmp <- lapply(dat_tmp, function(tmp) {
+        tmp <- tmp[1:nsample]
+    })
+
+    idx <- dat_tmp$HVA > 0 & dat_tmp$MCMC > 0 # & dat_tmp$PL > 0
+    # dat_tmp$PL = dat_tmp$PL[idx]
+    dat_tmp$HVA <- dat_tmp$HVA[idx]
+    dat_tmp$MCMC <- dat_tmp$MCMC[idx]
+
+    p <- plot_param_multi(dat_tmp) +
+        geom_vline(xintercept = sim1.dat$mod1$param$err[1], linetype = 2) +
+        theme(
+            text = element_text(size = 70),
+            legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks.y = element_blank()
+        ) + ylab("") + xlab("") +
+        scale_color_manual(
+            values = c("purple", "darkturquoise")
+        ) +
+        scale_fill_manual(
+            values = c("purple", "darkturquoise")
+        )
+
+    if (plot_figures) {
+        plot(p)
+    }
+
     if (save_figures) {
         ggsave(
-            file.path(
-                opath, "posterior",
-                paste0(tag, "posterior-W.pdf")
-            ),
-            plot = p, device = "pdf", dpi = 300,
-            height = fig_height_square, width = fig_width_square
+            file.path(opath, "posterior", paste0("sim-", seed, "-W.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
         )
     }
 }
 ```
 
 ```{r}
-if ("W" %in% names(sim1.dat$out1.hva$fit)) {
-    tag <- paste0("sim-", seed, "-hva-")
-    p <- plot_param(
-        c(sim1.dat$out1.hva$fit$W), 
-        data_true = NULL, 
-        tag = "W", title = FALSE, plot_figures = plot_figures)
+if ("W" %in% param_infer) {
+    val <- NULL
+    if ("out1.pl" %in% names(sim1.dat) & "W" %in% names(sim1.dat$out1.pl$fit)) {
+        tmp <- sqrt(mean((c(sim1.dat$out1.pl$fit$W) - 0.02 - c(sim1.dat$mod1$param$err[1]))^2))
+        val <- c(val, tmp)
+    }
+
+    if ("out1.hva" %in% names(sim1.dat) & "W" %in% names(sim1.dat$out1.hva$fit)) {
+        tmp <- sqrt(mean((c(sim1.dat$out1.hva$fit$W) - 0.02 - c(sim1.dat$mod1$param$err[1]))^2))
+        val <- c(val, tmp)
+    }
+
+    if ("out1.mcmc" %in% names(sim1.dat) & "W" %in% names(sim1.dat$out1.mcmc$fit)) {
+        tmp <- sqrt(mean((c(sim1.dat$out1.mcmc$fit$W) - c(sim1.dat$mod1$param$err[1]))^2))
+        val <- c(val, tmp)
+    }
+}
+
+
+print(val)
+```
+
+#### rho
+
+```{r}
+if ("rho" %in% param_infer) {
+    dat_tmp <- NULL
+    cname <- NULL
+
+    if ("rho" %in% names(sim1.dat$out1.pl$fit)) {
+        dat_tmp <- cbind(dat_tmp, sim1.dat$out1.pl$fit$rho)
+        cname <- c(cname, "PL")
+
+        p <- plot_param(
+            c(sim1.dat$out1.pl$fit$rho),
+            data_true = NULL,
+            tag = "rho", title = FALSE, plot_figures = FALSE
+        )
+
+        p <- p + labs(xlab = "rho")
+
+
+        if (plot_figures) {
+            plot(p)
+        }
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-pl-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-rho.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("rho" %in% names(sim1.dat$out1.hva$fit)) {
+        dat_tmp <- cbind(dat_tmp, sim1.dat$out1.hva$fit$rho)
+        cname <- c(cname, "HVA")
+
+        p <- plot_param(
+            c(sim1.dat$out1.hva$fit$rho),
+            data_true = NULL,
+            tag = "rho", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "rho")
+
+        if (plot_figures) {
+            plot(p)
+        }
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-hva-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-rho-all-but-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("rho" %in% names(sim1.dat$out1.mcmc$fit)) {
+        dat_tmp <- cbind(dat_tmp, sim1.dat$out1.mcmc$fit$rho)
+        cname <- c(cname, "MCMC")
+
+        p <- plot_param(
+            c(sim1.dat$out1.mcmc$fit$rho),
+            data_true = NULL,
+            tag = "rho", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "rho")
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-mcmc-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-rho-all-but-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    dat_tmp <- list(
+        # PL = sim1.dat$out1.pl$fit$rho
+        # ,
+        HVA = sim1.dat$out1.hva$fit$rho,
+        MCMC = sim1.dat$out1.mcmc$fit$rho
+    )
+
+    p <- plot_param_multi(dat_tmp) +
+        geom_vline(xintercept = sim1.dat$mod1$param$obs[2], linetype = 2) +
+        xlab("") + ylab("") +
+        theme(
+            text = element_text(size = 70),
+            legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks.y = element_blank()
+        ) +
+        scale_color_manual(
+            values = c("purple", "darkturquoise")
+        ) +
+        scale_fill_manual(
+            values = c("purple", "darkturquoise")
+        )
+
+
+    if (plot_figures) {
+        plot(p)
+    }
 
     if (save_figures) {
         ggsave(
-            file.path(
-                opath, "posterior",
-                paste0(tag, "posterior-W.pdf")
-            ),
-            plot = p, device = "pdf", dpi = 300,
-            height = fig_height_square, width = fig_width_square
+            file.path(opath, "posterior", paste0("sim-", seed, "-rho.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
         )
     }
 }
 ```
 
+#### mu0
+
 ```{r}
-if ("W" %in% names(sim1.dat$out1.mcmc$fit)) {
-    tag <- paste0("sim-", seed, "-mcmc-")
-    p <- plot_param(
-        c(sim1.dat$out1.mcmc$fit$W), 
-        data_true = NULL, 
-        tag = "W", title = FALSE, plot_figures = plot_figures)
+if ("mu0" %in% param_infer) {
+    if ("mu0" %in% names(sim1.dat$out1.pl$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.pl$fit$mu0),
+            data_true = NULL,
+            tag = "mu0", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "mu0")
+
+
+        if (plot_figures) {
+            plot(p)
+        }
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-pl-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("mu0" %in% names(sim1.dat$out1.hva$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.hva$fit$mu0),
+            data_true = NULL,
+            tag = "mu0", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "mu0")
+
+
+        if (plot_figures) {
+            plot(p)
+        }
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-hva-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("mu0" %in% names(sim1.dat$out1.mcmc$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.mcmc$fit$mu0),
+            data_true = NULL,
+            tag = "mu0", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "mu0")
+
+        if (plot_figures) {
+            plot(p)
+        }
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-hva-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+}
+```
+
+#### par1
+
+```{r}
+if ("par1" %in% param_infer) {
+    if (exists("out1.pl", envir = sim1.dat) && "par1" %in% names(sim1.dat$out1.pl$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.pl$fit$par1),
+            data_true = NULL,
+            tag = "par1", title = FALSE, plot_figures = plot_figures
+        )
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-pl-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-par1.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if (exists("out1.hva", envir = sim1.dat) && "par1" %in% names(sim1.dat$out1.hva$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.hva$fit$par1),
+            data_true = NULL,
+            tag = "par1", title = FALSE, plot_figures = plot_figures
+        )
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-hva-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-par1-all-but-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if (exists("out1.mcmc", envir = sim1.dat) && "par1" %in% names(sim1.dat$out1.mcmc$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.mcmc$fit$par1),
+            data_true = NULL,
+            tag = "par1", title = FALSE, plot_figures = plot_figures
+        )
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-mcmc-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-par1-all-but-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+
+    dat_tmp <- list(
+        # PL = sim1.dat$out1.pl$fit$rho
+        # ,
+        HVA = sim1.dat$out1.hva$fit$par1,
+        MCMC = sim1.dat$out1.mcmc$fit$par1
+    )
+
+    p <- plot_param_multi(dat_tmp) + xlab("") + ylab("") +
+        geom_vline(xintercept = sim1.dat$mod1$param$lag[1], linetype = 2) +
+        theme(
+            text = element_text(size = 70),
+            legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks.y = element_blank()
+        ) +
+        scale_color_manual(
+            values = c("purple", "darkturquoise")
+        ) +
+        scale_fill_manual(
+            values = c("purple", "darkturquoise")
+        )
+
+
+    if (plot_figures) {
+        plot(p)
+    }
 
     if (save_figures) {
         ggsave(
-            file.path(
-                opath, "posterior",
-                paste0(tag, "posterior-W.pdf")
-            ),
-            plot = p, device = "pdf", dpi = 300,
-            height = fig_height_square, width = fig_width_square
+            file.path(opath, "posterior", paste0("sim-", seed, "-par1.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
         )
     }
 }
 ```
 
+
+#### par2
+
 ```{r}
-rm(sim1.dat)
+if ("par2" %in% param_infer) {
+    if (exists("out1.pl", envir = sim1.dat) && "par2" %in% names(sim1.dat$out1.pl$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.pl$fit$par2),
+            data_true = NULL,
+            tag = "par2", title = FALSE, plot_figures = plot_figures
+        )
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-pl-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-par2.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if (exists("out1.hva", envir = sim1.dat) && "par2" %in% names(sim1.dat$out1.hva$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.hva$fit$par2),
+            data_true = NULL,
+            tag = "par2", title = FALSE, plot_figures = plot_figures
+        )
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-hva-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-par2-all-but-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if (exists("out1.mcmc", envir = sim1.dat) && "par2" %in% names(sim1.dat$out1.mcmc$fit)) {
+        p <- plot_param(
+            c(sim1.dat$out1.mcmc$fit$par2),
+            data_true = NULL,
+            tag = "par2", title = FALSE, plot_figures = plot_figures
+        )
+
+        if (save_figures) {
+            tag <- paste0("sim-", seed, "-mcmc-")
+
+            ggsave(
+                file.path(
+                    opath, "posterior",
+                    paste0(tag, "posterior-par2-all-but-mu0.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    dat_tmp <- list(
+        # PL = sim1.dat$out1.pl$fit$rho
+        # ,
+        HVA = sim1.dat$out1.hva$fit$par2,
+        MCMC = sim1.dat$out1.mcmc$fit$par2
+    )
+
+    p <- plot_param_multi(dat_tmp, alpha = 0.2) + xlab("") + ylab("") +
+        geom_vline(xintercept = sim1.dat$mod1$param$lag[2], linetype = 2) +
+        theme(
+            text = element_text(size = 70),
+            legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks.y = element_blank()
+        ) +
+        scale_color_manual(
+            values = c("purple", "darkturquoise")
+        ) +
+        scale_fill_manual(
+            values = c("purple", "darkturquoise")
+        )
+
+
+    if (plot_figures) {
+        plot(p)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath, "posterior", paste0("sim-", seed, "-par2.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
 ```
+
 
 ## S2. seed = 2793
 
@@ -503,7 +1312,7 @@ p <- plot_ts_ci_multi(
         MCMC = log(exp(sim2.dat$out1.mcmc$fit$psi[tstart:tend, ]) + 1),
         WT = sim2.dat$out1.wt[tstart:tend, ],
         EpiEstim = sim2.dat$out1.epi[tstart:tend, ],
-        True = log(exp(cbind(sim2.dat$sim1$psi[tstart:tend, ], sim2.dat$sim1$psi[tstart:tend, ], sim2.dat$sim1$psi[tstart:tend,])) + 1)
+        True = log(exp(cbind(sim2.dat$sim1$psi[tstart:tend, ], sim2.dat$sim1$psi[tstart:tend, ], sim2.dat$sim1$psi[tstart:tend, ])) + 1)
     ),
     legend.position = "top"
 )
@@ -737,13 +1546,191 @@ rm(sim3.dat)
 ## Santa Cruz
 
 ```{r}
-tag = "santacruz"
-santacruz.dat = load_dat(opath_real,tag, "covid")
-santacruz.dat = load_real(dpath, "Santa Cruz", santacruz.dat)
+tag <- "santacruz"
+santacruz.dat <- load_dat(opath_real, tag, "covid", param_infer)
+santacruz.dat <- load_real(dpath, "Santa Cruz", santacruz.dat)
 print(ls(santacruz.dat))
+
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == "Santa Cruz", ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+```
+
+### HVA and MCMC results
+
+```{r}
+plots <- plot_output(
+    santacruz.dat$out.hva, santacruz.dat$y2,
+    save_figures = FALSE, tag = paste0(tag, "-hva-"), opath = opath_real,
+    plot_figures = plot_figures
+)
+
+
+plots <- plot_output(
+    santacruz.dat$out.mcmc, santacruz.dat$y2,
+    save_figures = FALSE, tag = paste0(tag, "-hva-"), opath = opath_real,
+    plot_figures = plot_figures
+)
+```
+
+
+### Fitted y
+
+```{r}
+algo <- "HVA"
+tstart <- santacruz.dat$mod$dim$nlag
+
+p <- plot_ts_ci_multi(
+    list(
+        HVA = santacruz.dat$out.hva$error$fitted$yhat[-c(1:tstart), ]
+        # ,
+        # MCMC = santacruz.dat$out.mcmc$error$fitted$yhat[-c(1:tstart), ]
+        # ,
+        # True = cbind(
+        #     santacruz.dat$y2[-c(1:tstart)],
+        #     santacruz.dat$y2[-c(1:tstart)],
+        #     santacruz.dat$y2[-c(1:tstart)]
+        # )
+    ),
+    time_label = ddate[-c(1:(tstart - 1))], legend.position = "none", xlab = ""
+)
+
+p <- p + geom_point(data = data.frame(
+    y = santacruz.dat$y2[-c(1:tstart)],
+    x = ddate[-c(1:(tstart - 1))],
+    method = rep("True", length(santacruz.dat$y2[-c(1:tstart)]))
+), aes(x = x, y = y), size = 1)
+
+p <- p + ylab(expression(y[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 16))
+
+if (plot_figures) {
+    plot(p)
+}
+
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath_real, "posterior",
+            paste0("covid-", tag, "-", algo, "-yt-Wrho.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        width = fig_width_rect, height = 0.25 * fig_width_rect
+    )
+}
 ```
 
 ### k-step forecasting
+
+#### MCMC
+
+```{r}
+forecast_indices <- which(
+    apply(
+        santacruz.dat$out.mcmc$error$forecast$y_loss, 1,
+        function(row) {
+            !all(row == 0)
+        }
+    )
+)
+
+ycast <- santacruz.dat$out.mcmc$error$forecast$y_cast_all[forecast_indices, , ]
+dimnames(ycast) <- list(
+    paste0("t", forecast_indices),
+    1:dim(ycast)[2],
+    paste0("k", 1:dim(ycast)[3])
+)
+ycast <- reshape2::melt(ycast)
+colnames(ycast) <- c("time", "index", "kstep", "y")
+
+k <- 5
+ytrue <- santacruz.dat$y2[forecast_indices + k]
+p <- ggplot(ycast[ycast$kstep == paste0("k", k), ], aes(x = time, y = y)) +
+    geom_boxplot(alpha = 0.8, fill = "gray") +
+    geom_point(data = data.frame(
+        y = ytrue, time = paste0("t", forecast_indices)
+    ), color = "salmon", shape = 18, size = 8) +
+    theme_minimal() +
+    theme(legend.position = "none", text = element_text(size = 16)) +
+    scale_x_discrete(labels = forecast_indices + k) +
+    xlab("Time")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "forecast", paste0("covid-", tag, "-mcmc-forecast-", k, "step", ".pdf")),
+        plot = p, height = fig_height_square, width = fig_width_square, dpi = 300, device = "pdf"
+    )
+}
+```
+
+#### HVA
+
+```{r}
+forecast_indices <- which(
+    apply(
+        santacruz.dat$out.hva$error$forecast$y_loss, 1,
+        function(row) {
+            !all(row == 0)
+        }
+    )
+)
+
+ycast <- santacruz.dat$out.hva$error$forecast$y_cast_all[forecast_indices, , ]
+for (i in dim(ycast)[1]) {
+    for (j in dim(ycast)[3]) {
+        tmp <- ycast[i, , j]
+        tmax <- quantile(tmp, 0.975)
+        tmin <- quantile(tmp, 0.025)
+        tmp[tmp > tmax | tmp < tmin] <- NA
+        ycast[i, , j] <- tmp
+    }
+}
+
+dimnames(ycast) <- list(
+    paste0("t", forecast_indices),
+    1:dim(ycast)[2],
+    paste0("k", 1:dim(ycast)[3])
+)
+ycast <- reshape2::melt(ycast)
+colnames(ycast) <- c("time", "index", "kstep", "y")
+
+k <- 10
+ytrue <- santacruz.dat$y2[forecast_indices + k]
+p <- ggplot(ycast[ycast$kstep == paste0("k", k), ], aes(x = time, y = y)) +
+    geom_boxplot(alpha = 0.8, fill = "gray", na.rm = TRUE) +
+    geom_point(data = data.frame(
+        y = ytrue, time = paste0("t", forecast_indices)
+    ), color = "salmon", shape = 18, size = 8) +
+    theme_minimal() +
+    theme(legend.position = "none", text = element_text(size = 16)) +
+    scale_x_discrete(labels = forecast_indices + k) +
+    xlab("Time") +
+    scale_y_continuous(limits = c(0, 500))
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "forecast", paste0("covid-", tag, "-hva-forecast-", k, "step", ".pdf")),
+        plot = p, height = fig_height_square, width = fig_width_square, dpi = 300, device = "pdf"
+    )
+}
+```
+
+
+#### Comparisons
 
 ```{r}
 dat <- get_dat_real_loss_all(santacruz.dat)
@@ -823,14 +1810,18 @@ if (save_figures) {
 for (k in c(1, 5, 10)) {
     p <- plot_ts_ci_multi(
         list(
-            LBA = santacruz.dat$out.lba$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
-            MCS = santacruz.dat$out.mcs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
-            FFBS = santacruz.dat$out.ffbs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
-            PL = santacruz.dat$out.pl$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10), , k],
+            LBA = santacruz.dat$out.lba$error$forecast$y_cast[1:(length(santacruz.dat$y2) - k), , k],
+            # MCS = santacruz.dat$out.mcs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - k), , k],
+            # FFBS = santacruz.dat$out.ffbs$error$forecast$y_cast[1:(length(santacruz.dat$y2) - k), , k],
+            PL = santacruz.dat$out.tfs3$error$forecast$y_cast[1:(length(santacruz.dat$y2) - k), , k],
             # HVA = santacruz.dat$out.hva$error$forecast$y_cast[1:(length(santacruz.dat$y2) - 10),,k],
             # MCMC = log(exp(santacruz.dat$out1.mcmc$fit$psi) + 1),
             # WT = t(santacruz.dat$forecast.wt$y_cast[,1:(length(santacruz.dat$y2) - 10),k]),
-            True = cbind(santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)], santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)], santacruz.dat$y2[1:(length(santacruz.dat$y2) - 10)])
+            True = cbind(
+                santacruz.dat$y2[(k + 1):(length(santacruz.dat$y2))],
+                santacruz.dat$y2[(k + 1):(length(santacruz.dat$y2))],
+                santacruz.dat$y2[(k + 1):(length(santacruz.dat$y2))]
+            )
         ),
         legend.position = "top"
     )
@@ -860,28 +1851,31 @@ for (k in c(1, 5, 10)) {
 ### Posterior of Rt
 
 ```{r}
-tstart <- 50
-ntime <- 450
-tend <- tstart + ntime
+tend <- c(dim(santacruz.dat$out.wt)[1], dim(santacruz.dat$out.epi)[1], length(santacruz.dat$y2))
+ntime <- min(tend)
+tstart <- tend - ntime + 1
+
+algo = 'hva'
 
 p <- plot_ts_ci_multi(
     list(
-        LBA = log(exp(santacruz.dat$out.lba$fit$psi[tstart:tend, ]) + 1),
-        MCS = log(exp(santacruz.dat$out.mcs$fit$psi[tstart:tend, ]) + 1),
-        FFBS = log(exp(santacruz.dat$out.ffbs$fit$psi[tstart:tend, ]) + 1),
-        PL = log(exp(santacruz.dat$out.pl$fit$psi[tstart:tend, ]) + 1),
-        # HVA = log(exp(santacruz.dat$out.hva$fit$psi) + 1),
-        # MCMC = log(exp(santacruz.dat$out.mcmc$fit$psi) + 1),
-        WT = santacruz.dat$out.wt[tstart:tend, ],
-        EpiEstim = santacruz.dat$out.epi[tstart:tend, ]
+        # LBA = log(exp(santacruz.dat$out.lba$fit$psi[tstart[3]:tend[3], ]) + 1),
+        # MCS = log(exp(santacruz.dat$out.mcs$fit$psi[tstart:tend, ]) + 1),
+        # FFBS = log(exp(santacruz.dat$out.ffbs$fit$psi[tstart:tend, ]) + 1),
+        # PL = log(exp(santacruz.dat$out.tfs3$fit$psi[tstart[3]:tend[3], ]) + 1),
+        HVA = log(exp(santacruz.dat$out.mcs$fit$psi)[tstart[3]:tend[3], ] + 1),
+        # MCMC = log(exp(santacruz.dat$out.mcmc$fit$psi[tstart[3]:tend[3], ]) + 1),
+        WT = santacruz.dat$out.wt[tstart[1]:tend[1], ],
+        EpiEstim = santacruz.dat$out.epi[tstart[2]:tend[2], ]
     ),
-    legend.position = "top"
+    legend.position = "top", time_label = ddate
 )
 
-p <- p + ylab(expression(R[t]))
+p = p + geom_hline(yintercept = 1, linetype = "dashed")
+
 p <- p + ylab(expression(R[t])) +
     guides(color = guide_legend(nrow = 1)) +
-    theme(text = element_text(size = 12))
+    theme(text = element_text(size = 16))
 
 plot(p)
 
@@ -889,14 +1883,220 @@ if (save_figures) {
     ggsave(
         file.path(
             opath_real, "posterior",
-            paste0("covid-", tag, "-Rt.pdf")
+            paste0("covid-", tag, "-", algo, "-Rt-Wrho.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = fig_width_rect, height = fig_height_rect
+        width = fig_width_rect, height = fig_width_rect * 0.3
     )
 }
 ```
 
+
+### Convergence
+
+```{r}
+if ("W" %in% param_infer) {
+    dat <- data.frame(
+        y = c(santacruz.dat$out.hva$fit$W),
+        x = 1:length(c(santacruz.dat$out.hva$fit$W))
+    )
+    est <- median(c(santacruz.dat$out.hva$fit$W))
+
+    p1 <- ggplot(dat, aes(x = y)) +
+        geom_histogram(bins = 50) +
+        theme_minimal() +
+        geom_vline(
+            xintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab(expression(W)) +
+        ylab("")
+
+    p2 <- ggplot(dat, aes(x = x, y = y)) +
+        geom_line() +
+        theme_minimal() +
+        geom_hline(
+            yintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab("Iteration") +
+        ylab(expression(W))
+
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-W.pdf")),
+            dpi = 300, plot = p1, height = fig_height_square, width = fig_width_square
+        )
+
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-trace-W.pdf")),
+            dpi = 300, plot = p2, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+```{r}
+if ("rho" %in% param_infer) {
+    dat <- data.frame(
+        y = c(santacruz.dat$out.hva$fit$rho),
+        x = 1:length(c(santacruz.dat$out.hva$fit$rho))
+    )
+    est <- median(c(santacruz.dat$out.hva$fit$rho))
+
+    p1 <- ggplot(dat, aes(x = y)) +
+        geom_histogram(bins = 50) +
+        theme_minimal() +
+        geom_vline(
+            xintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab(expression(rho)) +
+        ylab("")
+
+    p2 <- ggplot(dat, aes(x = x, y = y)) +
+        geom_line() +
+        theme_minimal() +
+        geom_hline(
+            yintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab("Iteration") +
+        ylab(expression(rho))
+
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-rho.pdf")),
+            dpi = 300, plot = p1, height = fig_height_square, width = fig_width_square
+        )
+
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-trace-rho.pdf")),
+            dpi = 300, plot = p2, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+### Posterior of Static Parameters
+
+#### W
+
+```{r}
+if ("W" %in% param_infer) {
+    if ("W" %in% names(santacruz.dat$out.pl$fit)) {
+        p <- plot_param_single(
+            c(santacruz.dat$out.pl$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-pl-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(santacruz.dat$out.hva$fit)) {
+        p <- plot_param_single(
+            c(santacruz.dat$out.hva$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-hva-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(santacruz.dat$out.mcmc$fit)) {
+        p <- plot_param_single(
+            c(santacruz.dat$out.mcmc$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-mcmc-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+}
+
+```
+
+
+```{r}
+if ("W" %in% param_infer) {
+    dat_tmp <- list(
+        PL = santacruz.dat$out.pl$fit$W - 0.02,
+        HVA = c(santacruz.dat$out.hva$fit$W - 0.02),
+        MCMC = c(santacruz.dat$out.mcmc$fit$W)
+    )
+
+    nsample <- min(unlist(lapply(dat_tmp, length)))
+    dat_tmp <- lapply(dat_tmp, function(tmp) {
+        tmp <- tmp[1:nsample]
+    })
+
+    idx <- dat_tmp$HVA > 0 & dat_tmp$MCMC > 0 & dat_tmp$PL > 0
+    dat_tmp$PL <- dat_tmp$PL[idx]
+    dat_tmp$HVA <- dat_tmp$HVA[idx]
+    dat_tmp$MCMC <- dat_tmp$MCMC[idx]
+
+    p <- plot_param_multi(dat_tmp) + xlab(TeX(r"(W)"))
+
+    if (plot_figures) {
+        plot(p)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-W.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
 
 ```{r}
 rm(santacruz.dat)
@@ -906,14 +2106,176 @@ rm(santacruz.dat)
 ## Santa Clara
 
 ```{r}
-tag = "santaclara"
-santaclara.dat = load_dat(opath_real, tag, "covid")
-santaclara.dat = load_real(dpath, "Santa Clara", santaclara.dat)
+tag <- "santaclara"
+santaclara.dat <- load_dat(opath_real, tag, "covid")
+santaclara.dat <- load_real(dpath, "Santa Clara", santaclara.dat)
 print(ls(santaclara.dat))
+
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == "Santa Clara", ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+```
+
+### Fitted y
+
+```{r}
+algo <- "HVA"
+tstart <- santaclara.dat$mod$dim$nlag
+
+p <- plot_ts_ci_multi(
+    list(
+        HVA = santaclara.dat$out.hva$error$fitted$yhat[-c(1:tstart), ]
+        # ,
+        # MCMC = santaclara.dat$out.mcmc$error$fitted$yhat[-c(1:tstart), ]
+        # ,
+        # True = cbind(
+        #     santaclara.dat$y2[-c(1:tstart)],
+        #     santaclara.dat$y2[-c(1:tstart)],
+        #     santaclara.dat$y2[-c(1:tstart)]
+        # )
+    ),
+    time_label = ddate[-c(1:(tstart - 1))], legend.position = "none", xlab = ""
+)
+
+p <- p + geom_point(
+    data = data.frame(
+        x = ddate[-c(1:(tstart - 1))],
+        y = santaclara.dat$y2[-c(1:tstart)],
+        method = rep("True", length(ddate[-c(1:(tstart - 1))]))
+    ), aes(x = x, y = y), size = 1
+)
+
+p <- p + ylab(expression(y[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 16))
+
+if (plot_figures) {
+    plot(p)
+}
+
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath_real, "posterior",
+            paste0("covid-", tag, "-", algo, "-yt-Wrho.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        width = fig_width_rect, height = 0.25 * fig_width_rect
+    )
+}
 ```
 
 ### k-step forecasting error
 
+
+#### MCMC
+
+```{r}
+forecast_indices <- which(
+    apply(
+        santaclara.dat$out.mcmc$error$forecast$y_loss, 1,
+        function(row) {
+            !all(row == 0)
+        }
+    )
+)
+
+ycast <- santaclara.dat$out.mcmc$error$forecast$y_cast_all[forecast_indices, , ]
+dimnames(ycast) <- list(
+    paste0("t", forecast_indices),
+    1:dim(ycast)[2],
+    paste0("k", 1:dim(ycast)[3])
+)
+ycast <- reshape2::melt(ycast)
+colnames(ycast) <- c("time", "index", "kstep", "y")
+
+k <- 10
+ytrue <- santaclara.dat$y2[forecast_indices + k]
+p <- ggplot(ycast[ycast$kstep == paste0("k", k), ], aes(x = time, y = y)) +
+    geom_boxplot(alpha = 0.8, fill = "gray") +
+    geom_point(data = data.frame(
+        y = ytrue, time = paste0("t", forecast_indices)
+    ), color = "salmon", shape = 18, size = 8) +
+    theme_minimal() +
+    theme(legend.position = "none", text = element_text(size = 16)) +
+    scale_x_discrete(labels = forecast_indices + k) +
+    xlab("Time")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "forecast", paste0("covid-", tag, "-mcmc-forecast-", k, "step", ".pdf")),
+        plot = p, height = fig_height_square, width = fig_width_square, dpi = 300, device = "pdf"
+    )
+}
+```
+
+#### HVA
+
+```{r}
+forecast_indices <- which(
+    apply(
+        santaclara.dat$out.hva$error$forecast$y_loss, 1,
+        function(row) {
+            !all(row == 0)
+        }
+    )
+)
+
+ycast <- santaclara.dat$out.hva$error$forecast$y_cast_all[forecast_indices, , ]
+for (i in dim(ycast)[1]) {
+    for (j in dim(ycast)[3]) {
+        tmp <- ycast[i, , j]
+        tmax <- quantile(tmp, 0.975)
+        tmin <- quantile(tmp, 0.025)
+        tmp[tmp > tmax | tmp < tmin] <- NA
+        ycast[i, , j] <- tmp
+    }
+}
+
+dimnames(ycast) <- list(
+    paste0("t", forecast_indices),
+    1:dim(ycast)[2],
+    paste0("k", 1:dim(ycast)[3])
+)
+ycast <- reshape2::melt(ycast)
+colnames(ycast) <- c("time", "index", "kstep", "y")
+
+k <- 10
+ytrue <- santaclara.dat$y2[forecast_indices + k]
+p <- ggplot(ycast[ycast$kstep == paste0("k", k), ], aes(x = time, y = y)) +
+    geom_boxplot(alpha = 0.8, fill = "gray", na.rm = TRUE) +
+    geom_point(data = data.frame(
+        y = ytrue, time = paste0("t", forecast_indices)
+    ), color = "salmon", shape = 18, size = 8) +
+    theme_minimal() +
+    theme(legend.position = "none", text = element_text(size = 16)) +
+    scale_x_discrete(labels = forecast_indices + k) +
+    xlab("Time") +
+    scale_y_continuous(limits = c(0, 500))
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "forecast", paste0("covid-", tag, "-hva-forecast-", k, "step", ".pdf")),
+        plot = p, height = fig_height_square, width = fig_width_square, dpi = 300, device = "pdf"
+    )
+}
+```
+
+
+#### Comparisons
 ```{r}
 dat <- get_dat_real_loss_all(santaclara.dat)
 
@@ -993,14 +2355,18 @@ tstart <- 50
 for (k in c(1, 5, 10)) {
     p <- plot_ts_ci_multi(
         list(
-            LBA = santaclara.dat$out.lba2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
-            MCS = santaclara.dat$out.mcs2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
-            FFBS = santaclara.dat$out.ffbs2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
-            PL = santaclara.dat$out.pl$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - 10), , k],
+            LBA = santaclara.dat$out.lba2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - k), , k],
+            # MCS = santaclara.dat$out.mcs2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - k), , k],
+            # FFBS = santaclara.dat$out.ffbs2$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - k), , k],
+            PL = santaclara.dat$out.pl$error$forecast$y_cast[tstart:(length(santaclara.dat$y2) - k), , k],
             # HVA = santaclara.dat$out.hva$error$forecast$y_cast[1:(length(santaclara.dat$y2) - 10),,k],
             # MCMC = log(exp(santaclara.dat$out1.mcmc$fit$psi) + 1),
             # WT = santaclara.dat$out1.wt,
-            True = cbind(santaclara.dat$y2[tstart:(length(santaclara.dat$y2) - 10)], santaclara.dat$y2[tstart:(length(santaclara.dat$y2) - 10)], santaclara.dat$y2[tstart:(length(santaclara.dat$y2) - 10)])
+            True = cbind(
+                santaclara.dat$y2[(k + tstart):(length(santaclara.dat$y2))],
+                santaclara.dat$y2[(k + tstart):(length(santaclara.dat$y2))],
+                santaclara.dat$y2[(k + tstart):(length(santaclara.dat$y2))]
+            )
         ),
         legend.position = "top"
     )
@@ -1031,28 +2397,30 @@ for (k in c(1, 5, 10)) {
 ### Posterior of Rt
 
 ```{r}
-tstart <- 50
-ntime <- 450
-tend <- tstart + ntime
+tend <- c(dim(santaclara.dat$out.wt)[1], dim(santaclara.dat$out.epi)[1], length(santaclara.dat$y2)) - 10
+ntime <- min(tend)
+tstart <- tend - ntime + 10
+
+algo = "hva"
 
 p <- plot_ts_ci_multi(
     list(
-        LBA = log(exp(santaclara.dat$out.lba$fit$psi[tstart:tend, ]) + 1),
-        MCS = log(exp(santaclara.dat$out.mcs$fit$psi[tstart:tend,]) + 1),
-        FFBS = log(exp(santaclara.dat$out.ffbs$fit$psi[tstart:tend,]) + 1),
-        PL = log(exp(santaclara.dat$out.pl$fit$psi[tstart:tend,]) + 1),
-        # HVA = log(exp(santaclara.dat$out.hva$fit$psi[tstart:tend,]) + 1)
-        # MCMC = log(exp(santaclara.dat$out.mcmc$fit$psi[tstart:tend,]) + 1),
-        WT = santaclara.dat$out.wt[tstart:tend,],
-        EpiEstim = santaclara.dat$out.epi[tstart:tend,]
+        # LBA = log(exp(santaclara.dat$out.lba$fit$psi[tstart[3]:tend[3], ]) + 1),
+        # MCS = log(exp(santacruz.dat$out.mcs$fit$psi[tstart:tend, ]) + 1),
+        # FFBS = log(exp(santacruz.dat$out.ffbs$fit$psi[tstart:tend, ]) + 1),
+        # PL = log(exp(santaclara.dat$out.tfs3$fit$psi[tstart[3]:tend[3], ]) + 1),
+        HVA = log(exp(santaclara.dat$out.hva$fit$psi)[tstart[3]:tend[3], ] + 1),
+        # MCMC = log(exp(santaclara.dat$out.mcmc$fit$psi[tstart[3]:tend[3], ]) + 1),
+        WT = santaclara.dat$out.wt[tstart[1]:tend[1], ],
+        EpiEstim = santaclara.dat$out.epi[tstart[2]:tend[2], ]
     ),
-    legend.position = "top"
+    legend.position = "top", time_label = ddate
 )
 
-p <- p + ylab(expression(R[t]))
 p <- p + ylab(expression(R[t])) +
     guides(color = guide_legend(nrow = 1)) +
-    theme(text = element_text(size = 12))
+    theme(text = element_text(size = 16)) +
+    geom_hline(yintercept = 1, linetype = "dashed")
 
 plot(p)
 
@@ -1060,13 +2428,234 @@ if (save_figures) {
     ggsave(
         file.path(
             opath_real, "posterior",
-            paste0("covid-", tag, "-Rt.pdf")
+            paste0("covid-", tag, "-", algo, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = fig_width_rect, height = fig_height_rect
+        width = fig_width_rect, height = fig_width_rect * 0.3
     )
 }
 ```
+
+
+### Convergence
+
+```{r}
+if ("W" %in% param_infer) {
+    dat <- data.frame(
+        y = c(santaclara.dat$out.hva$fit$W),
+        x = 1:length(c(santaclara.dat$out.hva$fit$W))
+    )
+    est <- median(c(santaclara.dat$out.hva$fit$W))
+
+    p1 <- ggplot(dat, aes(x = y)) +
+        geom_histogram(bins = 50) +
+        theme_minimal() +
+        geom_vline(
+            xintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab(expression(W)) +
+        ylab("")
+
+    p2 <- ggplot(dat, aes(x = x, y = y)) +
+        geom_line() +
+        theme_minimal() +
+        geom_hline(
+            yintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab("Iteration") +
+        ylab(expression(W))
+
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-W.pdf")),
+            dpi = 300, plot = p1, height = fig_height_square, width = fig_width_square
+        )
+
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-trace-W.pdf")),
+            dpi = 300, plot = p2, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+```{r}
+if ("rho" %in% param_infer) {
+    dat <- data.frame(
+        y = c(santaclara.dat$out.hva$fit$rho),
+        x = 1:length(c(santaclara.dat$out.hva$fit$rho))
+    )
+    est <- median(c(santaclara.dat$out.hva$fit$rho))
+
+    p1 <- ggplot(dat, aes(x = y)) +
+        geom_histogram(bins = 50) +
+        theme_minimal() +
+        geom_vline(
+            xintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab(expression(rho)) +
+        ylab("")
+
+    p2 <- ggplot(dat, aes(x = x, y = y)) +
+        geom_line() +
+        theme_minimal() +
+        geom_hline(
+            yintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab("Iteration") +
+        ylab(expression(rho))
+
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-rho.pdf")),
+            dpi = 300, plot = p1, height = fig_height_square, width = fig_width_square
+        )
+
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-trace-rho.pdf")),
+            dpi = 300, plot = p2, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+
+### Posterior of Static Parameters
+
+#### W
+
+```{r}
+if ("W" %in% param_infer) {
+    if ("W" %in% names(santaclara.dat$out.pl$fit)) {
+        p <- plot_param_single(
+            c(santaclara.dat$out.pl$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (plot_figures) {
+            plot(p)
+        }
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-pl-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(santaclara.dat$out.hva$fit)) {
+        p <- plot_param_single(
+            c(santaclara.dat$out.hva$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (plot_figures) {
+            plot(p)
+        }
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-hva-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(santaclara.dat$out.mcmc$fit)) {
+        p <- plot_param_single(
+            c(santaclara.dat$out.mcmc$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (plot_figures) {
+            plot(p)
+        }
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-mcmc-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+}
+
+```
+
+
+```{r}
+if ("W" %in% param_infer) {
+    dat_tmp <- list(
+        PL = santaclara.dat$out.pl$fit$W - 0.02,
+        HVA = c(santaclara.dat$out.hva$fit$W),
+        MCMC = c(santaclara.dat$out.mcmc$fit$W)
+    )
+
+    nsample <- min(unlist(lapply(dat_tmp, length)))
+    dat_tmp <- lapply(dat_tmp, function(tmp) {
+        tmp <- tmp[1:nsample]
+    })
+
+    idx <- dat_tmp$HVA > 0 & dat_tmp$MCMC > 0 & dat_tmp$PL > 0
+    dat_tmp$PL <- dat_tmp$PL[idx]
+    dat_tmp$HVA <- dat_tmp$HVA[idx]
+    dat_tmp$MCMC <- dat_tmp$MCMC[idx]
+
+    p <- plot_param_multi(dat_tmp) + xlab(TeX(r"(W)"))
+
+    if (plot_figures) {
+        plot(p)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-W.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
 
 
 ```{r}
@@ -1075,17 +2664,182 @@ gc()
 ```
 
 
+
+
 ## Monterey
 
 ```{r}
-tag = "monterey"
-monterey.dat = load_dat(opath_real, tag, "covid")
-monterey.dat = load_real(dpath, "Monterey", monterey.dat)
+tag <- "monterey"
+monterey.dat <- load_dat(opath_real, tag, "covid")
+monterey.dat <- load_real(dpath, "Monterey", monterey.dat)
 print(ls(monterey.dat))
+
+
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == "Monterey", ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+```
+
+### Fitted y
+
+```{r}
+algo <- "HVA"
+tstart <- monterey.dat$mod$dim$nlag
+
+p <- plot_ts_ci_multi(
+    list(
+        HVA = monterey.dat$out.hva$error$fitted$yhat[-c(1:tstart), ]
+        # ,
+        # MCMC = monterey.dat$out.mcmc$error$fitted$yhat[-c(1:tstart), ]
+        # ,
+        # True = cbind(
+        #     monterey.dat$y2[-c(1:tstart)],
+        #     monterey.dat$y2[-c(1:tstart)],
+        #     monterey.dat$y2[-c(1:tstart)]
+        # )
+    ),
+    time_label = ddate[-c(1:(tstart - 1))],
+    legend.position = "none", xlab = ""
+)
+
+p <- p + geom_point(data = data.frame(
+    x = ddate[-c(1:(tstart - 1))],
+    y = monterey.dat$y2[-c(1:tstart)],
+    method = rep("True", length(ddate[-c(1:(tstart - 1))]))
+), aes(x = x, y = y), size = 1)
+
+p <- p + ylab(expression(y[t])) +
+    guides(color = guide_legend(nrow = 1)) +
+    theme(text = element_text(size = 16))
+
+if (plot_figures) {
+    plot(p)
+}
+
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath_real, "posterior",
+            paste0("covid-", tag, "-", algo, "-yt-Wrho.pdf")
+        ),
+        plot = p, device = "pdf", dpi = 300,
+        width = fig_width_rect, height = 0.25 * fig_width_rect
+    )
+}
 ```
 
 ### k-step forecasting error
 
+
+#### MCMC
+
+```{r}
+forecast_indices <- which(
+    apply(
+        monterey.dat$out.mcmc$error$forecast$y_loss, 1,
+        function(row) {
+            !all(row == 0)
+        }
+    )
+)
+
+ycast <- monterey.dat$out.mcmc$error$forecast$y_cast_all[forecast_indices, , ]
+dimnames(ycast) <- list(
+    paste0("t", forecast_indices),
+    1:dim(ycast)[2],
+    paste0("k", 1:dim(ycast)[3])
+)
+ycast <- reshape2::melt(ycast)
+colnames(ycast) <- c("time", "index", "kstep", "y")
+
+k <- 10
+ytrue <- monterey.dat$y2[forecast_indices + k]
+p <- ggplot(ycast[ycast$kstep == paste0("k", k), ], aes(x = time, y = y)) +
+    geom_boxplot(alpha = 0.8, fill = "gray") +
+    geom_point(data = data.frame(
+        y = ytrue, time = paste0("t", forecast_indices)
+    ), color = "salmon", shape = 18, size = 8) +
+    theme_minimal() +
+    theme(legend.position = "none", text = element_text(size = 16)) +
+    scale_x_discrete(labels = forecast_indices + k) +
+    xlab("Time")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "forecast", paste0("covid-", tag, "-mcmc-forecast-", k, "step", ".pdf")),
+        plot = p, height = fig_height_square, width = fig_width_square, dpi = 300, device = "pdf"
+    )
+}
+```
+
+#### HVA
+
+```{r}
+forecast_indices <- which(
+    apply(
+        monterey.dat$out.hva$error$forecast$y_loss, 1,
+        function(row) {
+            !all(row == 0)
+        }
+    )
+)
+
+ycast <- monterey.dat$out.hva$error$forecast$y_cast_all[forecast_indices, , ]
+for (i in dim(ycast)[1]) {
+    for (j in dim(ycast)[3]) {
+        tmp <- ycast[i, , j]
+        tmax <- quantile(tmp, 0.975)
+        tmin <- quantile(tmp, 0.025)
+        tmp[tmp > tmax | tmp < tmin] <- NA
+        ycast[i, , j] <- tmp
+    }
+}
+
+dimnames(ycast) <- list(
+    paste0("t", forecast_indices),
+    1:dim(ycast)[2],
+    paste0("k", 1:dim(ycast)[3])
+)
+ycast <- reshape2::melt(ycast)
+colnames(ycast) <- c("time", "index", "kstep", "y")
+
+k <- 5
+ytrue <- monterey.dat$y2[forecast_indices + k]
+p <- ggplot(ycast[ycast$kstep == paste0("k", k), ], aes(x = time, y = y)) +
+    geom_boxplot(alpha = 0.8, fill = "gray", na.rm = TRUE) +
+    geom_point(data = data.frame(
+        y = ytrue, time = paste0("t", forecast_indices)
+    ), color = "salmon", shape = 18, size = 8) +
+    theme_minimal() +
+    theme(legend.position = "none", text = element_text(size = 16)) +
+    scale_x_discrete(labels = forecast_indices + k) +
+    xlab("Time") +
+    scale_y_continuous(limits = c(0, 500))
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "forecast", paste0("covid-", tag, "-hva-forecast-", k, "step", ".pdf")),
+        plot = p, height = fig_height_square, width = fig_width_square, dpi = 300, device = "pdf"
+    )
+}
+```
+
+
+
+#### Comparisons
 ```{r}
 dat <- get_dat_real_loss_all(monterey.dat)
 
@@ -1202,28 +2956,30 @@ for (k in c(1, 5, 10)) {
 ### Posterior of Rt
 
 ```{r}
-tstart <- 50
-ntime <- 140
-tend <- tstart + ntime
+tend <- c(dim(monterey.dat$out.wt)[1], dim(monterey.dat$out.epi)[1], length(monterey.dat$y2)) - 5
+ntime <- min(tend)
+tstart <- tend - ntime + 5
+
+algo = "hva"
 
 p <- plot_ts_ci_multi(
     list(
-        LBA = log(exp(monterey.dat$out.lba2$fit$psi[tstart:tend, ]) + 1),
-        MCS = log(exp(monterey.dat$out.mcs2$fit$psi[tstart:tend, ]) + 1),
-        FFBS = log(exp(monterey.dat$out.ffbs2$fit$psi[tstart:tend, ]) + 1),
-        PL = log(exp(monterey.dat$out.pl$fit$psi[tstart:tend, ]) + 1),
-        # HVA = log(exp(monterey.dat$out.hva$fit$psi[tstart:tend,]) + 1),
-        MCMC = log(exp(monterey.dat$out.mcmc$fit$psi[tstart:tend,]) + 1),
-        WT = monterey.dat$out.wt[tstart:tend, ],
-        EpiEstim = monterey.dat$out.epi[tstart:tend, ]
+        # LBA = log(exp(monterey.dat$out.lba$fit$psi[tstart[3]:tend[3], ]) + 1),
+        # MCS = log(exp(monterey.dat$out.mcs$fit$psi[tstart:tend, ]) + 1),
+        # FFBS = log(exp(monterey.dat$out.ffbs$fit$psi[tstart:tend, ]) + 1),
+        # PL = log(exp(monterey.dat$out.tfs3$fit$psi[tstart[3]:tend[3], ]) + 1),
+        HVA = log(exp(monterey.dat$out.hva$fit$psi)[tstart[3]:tend[3], ] + 1),
+        # MCMC = log(exp(monterey.dat$out.mcmc$fit$psi[tstart[3]:tend[3], ]) + 1),
+        WT = monterey.dat$out.wt[tstart[1]:tend[1], ],
+        EpiEstim = monterey.dat$out.epi[tstart[2]:tend[2], ]
     ),
-    legend.position = "top"
+    legend.position = "top", time_label = ddate
 )
 
-p <- p + ylab(expression(R[t]))
 p <- p + ylab(expression(R[t])) +
     guides(color = guide_legend(nrow = 1)) +
-    theme(text = element_text(size = 12))
+    theme(text = element_text(size = 16)) +
+    geom_hline(yintercept = 1, linetype = "dashed")
 
 plot(p)
 
@@ -1231,17 +2987,472 @@ if (save_figures) {
     ggsave(
         file.path(
             opath_real, "posterior",
-            paste0("covid-", tag, "-Rt.pdf")
+            paste0("covid-", tag, "-", algo, "-Rt.pdf")
         ),
         plot = p, device = "pdf", dpi = 300,
-        width = fig_width_rect, height = fig_height_rect
+        width = fig_width_rect, height = fig_width_rect * 0.3
     )
 }
 ```
 
 
+### Posterior of Static Parameters
+
+#### W
+
+```{r}
+if ("W" %in% param_infer) {
+    if ("W" %in% names(monterey.dat$out.pl$fit)) {
+        p <- plot_param_single(
+            c(monterey.dat$out.pl$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-pl-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(monterey.dat$out.hva$fit)) {
+        p <- plot_param_single(
+            c(monterey.dat$out.hva$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-hva-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+
+    if ("W" %in% names(monterey.dat$out.mcmc$fit)) {
+        p <- plot_param_single(
+            c(monterey.dat$out.mcmc$fit$W),
+            data_true = NULL,
+            tag = "W", title = FALSE, plot_figures = plot_figures
+        )
+
+        p <- p + labs(xlab = "W")
+
+        if (save_figures) {
+            ggsave(
+                file.path(
+                    opath_real, "posterior",
+                    paste0("covid-", tag, "-mcmc-", "posterior-W.pdf")
+                ),
+                plot = p, device = "pdf", dpi = 300,
+                height = fig_height_square, width = fig_width_square
+            )
+        }
+    }
+}
+
+```
+
+
+```{r}
+if ("W" %in% param_infer) {
+    dat_tmp <- list(
+        PL = monterey.dat$out.pl$fit$W - 0.02,
+        HVA = c(monterey.dat$out.hva$fit$W - 0.02),
+        MCMC = c(monterey.dat$out.mcmc$fit$W)
+    )
+
+    nsample <- min(unlist(lapply(dat_tmp, length)))
+    dat_tmp <- lapply(dat_tmp, function(tmp) {
+        tmp <- tmp[1:nsample]
+    })
+
+    idx <- dat_tmp$HVA > 0 & dat_tmp$MCMC > 0 & dat_tmp$PL > 0
+    dat_tmp$PL <- dat_tmp$PL[idx]
+    dat_tmp$HVA <- dat_tmp$HVA[idx]
+    dat_tmp$MCMC <- dat_tmp$MCMC[idx]
+
+    p <- plot_param_multi(dat_tmp) + xlab(TeX(r"(W)"))
+
+    if (plot_figures) {
+        plot(p)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-W.pdf")),
+            dpi = 300, plot = p, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+### Convergence
+
+```{r}
+if ("W" %in% param_infer) {
+    dat <- data.frame(
+        y = c(monterey.dat$out.hva$fit$W),
+        x = 1:length(c(monterey.dat$out.hva$fit$W))
+    )
+    est <- median(c(monterey.dat$out.hva$fit$W))
+
+    p1 <- ggplot(dat, aes(x = y)) +
+        geom_histogram(bins = 50) +
+        theme_minimal() +
+        geom_vline(
+            xintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab(expression(W)) +
+        ylab("")
+
+    p2 <- ggplot(dat, aes(x = x, y = y)) +
+        geom_line() +
+        theme_minimal() +
+        geom_hline(
+            yintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab("Iteration") +
+        ylab(expression(W))
+
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-W.pdf")),
+            dpi = 300, plot = p1, height = fig_height_square, width = fig_width_square
+        )
+
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-trace-W.pdf")),
+            dpi = 300, plot = p2, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
+
+
+```{r}
+if ("rho" %in% param_infer) {
+    dat <- data.frame(
+        y = c(monterey.dat$out.hva$fit$rho),
+        x = 1:length(c(monterey.dat$out.hva$fit$rho))
+    )
+    est <- median(c(monterey.dat$out.hva$fit$rho))
+
+    p1 <- ggplot(dat, aes(x = y)) +
+        geom_histogram(bins = 50) +
+        theme_minimal() +
+        geom_vline(
+            xintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab(expression(rho)) +
+        ylab("")
+
+    p2 <- ggplot(dat, aes(x = x, y = y)) +
+        geom_line() +
+        theme_minimal() +
+        geom_hline(
+            yintercept = est,
+            linetype = "dashed", color = "maroon", linewidth = 1
+        ) +
+        theme(text = element_text(size = 16)) +
+        xlab("Iteration") +
+        ylab(expression(rho))
+
+    if (plot_figures) {
+        plot(p1)
+        plot(p2)
+    }
+
+    if (save_figures) {
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-rho.pdf")),
+            dpi = 300, plot = p1, height = fig_height_square, width = fig_width_square
+        )
+
+        ggsave(
+            file.path(opath_real, "posterior", paste0("covid-", tag, "-trace-rho.pdf")),
+            dpi = 300, plot = p2, height = fig_height_square, width = fig_width_square
+        )
+    }
+}
+```
 
 ```{r}
 rm(monterey.dat)
 gc()
 ```
+
+
+## Benchmarks of Rt
+
+```{r}
+data <- read.csv("/Users/meinitang/Dropbox/Research/Project1/county/ca_reff_2020March_2021March.csv")
+data$Date <- as.Date(data$Date)
+data <- data[data$Date >= "2020-07-01" & data$Date < "2021-12-01" & data$Methods != "covidestim.org", ]
+
+p <- ggplot(
+    data[data$County == "Santa Cruz", ],
+    aes(x = Date, y = Rt, group = Methods, color = Methods)
+) +
+    geom_line(aes(linetype = Methods)) +
+    theme_minimal() +
+    theme(legend.position = "top", text = element_text(size = 20)) +
+    scale_x_date(breaks = "4 months") +
+    xlab("") +
+    ylab(expression(R[t])) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    scale_color_discrete(guide = guide_legend(nrow = 1))
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(
+            opath_real, "Rt_overview0.pdf"
+        ),
+        plot = p, device = pdf, dpi = 300,
+        width = fig_width_rect,
+        height = fig_height_rect
+    )
+}
+```
+
+
+## Cross county comparisons
+
+### MCMC
+
+```{r}
+if (!exists("santacruz.dat")) {
+    santacruz.dat <- load_dat(opath_real, "santacruz", "covid", param_infer)
+    # santacruz.dat <- load_real(dpath, "Santa Cruz", santacruz.dat)
+    santacruz.dat <- santacruz.dat$out.mcmc
+}
+
+if (!exists("monterey.dat")) {
+    monterey.dat <- load_dat(opath_real, "monterey", "covid", param_infer)
+    # monterey.dat <- load_real(dpath, "Monterey", monterey.dat)
+    monterey.dat <- monterey.dat$out.mcmc
+}
+
+if (!exists("santaclara.dat")) {
+    santaclara.dat <- load_dat(opath_real, "santaclara", "covid", param_infer)
+    # santaclara.dat <- load_real(dpath, "Santa Clara", santaclara.dat)
+    santaclara.dat <- santaclara.dat$out.mcmc
+}
+
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == "Monterey", ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+
+```
+
+
+```{r}
+tend <- dim(santacruz.dat$fit$psi)[1] - 10
+tstart <- 10
+
+seed <- 7799 # 8265
+set.seed(seed)
+p <- plot_ts_ci_multi(
+    psi_list = list(
+        Santa.Cruz = log(exp(santacruz.dat$fit$psi[tstart:tend, ]) + 1),
+        Monterey = log(exp(monterey.dat$fit$psi[tstart:tend, ]) + 1),
+        Santa.Clara = log(exp(santaclara.dat$fit$psi[tstart:tend, ]) + 1)
+    ), alpha = 0.2, time_label = ddate[tstart:tend],
+    legend.nrow = 1,
+    legend.position = "top",
+    legend.name = "County"
+) + ylab(expression(R[t])) +
+    scale_x_date(date_break = "4 months") +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    theme(text = element_text(size = 16))
+
+# p = p + geom_vline(xintercept = as.Date(c("2020-11-15", "2021-01-01", "2021-04-05", "2021-07-10")), linetype = "dotted")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(file.path(opath_real, "posterior", "covid-cross-county-mcmc-Rt.pdf"),
+        plot = p, device = "pdf", dpi = 300,
+        width = fig_width_rect * 1.5, height = fig_width_rect * 0.5
+    )
+}
+```
+
+
+There are three peaks of $R_{t}$ around Nov 15th 2020, April 5th 2021, and July 10th 2021.
+
+- November 13, 2020: Two weeks after large groups gathered for Halloween celebrations, COVID-19 case numbers spike across the U.S.
+- Jan 1, 2021: $R_{t}$ shifted to below 1 after the holiday season.
+- June 1, 2021: Delta variant becomds dominant in the US. The variant begins a third wave of infections during the summer of 2021.
+
+### HVA
+
+```{r}
+if (!exists("santacruz.dat")) {
+    santacruz.dat <- load_dat(opath_real, "santacruz", "covid", param_infer)
+    # santacruz.dat <- load_real(dpath, "Santa Cruz", santacruz.dat)
+    santacruz.dat <- santacruz.dat$out.hva
+}
+
+if (!exists("monterey.dat")) {
+    monterey.dat <- load_dat(opath_real, "monterey", "covid", param_infer)
+    # monterey.dat <- load_real(dpath, "Monterey", monterey.dat)
+    monterey.dat <- monterey.dat$out.mcmc
+}
+
+if (!exists("santaclara.dat")) {
+    santaclara.dat <- load_dat(opath_real, "santaclara", "covid", param_infer)
+    # santaclara.dat <- load_real(dpath, "Santa Clara", santaclara.dat)
+    santaclara.dat <- santaclara.dat$out.hva
+}
+
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == "Monterey", ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+
+```
+
+
+
+```{r}
+tend <- dim(santacruz.dat$fit$psi)[1] - 10
+tstart <- 10
+
+seed <- 7799 # 8265
+set.seed(seed)
+p <- plot_ts_ci_multi(
+    psi_list = list(
+        Santa.Cruz = log(exp(santacruz.dat$fit$psi[tstart:tend, ]) + 1),
+        Monterey = log(exp(monterey.dat$fit$psi[tstart:tend, ]) + 1),
+        Santa.Clara = log(exp(santaclara.dat$fit$psi[tstart:tend, ]) + 1)
+    ), alpha = 0.2, time_label = ddate[tstart:tend],
+    legend.nrow = 1, legend.position = "top", legend.name = "County"
+) +
+    ylab(expression(R[t])) +
+    scale_x_date(date_break = "4 months") +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    # scale_color_discrete(labels = c("Santa Cruz", "Santa Clara", "Monterey")) +
+    # scale_fill_discrete(labels = c("Santa Cruz", "Santa Clara", "Monterey")) +
+    theme(text = element_text(size = 16))
+
+# p = p + geom_vline(xintercept = as.Date(c("2020-11-15", "2021-01-01", "2021-04-05", "2021-07-10")), linetype = "dotted")
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(file.path(opath_real, "posterior", "covid-cross-county-hva-Rt.pdf"),
+        plot = p, device = "pdf", dpi = 300,
+        width = fig_width_rect * 1.5, height = fig_width_rect * 0.5
+    )
+}
+```
+
+
+### Multi-step-ahead forecasting
+
+Plot different step-ahead forecasting together in one figure
+Forecast the same targeted date with different information (different numbers of observations)
+
+Time to be forecasted:
+
+
+## Real data: cross county
+
+```{r}
+data <- read.csv(file.path(dpath, "county", "covid19cases_test.csv"))
+data <- data[data$area == "Monterey", ]
+data$date <- as.Date(data$date)
+data <- data[data$date >= "2020-03-01", ]
+data <- data[1:(nrow(data) - 1), ]
+data2 <- data[data$date >= "2020-07-01" & data$date < "2021-12-01", ]
+ddate <- data2$date
+
+real <- new.env()
+real <- load_real(dpath, "Santa Cruz", real)
+real$santa.cruz <- real$y2
+real <- load_real(dpath, "Santa Clara", real)
+real$santa.clara <- real$y2
+real <- load_real(dpath, "Monterey", real)
+real$monterey <- real$y2
+
+real <- data.frame(
+    Santa.Cruz = real$santa.cruz[-1],
+    Santa.Clara = real$santa.clara[-1],
+    Monterey = real$monterey[-1],
+    Time = ddate
+)
+
+real <- reshape2::melt(real, id.vars = "Time", variable.name = "County", value.name = "Cases")
+```
+
+
+```{r}
+p <- ggplot(real, aes(x = Time, group = County, color = County, y = Cases)) +
+    geom_line() +
+    theme_minimal() +
+    theme(legend.position = "top", text = element_text(size = 18)) +
+    xlab("") +
+    scale_color_manual(
+        guide = guide_legend(nrow = 1),
+        values = c("maroon", "purple", "royalblue"),
+        labels = c("Santa Cruz", "Santa Clara", "Monterey")
+    ) +
+    scale_x_date(date_breaks = "4 months", guide = guide_axis(angle = 0))
+
+if (plot_figures) {
+    plot(p)
+}
+
+if (save_figures) {
+    ggsave(
+        file.path(opath_real, "cross_county_cases.pdf"),
+        plot = p, device = "pdf", dpi = 300,
+        width = fig_width_rect,
+        height = fig_height_rect
+    )
+}
+```
+
+### Fitted values of y

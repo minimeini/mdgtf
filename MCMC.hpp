@@ -12,17 +12,16 @@
 #include "LinkFunc.hpp"
 #include "LinearBayes.hpp"
 
-
 namespace MCMC
 {
     class Posterior
     {
     public:
         static void update_wt( // Checked. OK.
-            arma::vec &wt, // (nT + 1) x 1
+            arma::vec &wt,     // (nT + 1) x 1
             arma::vec &wt_accept,
-            ApproxDisturbance &approx_dlm, 
-            const arma::vec &y,         // (nT + 1) x 1
+            ApproxDisturbance &approx_dlm,
+            const arma::vec &y, // (nT + 1) x 1
             Model &model,
             const Dist &w0_prior,
             const double &mh_sd = 0.1)
@@ -36,7 +35,7 @@ namespace MCMC
                 arma::vec lam = model.wt2lambda(y, wt); // Checked. OK.
 
                 double logp_old = 0.;
-                for (unsigned int i = t; i <= model.dim.nT; i ++)
+                for (unsigned int i = t; i <= model.dim.nT; i++)
                 {
                     logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
                 } // Checked. OK.
@@ -47,7 +46,7 @@ namespace MCMC
                 Metropolis-Hastings
                 */
                 approx_dlm.update_by_wt(y, wt);
-                arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1); // nT x 1, f0, Fn and psi is updated
+                arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1);               // nT x 1, f0, Fn and psi is updated
                 arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.); // nT x 1
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink.name); // nT x 1
@@ -76,7 +75,7 @@ namespace MCMC
                 lam = model.wt2lambda(y, wt); // Checked. OK.
 
                 double logp_new = 0.;
-                for (unsigned int i = t; i <= model.dim.nT; i ++)
+                for (unsigned int i = t; i <= model.dim.nT; i++)
                 {
                     logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
                 } // Checked. OK.
@@ -100,7 +99,6 @@ namespace MCMC
                     logps = logp_old;
                     wt.at(t) = wt_old;
                 }
-
             }
         } // func update_wt
 
@@ -138,10 +136,10 @@ namespace MCMC
             case AVAIL::Dist::invgamma:
             {
                 double nSw_new = W_prior.par2 + res;                  // prior_params.at(1) = nSw
-                W = 1. / R::rgamma(0.5 *W_prior.par1, 2. / nSw_new); // prior_params.at(0) = nw_new
+                W = 1. / R::rgamma(0.5 * W_prior.par1, 2. / nSw_new); // prior_params.at(0) = nw_new
                 W_accept += 1.;
                 break;
-            }            
+            }
             default:
             {
                 break;
@@ -157,7 +155,8 @@ namespace MCMC
             Model &model,
             const arma::vec &y, // nobs x 1
             const arma::vec &hpsi,
-            const double &mh_sd = 1.)
+            const double &mh_sd = 1.,
+            const double &min_var = 0.1)
         {
             // double mu0_old = mu0;
             double mu0_old = model.dobs.par1;
@@ -174,14 +173,20 @@ namespace MCMC
                 lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink.name, mu0_old);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
-                Vt_hat.at(t) = ApproxDisturbance::func_Vt_approx(lambda.at(t), model.dobs, model.flink.name);
+                // Vt_hat.at(t) = ApproxDisturbance::func_Vt_approx(lambda.at(t), model.dobs, model.flink.name);
             }
+
+            Vt_hat = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink.name);
 
             arma::vec tmp = 1. / Vt_hat;
             double mu0_prec = arma::accu(tmp);
             double mu0_var = 1. / mu0_prec;
             double mu0_sd = std::sqrt(mu0_var);
-            double mu0_new = R::rnorm(mu0_old, mu0_sd * mh_sd);
+            mu0_sd = std::max(mu0_sd, min_var);
+            mu0_sd *= mh_sd;
+            bound_check(mu0_sd, "MCMC::posterior::update_mu0: mu0_sd", true, true);
+
+            double mu0_new = R::rnorm(mu0_old, mu0_sd);
 
             // logp_mu0 = logp_old;
             if (mu0_new > -EPS) // non-negative
@@ -204,7 +209,7 @@ namespace MCMC
                     // logp_mu0 = logp_new;
                 }
             }
-        
+
             bound_check(mu0, "Posterior::update_mu0");
             return mu0;
         } // func update_mu0
@@ -247,7 +252,7 @@ namespace MCMC
             {
                 rho_new = R::rnorm(rho_old, mh_sd * rho_old); // mh_sd here is the coefficient of variation, i.e., sd/mean.
                 success = (rho_new > 0) ? true : false;
-                cnt ++;
+                cnt++;
             }
 
             double logp_new = R::dgamma(rho_new, rho_prior.par1, 1. / rho_prior.par2, true);
@@ -313,9 +318,10 @@ namespace MCMC
                     {
                         par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
                         success = (par1_new > 0) ? true : false;
-                        cnt ++;
+                        cnt++;
                     }
-                } else // gaussian
+                }
+                else // gaussian
                 {
                     par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
                 }
@@ -323,7 +329,6 @@ namespace MCMC
                 logprior_par1_new = Prior::dprior(par1_new, par1_prior, true, false);
                 logp_new += logprior_par1_new;
             } // par1
-
 
             double par2_new = par2_old;
             double logprior_par2_old = 0.;
@@ -386,7 +391,6 @@ namespace MCMC
 
         } // update_lag
 
-
         static arma::vec update_dlag_hmc(
             double &par1_accept,
             double &par2_accept,
@@ -406,13 +410,12 @@ namespace MCMC
             double par1_old = model.transfer.dlag.par1;
             double par2_old = model.transfer.dlag.par2;
 
-
             // log of conditional posterior of lag parameters.
             double logp_old = 0.;
             logp_old += Prior::dprior(par1_old, par1_prior, true, true); // TODO: check it
             logp_old += Prior::dprior(par2_old, par2_prior, true, true); // TODO: check it
 
-            for (unsigned int t = 1; t <= model.dim.nT; t ++)
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
@@ -482,10 +485,9 @@ namespace MCMC
             p = p - (0.5 * epsilon) * grad_U;
             p = -p; // negate momentum for symmetry
 
-
             // log of conditional posterior for the proposed lag parameters.
             double logp_new = 0.;
-            for (unsigned int t = 1; t <= model.dim.nT; t ++)
+            for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
@@ -521,8 +523,6 @@ namespace MCMC
 
     }; // class Posterior
 
-    
-
     class Disturbance
     {
     public:
@@ -537,9 +537,7 @@ namespace MCMC
         {
             dim = model.dim;
             y = y_in;
-
         }
-
 
         void init(const Rcpp::List &mcmc_settings)
         {
@@ -586,13 +584,11 @@ namespace MCMC
                 nthin = Rcpp::as<unsigned int>(opts["nthin"]);
             }
 
-
             nsample = 100;
             if (opts.containsElementNamed("nsample"))
             {
                 nsample = Rcpp::as<unsigned int>(opts["nsample"]);
             }
-
 
             ntotal = nburnin + nthin * nsample + 1;
 
@@ -600,6 +596,18 @@ namespace MCMC
             if (opts.containsElementNamed("num_step_ahead_forecast"))
             {
                 nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
+            }
+
+            nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
+            if (opts.containsElementNamed("num_eval_forecast_error"))
+            {
+                nforecast_err = Rcpp::as<unsigned int>(opts["num_eval_forecast_error"]);
+            }
+
+            tstart_pct = 0.9;
+            if (opts.containsElementNamed("tstart_pct"))
+            {
+                tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
             }
 
             W = 0.01;
@@ -664,7 +672,6 @@ namespace MCMC
                 }
             }
 
-
             par2 = 0.;
             par2_stored.set_size(nsample);
             bool infer_par2 = false;
@@ -693,7 +700,6 @@ namespace MCMC
 
             w0_prior.init("gaussian", 0., W);
 
-
             double nw = W_prior.par1;
             double nSw = W_prior.par1 * W_prior.par2;
             double nw_new = nw + (double)wt.n_elem - 2.;
@@ -702,9 +708,8 @@ namespace MCMC
             return;
         }
 
-
         static Rcpp::List default_settings()
-        {    
+        {
             Rcpp::List Wopts;
             Wopts["infer"] = true;
             Wopts["init"] = 0.01;
@@ -743,7 +748,7 @@ namespace MCMC
             opts["rho"] = rho_opts;
             opts["par1"] = par1_opts;
             opts["par2"] = par2_opts;
-            
+
             opts["epsilon"] = 0.01;
             opts["L"] = 10;
             opts["m"] = Rcpp::NumericVector::create(1., 1.);
@@ -755,6 +760,8 @@ namespace MCMC
             opts["nsample"] = 100;
 
             opts["num_step_ahead_forecast"] = 0;
+            opts["num_eval_forecast_error"] = 10;
+            opts["tstart_pct"] = 0.9;
 
             return opts;
         }
@@ -801,19 +808,24 @@ namespace MCMC
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             Rcpp::List out = Model::forecast(
-                y, psi_stored, W_stored, model, nforecast
-            );
+                y, psi_stored, W_stored, model, nforecast);
 
             return out;
         }
-        
+
         Rcpp::List forecast_error(
-            const Model &model, 
-            const std::string &loss_func = "quadratic", 
+            const Model &model,
+            const std::string &loss_func = "quadratic",
             const unsigned int &kstep = 1,
             const bool &verbose = VERBOSE)
         {
             const unsigned int ntime = model.dim.nT;
+            unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
+            tstart = std::max(tstart, kstep);
+            tstart += 1;
+            tstart = std::max(tstart, static_cast<unsigned int>(tstart_pct * ntime));
+
+            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, ntime - kstep); // nforecast x 1
 
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
@@ -825,19 +837,13 @@ namespace MCMC
                 model.transfer.dlag.par1,
                 model.transfer.dlag.par2};
 
-            unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
-            tstart = std::max(tstart, kstep);
-            tstart += 1;
-
             arma::vec yall = y;
             arma::vec wt_all = wt;
             arma::mat wt_stored_all = wt_stored; // (nT + 1) x nsample
 
-            arma::uvec success(ntime + 1, arma::fill::ones);
-            success.head(tstart).fill(0);
-            success.tail(kstep + 2).fill(0);
+            arma::uvec success(ntime + 1, arma::fill::zeros); // 11 if forecasting is successfully performed.
 
-            for (unsigned int t = 0; t < ntime; t ++)
+            for (unsigned int t = 0; t < ntime; t++)
             {
                 if (t < tstart || t >= (ntime - kstep))
                 {
@@ -847,19 +853,28 @@ namespace MCMC
                     unsigned int nelem = idxe - idxs + 1;
                     ysub.head(nelem) = y.subvec(idxs, idxe);
 
-                    for (unsigned int i = 0; i < nsample; i ++)
+                    for (unsigned int i = 0; i < nsample; i++)
                     {
                         ycast.tube(t, i) = ysub;
                     }
-                    
                 }
             }
 
             Model submodel = model;
 
-            for (unsigned int t = tstart; t < (ntime - kstep); t++)
+            /**
+             * @brief Evaluate performance of k-step-ahead-forecasting
+             *
+             */
+            for (unsigned int i = 0; i < time_indices.n_elem; i++)
             {
+                /**
+                 * @brief Perform k-step-ahead forecasting for each using all data up to time `t`, for each t.
+                 *
+                 */
                 Rcpp::checkUserInterrupt();
+
+                unsigned int t = time_indices.at(i);
 
                 submodel.dim.nT = t;
                 submodel.dim.init(
@@ -867,8 +882,8 @@ namespace MCMC
                     submodel.dobs.par2);
 
                 submodel.transfer.init(
-                    submodel.dim, submodel.transfer.name, 
-                    submodel.transfer.fgain.name, 
+                    submodel.dim, submodel.transfer.name,
+                    submodel.transfer.fgain.name,
                     submodel.transfer.dlag.name, lag_param);
 
                 wt.clear();
@@ -883,22 +898,24 @@ namespace MCMC
 
                 try
                 {
-                    infer(submodel, false);
+                    infer(submodel, false); // New MCMC inference.
                     ynew = Model::forecast(
                         y, psi_stored, W_stored,
                         submodel.dim, submodel.transfer,
                         submodel.flink.name,
                         submodel.dobs.par1, kstep); // k x nsample, y[t + 1], ..., y[t + k]
+
+                    success.at(t) = 1;
                 }
-                catch(const std::exception& e)
+                catch (const std::exception &e)
                 {
+                    std::cerr << "\n Forecasting failed at t = " << t << std::endl;
                     success.at(t) = 0;
                 }
-                
 
                 for (unsigned int j = 0; j < kstep; j++)
                 {
-                    ycast.slice(j).row(t) = ynew.row(j);                                      // 1 x nsample
+                    ycast.slice(j).row(t) = ynew.row(j); // 1 x nsample
                     double ymin = arma::min(ynew.row(j));
                     double ymax = arma::max(ynew.row(j));
                     double ytrue = yall.at(t + 1 + j);
@@ -913,7 +930,7 @@ namespace MCMC
                     Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
                 }
             } // k-step ahead forecasting with information D[t] for each t.
-            
+
             if (verbose)
             {
                 Rcpp::Rcout << std::endl;
@@ -941,7 +958,7 @@ namespace MCMC
 
             for (unsigned int j = 0; j < kstep; j++)
             {
-                arma::vec ycov_tmp0 = y_cov_cast.col(j);
+                arma::vec ycov_tmp0 = y_cov_cast.col(j); // ntime x 1
                 arma::vec ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
                 y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
 
@@ -1083,10 +1100,10 @@ namespace MCMC
                 {
                     arma::vec out = Posterior::update_dlag(
                         par1_accept, par2_accept, model,
-                        y, hpsi, par1_prior, par2_prior, 
+                        y, hpsi, par1_prior, par2_prior,
                         par1_mh_sd, par2_mh_sd, max_lag);
                     // arma::vec out = Posterior::update_dlag_hmc(
-                    //     par1_accept, par2_accept, model, y, hpsi, 
+                    //     par1_accept, par2_accept, model, y, hpsi,
                     //     par1_prior, par2_prior, epsilon, L, m, max_lag);
 
                     par1 = out.at(0);
@@ -1096,7 +1113,6 @@ namespace MCMC
                 if (mu0_prior.infer)
                 {
                     mu0 = Posterior::update_mu0(mu0_accept, model, y, hpsi, mu0_mh_sd);
-                    
                 }
 
                 if (rho_prior.infer)
@@ -1130,18 +1146,16 @@ namespace MCMC
                 {
                     Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
                 }
-                
+
             } // end a single iteration
 
             if (verbose)
             {
                 Rcpp::Rcout << std::endl;
             }
-            
+
             return;
         }
-
-        
 
     private:
         double epsilon = 0.01;
@@ -1154,6 +1168,8 @@ namespace MCMC
         unsigned int nsample = 100;
         unsigned int ntotal = 200;
         unsigned int nforecast = 0;
+        unsigned int nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
+        double tstart_pct = 0.9;
 
         unsigned int max_lag = 30;
 
@@ -1195,11 +1211,7 @@ namespace MCMC
         double W = 0.01;
         arma::vec W_stored;
         double W_accept = 0.;
-
-        
     };
 }
-
-
 
 #endif

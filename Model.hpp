@@ -514,6 +514,10 @@ public:
 
             for (unsigned int t = 0; t < k; t++)
             {
+                /**
+                 * @brief `t + nT`-step-ahead forecasting
+                 * 
+                 */
                 unsigned int idx = t + nT; // idx of old
                 psi_vec.at(idx + 1) = psi_vec.at(idx);
                 ft_vec.at(idx + 1) = TransFunc::func_ft(
