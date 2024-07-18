@@ -1720,12 +1720,12 @@ namespace SMC
             Rcpp::List opts = opts_in;
             SequentialMonteCarlo::init(opts);
 
-            prior_W.infer = false;
-            prior_mu0.infer = false;
-            B = 1;
+            // prior_W.infer = false;
+            // prior_mu0.infer = false;
+            // B = 1;
 
-            Wt.set_size(dim.nT + 1);
-            Wt.fill(prior_W.val);
+            // Wt.set_size(dim.nT + 1);
+            // Wt.fill(prior_W.val);
 
             weights_forward.set_size(dim.nT + 1, N);
             weights_forward.zeros();
@@ -1755,46 +1755,17 @@ namespace SMC
             arma::vec ci_prob = {0.025, 0.5, 0.975};
             Rcpp::List output;
 
-            if (summarize)
-            {
-                arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
-                output["psi_filter"] = Rcpp::wrap(psi_f);
-            }
-            else
-            {
-                output["psi_filter"] = Rcpp::wrap(psi_forward);
-            }
-
-            if (dim.regressor_baseline)
-            {
-                arma::mat mu0_filter = Theta.row_as_mat(dim.nP - 1);
-                output["mu0_filter"] = Rcpp::wrap(mu0_filter);
-            }
-
+            arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
+            output["psi_filter"] = Rcpp::wrap(psi_f);
             output["eff_forward"] = Rcpp::wrap(eff_forward);
 
             if (smoothing)
             {
-                if (summarize)
-                {
-                    arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
-                    output["psi_backward"] = Rcpp::wrap(psi_b);
+                arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
+                output["psi_backward"] = Rcpp::wrap(psi_b);
 
-                    arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-                    output["psi"] = Rcpp::wrap(psi);
-                }
-                else
-                {
-                    output["psi_backward"] = Rcpp::wrap(psi_backward);
-                    output["psi"] = Rcpp::wrap(psi_smooth);
-                }
-
-                if (dim.regressor_baseline)
-                {
-                    arma::mat mu0_smooth = Theta_smooth.row_as_mat(dim.nP - 1);
-                    output["mu0"] = Rcpp::wrap(mu0_smooth);
-                }
-
+                arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
+                output["psi"] = Rcpp::wrap(psi);
                 output["eff_backward"] = Rcpp::wrap(eff_backward);
             }
 
@@ -1935,18 +1906,19 @@ namespace SMC
 
         void forward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
+            const bool full_rank = false;
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < y.n_elem; t++)
             {
                 yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
             }
 
-            mu0_filter.fill(model.dobs.par1); // N x 1
+            // mu0_filter.fill(model.dobs.par1); // N x 1
 
-            if (arma::any(W_filter < EPS))
-            {
-                throw std::invalid_argument("FFBS::filter: W_filter should not be zero.");
-            }
+            // if (arma::any(W_filter < EPS))
+            // {
+            //     throw std::invalid_argument("FFBS::filter: W_filter should not be zero.");
+            // }
 
             // y: (nT + 1) x 1
 
@@ -1988,6 +1960,8 @@ namespace SMC
                 Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
                 logq = logq.elem(resample_idx);
+
+
                 updated = updated.elem(resample_idx);
 
                 // tau = tau.elem(resample_idx);
@@ -2001,15 +1975,15 @@ namespace SMC
                 if (use_discount)
                 { // Use discount factor if W is not given
                     bool use_custom_val = (use_custom && t > 1) ? true : false;
-                    prior_W.val = SequentialMonteCarlo::discount_W(
+                    Wt.at(0) = SequentialMonteCarlo::discount_W(
                         Theta.slice(t),
                         custom_discount_factor,
                         use_custom_val,
                         default_discount_factor);
                 }
 
-                Wt.at(t + 1) = prior_W.val;
-                W_filter.fill(prior_W.val);
+                // Wt.at(t + 1) = prior_W.val;
+                // W_filter.fill(prior_W.val);
 
                 // Propagate
                 arma::mat Theta_new(dim.nP, N, arma::fill::zeros);
@@ -2020,8 +1994,8 @@ namespace SMC
                     Theta_new.col(i) = theta_new;
 
                     double ft = StateSpace::func_ft(model, t_new, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
-                    double logp_tmp = R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
+                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
+                    double logp_tmp = R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(Wt.at(0)), true);
 
                     // logq.at(i) = std::log(weights_forward.at(t_old, i) + EPS);
                     if (updated.at(i) == 1)
@@ -2080,7 +2054,7 @@ namespace SMC
         void backward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
             Theta_backward = Theta; // p x N x (nT + B)
-            double WT = W_filter.at(0);
+            double WT = Wt.at(0);
             double Wsqrt = std::sqrt(WT);
 
             arma::vec yhat = y; // (nT + 1) x 1
@@ -2177,7 +2151,7 @@ namespace SMC
                     }
 
                     double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
-                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_filter.at(i));
+                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, par.at(0));
 
                     logp.at(i) += ObsDist::loglike(
                         y.at(t_cur), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
@@ -2233,7 +2207,7 @@ namespace SMC
                 yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
             }
 
-            mu0_filter.fill(model.dobs.par1); // N x 1
+            // mu0_filter.fill(model.dobs.par1); // N x 1
             Theta_smooth.clear();
             Theta_smooth = Theta;
 
@@ -2251,7 +2225,7 @@ namespace SMC
                 mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
                 arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
                 arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += Wt.at(t);
+                Sig.at(0, 0) += Wt.at(0);
                 Sig = arma::symmatu(Sig + Ieps);
                 Sigma_marginal.slice(t) = Sig;
                 try
@@ -2292,12 +2266,12 @@ namespace SMC
                     double ft = StateSpace::func_ft(model, t_cur, gtheta, y);
                     double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
 
-                    double eta = mu0_filter.at(i) + ft;
+                    double eta = par.at(0) + ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
                         lambda, model.dobs, model.flink.name); // (eq 3.11)
 
-                    double delta = yhat.at(t_cur) - mu0_filter.at(i) - ft_tilde;
+                    double delta = yhat.at(t_cur) - par.at(0) - ft_tilde;
                     double delta2 = delta * delta;
 
                     arma::mat FFt_norm = Ft * Ft.t() / Vt;
@@ -2307,16 +2281,16 @@ namespace SMC
                     if (FFt_det < EPS8)
                     {
                         theta_cur = gtheta;
-                        theta_cur.at(0) += R::rnorm(0., std::sqrt(W_filter.at(i)));
-                        logq.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_filter.at(i)), true);
+                        theta_cur.at(0) += R::rnorm(0., std::sqrt(Wt.at(0)));
+                        logq.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(Wt.at(0)), true);
                     }
                     else
                     {
                         arma::mat Gt = LBA::func_Gt(model, gtheta, y.at(t_cur));
                         arma::mat Wprec(model.dim.nP, model.dim.nP, arma::fill::zeros);
-                        Wprec.at(0, 0) = 1. / W_filter.at(i);
+                        Wprec.at(0, 0) = 1. / Wt.at(0);
                         arma::mat prec_part1 = Gt.t() * Wprec * Gt;
-                        prec_part1.at(0, 0) += 1. / W_filter.at(i);
+                        prec_part1.at(0, 0) += 1. / Wt.at(0);
 
                         arma::mat prec = prec_part1 + FFt_norm;
                         arma::mat Rchol, Sigma;
@@ -2334,7 +2308,7 @@ namespace SMC
                         }
 
                         arma::vec mu_part1 = Gt.t() * Wprec * Theta_next.col(i);
-                        mu_part1.at(0) += gtheta.at(0) / W_filter.at(i);
+                        mu_part1.at(0) += gtheta.at(0) / Wt.at(0);
 
                         arma::vec mu = Ft * (delta / Vt);
                         mu = Sigma * (mu_part1 + mu);
@@ -2345,12 +2319,12 @@ namespace SMC
 
                     Theta_cur.col(i) = theta_cur;
 
-                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_filter.at(i)), true);
+                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(Wt.at(0)), true);
                     gtheta = StateSpace::func_gt(model, theta_cur, y.at(t_cur));
-                    logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(W_filter.at(i)), true);
+                    logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
 
                     ft = StateSpace::func_ft(model, t_cur, theta_cur, y);
-                    lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
+                    lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
                     logp.at(i) += ObsDist::loglike(y.at(t_cur), model.dobs.name, lambda, model.dobs.par2, true);
 
                     logp.at(i) -= MVNorm::dmvnorm2(Theta_next.col(i), mu_marginal.col(t_next), Prec_marginal.slice(t_next), true);
