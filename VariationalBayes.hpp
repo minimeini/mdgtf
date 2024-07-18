@@ -1772,17 +1772,9 @@ namespace VB
                         W_stored.at(idx_run) = W;
                     }
 
-                    if (mu0_prior.infer || model_in.dim.regressor_baseline)
+                    if (mu0_prior.infer)
                     {
-                        if (model_in.dim.regressor_baseline)
-                        {
-                            arma::vec mu0 = smc.get_mu0();
-                            mu0_stored2.col(idx_run) = mu0;
-                        }
-                        else
-                        {
-                            mu0_stored.at(idx_run) = mu0;
-                        }
+                        mu0_stored.at(idx_run) = mu0;
                     }
 
                     if (rho_prior.infer)
@@ -1809,10 +1801,6 @@ namespace VB
                 Rcpp::Rcout << std::endl;
             }
 
-            if (model_in.dim.regressor_baseline)
-            {
-                mu0_prior.infer = true;
-            }
         }
 
         Rcpp::List get_output()
@@ -1830,14 +1818,7 @@ namespace VB
 
             if (mu0_prior.infer)
             {
-                if (dim.regressor_baseline)
-                {
-                    output["mu0"] = Rcpp::wrap(mu0_stored2);
-                }
-                else
-                {
-                    output["mu0"] = Rcpp::wrap(mu0_stored);
-                }
+                output["mu0"] = Rcpp::wrap(mu0_stored);
             }
 
             if (rho_prior.infer)

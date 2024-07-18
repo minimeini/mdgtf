@@ -450,4 +450,14 @@ arma::vec evaluate(
 	return out;
 }
 
+
+arma::vec logp_shifted(const arma::vec &logp)
+{
+	arma::vec logp_new = logp;
+	double logp_max = logp.max();
+	logp_new.for_each([&logp_max](arma::vec::elem_type &val)
+					  { val -= logp_max; });
+	return logp_new;
+}
+
 #endif

@@ -1422,31 +1422,31 @@ public:
         return theta_next;
     }
 
-    static arma::vec func_state_propagate(
-        const Model &model,
-        const arma::vec &theta_now,
-        const double &ynow,
-        const double &Wsqrt,
-        const bool &positive_noise = false)
-    {
-        arma::vec theta_next = func_gt(model, theta_now, ynow);
+    // static arma::vec func_state_propagate(
+    //     const Model &model,
+    //     const arma::vec &theta_now,
+    //     const double &ynow,
+    //     const double &Wsqrt,
+    //     const bool &positive_noise = false)
+    // {
+    //     arma::vec theta_next = func_gt(model, theta_now, ynow);
 
-        double omega_next = 0.;
-        if (Wsqrt > 0)
-        {
-            omega_next = R::rnorm(0., Wsqrt); // [Input] - Wsqrt
-        }
+    //     double omega_next = 0.;
+    //     if (Wsqrt > 0)
+    //     {
+    //         omega_next = R::rnorm(0., Wsqrt); // [Input] - Wsqrt
+    //     }
         
-        if (positive_noise)                      // t < Theta_now.n_rows
-        {
-            theta_next.at(0) += std::abs(omega_next);
-        }
-        else
-        {
-            theta_next.at(0) += omega_next;
-        }
-        return theta_next;
-    }
+    //     if (positive_noise)                      // t < Theta_now.n_rows
+    //     {
+    //         theta_next.at(0) += std::abs(omega_next);
+    //     }
+    //     else
+    //     {
+    //         theta_next.at(0) += omega_next;
+    //     }
+    //     return theta_next;
+    // }
 
     /**
      * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
@@ -1601,8 +1601,12 @@ public:
                 unsigned int idx = t + nT;
                 double ynow = yvec.at(idx);
                 arma::vec theta_now = Theta_all.slice(idx).col(i);
-
-                arma::vec theta_next = StateSpace::func_state_propagate(model, theta_now, ynow, Wsqrt, false);
+                arma::vec theta_next = StateSpace::func_gt(model, theta_now, ynow);
+                if (Wsqrt > 0)
+                {
+                    theta_next.at(0) += R::rnorm(0., Wsqrt);
+                }
+                // arma::vec theta_next = StateSpace::func_state_propagate(model, theta_now, ynow, Wsqrt, false);
                 double ft_next = StateSpace::func_ft(model, idx + 1, theta_next, yvec);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink.name, mu0);
                 double ynext = 0.;

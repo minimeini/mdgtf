@@ -40,27 +40,75 @@ public:
         return prec;
     }
 
-    static double dmvnorm(const arma::vec &x, const arma::vec &mu, const arma::mat &Sigma, const bool &return_log = true)
+
+    static arma::vec rmvnorm(const arma::vec &loc, const arma::mat &Prec)
     {
-        arma::mat prec = inverse(Sigma, false, true);
-        double logdet = arma::log_det_sympd(prec);
-        double cnst = static_cast<double>(mu.n_elem) * LOG2PI;
-        
+        arma::vec epsilon = arma::randn(loc.n_elem);
+        arma::mat precision_chol = arma::chol(Prec);
+        arma::vec scaled_mu = arma::solve(arma::trimatu(precision_chol.t()), loc);
+        arma::vec x = arma::solve(arma::trimatu(precision_chol), epsilon + scaled_mu);
+
+        return x;
+    }
+
+    static arma::vec rmvnorm2(const arma::vec &loc, const arma::mat &Prec)
+    {
+
+        arma::vec epsilon = arma::randn(loc.n_elem);
+        arma::mat precision_chol = arma::chol(Prec);
+        arma::mat precision_chol_inv = arma::trans(arma::inv(arma::trimatu(precision_chol)));
+        arma::vec x = arma::trans(precision_chol_inv) * (precision_chol_inv * loc + epsilon);
+
+        return x;
+    }
+
+    /**
+     * @brief A potentially more effective way to calculate multivariate normal density for Bayesian inference.
+     *
+     * @param z z = prec_rchol_inv.t() * loc + eps, where eps is a sample from a standard multivariate normal; a sample from this multivariate normal is x = prec_rchol_inv * z.
+     * @param loc Location, the mean of this multivariate normal is mu = Sigma * loc, where Sigma is variance.
+     * @param prec_rchol_inv Left Cholesky of the variance Sigma.
+     * @param return_log
+     * @return double
+     */
+    static double dmvnorm0(const arma::vec &z, const arma::vec &loc, const arma::mat &prec_rchol_inv, const bool &return_log = true)
+    {
+        const double p = static_cast<double>(z.n_elem);
+        double c = p * std::log(2. * arma::datum::pi);
+        c += 2. * arma::accu(arma::log(prec_rchol_inv.diag())); // determinant of variance [checked. OK.]
+        c += arma::dot(z, z);
+
+        arma::vec ll = prec_rchol_inv.t() * loc;
+        c -= 2. * arma::dot(z, ll);
+        c += arma::dot(ll, ll);
+
+        c *= -0.5;
+        if (!return_log)
+        {
+            c = std::exp(c);
+        }
+
+        return c;
+    }
+
+    double dmvnorm(const arma::vec &x, const arma::vec &mu, const arma::mat &Sigma, const bool &return_log = true)
+    {
+        const double p = static_cast<double>(x.n_elem);
+        double c = p * std::log(2. * arma::datum::pi);
+        c += arma::log_det_sympd(arma::symmatu(Sigma));
+
         arma::vec diff = x - mu;
-        double dist = arma::as_scalar(diff.t() * prec * diff);
+        arma::mat prec = arma::inv(Sigma);
 
-        double logprob = - cnst + logdet - dist;
-        logprob *= 0.5;
+        c += arma::as_scalar(diff.t() * prec * diff);
 
-        if (return_log)
+        c *= -0.5;
+        if (!return_log)
         {
-            return logprob;
+            c = std::exp(c);
         }
-        else
-        {
-            logprob = std::min(logprob, UPBND);
-            return std::exp(logprob);
-        }
+
+        return c;
     }
 
     static double dmvnorm2(const arma::vec &x, const arma::vec &mu, const arma::mat &Prec, const bool &return_log = true)
