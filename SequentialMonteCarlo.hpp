@@ -1907,47 +1907,29 @@ namespace SMC
         void forward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
-            arma::vec yhat = y; // (nT + 1) x 1
-            for (unsigned int t = 0; t < y.n_elem; t++)
-            {
-                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            }
-
-            // mu0_filter.fill(model.dobs.par1); // N x 1
-
-            // if (arma::any(W_filter < EPS))
-            // {
-            //     throw std::invalid_argument("FFBS::filter: W_filter should not be zero.");
-            // }
-
-            // y: (nT + 1) x 1
 
             for (unsigned int t = 0; t < dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
 
-                // unsigned int t_old = t;
-                // unsigned int t_new = t + 1;
-                // arma::mat Theta_old = Theta.slice(t_old); // p x N, theta[t]
-
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu;                // nP x N
-                arma::cube Prec, Sigma_chol; // nP x nP x N
-                arma::uvec updated(N, arma::fill::zeros);
+                arma::mat loc(dim.nP, N, arma::fill::zeros);
+                arma::cube prec_chol_inv; // nP x nP x N
+                if (full_rank)
+                {
+                    prec_chol_inv = arma::zeros<arma::cube>(dim.nP, dim.nP, N); // nP x nP x N
+                }
 
-                arma::vec tau = imp_weights_forecast(
-                    mu, Prec, Sigma_chol, logq, updated, // sufficient statistics
-                    model, t + 1,
-                    Theta.slice(t), // theta needs to be resampled
-                    W_filter, mu0_filter, y, yhat);
+                arma::vec tau = qforecast(
+                    loc, prec_chol_inv, logq,     // sufficient statistics
+                    model, t + 1, Theta.slice(t), // theta needs to be resampled
+                    Wt, par, y);
 
                 tau = tau % weights;
                 weights_forward.row(t) = tau.t();
 
                 arma::uvec resample_idx = get_resample_index(tau);
 
-                // Theta_old = Theta_old.cols(resample_idx);
-                // Theta.slice(t) = Theta_old;
                 for (unsigned int k = 0; k <= t; k++)
                 {
                     Theta.slice(k) = Theta.slice(k).cols(resample_idx);
@@ -1955,19 +1937,14 @@ namespace SMC
                     weights_forward.row(k) = wtmp.elem(resample_idx).t();
                 }
 
-                // Sufficient statistics for theta
-                mu = mu.cols(resample_idx);
-                Prec = Prec.slices(resample_idx);
-                Sigma_chol = Sigma_chol.slices(resample_idx);
+                loc = loc.cols(resample_idx);
+                if (full_rank)
+                {
+                    prec_chol_inv = prec_chol_inv.slices(resample_idx);
+                }
                 logq = logq.elem(resample_idx);
 
-                // tau = tau.elem(resample_idx);
-                // weights_forward.row(t_old) = tau.t();
                 eff_forward.at(t + 1) = effective_sample_size(tau);
-
-                // arma::rowvec wetmp = weights_prop_forward.row(t_old);
-                // weights = weights.elem(resample_idx);
-                // weights_prop_forward.row(t_old) = weights.t();
 
                 if (use_discount)
                 { // Use discount factor if W is not given
@@ -1979,39 +1956,39 @@ namespace SMC
                         default_discount_factor);
                 }
 
-                // Wt.at(t + 1) = prior_W.val;
-                // W_filter.fill(prior_W.val);
-
                 // Propagate
                 arma::vec logp(N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
+                    arma::vec zt, theta_new;
+                    if (full_rank)
+                    {
+                        arma::vec eps = arma::randn(dim.nP);
+                        zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                        theta_new = prec_chol_inv.slice(i) * zt;            // scaled
+
+                        logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
+                        double logp_tmp = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
+                        logp.at(i) = logp_tmp;
+                    }
+                    else
+                    {
+                        theta_new = loc.col(i);
+                        theta_new.at(0) += R::rnorm(0, std::sqrt(Wt.at(0)));
+
+                        double logp_tmp = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
+                        logq.at(i) += logp_tmp; // sample from evolution distribution
+                        logp.at(i) = logp_tmp;
+                    }
+
                     Theta.slice(t + 1).col(i) = theta_new;
 
                     double ft = StateSpace::func_ft(model, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
-                    double logp_tmp = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
-
-                    // logq.at(i) = std::log(weights_forward.at(t_old, i) + EPS);
-                    if (full_rank)
-                    {
-                        logq.at(i) += MVNorm::dmvnorm2(theta_new, mu.col(i), Prec.slice(i), true); // sample from posterior
-                    }
-                    else
-                    {
-                        logq.at(i) += logp_tmp; // sample from evolution distribution
-                    }
-
-                    logp.at(i) = logp_tmp;
                     logp.at(i) += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
-
-                    // double logw_old = std::log(weights_prop_forward.at(t_old, i) + EPS);
-                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // logw_old
+                    weights.at(i) = std::exp(logp.at(i) - logq.at(i));
                 }
 
-
-                // eff_forward.at(t_new) = effective_sample_size(weights);
                 log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
 
                 // if (eff_forward.at(t + 1) < 0.95 * N || t >= dim.nT - 1)
@@ -2024,8 +2001,6 @@ namespace SMC
                 // {
                 // Theta.slice(t_new) = Theta_new;
                 // }
-
-                // weights_prop_forward.row(t_new) = weights.t();
 
                 if (verbose)
                 {
