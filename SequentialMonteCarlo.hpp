@@ -2032,24 +2032,7 @@ namespace SMC
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
             arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            // Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
             arma::cube Prec_marginal = Sigma_marginal;
-            // Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
-
-            // arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
-            // Ieps.for_each([](arma::mat::elem_type &val)
-            //               { val *= EPS; });
-            // for (unsigned int t = 1; t <= dim.nT; t++)
-            // {
-            //     mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-            //     arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-            //     arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-            //     Sig.at(0, 0) += WT;
-            //     Sig = arma::symmatu(Sig + Ieps);
-            //     Sigma_marginal.slice(t) = Sig;
-            //     arma::mat Prec = inverse(Sig);
-            //     Prec_marginal.slice(t) = arma::symmatu(Prec);
-            // }
             prior_forward(mu_marginal, Sigma_marginal, Prec_marginal, model, Wt, y);
 
             arma::vec log_marg(N, arma::fill::zeros);
@@ -2064,66 +2047,50 @@ namespace SMC
             {
                 Rcpp::checkUserInterrupt();
 
-                unsigned int t_cur = t;
-                unsigned int t_next = t + 1;
-                arma::mat Theta_next = Theta_backward.slice(t_next); // p x N, theta[t]
-
-                /**
-                 * @brief Resampling using conditional one-step-ahead predictive distribution as weights.
-                 *
-                 */
-
                 arma::vec logq(N, arma::fill::zeros);
                 arma::mat mu;                // nP x N, mean of the posterior (propagation dist.) of theta[t_cur] | y[t_cur:nT], theta[t_next], W
                 arma::cube Prec, Sigma_chol; // nP x nP x N, related to posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
 
                 arma::vec tau = qbackcast(
                     mu, Prec, Sigma_chol, logq,
-                    model, t_cur, Theta_next,
+                    model, t, Theta_backward.slice(t + 1),
                     mu_marginal, Sigma_marginal, Wt, par, y, full_rank);
 
                 tau = tau % weights;
                 arma::uvec resample_idx = get_resample_index(tau);
 
-                Theta_next = Theta_next.cols(resample_idx); // theta[t]
-                Theta_backward.slice(t_next) = Theta_next;
+                Theta_backward.slice(t + 1) = Theta_backward.slice(t + 1).cols(resample_idx);
 
                 mu = mu.cols(resample_idx);
                 Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
 
                 tau = tau.elem(resample_idx);
-                weights_backward.row(t_next) = weights.t();
-                eff_backward.at(t_cur) = effective_sample_size(tau);
-
-                // weights = weights.elem(resample_idx);
-                // weights_prop_backward.row(t_next) = weights.t();
+                weights_backward.row(t + 1) = weights.t();
+                eff_backward.at(t) = effective_sample_size(tau);
 
                 log_marg = log_marg.elem(resample_idx);
                 logq = logq.elem(resample_idx);
-
-                // NEED TO CHANGE PROPAGATE STEP
-                // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
-                arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
+;
                 arma::vec logp(N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
-                    Theta_cur.col(i) = theta_cur;
+                    Theta_backward.slice(t).col(i) = theta_cur;
                     if (full_rank)
                     {
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                        logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
+                        logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t + 1), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
                     }
 
-                    double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
+                    double ft_cur = StateSpace::func_ft(model, t, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, par.at(0));
 
                     logp.at(i) += ObsDist::loglike(
-                        y.at(t_cur), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
+                        y.at(t), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
                     // logp.at(i) -= log_marg.at(i);
                     logp.at(i) -= log_marg.at(i);
-                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t_cur), Prec_marginal.slice(t_cur), true);
+                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t), Prec_marginal.slice(t), true);
                     logp.at(i) += log_marg.at(i);
 
                     // double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
@@ -2134,20 +2101,7 @@ namespace SMC
                 weights.for_each([&wmax](arma::vec::elem_type &val)
                                  { val -= wmax; });
                 weights = arma::exp(weights);
-                // eff_backward.at(t_cur) = effective_sample_size(weights);
-                // if (eff_backward.at(t_cur) < 0.95 * N)
-                // {
-                //     resample_idx = get_resample_index(weights);
-                //     Theta_backward.slice(t_cur) = Theta_cur.cols(resample_idx);
-                //     log_marg = log_marg.elem(resample_idx);
-                //     weights.ones();
-                // }
-                // else
-                // {
-                Theta_backward.slice(t_cur) = Theta_cur;
-                // }
 
-                // weights_prop_backward.row(t_cur) = weights.t();
 
                 if (verbose)
                 {
