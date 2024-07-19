@@ -1271,3 +1271,29 @@ arma::mat dgtf_optimal_nlag(
 
     return stats;
 }
+
+// [[Rcpp::export]]
+arma::vec rmvnorm_arma_solve(const arma::mat &precision, const arma::vec &location, const arma::vec &scaled_mu)
+{
+
+    arma::vec epsilon = arma::randn(precision.n_rows);
+    arma::mat precision_chol = arma::chol(precision);
+    // arma::vec scaled_mu = arma::solve(arma::trimatu(precision_chol.t()), location);
+    arma::vec draw = arma::solve(arma::trimatu(precision_chol), epsilon + scaled_mu);
+
+    return draw;
+}
+
+// [[Rcpp::export]]
+arma::vec rmvnorm_arma_inv(const arma::mat &precision, const arma::vec &location)
+{
+
+    arma::vec epsilon = arma::randn(precision.n_rows);
+    arma::mat precision_chol = arma::chol(precision);
+    arma::mat precision_chol_inv = arma::inv(arma::trimatu(precision_chol));
+    arma::vec draw = precision_chol_inv * (precision_chol_inv.t() * location + epsilon);
+
+    return draw;
+}
+
+

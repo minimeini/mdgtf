@@ -2020,9 +2020,9 @@ namespace SMC
 
         void backward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
+            const bool full_rank = false;
+
             Theta_backward = Theta; // p x N x (nT + B)
-            double WT = Wt.at(0);
-            double Wsqrt = std::sqrt(WT);
 
             // arma::vec yhat = y; // (nT + 1) x 1
             // for (unsigned int t = 0; t < y.n_elem; t++)
@@ -2074,14 +2074,13 @@ namespace SMC
                  */
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::uvec updated(N, arma::fill::zeros);
                 arma::mat mu;                // nP x N, mean of the posterior (propagation dist.) of theta[t_cur] | y[t_cur:nT], theta[t_next], W
                 arma::cube Prec, Sigma_chol; // nP x nP x N, related to posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
 
                 arma::vec tau = qbackcast(
-                    mu, Prec, Sigma_chol, logq, updated,
+                    mu, Prec, Sigma_chol, logq,
                     model, t_cur, Theta_next,
-                    mu_marginal, Sigma_marginal, y);
+                    mu_marginal, Sigma_marginal, Wt, par, y, full_rank);
 
                 tau = tau % weights;
                 arma::uvec resample_idx = get_resample_index(tau);
@@ -2102,7 +2101,6 @@ namespace SMC
 
                 log_marg = log_marg.elem(resample_idx);
                 logq = logq.elem(resample_idx);
-                updated = updated.elem(resample_idx);
 
                 // NEED TO CHANGE PROPAGATE STEP
                 // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
@@ -2112,10 +2110,10 @@ namespace SMC
                 {
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                     Theta_cur.col(i) = theta_cur;
-                    if (updated.at(i) == 1)
+                    if (full_rank)
                     {
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                        logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(WT), true);
+                        logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
                     }
 
                     double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
