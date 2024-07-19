@@ -592,6 +592,7 @@ namespace SMC
 
                 arma::mat G_next = LBA::func_Gt(model, v_cur, y.at(t_cur));
 
+                arma::vec r_cur(model.dim.nP, arma::fill::zeros);
                 arma::mat K_cur(model.dim.nP, model.dim.nP, arma::fill::zeros); // evolution matrix
                 arma::mat U_cur = K_cur;                                        // mean of conditional backward evolution
                 arma::mat Uprec_cur = K_cur;
@@ -619,7 +620,7 @@ namespace SMC
                     Uprec_cur = inverse(Urchol_cur, U_cur);
                     ldetU = arma::log_det_sympd(U_cur);
                 }
-                arma::vec r_cur = v_cur - K_cur * v_next;
+                r_cur = v_cur - K_cur * v_next;
 
                 arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
                 arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
@@ -2021,19 +2022,11 @@ namespace SMC
         void backward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
-
             Theta_backward = Theta; // p x N x (nT + B)
 
-            // arma::vec yhat = y; // (nT + 1) x 1
-            // for (unsigned int t = 0; t < y.n_elem; t++)
-            // {
-            //     yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            // }
-
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
-            arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            arma::cube Prec_marginal = Sigma_marginal;
-            prior_forward(mu_marginal, Sigma_marginal, Prec_marginal, model, Wt, y);
+            arma::cube Prec_marginal(dim.nP, dim.nP, dim.nT + 1);
+            prior_forward(mu_marginal, Prec_marginal, model, Wt, y);
 
             arma::vec log_marg(N, arma::fill::zeros);
             for (unsigned int i = 0; i < N; i++)
@@ -2058,7 +2051,7 @@ namespace SMC
                 arma::vec tau = qbackcast(
                     loc, prec_chol_inv, logq,
                     model, t, Theta_backward.slice(t + 1),
-                    mu_marginal, Sigma_marginal, Wt, par, y, full_rank);
+                    mu_marginal, Prec_marginal, Wt, par, y, full_rank);
 
                 tau = tau % weights;
                 arma::uvec resample_idx = get_resample_index(tau);
@@ -2111,13 +2104,13 @@ namespace SMC
                     logp.at(i) += log_marg.at(i);
 
                     // double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
-                    weights.at(i) = logp.at(i) - logq.at(i); // + logw_next;
+                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_next;
                 } // loop over i, index of particles
 
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
+                // double wmax = weights.max();
+                // weights.for_each([&wmax](arma::vec::elem_type &val)
+                //                  { val -= wmax; });
+                // weights = arma::exp(weights);
 
 
                 if (verbose)
@@ -2149,9 +2142,8 @@ namespace SMC
             Theta_smooth = Theta;
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
-            arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            arma::cube Prec_marginal = Sigma_marginal;
-            prior_forward(mu_marginal, Sigma_marginal, Prec_marginal, model, Wt, y);
+            arma::cube Prec_marginal(dim.nP, dim.nP, dim.nT + 1);
+            prior_forward(mu_marginal, Prec_marginal, model, Wt, y);
 
             for (unsigned int t = 1; t < dim.nT; t++)
             {

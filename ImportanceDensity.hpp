@@ -309,35 +309,32 @@ static arma::vec qforecast(
 
 
 
-/**
- * @brief Construct artifical priors (for backward filtering) via forward iterations.
- * 
- */
+
 static void prior_forward(
-    arma::mat &mu, // nP x (nT + 1)
-    arma::cube &sigma, // nP x nP x (nT + 1)
-    arma::cube &prec, // nP x nP x (nT + 1)
+    arma::mat &mu,     // nP x (nT + 1)
+    arma::cube &prec,  // nP x nP x (nT + 1)
     const Model &model,
     const arma::vec &Wt, // nP x 1
-    const arma::vec &y // (nT + 1) x 1
+    const arma::vec &y   // (nT + 1) x 1
 )
 {
     const unsigned int nP = Wt.n_elem;
     const unsigned int nT = y.n_elem - 1;
     // arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
     // arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-    sigma.slice(0) = arma::eye<arma::mat>(nP, nP) * 2.;
+    arma::mat sig = arma::eye<arma::mat>(nP, nP) * 2.;
     // arma::cube Prec_marginal = Sigma_marginal;
     prec.slice(0) = arma::eye<arma::mat>(nP, nP) * 0.5;
+
 
     for (unsigned int t = 1; t <= nT; t++)
     {
         mu.col(t) = StateSpace::func_gt(model, mu.col(t - 1), y.at(t - 1));
         arma::mat Gt = LBA::func_Gt(model, mu.col(t - 1), y.at(t - 1));
-        arma::mat sig = Gt * sigma.slice(t - 1) * Gt.t();
+        sig = Gt * sig * Gt.t();
         sig.at(0, 0) += Wt.at(0);
         sig.diag() += EPS;
-        sigma.slice(t) = sig;
+
         prec.slice(t) = inverse(sig);
     }
 
@@ -417,6 +414,57 @@ static void prior_forward(
 //     return;
 // }
 
+
+static void backward_kernel(
+    arma::mat &K,
+    arma::vec &r,
+    arma::mat &Uinv,
+    double &ldetU,
+    const Model &model,
+    const unsigned int &t_cur,
+    const arma::mat &vt,  // nP x (nT + 1)
+    const arma::cube &Vt_inv, // nP x nP x (nT + 1)
+    const arma::vec &Wt,
+    const arma::vec &y)
+{
+    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    arma::mat U_cur = K;
+    arma::mat Uprec_cur = K;
+    arma::mat Urchol_cur = K;
+
+    if (trans_list[model.transfer.name] == AVAIL::sliding)
+    {
+        for (unsigned int i = 0; i < model.dim.nP - 1; i++)
+        {
+            K.at(i, i + 1) = 1.;
+        }
+
+        K.at(model.dim.nP - 1, model.dim.nP - 1) = 1.;
+        U_cur.at(model.dim.nP - 1, model.dim.nP - 1) = Wt.at(0);
+        Uprec_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1. / Wt.at(0);
+        Urchol_cur.at(model.dim.nP - 1, model.dim.nP - 1) = std::sqrt(Wt.at(0));
+        ldetU = std::log(Wt.at(0));
+    }
+    else
+    {
+        arma::mat G_next = LBA::func_Gt(model, vt.col(t_cur), y.at(t_cur));
+
+        arma::mat Vchol = arma::chol(Vt_inv.slice(t_cur));
+        arma::mat Vchol_inv = arma::inv(arma::trimatu(Vchol));
+        arma::mat Vt_cur = Vchol_inv * Vchol_inv.t();
+
+        arma::mat VGt = Vt_cur * G_next.t();
+        K = VGt * Vt_inv.slice(t_cur + 1);
+        U_cur = Vt_cur - VGt * Vt_inv.slice(t_cur + 1) * VGt.t();
+        U_cur = arma::symmatu(U_cur);
+        Uprec_cur = inverse(Urchol_cur, U_cur);
+        ldetU = arma::log_det_sympd(U_cur);
+    }
+
+    r = vt.col(t_cur) - K * vt.col(t_cur + 1);
+    return;
+}
+
 static arma::vec qbackcast(
     arma::mat &loc,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
     arma::cube &Prec_chol_inv,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
@@ -425,7 +473,7 @@ static arma::vec qbackcast(
     const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
     const arma::mat &vt,         // nP x (nT + 1), v[t], mean of artificial prior for theta[t_cur]
-    const arma::cube &Vt,        // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
+    const arma::cube &Vt_inv,        // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
     const arma::vec &Wt, // p x 1
     const arma::vec &par, // m x 1, m = 4
     const arma::vec &y,
@@ -440,43 +488,13 @@ static arma::vec qbackcast(
     unsigned int nP = Theta_next.n_rows;
     unsigned int t_next = t_cur + 1;
 
-    arma::mat G_next = LBA::func_Gt(model, vt.col(t_cur), y.at(t_cur));
-    arma::mat Vprec_next = inverse(Vt.slice(t_next));
-
+    arma::vec r_cur(model.dim.nP, arma::fill::zeros);
     arma::mat K_cur(model.dim.nP, model.dim.nP, arma::fill::zeros);
-    arma::mat U_cur = K_cur;
     arma::mat Uprec_cur = K_cur;
-    arma::mat Urchol_cur = K_cur;
     double ldetU = 0.;
+    backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, Wt, y);
+    
 
-    if (trans_list[model.transfer.name] == AVAIL::sliding)
-    {
-        /**
-         * @brief This is special case for sliding window transfer function. In this case we don't need artificial prior (v[t], V[t]) since we can derive (u[t], U[t]) directly. Advantage is that this is exact, the general backcast is an approximation
-         *
-         */
-        K_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1.;
-        for (unsigned int i = 0; i < model.dim.nP - 1; i++)
-        {
-            K_cur.at(i, i + 1) = 1.;
-        }
-        
-        U_cur.at(model.dim.nP - 1, model.dim.nP - 1) = Wt.at(0);
-        Uprec_cur.at(model.dim.nP - 1, model.dim.nP - 1) = 1. / Wt.at(0);
-        Urchol_cur.at(model.dim.nP - 1, model.dim.nP - 1) = std::sqrt(Wt.at(0));
-        ldetU = std::log(Wt.at(0));
-    }
-    else
-    {
-        arma::mat V_cur = Vt.slice(t_cur);
-        K_cur = V_cur * G_next.t() * Vprec_next;
-        U_cur = V_cur - V_cur * G_next.t() * Vprec_next * G_next * V_cur;
-        U_cur = arma::symmatu(U_cur);
-        Uprec_cur = inverse(Urchol_cur, U_cur);
-        ldetU = arma::log_det_sympd(U_cur);
-    }
-
-    arma::vec r_cur = vt.col(t_cur) - K_cur * vt.col(t_next);
     for (unsigned int i = 0; i < N; i++)
     {
         
