@@ -2075,13 +2075,24 @@ namespace SMC
                 arma::vec logp(N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
-                    Theta_backward.slice(t).col(i) = theta_cur;
+                    arma::vec theta_cur;
                     if (full_rank)
                     {
+                        theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
                         logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t + 1), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
                     }
+                    else
+                    {
+                        theta_cur = mu.col(i);
+                        double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
+                        theta_cur.at(theta_cur.n_elem - 1) += eps;
+                        double logp_tmp = R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
+                        logq.at(i) += logp_tmp; // sample from evolution distribution
+                        logp.at(i) = logp_tmp;
+                    }
+
+                    Theta_backward.slice(t).col(i) = theta_cur;
 
                     double ft_cur = StateSpace::func_ft(model, t, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, par.at(0));
