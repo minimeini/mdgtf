@@ -1960,11 +1960,11 @@ namespace SMC
                 arma::vec logp(N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec zt, theta_new;
+                    arma::vec theta_new;
                     if (full_rank)
                     {
                         arma::vec eps = arma::randn(dim.nP);
-                        zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                        arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
                         theta_new = prec_chol_inv.slice(i) * zt;            // scaled
 
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
@@ -2048,11 +2048,15 @@ namespace SMC
                 Rcpp::checkUserInterrupt();
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu;                // nP x N, mean of the posterior (propagation dist.) of theta[t_cur] | y[t_cur:nT], theta[t_next], W
-                arma::cube Prec, Sigma_chol; // nP x nP x N, related to posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+                arma::mat loc(dim.nP, N, arma::fill::zeros);
+                arma::cube prec_chol_inv; // nP x nP x N
+                if (full_rank)
+                {
+                    prec_chol_inv = arma::zeros<arma::cube>(dim.nP, dim.nP, N); // nP x nP x N
+                }
 
                 arma::vec tau = qbackcast(
-                    mu, Prec, Sigma_chol, logq,
+                    loc, prec_chol_inv, logq,
                     model, t, Theta_backward.slice(t + 1),
                     mu_marginal, Sigma_marginal, Wt, par, y, full_rank);
 
@@ -2060,10 +2064,11 @@ namespace SMC
                 arma::uvec resample_idx = get_resample_index(tau);
 
                 Theta_backward.slice(t + 1) = Theta_backward.slice(t + 1).cols(resample_idx);
-
-                mu = mu.cols(resample_idx);
-                Prec = Prec.slices(resample_idx);
-                Sigma_chol = Sigma_chol.slices(resample_idx);
+                loc = loc.cols(resample_idx);
+                if (full_rank)
+                {
+                    prec_chol_inv = prec_chol_inv.slices(resample_idx);
+                }
 
                 tau = tau.elem(resample_idx);
                 weights_backward.row(t + 1) = weights.t();
@@ -2079,19 +2084,19 @@ namespace SMC
                     if (full_rank)
                     {
                         arma::vec eps = arma::randn(dim.nP);
-                        theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * eps;
-                        logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                        logp.at(i) += R::dnorm4(Theta_backward.at(dim.nP - 1, i, t + 1), theta_cur.at(dim.nP - 1), std::sqrt(Wt.at(0)), true);
+                        arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                        theta_cur = prec_chol_inv.slice(i) * zt;
+                        logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
                     }
                     else
                     {
-                        theta_cur = mu.col(i);
+                        theta_cur = loc.col(i);
                         double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
                         theta_cur.at(dim.nP - 1) += eps;
-                        double logp_tmp = R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
-                        logq.at(i) += logp_tmp; // sample from evolution distribution
-                        logp.at(i) = logp_tmp;
+                        logq.at(i) += R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
                     }
+
+                    logp.at(i) += R::dnorm4(Theta_backward.at(dim.nP - 1, i, t + 1), theta_cur.at(dim.nP - 1), std::sqrt(Wt.at(0)), true);
 
                     Theta_backward.slice(t).col(i) = theta_cur;
 

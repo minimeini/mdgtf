@@ -418,9 +418,8 @@ static void prior_forward(
 // }
 
 static arma::vec qbackcast(
-    arma::mat &mu,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
-    arma::cube &Prec,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
-    arma::cube &Sigma_chol, // p x p x N, right cholesky of the variance of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::mat &loc,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::cube &Prec_chol_inv,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
     arma::vec &logq,        // N x 1
     const Model &model,
     const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
@@ -440,12 +439,6 @@ static arma::vec qbackcast(
     unsigned int N = Theta_next.n_cols;
     unsigned int nP = Theta_next.n_rows;
     unsigned int t_next = t_cur + 1;
-
-    mu.set_size(nP, N);
-    mu.zeros();
-
-    Prec = arma::zeros<arma::cube>(nP, nP, N);
-    Sigma_chol = Prec;
 
     arma::mat G_next = LBA::func_Gt(model, vt.col(t_cur), y.at(t_cur));
     arma::mat Vprec_next = inverse(Vt.slice(t_next));
@@ -504,41 +497,35 @@ static arma::vec qbackcast(
         if (!full_rank)
         {
             // No information from data, degenerates to the backward evolution
-            mu.col(i) = u_cur;
-            Prec.slice(i) = Uprec_cur;
-            Sigma_chol.slice(i) = Urchol_cur;
+            loc.col(i) = u_cur;
+            // Prec.slice(i) = Uprec_cur;
+            // Sigma_chol.slice(i) = Urchol_cur;
             logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
         } // one-step backcasting
         else
         {
             arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
-            Prec.slice(i) = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
-            Prec.slice(i).diag() += EPS;
-            double ldetPrec;
-            try
-            {
-                ldetPrec = arma::log_det_sympd(Prec.slice(i));
-            }
-            catch (const std::exception &e)
-            {
-                throw std::runtime_error("log_det_sympd failed at ldetU");
-            }
+            arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
+            Prec.diag() += EPS;
+            double ldetPrec = arma::log_det_sympd(Prec);
 
             arma::mat Rchol;
-            arma::mat Sig = inverse(Rchol, Prec.slice(i));
-            Sigma_chol.slice(i) = Rchol;
+            arma::mat Sig = inverse(Rchol, Prec);
+
+            arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));
+            Prec_chol_inv.slice(i) = Rchol_inv;
 
             double delta = yhat_cur - eta;
             delta += arma::as_scalar(F_cur.t() * u_cur);
 
-            arma::vec mu_tmp = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
-            mu.col(i) = Sig * mu_tmp;
+            loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
+            arma::vec mu = Sig * loc.col(i);
 
             double ldetV = std::log(Vtilde);
             double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
             logq_pred += delta * delta / Vtilde;
             logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
-            logq_pred -= arma::as_scalar(mu.col(i).t() * Prec.slice(i) * mu.col(i));
+            logq_pred -= arma::as_scalar(mu.t() * Prec * mu);
             logq_pred *= -0.5;
 
             logq.at(i) += logq_pred;
