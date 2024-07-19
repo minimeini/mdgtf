@@ -2078,15 +2078,16 @@ namespace SMC
                     arma::vec theta_cur;
                     if (full_rank)
                     {
-                        theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
+                        arma::vec eps = arma::randn(dim.nP);
+                        theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * eps;
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                        logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t + 1), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
+                        logp.at(i) += R::dnorm4(Theta_backward.at(dim.nP - 1, i, t + 1), theta_cur.at(dim.nP - 1), std::sqrt(Wt.at(0)), true);
                     }
                     else
                     {
                         theta_cur = mu.col(i);
                         double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
-                        theta_cur.at(theta_cur.n_elem - 1) += eps;
+                        theta_cur.at(dim.nP - 1) += eps;
                         double logp_tmp = R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
                         logq.at(i) += logp_tmp; // sample from evolution distribution
                         logp.at(i) = logp_tmp;
