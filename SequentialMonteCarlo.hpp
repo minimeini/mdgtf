@@ -695,8 +695,22 @@ namespace SMC
             return weights;
         } // func: imp_weights_backcast
 
-    
-        static arma::uvec get_smooth_index(
+
+        static arma::uvec get_resample_index(const arma::vec &weights)
+        {
+            unsigned int N = weights.n_elem;
+            double wsum = arma::accu(weights);
+            arma::uvec indices = arma::regspace<arma::uvec>(0, 1, N - 1);
+            if (wsum > EPS)
+            {
+                arma::vec w = weights / wsum;
+                indices = sample(N, N, w, true, true);
+            }
+
+            return indices;
+        }
+
+            static arma::uvec get_smooth_index(
             const arma::rowvec &psi_smooth_now,  // 1 x M, Theta_smooth.slice(t).row(0)
             const arma::rowvec &psi_filter_prev, // 1 x N, Theta.slice(t - 1).row(0)
             const arma::vec &Wsqrt)              // M x 1
