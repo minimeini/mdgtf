@@ -2024,32 +2024,33 @@ namespace SMC
             double WT = Wt.at(0);
             double Wsqrt = std::sqrt(WT);
 
-            arma::vec yhat = y; // (nT + 1) x 1
-            for (unsigned int t = 0; t < y.n_elem; t++)
-            {
-                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            }
+            // arma::vec yhat = y; // (nT + 1) x 1
+            // for (unsigned int t = 0; t < y.n_elem; t++)
+            // {
+            //     yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
+            // }
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
             arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
+            // Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
             arma::cube Prec_marginal = Sigma_marginal;
-            Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
+            // Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
 
-            arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
-            Ieps.for_each([](arma::mat::elem_type &val)
-                          { val *= EPS; });
-            for (unsigned int t = 1; t <= dim.nT; t++)
-            {
-                mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += WT;
-                Sig = arma::symmatu(Sig + Ieps);
-                Sigma_marginal.slice(t) = Sig;
-                arma::mat Prec = inverse(Sig);
-                Prec_marginal.slice(t) = arma::symmatu(Prec);
-            }
+            // arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
+            // Ieps.for_each([](arma::mat::elem_type &val)
+            //               { val *= EPS; });
+            // for (unsigned int t = 1; t <= dim.nT; t++)
+            // {
+            //     mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
+            //     arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
+            //     arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
+            //     Sig.at(0, 0) += WT;
+            //     Sig = arma::symmatu(Sig + Ieps);
+            //     Sigma_marginal.slice(t) = Sig;
+            //     arma::mat Prec = inverse(Sig);
+            //     Prec_marginal.slice(t) = arma::symmatu(Prec);
+            // }
+            prior_forward(mu_marginal, Sigma_marginal, Prec_marginal, model, Wt, y);
 
             arma::vec log_marg(N, arma::fill::zeros);
             for (unsigned int i = 0; i < N; i++)
@@ -2077,10 +2078,10 @@ namespace SMC
                 arma::mat mu;                // nP x N, mean of the posterior (propagation dist.) of theta[t_cur] | y[t_cur:nT], theta[t_next], W
                 arma::cube Prec, Sigma_chol; // nP x nP x N, related to posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
 
-                arma::vec tau = imp_weights_backcast(
+                arma::vec tau = qbackcast(
                     mu, Prec, Sigma_chol, logq, updated,
                     model, t_cur, Theta_next,
-                    mu_marginal, Sigma_marginal, y, yhat);
+                    mu_marginal, Sigma_marginal, y);
 
                 tau = tau % weights;
                 arma::uvec resample_idx = get_resample_index(tau);
@@ -2180,30 +2181,8 @@ namespace SMC
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
             arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
-            Sigma_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 2.;
             arma::cube Prec_marginal = Sigma_marginal;
-            Prec_marginal.slice(0) = arma::eye<arma::mat>(dim.nP, dim.nP) * 0.5;
-
-            arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
-            Ieps.for_each([](arma::mat::elem_type &val)
-                          { val *= EPS; });
-            for (unsigned int t = 1; t <= dim.nT; t++)
-            {
-                mu_marginal.col(t) = StateSpace::func_gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Gt = LBA::func_Gt(model, mu_marginal.col(t - 1), y.at(t - 1));
-                arma::mat Sig = Gt * Sigma_marginal.slice(t - 1) * Gt.t();
-                Sig.at(0, 0) += Wt.at(0);
-                Sig = arma::symmatu(Sig + Ieps);
-                Sigma_marginal.slice(t) = Sig;
-                try
-                {
-                    Prec_marginal.slice(t) = inverse(Sig);
-                }
-                catch (const std::exception &e)
-                {
-                    throw std::runtime_error("Matrix inversion failed at backward filter - prec_marginal initializing");
-                }
-            }
+            prior_forward(mu_marginal, Sigma_marginal, Prec_marginal, model, Wt, y);
 
             for (unsigned int t = 1; t < dim.nT; t++)
             {
