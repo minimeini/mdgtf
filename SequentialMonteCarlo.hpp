@@ -2662,6 +2662,10 @@ namespace SMC
             return out;
         }
 
+
+        /**
+         * @todo Something wrong with forward filter, comparing to TFS.
+         */
         void forward_filter(Model &model, const bool &verbose = VERBOSE)
         {
             if (arma::any(W_filter < EPS))
