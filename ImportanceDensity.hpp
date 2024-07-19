@@ -309,7 +309,15 @@ static arma::vec qforecast(
 
 
 
-
+/**
+ * @brief Is there a more efficient way to construct artificial priors?
+ * 
+ * @param mu 
+ * @param prec 
+ * @param model 
+ * @param Wt 
+ * @param y 
+ */
 static void prior_forward(
     arma::mat &mu,     // nP x (nT + 1)
     arma::cube &prec,  // nP x nP x (nT + 1)
@@ -413,6 +421,7 @@ static void prior_forward(
 
 //     return;
 // }
+
 
 
 static void backward_kernel(
