@@ -488,8 +488,6 @@ static arma::vec qbackcast(
     {
         
         arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
-        arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
-
         double ft_ut = StateSpace::func_ft(model, t_cur, u_cur, y);
         double eta = model.dobs.par1 + ft_ut;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
@@ -501,22 +499,20 @@ static arma::vec qbackcast(
         double Vtilde = ApproxDisturbance::func_Vt_approx(
             lambda, model.dobs, model.flink.name); // (eq 3.59)
         Vtilde = std::abs(Vtilde) + EPS;
-        
 
-        
+
         if (!full_rank)
         {
             // No information from data, degenerates to the backward evolution
             mu.col(i) = u_cur;
             Prec.slice(i) = Uprec_cur;
             Sigma_chol.slice(i) = Urchol_cur;
-
             logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
         } // one-step backcasting
         else
         {
-            arma::mat FFt_norm = arma::symmatu(F_cur * F_cur.t() / Vtilde);
-            Prec.slice(i) = FFt_norm + Uprec_cur;
+            arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
+            Prec.slice(i) = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.slice(i).diag() += EPS;
             double ldetPrec;
             try
