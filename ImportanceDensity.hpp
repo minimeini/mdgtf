@@ -498,8 +498,6 @@ static arma::vec qbackcast(
         {
             // No information from data, degenerates to the backward evolution
             loc.col(i) = u_cur;
-            // Prec.slice(i) = Uprec_cur;
-            // Sigma_chol.slice(i) = Urchol_cur;
             logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
         } // one-step backcasting
         else
@@ -507,25 +505,22 @@ static arma::vec qbackcast(
             arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
-            double ldetPrec = arma::log_det_sympd(Prec);
 
-            arma::mat Rchol;
-            arma::mat Sig = inverse(Rchol, Prec);
-
+            arma::mat Rchol = arma::chol(arma::symmatu(Prec));
             arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));
+            double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.;
             Prec_chol_inv.slice(i) = Rchol_inv;
 
             double delta = yhat_cur - eta;
             delta += arma::as_scalar(F_cur.t() * u_cur);
 
             loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
-            arma::vec mu = Sig * loc.col(i);
 
             double ldetV = std::log(Vtilde);
             double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
             logq_pred += delta * delta / Vtilde;
             logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
-            logq_pred -= arma::as_scalar(mu.t() * Prec * mu);
+            logq_pred -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
             logq_pred *= -0.5;
 
             logq.at(i) += logq_pred;
