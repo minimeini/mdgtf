@@ -2646,7 +2646,7 @@ namespace SMC
                 // }
 
                 // arma::vec Wsqrt = arma::sqrt(W_stored.col(t));
-                arma::vec Wsqrt = arma::sqrt(W_filter);
+                // arma::vec Wsqrt = arma::sqrt(W_filter);
                 bool positive_noise = (t_old < Theta_old.n_rows) ? true : false;
 
                 // NEED TO CHANGE PROPAGATE STEP
