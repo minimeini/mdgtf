@@ -27,8 +27,8 @@ namespace SMC
             y.zeros();
             y.tail(y_in.n_elem) = y_in;
 
-            log_cond_marginal.set_size(dim.nT + 1);
-            log_cond_marginal.zeros();
+            // log_cond_marginal.set_size(dim.nT + 1);
+            // log_cond_marginal.zeros();
 
             par = {
                 model.dobs.par1, // mu0
@@ -49,8 +49,8 @@ namespace SMC
             y.set_size(dim.nT + 1);
             y.zeros();
 
-            log_cond_marginal.set_size(dim.nT + 1);
-            log_cond_marginal.zeros();
+            // log_cond_marginal.set_size(dim.nT + 1);
+            // log_cond_marginal.zeros();
         }
 
         static Rcpp::List default_settings()
@@ -154,11 +154,11 @@ namespace SMC
             Theta_smooth.set_size(dim.nP, M, dim.nT + B);
             Theta_smooth.zeros();
 
-            psi_forward.set_size(dim.nT + B, N);
-            psi_forward.zeros();
-            psi_backward = psi_forward;
-            psi_smooth.set_size(dim.nT + B, M);
-            psi_smooth.zeros();
+            // psi_forward.set_size(dim.nT + B, N);
+            // psi_forward.zeros();
+            // psi_backward = psi_forward;
+            // psi_smooth.set_size(dim.nT + B, M);
+            // psi_smooth.zeros();
 
             std::string par_name = "mu0";
             prior_mu0.init("gamma", 1., 1.);
@@ -805,7 +805,7 @@ namespace SMC
 
         arma::vec y;                    // (nT + 1) x 1
         arma::vec weights, lambda, tau; // N x 1
-        arma::vec log_cond_marginal;
+        // arma::vec log_cond_marginal;
 
         arma::cube Theta;        // p x N x (nT + B)
         arma::cube Theta_smooth; // p x M x (nT + B)
@@ -821,9 +821,9 @@ namespace SMC
         unsigned int B = 1;
         unsigned int nforecast = 0;
 
-        arma::mat psi_forward;  // (nT + B) x N
-        arma::mat psi_backward; // (nT + B) x N
-        arma::mat psi_smooth;   // (nT + B) x M
+        // arma::mat psi_forward;  // (nT + B) x N
+        // arma::mat psi_backward; // (nT + B) x N
+        // arma::mat psi_smooth;   // (nT + B) x M
 
         Prior prior_W;
         arma::vec W_filter; // N x 1
@@ -839,6 +839,9 @@ namespace SMC
         bool smoothing = true;
         bool backward = true;
 
+        Rcpp::List output;
+        arma::vec ci_prob = {0.025, 0.5, 0.975};
+
     }; // class Sequential Monte Carlo
 
     class MCS : public SequentialMonteCarlo
@@ -850,23 +853,23 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = true)
         {
-            arma::vec ci_prob = {0.025, 0.5, 0.975};
-            Rcpp::List output;
-            // arma::mat psi_filter = get_psi_filter();
-            // arma::mat psi_smooth = get_psi_smooth();
+            // arma::vec ci_prob = {0.025, 0.5, 0.975};
+            // Rcpp::List output;
+            // // arma::mat psi_filter = get_psi_filter();
+            // // arma::mat psi_smooth = get_psi_smooth();
 
-            if (DEBUG)
-            {
-                output["Theta"] = Rcpp::wrap(Theta);
-            }
+            // if (DEBUG)
+            // {
+            //     output["Theta"] = Rcpp::wrap(Theta);
+            // }
 
-            arma::mat psi1 = arma::quantile(psi_forward.tail_rows(dim.nT + 1), ci_prob, 1); // (nT + 1) x 3
-            output["psi_filter"] = Rcpp::wrap(psi1);
+            // arma::mat psi1 = arma::quantile(psi_forward.tail_rows(dim.nT + 1), ci_prob, 1); // (nT + 1) x 3
+            // output["psi_filter"] = Rcpp::wrap(psi1);
 
-            arma::mat psi2 = arma::quantile(psi_smooth.tail_rows(dim.nT + 1), ci_prob, 1); // (nT + 1) x 3
-            output["psi"] = Rcpp::wrap(psi2);
+            // arma::mat psi2 = arma::quantile(psi_smooth.tail_rows(dim.nT + 1), ci_prob, 1); // (nT + 1) x 3
+            // output["psi"] = Rcpp::wrap(psi2);
 
-            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
+            // output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return output;
         }
@@ -884,9 +887,9 @@ namespace SMC
             Theta_smooth.clear();
             Theta_smooth = Theta;
 
-            psi_smooth.reset();
-            psi_smooth.set_size(dim.nT + B, N);
-            psi_smooth.zeros();
+            // psi_smooth.reset();
+            // psi_smooth.set_size(dim.nT + B, N);
+            // psi_smooth.zeros();
         }
 
         static Rcpp::List default_settings()
@@ -1128,6 +1131,10 @@ namespace SMC
 
         void infer(const Model &model, const bool &verbose = VERBOSE)
         {
+            arma::mat psi_forward(dim.nT + B, N);
+            psi_forward.zeros();
+            arma::mat psi_smooth = psi_forward;
+            arma::vec log_cond_marginal(dim.nT + 1, arma::fill::zeros);
 
             for (unsigned int t = 0; t < dim.nT; t++)
             {
@@ -1187,6 +1194,10 @@ namespace SMC
             {
                 Rcpp::Rcout << std::endl;
             }
+
+            output["psi_filter"] = Rcpp::wrap(arma::quantile(psi_forward.tail_rows(dim.nT + 1), ci_prob, 1));
+            output["psi"] = Rcpp::wrap(arma::quantile(psi_smooth.tail_rows(dim.nT + 1), ci_prob, 1));
+            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
         }
     };
 
@@ -1211,22 +1222,22 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = true)
         {
-            arma::vec ci_prob = {0.025, 0.5, 0.975};
-            Rcpp::List output;
+            // arma::vec ci_prob = {0.025, 0.5, 0.975};
+            // Rcpp::List output;
 
-            arma::mat psi_forward = Theta.row_as_mat(0);
+            // arma::mat psi_forward = Theta.row_as_mat(0);
 
-            arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
-            output["psi_filter"] = Rcpp::wrap(psi_f);
-            output["eff_forward"] = Rcpp::wrap(eff_forward);
+            // arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
+            // output["psi_filter"] = Rcpp::wrap(psi_f);
+            // output["eff_forward"] = Rcpp::wrap(eff_forward);
 
-            if (smoothing)
-            {
-                arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-                output["psi"] = Rcpp::wrap(psi);
-            }
+            // if (smoothing)
+            // {
+            //     arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
+            //     output["psi"] = Rcpp::wrap(psi);
+            // }
 
-            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
+            // output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return output;
         }
@@ -1364,6 +1375,8 @@ namespace SMC
         void forward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
+            arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
+            arma::vec log_cond_marginal = eff_forward;
 
             for (unsigned int t = 0; t < dim.nT; t++)
             {
@@ -1459,7 +1472,10 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_forward = Theta.row_as_mat(0); // (nT + 1) x N
+            arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
+            output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+            output["eff_forward"] = Rcpp::wrap(eff_forward.t());
+            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return;
         }
@@ -1502,7 +1518,8 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_smooth = Theta_smooth.row_as_mat(0);
+            arma::mat psi = Theta_smooth.row_as_mat(0);
+            output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
             return;
         }
 
@@ -1526,8 +1543,8 @@ namespace SMC
     class TFS : public SequentialMonteCarlo
     {
     private:
-        arma::vec eff_forward;  // (nT + 1) x 1
-        arma::vec eff_backward; // (nT + 1) x 1
+        // arma::vec eff_forward;  // (nT + 1) x 1
+        // arma::vec eff_backward; // (nT + 1) x 1
 
         arma::mat weights_forward;  // (nT + 1) x N
         arma::mat weights_backward; // (nT + 1) x N
@@ -1561,9 +1578,9 @@ namespace SMC
             Theta_smooth.clear();
             Theta_smooth = Theta;
 
-            eff_forward.set_size(dim.nT + 1);
-            eff_forward.zeros();
-            eff_backward = eff_forward;
+            // eff_forward.set_size(dim.nT + 1);
+            // eff_forward.zeros();
+            // eff_backward = eff_forward;
 
             return;
         }
@@ -1576,25 +1593,6 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = true)
         {
-            arma::vec ci_prob = {0.025, 0.5, 0.975};
-            Rcpp::List output;
-
-            arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
-            output["psi_filter"] = Rcpp::wrap(psi_f);
-            output["eff_forward"] = Rcpp::wrap(eff_forward);
-
-            if (smoothing)
-            {
-                arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
-                output["psi_backward"] = Rcpp::wrap(psi_b);
-
-                arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-                output["psi"] = Rcpp::wrap(psi);
-                output["eff_backward"] = Rcpp::wrap(eff_backward);
-            }
-
-            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
-
             return output;
         }
 
@@ -1731,6 +1729,8 @@ namespace SMC
         void forward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
+            arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
+            arma::vec log_cond_marginal = eff_forward;
 
             for (unsigned int t = 0; t < dim.nT; t++)
             {
@@ -1837,7 +1837,10 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_forward = Theta.row_as_mat(0); // (nT + 1) x N
+            arma::mat psi = Theta.row_as_mat(0);
+            output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+            output["eff_forward"] = Rcpp::wrap(eff_forward.t());
+            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
 
             return;
         }
@@ -1845,6 +1848,7 @@ namespace SMC
         void backward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
+            arma::vec eff_backward(dim.nT + 1, arma::fill::zeros);
             Theta_backward = Theta; // p x N x (nT + B)
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
@@ -1948,7 +1952,10 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_backward = Theta_backward.row_as_mat(0); // (nT + 1) x N
+            // psi_backward = Theta_backward.row_as_mat(0); // (nT + 1) x N
+            arma::mat psi = Theta_backward.row_as_mat(0);
+            output["psi_backward"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+            output["eff_backward"] = Rcpp::wrap(eff_backward.t());
             return;
         }
 
@@ -2082,7 +2089,9 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_smooth = Theta_smooth.row_as_mat(0);
+            // psi_smooth = Theta_smooth.row_as_mat(0);
+            arma::mat psi = Theta_smooth.row_as_mat(0);
+            output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
             return;
         }
 
@@ -2140,10 +2149,10 @@ namespace SMC
             Theta_smooth.clear();
             Theta_smooth = Theta;
 
-            eff_forward.set_size(dim.nT + 1);
-            eff_forward.zeros();
-            eff_filter = eff_forward;
-            eff_backward = eff_forward;
+            // eff_forward.set_size(dim.nT + 1);
+            // eff_forward.zeros();
+            // eff_filter = eff_forward;
+            // eff_backward = eff_forward;
 
             {
                 aw_forward.set_size(N);
@@ -2372,99 +2381,99 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = TRUE)
         {
-            arma::vec ci_prob = {0.025, 0.5, 0.975};
-            Rcpp::List output;
+            // arma::vec ci_prob = {0.025, 0.5, 0.975};
+            // Rcpp::List output;
 
-            if (summarize)
-            {
-                arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
-                output["psi_filter"] = Rcpp::wrap(psi_f);
-            }
-            else
-            {
-                output["psi_filter"] = Rcpp::wrap(psi_forward);
-            }
+            // if (summarize)
+            // {
+            //     arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
+            //     output["psi_filter"] = Rcpp::wrap(psi_f);
+            // }
+            // else
+            // {
+            //     output["psi_filter"] = Rcpp::wrap(psi_forward);
+            // }
 
-            if (dim.regressor_baseline)
-            {
-                arma::mat mu0_filter = Theta.row_as_mat(dim.nP - 1);
-                output["mu0_filter"] = Rcpp::wrap(mu0_filter);
-            }
+            // if (dim.regressor_baseline)
+            // {
+            //     arma::mat mu0_filter = Theta.row_as_mat(dim.nP - 1);
+            //     output["mu0_filter"] = Rcpp::wrap(mu0_filter);
+            // }
 
-            if (prior_W.infer)
-            {
-                // arma::vec W_filter = W_stored.col(dim.nT);
-                output["W"] = Rcpp::wrap(W_forward.t());
-                if (smoothing)
-                {
-                    output["W_forward2"] = Rcpp::wrap(W_filter.t());
-                    output["W_backward"] = Rcpp::wrap(W_backward.t());
-                }
-            }
+            // if (prior_W.infer)
+            // {
+            //     // arma::vec W_filter = W_stored.col(dim.nT);
+            //     output["W"] = Rcpp::wrap(W_forward.t());
+            //     if (smoothing)
+            //     {
+            //         output["W_forward2"] = Rcpp::wrap(W_filter.t());
+            //         output["W_backward"] = Rcpp::wrap(W_backward.t());
+            //     }
+            // }
 
-            if (prior_mu0.infer)
-            {
-                output["mu0"] = Rcpp::wrap(mu0_forward.t());
-                if (smoothing)
-                {
-                    output["mu0_forward2"] = Rcpp::wrap(mu0_filter.t());
-                    output["mu0_backward"] = Rcpp::wrap(mu0_backward.t());
-                }
-            }
+            // if (prior_mu0.infer)
+            // {
+            //     output["mu0"] = Rcpp::wrap(mu0_forward.t());
+            //     if (smoothing)
+            //     {
+            //         output["mu0_forward2"] = Rcpp::wrap(mu0_filter.t());
+            //         output["mu0_backward"] = Rcpp::wrap(mu0_backward.t());
+            //     }
+            // }
 
-            if (prior_rho.infer)
-            {
-                output["rho"] = Rcpp::wrap(rho_forward.t());
-                if (smoothing)
-                {
-                    output["rho_forward2"] = Rcpp::wrap(rho_filter.t());
-                    output["rho_backward"] = Rcpp::wrap(rho_backward.t());
-                }
-            }
+            // if (prior_rho.infer)
+            // {
+            //     output["rho"] = Rcpp::wrap(rho_forward.t());
+            //     if (smoothing)
+            //     {
+            //         output["rho_forward2"] = Rcpp::wrap(rho_filter.t());
+            //         output["rho_backward"] = Rcpp::wrap(rho_backward.t());
+            //     }
+            // }
 
-            if (prior_par1.infer || prior_par2.infer)
-            {
-                output["par1"] = Rcpp::wrap(par1_forward.t());
-                output["par2"] = Rcpp::wrap(par2_forward.t());
-                if (smoothing)
-                {
-                    output["par1_forward2"] = Rcpp::wrap(par1_filter.t());
-                    output["par1_backward"] = Rcpp::wrap(par1_backward.t());
+            // if (prior_par1.infer || prior_par2.infer)
+            // {
+            //     output["par1"] = Rcpp::wrap(par1_forward.t());
+            //     output["par2"] = Rcpp::wrap(par2_forward.t());
+            //     if (smoothing)
+            //     {
+            //         output["par1_forward2"] = Rcpp::wrap(par1_filter.t());
+            //         output["par1_backward"] = Rcpp::wrap(par1_backward.t());
 
-                    output["par2_forward2"] = Rcpp::wrap(par2_filter.t());
-                    output["par2_backward"] = Rcpp::wrap(par2_backward.t());
-                }
-            }
+            //         output["par2_forward2"] = Rcpp::wrap(par2_filter.t());
+            //         output["par2_backward"] = Rcpp::wrap(par2_backward.t());
+            //     }
+            // }
 
-            output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
-            output["eff_forward1"] = Rcpp::wrap(eff_forward.t());
+            // output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
+            // output["eff_forward1"] = Rcpp::wrap(eff_forward.t());
 
-            if (smoothing)
-            {
-                arma::mat psi_smooth = get_psi_smooth(); // (nT + 1) x M
+            // if (smoothing)
+            // {
+            //     arma::mat psi_smooth = get_psi_smooth(); // (nT + 1) x M
 
-                if (summarize)
-                {
-                    arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
-                    output["psi_backward"] = Rcpp::wrap(psi_b);
+            //     if (summarize)
+            //     {
+            //         arma::mat psi_b = arma::quantile(psi_backward, ci_prob, 1);
+            //         output["psi_backward"] = Rcpp::wrap(psi_b);
 
-                    arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-                    output["psi"] = Rcpp::wrap(psi);
-                }
-                else
-                {
-                    output["psi"] = Rcpp::wrap(psi_smooth);
-                }
+            //         arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
+            //         output["psi"] = Rcpp::wrap(psi);
+            //     }
+            //     else
+            //     {
+            //         output["psi"] = Rcpp::wrap(psi_smooth);
+            //     }
 
-                if (dim.regressor_baseline)
-                {
-                    arma::mat mu0_smooth = Theta_smooth.row_as_mat(dim.nP - 1);
-                    output["mu0"] = Rcpp::wrap(mu0_smooth);
-                }
+            //     if (dim.regressor_baseline)
+            //     {
+            //         arma::mat mu0_smooth = Theta_smooth.row_as_mat(dim.nP - 1);
+            //         output["mu0"] = Rcpp::wrap(mu0_smooth);
+            //     }
 
-                output["eff_forward2"] = Rcpp::wrap(eff_filter.t());
-                output["eff_backward"] = Rcpp::wrap(eff_backward.t());
-            }
+            //     output["eff_forward2"] = Rcpp::wrap(eff_filter.t());
+            //     output["eff_backward"] = Rcpp::wrap(eff_backward.t());
+            // }
 
             return output;
         }
@@ -2491,6 +2500,9 @@ namespace SMC
          */
         void forward_filter(Model &model, const bool &verbose = VERBOSE)
         {
+            arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
+            arma::vec log_cond_marginal = eff_forward;
+
             if (arma::any(W_filter < EPS))
             {
                 throw std::invalid_argument("PL::forward_filter: W_filter should not be zero.");
@@ -2594,7 +2606,7 @@ namespace SMC
 
                 // tau = tau.elem(resample_idx);
                 // weights_forward.row(t_old) = tau.t();
-                eff_filter.at(t_new) = effective_sample_size(tau);
+                eff_forward.at(t_new) = effective_sample_size(tau);
 
                 // arma::rowvec wetmp = weights_prop_forward.row(t_old);
                 // weights = weights.elem(resample_idx);
@@ -2922,16 +2934,44 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_forward = Theta.row_as_mat(0); // (nT + 1) x N
+            // psi_forward = Theta.row_as_mat(0); // (nT + 1) x N
             if (!filter_pass)
             {
+                arma::mat psi = Theta.row_as_mat(0);
+                output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+                output["eff_forward"] = Rcpp::wrap(eff_forward.t());
+                if (prior_W.infer)
+                {
+                    output["W"] = Rcpp::wrap(W_filter.t());
+                }
+                if (prior_mu0.infer)
+                {
+                    output["mu0"] = Rcpp::wrap(mu0_filter.t());
+                }
+                if (prior_rho.infer)
+                {
+                    output["rho"] = Rcpp::wrap(rho_filter.t());
+                }
+                if (prior_par1.infer)
+                {
+                    output["par1"] = Rcpp::wrap(par1_filter.t());
+                }
+                if (prior_par2.infer)
+                {
+                    output["par2"] = Rcpp::wrap(par2_filter.t());
+                }
+
                 W_forward = W_filter;
                 mu0_forward = mu0_filter;
                 rho_forward = rho_filter;
                 par1_forward = par1_filter;
                 par2_forward = par2_filter;
 
-                eff_forward = eff_filter;
+                // eff_forward = eff_filter;
+            }
+            else
+            {
+                output["eff_forward2"] = Rcpp::wrap(eff_forward.t());
             }
             filter_pass = true;
             return;
@@ -2939,6 +2979,7 @@ namespace SMC
 
         void backward_filter(Model &model, const bool &verbose = VERBOSE)
         {
+            arma::vec eff_backward(dim.nT + 1, arma::fill::zeros);
             if (!filter_pass)
             {
                 throw std::runtime_error("SMC::PL: you need to run a forward filtering pass before running backward filtering.");
@@ -3198,7 +3239,9 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_backward = Theta_backward.row_as_mat(0); // (nT + 1) x N
+            arma::mat psi = Theta_backward.row_as_mat(0); // (nT + 1) x N
+            output["psi_backward"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+            output["eff_backward"] = Rcpp::wrap(eff_backward.t());
             return;
         }
 
@@ -3257,8 +3300,10 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_smooth.clear();
-            psi_smooth = Theta_smooth.row_as_mat(0);
+            // psi_smooth.clear();
+            // psi_smooth = Theta_smooth.row_as_mat(0);
+            arma::mat psi = Theta_smooth.row_as_mat(0);
+            output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
         }
 
         void two_filter_smoother(Model &model, const bool &verbose = VERBOSE)
@@ -3438,7 +3483,8 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            psi_smooth = Theta_smooth.row_as_mat(0);
+            arma::mat psi = Theta_smooth.row_as_mat(0);
+            output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
             return;
         }
 
@@ -3469,9 +3515,9 @@ namespace SMC
         arma::cube Sigma_marginal; // nP^2 x (nT + 1) x N
         arma::cube Prec_marginal;  // nP^2 x (nT + 1) x N
 
-        arma::vec eff_forward;  // (nT + 1) x 1
-        arma::vec eff_backward; // (nT + 1) x 1
-        arma::vec eff_filter;
+        // arma::vec eff_forward;  // (nT + 1) x 1
+        // arma::vec eff_backward; // (nT + 1) x 1
+        // arma::vec eff_filter;
 
         arma::mat weights_forward;  // (nT + 1) x N
         arma::mat weights_backward; // (nT + 1) x N

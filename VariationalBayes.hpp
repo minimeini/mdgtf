@@ -1659,11 +1659,11 @@ namespace VB
                 arma::mat psi_all;
                 if (smc.smoothing)
                 {
-                    psi_all = smc.psi_smooth; // (nT + B) x N
+                    psi_all = smc.Theta.row_as_mat(0); // (nT + B) x N
                 }
                 else
                 {
-                    psi_all = smc.psi_forward; // (nT + B) x N
+                    psi_all = smc.Theta_smooth.row_as_mat(0); // (nT + B) x N
                 }
                 // arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
                 psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
