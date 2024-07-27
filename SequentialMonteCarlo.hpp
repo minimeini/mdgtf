@@ -2503,37 +2503,37 @@ namespace SMC
             arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
             arma::vec log_cond_marginal = eff_forward;
 
-            if (arma::any(W_filter < EPS))
-            {
-                throw std::invalid_argument("PL::forward_filter: W_filter should not be zero.");
-            }
+            // if (arma::any(W_filter < EPS))
+            // {
+            //     throw std::invalid_argument("PL::forward_filter: W_filter should not be zero.");
+            // }
 
-            if (!prior_W.infer)
-            {
-                prior_W.val = model.derr.par1;
-                W_filter.fill(prior_W.val);
-            }
+            // if (!prior_W.infer)
+            // {
+            //     prior_W.val = model.derr.par1;
+            //     W_filter.fill(prior_W.val);
+            // }
 
-            if (!prior_mu0.infer)
-            {
-                prior_mu0.val = model.dobs.par1;
-                mu0_filter.fill(prior_mu0.val);
-            }
+            // if (!prior_mu0.infer)
+            // {
+            //     prior_mu0.val = model.dobs.par1;
+            //     mu0_filter.fill(prior_mu0.val);
+            // }
 
-            if (!prior_rho.infer)
-            {
-                prior_rho.val = model.dobs.par2;
-                rho_filter.fill(prior_rho.val);
-            }
+            // if (!prior_rho.infer)
+            // {
+            //     prior_rho.val = model.dobs.par2;
+            //     rho_filter.fill(prior_rho.val);
+            // }
 
-            if (!prior_par1.infer && !prior_par2.infer)
-            {
-                prior_par1.val = model.transfer.dlag.par1;
-                prior_par2.val = model.transfer.dlag.par2;
+            // if (!prior_par1.infer && !prior_par2.infer)
+            // {
+            //     prior_par1.val = model.transfer.dlag.par1;
+            //     prior_par2.val = model.transfer.dlag.par2;
 
-                par1_filter.fill(prior_par1.val);
-                par2_filter.fill(prior_par2.val);
-            }
+            //     par1_filter.fill(prior_par1.val);
+            //     par2_filter.fill(prior_par2.val);
+            // }
 
             std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
