@@ -173,7 +173,7 @@ static arma::vec qforecast(
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -189,19 +189,20 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);           // Ft evaluated at a[t_new]
+            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y); // Ft evaluated at a[t_new]
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - par.at(0) - ft_tilde;                              // (eq 3.16)
+            double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / Wt.at(0, i);                   // (eq 3.21)
-            arma::mat Rchol = arma::chol(arma::symmatu(Prec_i));   // Right cholesky of the precision, upper triangular
-            arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance, lower triangular; arma::inv is faster when indicating `trimatu` explicitly.
+            Prec_i.at(0, 0) += 1. / Wt.at(0, i); // (eq 3.21)
+            arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
+            arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
+            Prec_chol_inv.slice(i) = Rchol_inv;
 
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
 
-            loc.col(i) = Ft_gtheta * (delta / Vt);            // nP x 1, location, mean mu = Sigma * loc
+            loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1, location, mean mu = Sigma * loc
             loc.at(0, i) += gtheta_old_i.at(0) / Wt.at(0, i); // location
 
             double ldetV = std::log(std::abs(Vt) + EPS);
@@ -255,7 +256,7 @@ static arma::vec qforecast(
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -271,19 +272,19 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);           // Ft evaluated at a[t_new]
+            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - par.at(0) - ft_tilde;                              // (eq 3.16)
+            double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / Wt.at(0);                   // (eq 3.21)
-            arma::mat Rchol = arma::chol(arma::symmatu(Prec_i));   // Right cholesky of the precision, upper triangular
-            arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance, lower triangular; arma::inv is faster when indicating `trimatu` explicitly.
-
+            Prec_i.at(0, 0) += 1. / Wt.at(0); // (eq 3.21)
+            arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
+            arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
+            Prec_chol_inv.slice(i) = Rchol_inv;
 
-            loc.col(i) = Ft_gtheta * (delta / Vt);            // nP x 1, location, mean mu = Sigma * loc
+            loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1, location, mean mu = Sigma * loc
             loc.at(0, i) += gtheta_old_i.at(0) / Wt.at(0); // location
 
             double ldetV = std::log(std::abs(Vt) + EPS);
@@ -304,16 +305,7 @@ static arma::vec qforecast(
                   { val -= logq_max; });
 
     arma::vec weights = arma::exp(logq);
-
-    try
-    {
-        bound_check<arma::vec>(weights, "imp_weights_forecast");
-    }
-    catch (const std::exception &e)
-    {
-        logq.t().brief_print("\n logarithm of weights: ");
-        throw std::runtime_error(e.what());
-    }
+    bound_check<arma::vec>(weights, "imp_weights_forecast");
 
     return weights;
 } // func: imp_weights_forecast
