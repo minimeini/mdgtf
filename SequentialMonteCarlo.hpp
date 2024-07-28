@@ -375,133 +375,64 @@ namespace SMC
          * @return arma::vec
          */
         static arma::vec imp_weights_forecast(
-            arma::mat &mu,          // p x N
-            arma::cube &Prec,       // p x p x N
-            arma::cube &Sigma_chol, // p x p x N
-            arma::vec &logq,        // N x 1
-            arma::uvec &updated,
+            arma::mat &loc,            // p x N
+            arma::cube &Prec_chol_inv, // p x p x N
+            arma::vec &logq,           // N x 1
             const Model &model,
             const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
             const arma::mat &Theta_old, // p x N, {theta[t-1]}
             const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
             const arma::vec &mu0_old,   // N x 1, samples of baseline
             const arma::vec &y,
-            const arma::vec &yhat // y[t]
-        )
+            const bool &full_rank = false)
         {
-            unsigned int N = Theta_old.n_cols;
-            unsigned int nP = Theta_old.n_rows;
             double y_old = y.at(t_new - 1);
-            arma::mat Ieps(model.dim.nP, model.dim.nP, arma::fill::eye);
-            Ieps.diag().fill(EPS);
+            double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
 
-            mu.set_size(nP, N);
-            mu.zeros();
-
-            Prec = arma::zeros<arma::cube>(nP, nP, N);
-            Sigma_chol = Prec;
-
-            updated.set_size(N);
-            updated.zeros();
-
-            for (unsigned int i = 0; i < N; i++)
+            for (unsigned int i = 0; i < Theta_old.n_cols; i++)
             {
-                arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-                double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
-                arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, t_new, gtheta_old_i, y);            // Ft evaluated at a[t_new]
-                double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i);  // (eq 3.8)
-
+                arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old);
+                double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);
                 double eta = mu0_old.at(i) + ft_gtheta;
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
-
-                if (t_new == 1 && lambda < EPS)
-                {
-                    lambda = 1.;
-                }
+                lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
                 double Vt = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink.name); // (eq 3.11)
 
-                double delta = yhat.at(t_new) - mu0_old.at(i) - ft_tilde; // (eq 3.16)
-                double delta2 = delta * delta;
-
-                arma::mat FFt_norm = Ft_gtheta * Ft_gtheta.t() / Vt;
-                double FFt_det = arma::det(FFt_norm);
-                if (FFt_det < EPS8)
+                if (!full_rank)
                 {
-                    Ft_gtheta.zeros();
-                    FFt_norm.zeros();
-
-                    mu.col(i) = gtheta_old_i;
-                    Prec.at(0, 0, i) = 1. / W_old.at(i);
-                    Sigma_chol.at(0, 0, i) = std::sqrt(W_old.at(i));
-
-                    logq.at(i) = R::dnorm4(yhat.at(t_new), eta, std::sqrt(Vt), true);
-
-                    updated.at(i) = 0;
+                    loc.col(i) = gtheta_old_i;
+                    logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
 
                 } // One-step-ahead predictive density
                 else
                 {
-                    arma::mat Prec_i = FFt_norm + Ieps;  // nP x nP, function of mu0[i, t]
+                    arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, t_new, gtheta_old_i, y);
+                    double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
+                    double delta = yhat_new - mu0_old.at(i) - ft_tilde; // (eq 3.16)
+
+                    arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
+                    Prec_i.diag() += EPS;
                     Prec_i.at(0, 0) += 1. / W_old.at(i); // (eq 3.21)
+                    arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
+                    arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
+                    double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.;
+                    Prec_chol_inv.slice(i) = Rchol_inv;
 
-                    Prec_i = arma::symmatu(Prec_i);
-                    Prec.slice(i) = Prec_i;
-                    double ldetPrec = arma::log_det_sympd(Prec_i);
-
-                    arma::mat Rchol, Sigma_i;
-                    try
-                    {
-                        Sigma_i = inverse(Rchol, Prec_i);
-                    }
-                    catch (const std::exception &e)
-                    {
-                        double det_prec = arma::det(Prec_i);
-                        std::cout << "\n Determinant of Prec_i is: " << det_prec << "; ";
-                        std::cout << "Determinant of Ft * Ft.t() / Vt is: " << FFt_det << std::endl;
-                        std::cerr << e.what() << '\n';
-                    }
-
-                    Sigma_i = arma::symmatu(Sigma_i);
-                    Sigma_chol.slice(i) = Rchol;
-
-                    arma::vec y_scaled = Ft_gtheta * (delta / Vt); // nP x 1
-                    y_scaled.at(0) += gtheta_old_i.at(0) / W_old.at(i);
-                    // arma::vec g_scaled = precW * gtheta_old_i;
-                    // arma::vec mu_i = Sigma_i * (y_scaled + g_scaled); // (eq 3.20)
-                    arma::vec mu_i = Sigma_i * y_scaled;
-
-                    mu.col(i) = mu_i;
+                    loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1
+                    loc.at(0, i) += gtheta_old_i.at(0) / W_old.at(i);
 
                     double ldetV = std::log(std::abs(Vt) + EPS);
                     double ldetW = std::log(std::abs(W_old.at(i)) + EPS);
 
                     double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
-                    loglik += delta2 / Vt;
+                    loglik += delta * delta / Vt;
                     loglik += std::pow(gtheta_old_i.at(0), 2.) / W_old.at(i);
-                    loglik -= arma::as_scalar(mu_i.t() * Prec_i * mu_i); // minus (-)
+                    loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
                     loglik *= -0.5;                                      // (eq 3.24 - 3.25)
 
-                    try
-                    {
-                        bound_check(loglik, "imp_weights_forecast: loglik");
-                    }
-                    catch (const std::exception &e)
-                    {
-                        std::cout << "\n ldetPrec = " << ldetPrec;
-                        std::cout << ", ldetV = " << ldetV;
-                        std::cout << ", ldetW = " << ldetW;
-                        std::cout << ", delta = " << delta;
-                        std::cout << ", Vt = " << Vt;
-                        std::cout << ", gWg = " << std::pow(gtheta_old_i.at(0), 2.) / W_old.at(i);
-                        std::cout << ", uSu = " << arma::as_scalar(mu_i.t() * Prec_i * mu_i);
-                        throw std::runtime_error(e.what());
-                    }
-
                     logq.at(i) += loglik;
-
-                    updated.at(i) = 1;
                 } // one-step-ahead predictive density
             }
 
@@ -509,24 +440,8 @@ namespace SMC
             logq.for_each([&logq_max](arma::vec::elem_type &val)
                           { val -= logq_max; });
 
-            // double logm = arma::mean(logq);
-            // if (logq.max() > 100)
-            // {
-            //     double diff = logq.max() - 100;
-            //     logm = std::max(logm, diff);
-            // }
-            // logq.for_each([&logm](arma::vec::elem_type &val){val -= logm;});
             arma::vec weights = arma::exp(logq);
-
-            try
-            {
-                bound_check<arma::vec>(weights, "imp_weights_forecast");
-            }
-            catch (const std::exception &e)
-            {
-                logq.t().brief_print("\n logarithm of weights: ");
-                throw std::runtime_error(e.what());
-            }
+            bound_check<arma::vec>(weights, "imp_weights_forecast");
 
             return weights;
         } // func: imp_weights_forecast
@@ -2538,15 +2453,18 @@ namespace SMC
                  */
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu;                // nP x N
-                arma::cube Prec, Sigma_chol; // nP x nP x N
-                arma::uvec updated(N, arma::fill::zeros);
+                arma::mat loc(dim.nP, N, arma::fill::zeros); // nP x N
+                arma::cube prec_chol_inv; // nP x nP x N
+                if (full_rank)
+                {
+                    prec_chol_inv = arma::zeros<arma::cube>(dim.nP, dim.nP, N); // nP x nP x N
+                }
 
                 arma::vec tau = imp_weights_forecast(
-                    mu, Prec, Sigma_chol, logq, updated,
+                    loc, prec_chol_inv, logq,
                     model, t + 1,
                     Theta.slice(t),
-                    W_filter, mu0_filter, y, yhat);
+                    W_filter, mu0_filter, y, full_rank);
 
                 tau = tau % weights;
                 weights_forward.row(t) = tau.t();
@@ -2562,9 +2480,11 @@ namespace SMC
 
 
                 logq = logq.elem(resample_idx);
-                mu = mu.cols(resample_idx);
-                Prec = Prec.slices(resample_idx);
-                Sigma_chol = Sigma_chol.slices(resample_idx);
+                loc = loc.cols(resample_idx);
+                if (full_rank)
+                {
+                    prec_chol_inv = prec_chol_inv.slices(resample_idx);
+                }
 
                 eff_forward.at(t + 1) = effective_sample_size(tau);
 
@@ -2601,12 +2521,14 @@ namespace SMC
                     arma::vec theta_new; // nP x 1
                     if (full_rank)
                     {
-                        theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
-                        logq.at(i) += MVNorm::dmvnorm2(theta_new, mu.col(i), Prec.slice(i), true); // sample from posterior
+                        arma::vec eps = arma::randn(dim.nP);
+                        arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                        theta_new = prec_chol_inv.slice(i) * zt;
+                        logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
                     }
                     else
                     {
-                        theta_new = mu.col(i);
+                        theta_new = loc.col(i);
                         double eps = R::rnorm(0., std::sqrt(W_filter.at(i)));
                         theta_new.at(0) += eps;
                         logq.at(i) += R::dnorm4(eps, 0., std::sqrt(W_filter.at(i)), true);
