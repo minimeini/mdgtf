@@ -2665,18 +2665,9 @@ namespace SMC
                 // start = std::chrono::high_resolution_clock::now();
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    if (prior_par1.infer || prior_par2.infer)
-                    {
-                        unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
-                    }
                     arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
                     Theta_new.col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model.transfer, t_new, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
-                    // double logp_tmp = R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
-
-                    // double logq_theta = 0.;
                     if (full_rank)
                     {
                         logq.at(i) += MVNorm::dmvnorm2(theta_new, mu.col(i), Prec.slice(i), true); // sample from posterior
@@ -2686,7 +2677,12 @@ namespace SMC
                         logq.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
                     }
 
-                    // logq.at(i) += logq_theta;
+                    if (prior_par1.infer || prior_par2.infer)
+                    {
+                        unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
+                    }
+                    double ft = StateSpace::func_ft(model.transfer, t_new, theta_new, y);
+                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
 
                     double wtmp = prior_W.val;
                     if (filter_pass || (prior_W.infer && !burnin))
