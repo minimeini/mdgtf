@@ -169,9 +169,6 @@ namespace SMC
                 init_param_def(settings, par_name, prior_mu0);
             }
 
-            mu0_filter.set_size(N);
-            mu0_filter.fill(prior_mu0.val);
-
             par_name = "W";
             prior_W.init("invgamma", 1., 1.);
             prior_W.init_param(false, 0.01);
@@ -661,7 +658,7 @@ namespace SMC
         arma::vec W_filter; // N x 1
 
         Prior prior_mu0;
-        arma::vec mu0_filter;
+        // arma::vec mu0_filter;
 
         bool use_discount = false;
         bool use_custom = false;
@@ -2018,15 +2015,17 @@ namespace SMC
                 }
             }
 
+            param_filter.set_size(4, N);
+
             {
                 amu_forward.set_size(N);
                 amu_forward.fill(prior_mu0.par1);
                 bmu_forward.set_size(N);
                 bmu_forward.fill(prior_mu0.par2);
-                mu0_smooth.set_size(N);
-                mu0_smooth.zeros();
-                mu0_backward = mu0_smooth;
-                mu0_forward = mu0_smooth;
+                // mu0_smooth.set_size(N);
+                // mu0_smooth.zeros();
+                // mu0_backward = mu0_smooth;
+                // mu0_forward = mu0_smooth;
 
                 if (prior_mu0.infer)
                 {
@@ -2038,7 +2037,12 @@ namespace SMC
                         Rcpp::List mu0_init_opts = Rcpp::as<Rcpp::List>(opts["mu0_init"]);
                         init_dist(dist_mu0_init, mu0_init_opts);
                     }
-                    mu0_filter = draw_param_init(dist_mu0_init, N);
+                    arma::vec mu0_init = draw_param_init(dist_mu0_init, N);
+                    param_filter.row(0) = mu0_init.t();
+                }
+                else
+                {
+                    param_filter.row(0).fill(prior_mu0.val);
                 }
             }
 
@@ -2056,10 +2060,7 @@ namespace SMC
                         rho_mh_sd = Rcpp::as<double>(opts_rho["mh_sd"]);
                     }
                 }
-                rho_filter.set_size(N);
-                rho_filter.fill(prior_rho.val);
-                rho_backward = rho_filter;
-                rho_forward = rho_filter;
+                param_filter.row(1).fill(prior_rho.val);
             }
 
             obs_update = prior_mu0.infer || prior_rho.infer;
@@ -2078,10 +2079,7 @@ namespace SMC
                         par1_mh_sd = Rcpp::as<double>(opts_tmp["mh_sd"]);
                     }
                 }
-                par1_filter.set_size(N);
-                par1_filter.fill(prior_par1.val);
-                par1_backward = par1_filter;
-                par1_forward = par1_filter;
+                param_filter.row(2).fill(prior_par1.val);
             }
 
             {
@@ -2098,15 +2096,15 @@ namespace SMC
                         par2_mh_sd = Rcpp::as<double>(opts_tmp["mh_sd"]);
                     }
                 }
-                par2_filter.set_size(N);
-                par2_filter.fill(prior_par2.val);
-                par2_backward = par2_filter;
-                par2_forward = par2_filter;
+                param_filter.row(3).fill(prior_par2.val);
             }
 
             lag_update = prior_par1.infer || prior_par2.infer;
             prior_par1.infer = lag_update;
             prior_par2.infer = lag_update;
+
+            param_backward = param_filter;
+            param_smooth = param_smooth;
 
             mu_marginal.set_size(dim.nP, dim.nT + 1, N);
             mu_marginal.zeros();
@@ -2383,7 +2381,7 @@ namespace SMC
                     loc, prec_chol_inv, logq,
                     model, t + 1,
                     Theta.slice(t),
-                    W_filter, mu0_filter, y, 
+                    W_filter, param_filter, y, 
                     obs_update, lag_update, full_rank);
 
                 tau = tau % weights;
@@ -2416,24 +2414,16 @@ namespace SMC
                     bw_forward = bw_forward.elem(resample_idx); // s[t]
                 }
 
+                if (obs_update || lag_update)
+                {
+                    param_filter = param_filter.cols(resample_idx);
+                }
+
                 if (prior_mu0.infer)
                 {
-                    mu0_filter = mu0_filter.elem(resample_idx);   // gamma[t]
                     amu_forward = amu_forward.elem(resample_idx); // s[t]
                     bmu_forward = bmu_forward.elem(resample_idx); // s[t]
                 }
-
-                if (prior_rho.infer)
-                {
-                    rho_filter = rho_filter.elem(resample_idx); // gamma[t]
-                }
-
-                if (prior_par1.infer || prior_par2.infer)
-                {
-                    par1_filter = par1_filter.elem(resample_idx);
-                    par2_filter = par2_filter.elem(resample_idx);
-                }
-
 
                 arma::vec logp(N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
@@ -2493,12 +2483,18 @@ namespace SMC
                         model.derr._par1 = W_filter.at(i);
                     }
 
-                    if (prior_par1.infer || prior_par2.infer)
+                    if (lag_update)
                     {
-                        unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
+                        unsigned int nlag = model.update_dlag(param_filter.at(2, i), param_filter.at(3, i), model.dim.nL, false);
+                    }
+
+                    if (obs_update)
+                    {
+                        model.dobs._par1 = param_filter.at(0, i);
+                        model.dobs._par2 = param_filter.at(1, i);
                     }
                     double ft_new = StateSpace::func_ft(model.transfer, t + 1, theta_new, y); // ft(theta[t+1])
-                    double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, mu0_filter.at(i)); // ft_new from time t + 1, mu0_filter from time t (old).
+                    double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, param_filter.at(0, i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
                     {
                         if (prior_mu0.infer && !filter_pass)
@@ -2531,111 +2527,111 @@ namespace SMC
                                 }
                             }
 
-                            mu0_filter.at(i) = mu0;
+                            param_filter.at(0, i) = mu0;
                             logq.at(i) += R::dnorm4(mu0, amu_forward.at(i), sd, true);
 
                         } // inference of mu0
 
                         if (prior_mu0.infer)
                         {
-                            model.dobs._par1 = mu0_filter.at(i);
+                            model.dobs._par1 = param_filter.at(0, i);
                         }
                     } // mu0
 
                     {
                         if (!prior_rho.infer)
                         {
-                            rho_filter.at(i) = prior_rho.val;
+                            param_filter.at(1, i) = prior_rho.val;
                         }
                         else if (!filter_pass)
                         {
-                            double rho_old = rho_filter.at(i);
-                            rho_filter.at(i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
+                            double rho_old = param_filter.at(1, i);
+                            param_filter.at(1, i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
                             unsigned int cnt = 0;
-                            while (rho_filter.at(i) < 0 && cnt < max_iter)
+                            while (param_filter.at(1, i) < 0 && cnt < max_iter)
                             {
-                                rho_filter.at(i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
+                                param_filter.at(1, i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
                                 cnt++;
                             }
-                            logq.at(i) += R::dnorm4(rho_filter.at(i), rho_old, rho_mh_sd * rho_old, 1);
+                            logq.at(i) += R::dnorm4(param_filter.at(1, i), rho_old, rho_mh_sd * rho_old, 1);
                         }
 
                         if (prior_rho.infer)
                         {
-                            model.dobs._par2 = rho_filter.at(i);
+                            model.dobs._par2 = param_filter.at(1, i);
                         }
                     } // rho
 
                     {
                         if (!lag_update)
                         {
-                            par1_filter.at(i) = prior_par1.val;
-                            par2_filter.at(i) = prior_par2.val;
+                            param_filter.at(2, i) = prior_par1.val;
+                            param_filter.at(3, i) = prior_par2.val;
                         }
                         else if (!filter_pass)
                         {
-                            double par1_old = par1_filter.at(i);
-                            par1_filter.at(i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                            double par1_old = param_filter.at(2, i);
+                            param_filter.at(2, i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
 
                             if (nonnegative_par1)
                             {
                                 unsigned int cnt = 0;
                                 if (withinone_par1)
                                 {
-                                    while ((par1_filter.at(i) < 0 || par1_filter.at(i) > 1) && cnt < max_iter)
+                                    while ((param_filter.at(2, i) < 0 || param_filter.at(2, i) > 1) && cnt < max_iter)
                                     {
-                                        par1_filter.at(i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                                        param_filter.at(2, i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
                                         cnt++;
                                     }
                                 }
                                 else
                                 {
-                                    while (par1_filter.at(i) < 0 && cnt < max_iter)
+                                    while (param_filter.at(2, i) < 0 && cnt < max_iter)
                                     {
-                                        par1_filter.at(i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                                        param_filter.at(2, i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
                                         cnt++;
                                     }
                                 }
                             }
 
-                            logq.at(i) += R::dnorm4(par1_filter.at(i), par1_old, par1_mh_sd * par1_old, 1);
+                            logq.at(i) += R::dnorm4(param_filter.at(2, i), par1_old, par1_mh_sd * par1_old, 1);
 
-                            double par2_old = par2_filter.at(i);
-                            par2_filter.at(i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                            double par2_old = param_filter.at(3, i);
+                            param_filter.at(3, i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
 
                             if (nonnegative_par2)
                             {
                                 unsigned int cnt = 0;
                                 if (withinone_par2)
                                 {
-                                    while ((par2_filter.at(i) < 0 || par2_filter.at(i) > 1) && cnt < max_iter)
+                                    while ((param_filter.at(3, i) < 0 || param_filter.at(3, i) > 1) && cnt < max_iter)
                                     {
-                                        par2_filter.at(i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                                        param_filter.at(3, i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
                                         cnt++;
                                     }
                                 }
                                 else
                                 {
-                                    while (par2_filter.at(i) < 0 && cnt < max_iter)
+                                    while (param_filter.at(3, i) < 0 && cnt < max_iter)
                                     {
-                                        par2_filter.at(i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                                        param_filter.at(3, i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
                                         cnt++;
                                     }
                                 }
                             }
 
-                            logq.at(i) += R::dnorm4(par2_filter.at(i), par2_old, par2_mh_sd * par2_old, 1);
+                            logq.at(i) += R::dnorm4(param_filter.at(3, i), par2_old, par2_mh_sd * par2_old, 1);
                         }
 
                         if (lag_update)
                         {
-                            unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
+                            unsigned int nlag = model.update_dlag(param_filter.at(2, i), param_filter.at(3, i), model.dim.nL, false);
                         }
                     } // lag distribution
 
-                    double lambda_new = LinkFunc::ft2mu(ft_new, model.dobs.name, mu0_filter.at(i));
+                    double lambda_new = LinkFunc::ft2mu(ft_new, model.dobs.name, param_filter.at(0, i));
                     logp.at(i) = ObsDist::loglike(
-                        y.at(t + 1), model.dobs.name, lambda_new, rho_filter.at(i), true); // observation density
+                        y.at(t + 1), model.dobs.name, lambda_new, param_filter.at(1, i), true); // observation density
                     logp.at(i) += R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(W_filter.at(i)), true);
 
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_old;
@@ -2669,27 +2665,22 @@ namespace SMC
                 }
                 if (prior_mu0.infer)
                 {
-                    output["mu0"] = Rcpp::wrap(mu0_filter.t());
+                    output["mu0"] = Rcpp::wrap(param_filter.row(0));
                 }
                 if (prior_rho.infer)
                 {
-                    output["rho"] = Rcpp::wrap(rho_filter.t());
+                    output["rho"] = Rcpp::wrap(param_filter.row(1));
                 }
                 if (prior_par1.infer)
                 {
-                    output["par1"] = Rcpp::wrap(par1_filter.t());
+                    output["par1"] = Rcpp::wrap(param_filter.row(2));
                 }
                 if (prior_par2.infer)
                 {
-                    output["par2"] = Rcpp::wrap(par2_filter.t());
+                    output["par2"] = Rcpp::wrap(param_filter.row(3));
                 }
 
                 W_forward = W_filter;
-                mu0_forward = mu0_filter;
-                rho_forward = rho_filter;
-                par1_forward = par1_filter;
-                par2_forward = par2_filter;
-
                 // eff_forward = eff_filter;
             }
             else
@@ -2712,10 +2703,7 @@ namespace SMC
 
             Theta_backward = Theta;
             W_backward = W_filter;
-            mu0_backward = mu0_filter;
-            rho_backward = rho_filter;
-            par1_backward = par1_filter;
-            par2_backward = par2_filter;
+            param_backward = param_filter;
 
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < y.n_elem; t++)
@@ -2793,6 +2781,8 @@ namespace SMC
                 arma::cube Prec, Sigma_chol; // nP x nP x N
                 arma::uvec updated(N, arma::fill::zeros);
 
+                arma::vec mu0_backward = arma::vectorise(param_backward.row(0));
+
                 arma::vec tau = imp_weights_backcast(
                     mu, Prec, Sigma_chol, logq, updated,
                     model, t_cur, Theta_next,
@@ -2832,22 +2822,7 @@ namespace SMC
                 {
                     W_backward = W_backward.elem(resample_idx);
                 }
-
-                if (prior_mu0.infer)
-                {
-                    mu0_backward = mu0_backward.elem(resample_idx);
-                }
-
-                if (prior_rho.infer)
-                {
-                    rho_backward = rho_backward.elem(resample_idx);
-                }
-
-                if (prior_par1.infer || prior_par2.infer)
-                {
-                    par1_backward = par1_backward.elem(resample_idx);
-                    par2_backward = par2_backward.elem(resample_idx);
-                }
+                param_backward = param_backward.cols(resample_idx);
 
                 mu_marginal = mu_marginal.slices(resample_idx);
                 Sigma_marginal = Sigma_marginal.slices(resample_idx);
@@ -2866,15 +2841,15 @@ namespace SMC
                     }
                     if (prior_mu0.infer)
                     {
-                        model.dobs._par1 = mu0_backward.at(i);
+                        model.dobs._par1 = param_backward.at(0, i);
                     }
                     if (prior_rho.infer)
                     {
-                        model.dobs._par2 = rho_backward.at(i);
+                        model.dobs._par2 = param_backward.at(1, i);
                     }
-                    if (prior_par1.infer || prior_par2.infer)
+                    if (lag_update)
                     {
-                        unsigned int nlag = model.update_dlag(par1_backward.at(i), par2_backward.at(i), model.dim.nL, false);
+                        unsigned int nlag = model.update_dlag(param_backward.at(2, i), param_backward.at(3, i), model.dim.nL, false);
                     }
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                     Theta_cur.col(i) = theta_cur;
@@ -2889,7 +2864,7 @@ namespace SMC
                     }
 
                     logp.at(i) += ObsDist::loglike(
-                        y.at(t_cur), model.dobs.name, lambda_cur, rho_backward.at(i), true); // observation density
+                        y.at(t_cur), model.dobs.name, lambda_cur, param_backward.at(1, i), true); // observation density
 
                     logp.at(i) -= log_marg.at(i);
                     arma::vec Vprec = Prec_marginal.slice(i).col(t_cur);
@@ -2907,45 +2882,6 @@ namespace SMC
                                  { val -= wmax; });
                 weights = arma::exp(weights);
                 bound_check<arma::vec>(weights, "PL::backward_filter: propagation weights at t = " + std::to_string(t_cur));
-
-                // eff_backward.at(t_cur) = effective_sample_size(weights);
-                // if (eff_backward.at(t_cur) < 0.5 * N || t_cur <= 1)
-                // {
-                //     // resample
-                //     resample_idx = get_resample_index(weights);
-                //     Theta_cur = Theta_cur.cols(resample_idx);
-                //     log_marg = log_marg.elem(resample_idx);
-
-                //     weights.ones();
-
-                //     arma::rowvec wetmp = weights_backward.row(t_cur);
-                //     weights_backward.row(t_cur) = wetmp.elem(resample_idx).t();
-
-                //     if (prior_W.infer)
-                //     {
-                //         W_backward = W_backward.elem(resample_idx);
-                //     }
-
-                //     if (prior_mu0.infer)
-                //     {
-                //         mu0_backward = mu0_backward.elem(resample_idx);
-                //     }
-
-                //     if (prior_rho.infer)
-                //     {
-                //         rho_backward = rho_backward.elem(resample_idx);
-                //     }
-
-                //     if (prior_par1.infer || prior_par2.infer)
-                //     {
-                //         par1_backward = par1_backward.elem(resample_idx);
-                //         par2_backward = par2_backward.elem(resample_idx);
-                //     }
-
-                //     mu_marginal = mu_marginal.slices(resample_idx);
-                //     Sigma_marginal = Sigma_marginal.slices(resample_idx);
-
-                // }
 
                 Theta_backward.slice(t_cur) = Theta_cur;
                 // weights_prop_backward.row(t_cur) = weights.t();
@@ -3057,7 +2993,7 @@ namespace SMC
                 arma::mat Theta_prev = Theta.slice(t_prev); // p x N
                 // Theta.slice(t_prev) = Theta_prev.cols(resample_idx);
                 arma::vec W_filter_new = W_filter;     //.elem(resample_idx);
-                arma::vec mu0_filter_new = mu0_filter; // .elem(resample_idx);
+                arma::vec mu0_filter_new = arma::vectorise(param_filter.row(0)); // .elem(resample_idx);
 
                 // wfor = wfor.elem(resample_idx);
                 // weights_forward.row(t_prev) = wfor.t();
@@ -3071,10 +3007,10 @@ namespace SMC
                 arma::mat Theta_next = Theta_backward.slice(t_next);
                 // Theta_backward.slice(t_next) = Theta_next.cols(resample_idx);
                 arma::vec W_backward_new = W_backward;       //.elem(resample_idx);
-                arma::vec mu0_backward_new = mu0_backward;   //.elem(resample_idx);
-                arma::vec rho_backward_new = rho_backward;   //.elem(resample_idx);
-                arma::vec par1_backward_new = par1_backward; //.elem(resample_idx);
-                arma::vec par2_backward_new = par2_backward; //.elem(resample_idx);
+                arma::vec mu0_backward_new = arma::vectorise(param_backward.row(0)); //.elem(resample_idx);
+                arma::vec rho_backward_new = arma::vectorise(param_backward.row(1)); //.elem(resample_idx);
+                arma::vec par1_backward_new = arma::vectorise(param_backward.row(2)); //.elem(resample_idx);
+                arma::vec par2_backward_new = arma::vectorise(param_backward.row(3)); //.elem(resample_idx);
 
                 // wback = wback.elem(resample_idx);
                 // weights_backward.row(t_next) = wback.t();
@@ -3262,6 +3198,8 @@ namespace SMC
         arma::vec W_backward;
         arma::vec W_forward; // N x 4, 1st filter, 2nd filter, backward filter, smoothing
 
+        arma::mat param_filter, param_backward, param_smooth;
+
         // arma::mat amu; // N x (nT + 1), mean of normal
         // arma::mat bmu; // N x (nT + 1), precision of normal
         arma::vec amu_forward; // N x 1, mean of normal
@@ -3270,27 +3208,27 @@ namespace SMC
         // arma::vec bmu_backward; // N x 1
         // arma::mat mu0_stored; // N x (nT + 1)
         // arma::vec mu0_backward; // N x 1
-        arma::vec mu0_smooth; // M x 1
-        arma::vec mu0_backward;
-        arma::vec mu0_forward;
+        // arma::vec mu0_smooth; // M x 1
+        // arma::vec mu0_backward;
+        // arma::vec mu0_forward;
 
         Prior prior_rho;
         double rho_mh_sd = 1.;
-        arma::vec rho_filter; // N x 1
-        arma::vec rho_backward;
-        arma::vec rho_forward;
+        // arma::vec rho_filter; // N x 1
+        // arma::vec rho_backward;
+        // arma::vec rho_forward;
 
         Prior prior_par1;
         double par1_mh_sd = 1.;
-        arma::vec par1_filter; // N x 1
-        arma::vec par1_backward;
-        arma::vec par1_forward;
+        // arma::vec par1_filter; // N x 1
+        // arma::vec par1_backward;
+        // arma::vec par1_forward;
 
         Prior prior_par2;
         double par2_mh_sd = 1.;
-        arma::vec par2_filter; // N x 1
-        arma::vec par2_backward;
-        arma::vec par2_forward;
+        // arma::vec par2_filter; // N x 1
+        // arma::vec par2_backward;
+        // arma::vec par2_forward;
 
         arma::mat e11; // N x (nT + 1)
 

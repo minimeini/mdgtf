@@ -70,11 +70,12 @@ static arma::vec qforecast(
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
     const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
-    const arma::vec &mu0_old,   // N x 1, samples of baseline
+    const arma::mat &param,   // 4 x N, (mu0, rho, par1, par2)
     const arma::vec &y,
     const bool &obs_update,
     const bool &lag_update,
-    const bool &full_rank = false)
+    const bool &full_rank = false,
+    const unsigned int &max_lag = 30)
 {
     ObsDist dobs = model.dobs;
     TransFunc ftrans = model.transfer;
@@ -85,13 +86,16 @@ static arma::vec qforecast(
     {
         if (obs_update)
         {
+            dobs._par1 = param.at(0, i);
+            dobs._par2 = param.at(1, i);
         }
         if (lag_update)
         {
+            unsigned int nlag = ftrans.update_dlag(param.at(2, i), param.at(3, i), max_lag, false);
         }
         arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old);
         double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);
-        double eta = mu0_old.at(i) + ft_gtheta;
+        double eta = param.at(0, i) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
@@ -108,7 +112,7 @@ static arma::vec qforecast(
         {
             arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - mu0_old.at(i) - ft_tilde;                          // (eq 3.16)
+            double delta = yhat_new - param.at(0, i) - ft_tilde;                          // (eq 3.16)
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
