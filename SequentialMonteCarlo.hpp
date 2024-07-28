@@ -2659,14 +2659,14 @@ namespace SMC
 
                 // NEED TO CHANGE PROPAGATE STEP
                 // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
-                arma::mat Theta_new(model.dim.nP, N, arma::fill::zeros);
+                // arma::mat Theta_new(model.dim.nP, N, arma::fill::zeros);
                 arma::vec logp(N, arma::fill::zeros);
 
                 // start = std::chrono::high_resolution_clock::now();
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
-                    Theta_new.col(i) = theta_new;
+                    Theta.slice(t_new).col(i) = theta_new;
 
                     if (full_rank)
                     {
@@ -2879,7 +2879,7 @@ namespace SMC
                 // eff_filter.at(t_new) = effective_sample_size(weights);
                 log_cond_marginal.at(t_new) = log_conditional_marginal(weights);
 
-                Theta.slice(t_new) = Theta_new;
+                // Theta.slice(t_new) = Theta_new;
 
                 // if (eff_filter.at(t_new) < 0.5 * N || t_new >= dim.nT - 1)
                 // {
