@@ -2507,6 +2507,7 @@ namespace SMC
          */
         void forward_filter(Model &model, const bool &verbose = VERBOSE)
         {
+            const bool full_rank = false;
             arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
             arma::vec log_cond_marginal = eff_forward;
 
@@ -2605,7 +2606,7 @@ namespace SMC
                 Theta_old = Theta_old.cols(resample_idx); // theta[t]
                 // Theta.slice(t_old) = Theta_old;
 
-                updated = updated.elem(resample_idx);
+                // updated = updated.elem(resample_idx);
                 logq = logq.elem(resample_idx);
                 mu = mu.cols(resample_idx);
                 Prec = Prec.slices(resample_idx);
@@ -2673,19 +2674,19 @@ namespace SMC
 
                     double ft = StateSpace::func_ft(model.transfer, t_new, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
-                    double logp_tmp = R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
+                    // double logp_tmp = R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
 
-                    double logq_theta = 0.;
-                    if (updated.at(i) == 1)
+                    // double logq_theta = 0.;
+                    if (full_rank)
                     {
-                        logq_theta = MVNorm::dmvnorm2(theta_new, mu.col(i), Prec.slice(i), true); // sample from posterior
+                        logq.at(i) += MVNorm::dmvnorm2(theta_new, mu.col(i), Prec.slice(i), true); // sample from posterior
                     }
                     else
                     {
-                        logq_theta = logp_tmp; // sample from evolution distribution
+                        logq.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
                     }
 
-                    logq.at(i) += logq_theta;
+                    // logq.at(i) += logq_theta;
 
                     double wtmp = prior_W.val;
                     if (filter_pass || (prior_W.infer && !burnin))
