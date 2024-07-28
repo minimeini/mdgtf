@@ -2510,37 +2510,6 @@ namespace SMC
             arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
             arma::vec log_cond_marginal = eff_forward;
 
-            // if (arma::any(W_filter < EPS))
-            // {
-            //     throw std::invalid_argument("PL::forward_filter: W_filter should not be zero.");
-            // }
-
-            // if (!prior_W.infer)
-            // {
-            //     prior_W.val = model.derr.par1;
-            //     W_filter.fill(prior_W.val);
-            // }
-
-            // if (!prior_mu0.infer)
-            // {
-            //     prior_mu0.val = model.dobs.par1;
-            //     mu0_filter.fill(prior_mu0.val);
-            // }
-
-            // if (!prior_rho.infer)
-            // {
-            //     prior_rho.val = model.dobs.par2;
-            //     rho_filter.fill(prior_rho.val);
-            // }
-
-            // if (!prior_par1.infer && !prior_par2.infer)
-            // {
-            //     prior_par1.val = model.transfer.dlag.par1;
-            //     prior_par2.val = model.transfer.dlag.par2;
-
-            //     par1_filter.fill(prior_par1.val);
-            //     par2_filter.fill(prior_par2.val);
-            // }
 
             std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
@@ -2561,11 +2530,7 @@ namespace SMC
                 Rcpp::checkUserInterrupt();
 
                 bool print_time = (t == dim.nT - 2);
-
                 bool burnin = (t <= std::min(0.1 * dim.nT, 20.)) ? true : false;
-                // unsigned int t_old = t;
-                // unsigned int t_new = t + 1;
-                // arma::mat Theta_old = Theta.slice(t_old); // p x N, theta[t]
 
                 /**
                  * @brief Resampling using conditional one-step-ahead predictive distribution as weights.
@@ -2577,22 +2542,15 @@ namespace SMC
                 arma::cube Prec, Sigma_chol; // nP x nP x N
                 arma::uvec updated(N, arma::fill::zeros);
 
-                // auto start = std::chrono::high_resolution_clock::now();
                 arma::vec tau = imp_weights_forecast(
                     mu, Prec, Sigma_chol, logq, updated,
                     model, t + 1,
                     Theta.slice(t),
                     W_filter, mu0_filter, y, yhat);
-                // auto stop = std::chrono::high_resolution_clock::now();
-                // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // if (print_time) {
-                //     std::cout << "\nimp_weights_forecast: " << duration.count() << " microseconds";
-                // }
 
                 tau = tau % weights;
                 weights_forward.row(t) = tau.t();
 
-                // start = std::chrono::high_resolution_clock::now();
                 arma::uvec resample_idx = get_resample_index(tau);
 
                 for (unsigned int k = 0; k <= t; k++)
@@ -2602,22 +2560,13 @@ namespace SMC
                     weights_forward.row(k) = wtmp.elem(resample_idx).t();
                 }
 
-                // Theta_old = Theta_old.cols(resample_idx); // theta[t]
-                // Theta.slice(t_old) = Theta_old;
 
-                // updated = updated.elem(resample_idx);
                 logq = logq.elem(resample_idx);
                 mu = mu.cols(resample_idx);
                 Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
 
-                // tau = tau.elem(resample_idx);
-                // weights_forward.row(t_old) = tau.t();
                 eff_forward.at(t + 1) = effective_sample_size(tau);
-
-                // arma::rowvec wetmp = weights_prop_forward.row(t_old);
-                // weights = weights.elem(resample_idx);
-                // weights_prop_forward.row(t_old) = weights.t();
 
                 // No need to update static parameters if we already inferred them during forward filtering once with the same data (filter_pass = true).
                 if (prior_W.infer)
@@ -2645,23 +2594,8 @@ namespace SMC
                     par2_filter = par2_filter.elem(resample_idx);
                 }
 
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // if (print_time)
-                // {
-                //     std::cout << "\nresample: " << duration.count() << " microseconds";
-                // }
 
-                // arma::vec Wsqrt = arma::sqrt(W_stored.col(t));
-                // arma::vec Wsqrt = arma::sqrt(W_filter);
-                // bool positive_noise = (t_old < Theta_old.n_rows) ? true : false;
-
-                // NEED TO CHANGE PROPAGATE STEP
-                // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
-                // arma::mat Theta_new(model.dim.nP, N, arma::fill::zeros);
                 arma::vec logp(N, arma::fill::zeros);
-
-                // start = std::chrono::high_resolution_clock::now();
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_new; // nP x 1
@@ -2862,69 +2796,12 @@ namespace SMC
                         y.at(t + 1), model.dobs.name, lambda_new, rho_filter.at(i), true); // observation density
                     logp.at(i) += R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(W_filter.at(i)), true);
 
-                    // double logw_old = std::log(weights_prop_forward.at(t_old, i) + EPS);
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_old;
                 } // loop over i, index of particles; end of propagation
 
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // if (print_time)
-                // {
-                //     std::cout << "\npropagate: " << duration.count() << " microseconds" << std::endl;
-                // }
-
-                // double wmax = weights.max();
-                // weights.for_each([&wmax](arma::vec::elem_type &val)
-                //                  { val -= wmax; });
-                // weights = arma::exp(weights);
                 bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t));
 
-                // eff_filter.at(t_new) = effective_sample_size(weights);
                 log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
-
-                // Theta.slice(t_new) = Theta_new;
-
-                // if (eff_filter.at(t_new) < 0.5 * N || t_new >= dim.nT - 1)
-                // {
-                //     arma::uvec resample_idx = get_resample_index(weights);
-                //     weights.ones();
-
-                //     for (unsigned int t = 0; t <= t_new; t ++)
-                //     {
-                //         arma::mat tmp = Theta.slice(t); // p x N
-                //         Theta.slice(t) = tmp.cols(resample_idx);
-                //     }
-                //     // Theta.slice(t_new) = Theta_new.cols(resample_idx);
-
-                //     // Move: psi
-
-                //     if (prior_W.infer)
-                //     {
-                //         W_filter = W_filter.elem(resample_idx);
-                //         aw_forward = aw_forward.elem(resample_idx);
-                //         bw_forward = bw_forward.elem(resample_idx);
-                //     }
-
-                //     if (prior_mu0.infer)
-                //     {
-                //         mu0_filter = mu0_filter.elem(resample_idx);
-                //         amu_forward = amu_forward.elem(resample_idx);
-                //         bmu_forward = bmu_forward.elem(resample_idx);
-                //     }
-
-                //     if (prior_rho.infer)
-                //     {
-                //         rho_filter = rho_filter.elem(resample_idx);
-                //     }
-
-                //     if (prior_par1.infer || prior_par2.infer)
-                //     {
-                //         par1_filter = par1_filter.elem(resample_idx);
-                //         par2_filter = par2_filter.elem(resample_idx);
-                //     }
-                // }
-
-                // weights_prop_forward.row(t_new) = weights.t();
 
                 if (verbose)
                 {
