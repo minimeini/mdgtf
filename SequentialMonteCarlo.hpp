@@ -2677,13 +2677,6 @@ namespace SMC
                         logq.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
                     }
 
-                    if (prior_par1.infer || prior_par2.infer)
-                    {
-                        unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
-                    }
-                    double ft = StateSpace::func_ft(model.transfer, t_new, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
-
                     double wtmp = prior_W.val;
                     if (filter_pass || (prior_W.infer && !burnin))
                     {
@@ -2721,6 +2714,10 @@ namespace SMC
                         model.derr._par1 = W_filter.at(i);
                     }
 
+                    if (prior_par1.infer || prior_par2.infer)
+                    {
+                        unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
+                    }
                     double ft_new = StateSpace::func_ft(model.transfer, t_new, theta_new, y); // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, mu0_filter.at(i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
