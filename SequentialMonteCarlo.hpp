@@ -408,7 +408,7 @@ namespace SMC
             {
                 arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
                 double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
-                arma::vec Ft_gtheta = LBA::func_Ft(model, t_new, gtheta_old_i, y);            // Ft evaluated at a[t_new]
+                arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, t_new, gtheta_old_i, y);            // Ft evaluated at a[t_new]
                 double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i);  // (eq 3.8)
 
                 double eta = mu0_old.at(i) + ft_gtheta;
@@ -623,7 +623,7 @@ namespace SMC
                 r_cur = v_cur - K_cur * v_next;
 
                 arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
-                arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
+                arma::vec F_cur = LBA::func_Ft(model.transfer, t_cur, u_cur, y);
 
                 double ft_ut = StateSpace::func_ft(model.transfer, t_cur, u_cur, y);
                 double eta = mu0_filter.at(i) + ft_ut;
@@ -1961,6 +1961,7 @@ namespace SMC
 
         void smoother(const Model &model, const bool &verbose = VERBOSE)
         {
+            
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < y.n_elem; t++)
             {
@@ -1975,6 +1976,7 @@ namespace SMC
             arma::cube Prec_marginal(dim.nP, dim.nP, dim.nT + 1);
             prior_forward(mu_marginal, Prec_marginal, model, Wt, y);
 
+            
             for (unsigned int t = 1; t < dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
@@ -1996,10 +1998,12 @@ namespace SMC
                 arma::vec logp(N, arma::fill::zeros);
                 arma::vec logq = arma::log(wfor + EPS) + arma::log(wback + EPS);
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
+
+
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));
-                    arma::vec Ft = LBA::func_Ft(model, t_cur, gtheta, y);
+                    arma::vec Ft = LBA::func_Ft(model.transfer, t_cur, gtheta, y);
                     double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
                     double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
 
@@ -2013,6 +2017,8 @@ namespace SMC
 
                     arma::mat FFt_norm = Ft * Ft.t() / Vt;
                     double FFt_det = arma::det(FFt_norm);
+
+                    
 
                     arma::vec theta_cur;
                     if (FFt_det < EPS8)
@@ -2071,12 +2077,15 @@ namespace SMC
                     weights.at(i) = logp.at(i) - logq.at(i); // + log_forward + log_backward;
                 } // loop over particle i
 
+                
+
                 double wmax = weights.max();
                 weights.for_each([&wmax](arma::vec::elem_type &val)
                                  { val -= wmax; });
                 weights = arma::exp(weights);
                 arma::uvec resample_idx = get_resample_index(weights);
                 Theta_smooth.slice(t_cur) = Theta_cur.cols(resample_idx);
+
 
                 if (verbose)
                 {
@@ -2851,7 +2860,7 @@ namespace SMC
                         {
                             unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
                         }
-                    } // rho
+                    } // lag distribution
 
                     double lambda_new = LinkFunc::ft2mu(ft_new, model.dobs.name, mu0_filter.at(i));
                     logp.at(i) = ObsDist::loglike(
@@ -3385,7 +3394,7 @@ namespace SMC
                     }
 
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));
-                    arma::vec Ft = LBA::func_Ft(model, t_cur, gtheta, y);
+                    arma::vec Ft = LBA::func_Ft(model.transfer, t_cur, gtheta, y);
                     double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
                     double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
 

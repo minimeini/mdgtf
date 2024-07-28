@@ -212,23 +212,26 @@ namespace LBA
      * @return arma::vec
      */
     static arma::vec func_Ft(
-        const Model &model,
+        const TransFunc &ftrans,
         const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,       // y[0], y[1], ..., y[nT]
         const bool &fill_zero = LBA_FILL_ZERO
     )
     {
-        arma::vec Ft_cur = model.transfer.F0;
-        if (model.transfer.trans_list[model.transfer.name] == AVAIL::sliding)
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        arma::vec Ft_cur = ftrans.F0;
+        if (trans_list[ftrans.name] == AVAIL::sliding)
         {
+            const unsigned int nL = theta_cur.n_elem;
             // unsigned int nelem = std::min(t, model.dim.nL); // min(t,nL)
-            int nstart = std::max((int) 0, (int) (t - model.dim.nL));
-            unsigned int nend = std::max(model.dim.nL - 1, t - 1);
-            unsigned int nelem = nend - (unsigned int) nstart + 1;
+            unsigned int nstart = (t > nL) ? (t - nL) : 0;
+            // unsigned int nstart = std::max((unsigned int)0, t - nL);
+            unsigned int nend = std::max(nL - 1, t - 1);
+            unsigned int nelem = nend - nstart + 1;
 
-            arma::vec yold(model.dim.nL, arma::fill::zeros);
-            yold.tail(nelem) = yall.subvec((unsigned int) nstart, nend);
+            arma::vec yold(nL, arma::fill::zeros);
+            yold.tail(nelem) = yall.subvec(nstart, nend);
             // yold.head(nelem) = yall.subvec(t - nelem, t - 1); // y[t - min(t,nL)], ..., y[t-1], 0, ..., 0 => 
             // yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
             // arma::vec ytmp = yall.subvec(t - nelem, t - 1);
@@ -244,15 +247,15 @@ namespace LBA
 
             if (fill_zero)
             {
-                yold.elem(arma::find(yold <= EPS)).fill(0.01 / model.dim.nL);
+                yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(nL));
             }
             
             yold = arma::reverse(yold);
 
-            arma::vec th = theta_cur.head(model.dim.nL); // nL x 1
-            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, model.transfer.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
+            arma::vec th = theta_cur.head(nL); // nL x 1
+            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, ftrans.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
-            Ft_cur.head(model.dim.nL) = Ftmp % model.transfer.dlag.Fphi;
+            Ft_cur.head(nL) = Ftmp % ftrans.dlag.Fphi;
         }
 
         bound_check<arma::vec>(Ft_cur, "func_Ft: Ft_cur");
@@ -283,7 +286,7 @@ namespace LBA
         const bool &fill_zero = LBA_FILL_ZERO)
     {
         mean_ft = StateSpace::func_ft(model.transfer, t, at, yall);
-        _Ft = func_Ft(model, t, at, yall, fill_zero);
+        _Ft = func_Ft(model.transfer, t, at, yall, fill_zero);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
     }
