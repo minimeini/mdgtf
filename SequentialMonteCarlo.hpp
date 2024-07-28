@@ -384,21 +384,33 @@ namespace SMC
             const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
             const arma::vec &mu0_old,   // N x 1, samples of baseline
             const arma::vec &y,
+            const bool &obs_update = false,
+            const bool &lag_update = false,
             const bool &full_rank = false)
         {
+            ObsDist dobs = model.dobs;
+            TransFunc ftrans = model.transfer;
             double y_old = y.at(t_new - 1);
             double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
 
             for (unsigned int i = 0; i < Theta_old.n_cols; i++)
             {
-                arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old);
-                double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);
+                if (obs_update)
+                {
+
+                }
+                if (lag_update)
+                {
+
+                }
+                arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old);
+                double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);
                 double eta = mu0_old.at(i) + ft_gtheta;
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
                 lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
                 double Vt = ApproxDisturbance::func_Vt_approx(
-                    lambda, model.dobs, model.flink.name); // (eq 3.11)
+                    lambda, dobs, model.flink.name); // (eq 3.11)
 
                 if (!full_rank)
                 {
@@ -408,7 +420,7 @@ namespace SMC
                 } // One-step-ahead predictive density
                 else
                 {
-                    arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, t_new, gtheta_old_i, y);
+                    arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);
                     double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
                     double delta = yhat_new - mu0_old.at(i) - ft_tilde; // (eq 3.16)
 
@@ -2145,6 +2157,8 @@ namespace SMC
                 rho_forward = rho_filter;
             }
 
+            obs_update = prior_mu0.infer || prior_rho.infer;
+
             {
                 std::string par_name = "par1";
                 prior_par1.init("gamma", 0.1, 0.1);
@@ -2185,9 +2199,9 @@ namespace SMC
                 par2_forward = par2_filter;
             }
 
-            bool infer_lag = prior_par1.infer || prior_par2.infer;
-            prior_par1.infer = infer_lag;
-            prior_par2.infer = infer_lag;
+            lag_update = prior_par1.infer || prior_par2.infer;
+            prior_par1.infer = lag_update;
+            prior_par2.infer = lag_update;
 
             mu_marginal.set_size(dim.nP, dim.nT + 1, N);
             mu_marginal.zeros();
@@ -2464,7 +2478,8 @@ namespace SMC
                     loc, prec_chol_inv, logq,
                     model, t + 1,
                     Theta.slice(t),
-                    W_filter, mu0_filter, y, full_rank);
+                    W_filter, mu0_filter, y, 
+                    obs_update, lag_update, full_rank);
 
                 tau = tau % weights;
                 weights_forward.row(t) = tau.t();
@@ -3310,6 +3325,8 @@ namespace SMC
 
     private:
         bool filter_pass = false;
+        bool obs_update = false;
+        bool lag_update = false;
 
         arma::vec mu_marg_init;  // nP x 1
         arma::mat Sig_marg_init; // nP x nP
