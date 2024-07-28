@@ -1793,20 +1793,18 @@ namespace SMC
 
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
                         double logp_tmp = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
-                        logp.at(i) = logp_tmp;
                     }
                     else
                     {
                         theta_new = loc.col(i);
                         theta_new.at(0) += R::rnorm(0, std::sqrt(Wt.at(0)));
 
-                        double logp_tmp = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
-                        logq.at(i) += logp_tmp; // sample from evolution distribution
-                        logp.at(i) = logp_tmp;
+                        logq.at(i) += R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true); // sample from evolution distribution
                     }
 
                     Theta.slice(t + 1).col(i) = theta_new;
 
+                    logp.at(i) = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
                     double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
                     logp.at(i) += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
@@ -2726,7 +2724,7 @@ namespace SMC
                         model.derr._par1 = W_filter.at(i);
                     }
 
-                    double ft_new = StateSpace::func_ft(model.transfer, t_new, theta_new, y);                 // ft(theta[t+1])
+                    double ft_new = StateSpace::func_ft(model.transfer, t_new, theta_new, y); // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, mu0_filter.at(i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
                     {
