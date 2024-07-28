@@ -2563,9 +2563,9 @@ namespace SMC
                 bool print_time = (t == dim.nT - 2);
 
                 bool burnin = (t <= std::min(0.1 * dim.nT, 20.)) ? true : false;
-                unsigned int t_old = t;
-                unsigned int t_new = t + 1;
-                arma::mat Theta_old = Theta.slice(t_old); // p x N, theta[t]
+                // unsigned int t_old = t;
+                // unsigned int t_new = t + 1;
+                // arma::mat Theta_old = Theta.slice(t_old); // p x N, theta[t]
 
                 /**
                  * @brief Resampling using conditional one-step-ahead predictive distribution as weights.
@@ -2580,8 +2580,8 @@ namespace SMC
                 // auto start = std::chrono::high_resolution_clock::now();
                 arma::vec tau = imp_weights_forecast(
                     mu, Prec, Sigma_chol, logq, updated,
-                    model, t_new,
-                    Theta_old,
+                    model, t + 1,
+                    Theta.slice(t),
                     W_filter, mu0_filter, y, yhat);
                 // auto stop = std::chrono::high_resolution_clock::now();
                 // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
@@ -2590,19 +2590,19 @@ namespace SMC
                 // }
 
                 tau = tau % weights;
-                weights_forward.row(t_old) = tau.t();
+                weights_forward.row(t) = tau.t();
 
                 // start = std::chrono::high_resolution_clock::now();
                 arma::uvec resample_idx = get_resample_index(tau);
 
-                for (unsigned int k = 0; k <= t_old; k++)
+                for (unsigned int k = 0; k <= t; k++)
                 {
                     Theta.slice(k) = Theta.slice(k).cols(resample_idx);
                     arma::vec wtmp = arma::vectorise(weights_forward.row(k));
                     weights_forward.row(k) = wtmp.elem(resample_idx).t();
                 }
 
-                Theta_old = Theta_old.cols(resample_idx); // theta[t]
+                // Theta_old = Theta_old.cols(resample_idx); // theta[t]
                 // Theta.slice(t_old) = Theta_old;
 
                 // updated = updated.elem(resample_idx);
@@ -2613,7 +2613,7 @@ namespace SMC
 
                 // tau = tau.elem(resample_idx);
                 // weights_forward.row(t_old) = tau.t();
-                eff_forward.at(t_new) = effective_sample_size(tau);
+                eff_forward.at(t + 1) = effective_sample_size(tau);
 
                 // arma::rowvec wetmp = weights_prop_forward.row(t_old);
                 // weights = weights.elem(resample_idx);
@@ -2654,7 +2654,7 @@ namespace SMC
 
                 // arma::vec Wsqrt = arma::sqrt(W_stored.col(t));
                 // arma::vec Wsqrt = arma::sqrt(W_filter);
-                bool positive_noise = (t_old < Theta_old.n_rows) ? true : false;
+                // bool positive_noise = (t_old < Theta_old.n_rows) ? true : false;
 
                 // NEED TO CHANGE PROPAGATE STEP
                 // arma::mat Theta_new = propagate(y.at(t_old), Wsqrt, Theta_old, model, positive_noise);
@@ -2678,7 +2678,7 @@ namespace SMC
                         logq.at(i) += R::dnorm4(eps, 0., std::sqrt(W_filter.at(i)), true);
                     }
 
-                    Theta.slice(t_new).col(i) = theta_new;
+                    Theta.slice(t + 1).col(i) = theta_new;
 
                     double wtmp = prior_W.val;
                     if (filter_pass || (prior_W.infer && !burnin))
@@ -2699,7 +2699,7 @@ namespace SMC
 
                     if (prior_W.infer && !filter_pass)
                     {
-                        double err = theta_new.at(0) - Theta_old.at(0, i);
+                        double err = theta_new.at(0) - Theta.at(0, i, t);
                         double sse = std::pow(err, 2.);
 
                         aw_forward.at(i) += 0.5;
@@ -2721,7 +2721,7 @@ namespace SMC
                     {
                         unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
                     }
-                    double ft_new = StateSpace::func_ft(model.transfer, t_new, theta_new, y); // ft(theta[t+1])
+                    double ft_new = StateSpace::func_ft(model.transfer, t + 1, theta_new, y); // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, mu0_filter.at(i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
                     {
@@ -2733,7 +2733,7 @@ namespace SMC
                             bmu_forward.at(i) = 1. / prec;
 
                             // double nom = bmu.at(i, t) * amu.at(i, t); // prior precision x mean
-                            double eps = yhat.at(t_new) - ft_new;
+                            double eps = yhat.at(t + 1) - ft_new;
                             double eps_scl = eps / Vt_old;
                             amu_forward.at(i) = bmu_forward.at(i) * (amu_scl + eps_scl);
 
@@ -2859,11 +2859,11 @@ namespace SMC
 
                     double lambda_new = LinkFunc::ft2mu(ft_new, model.dobs.name, mu0_filter.at(i));
                     logp.at(i) = ObsDist::loglike(
-                        y.at(t_new), model.dobs.name, lambda_new, rho_filter.at(i), true); // observation density
-                    logp.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
+                        y.at(t + 1), model.dobs.name, lambda_new, rho_filter.at(i), true); // observation density
+                    logp.at(i) += R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(W_filter.at(i)), true);
 
                     // double logw_old = std::log(weights_prop_forward.at(t_old, i) + EPS);
-                    weights.at(i) = logp.at(i) - logq.at(i); // + logw_old;
+                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_old;
                 } // loop over i, index of particles; end of propagation
 
                 // stop = std::chrono::high_resolution_clock::now();
@@ -2873,14 +2873,14 @@ namespace SMC
                 //     std::cout << "\npropagate: " << duration.count() << " microseconds" << std::endl;
                 // }
 
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
-                bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t_old));
+                // double wmax = weights.max();
+                // weights.for_each([&wmax](arma::vec::elem_type &val)
+                //                  { val -= wmax; });
+                // weights = arma::exp(weights);
+                bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t));
 
                 // eff_filter.at(t_new) = effective_sample_size(weights);
-                log_cond_marginal.at(t_new) = log_conditional_marginal(weights);
+                log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
 
                 // Theta.slice(t_new) = Theta_new;
 
