@@ -282,7 +282,7 @@ namespace LBA
         const arma::mat &Rt,
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        mean_ft = StateSpace::func_ft(model, t, at, yall);
+        mean_ft = StateSpace::func_ft(model.transfer, t, at, yall);
         _Ft = func_Ft(model, t, at, yall, fill_zero);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
@@ -788,7 +788,7 @@ namespace LBA
 
         void filter_single_iter(const unsigned int &t)
         {
-            _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+            _at.col(t) = StateSpace::func_gt(_model.transfer, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
             _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
@@ -844,7 +844,7 @@ namespace LBA
             for (unsigned int t = tstart; t <= _model.dim.nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(_model, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                _at.col(t) = StateSpace::func_gt(_model.transfer, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
@@ -1137,7 +1137,7 @@ namespace LBA
                 for (unsigned int j = 1; j <= ncast; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
-                        _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                        _model.transfer, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
                     arma::mat Gt_cast = func_Gt(_model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 

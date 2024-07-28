@@ -406,8 +406,8 @@ namespace SMC
 
             for (unsigned int i = 0; i < N; i++)
             {
-                arma::vec gtheta_old_i = StateSpace::func_gt(model, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-                double ft_gtheta = StateSpace::func_ft(model, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+                arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+                double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
                 arma::vec Ft_gtheta = LBA::func_Ft(model, t_new, gtheta_old_i, y);            // Ft evaluated at a[t_new]
                 double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i);  // (eq 3.8)
 
@@ -625,7 +625,7 @@ namespace SMC
                 arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
                 arma::vec F_cur = LBA::func_Ft(model, t_cur, u_cur, y);
 
-                double ft_ut = StateSpace::func_ft(model, t_cur, u_cur, y);
+                double ft_ut = StateSpace::func_ft(model.transfer, t_cur, u_cur, y);
                 double eta = mu0_filter.at(i) + ft_ut;
                 double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
                 double Vtilde = ApproxDisturbance::func_Vt_approx(
@@ -1155,7 +1155,7 @@ namespace SMC
                 bool positive_noise = (t < Theta.n_rows) ? true : false;
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec theta_new = StateSpace::func_gt(model, Theta.slice(t + B - 1).col(i), y.at(t));
+                    arma::vec theta_new = StateSpace::func_gt(model.transfer, Theta.slice(t + B - 1).col(i), y.at(t));
                     double eps = R::rnorm(0., Wsqrt);
                     if (positive_noise)
                     {
@@ -1164,7 +1164,7 @@ namespace SMC
 
                     theta_new.at(0) += eps;
 
-                    double ft = StateSpace::func_ft(model, t + 1, theta_new, y);
+                    double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
 
                     weights.at(i) = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, par.at(1), false);
@@ -1445,7 +1445,7 @@ namespace SMC
 
                     Theta.slice(t + 1).col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model, t + 1, theta_new, y);
+                    double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
                     logp.at(i) += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i));
@@ -1807,7 +1807,7 @@ namespace SMC
 
                     Theta.slice(t + 1).col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model, t + 1, theta_new, y);
+                    double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
                     logp.at(i) += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i));
@@ -1920,7 +1920,7 @@ namespace SMC
 
                     Theta_backward.slice(t).col(i) = theta_cur;
 
-                    double ft_cur = StateSpace::func_ft(model, t, theta_cur, y);
+                    double ft_cur = StateSpace::func_ft(model.transfer, t, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, par.at(0));
 
                     logp.at(i) += ObsDist::loglike(
@@ -1998,9 +1998,9 @@ namespace SMC
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec gtheta = StateSpace::func_gt(model, Theta_prev.col(i), y.at(t_prev));
+                    arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));
                     arma::vec Ft = LBA::func_Ft(model, t_cur, gtheta, y);
-                    double ft = StateSpace::func_ft(model, t_cur, gtheta, y);
+                    double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
                     double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
 
                     double eta = par.at(0) + ft;
@@ -2057,10 +2057,10 @@ namespace SMC
                     Theta_cur.col(i) = theta_cur;
 
                     logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(Wt.at(0)), true);
-                    gtheta = StateSpace::func_gt(model, theta_cur, y.at(t_cur));
+                    gtheta = StateSpace::func_gt(model.transfer, theta_cur, y.at(t_cur));
                     logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
 
-                    ft = StateSpace::func_ft(model, t_cur, theta_cur, y);
+                    ft = StateSpace::func_ft(model.transfer, t_cur, theta_cur, y);
                     lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
                     logp.at(i) += ObsDist::loglike(y.at(t_cur), model.dobs.name, lambda, model.dobs.par2, true);
 
@@ -2664,7 +2664,7 @@ namespace SMC
                     arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
                     Theta_new.col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model, t_new, theta_new, y);
+                    double ft = StateSpace::func_ft(model.transfer, t_new, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_filter.at(i));
                     double logp_tmp = R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
 
@@ -2717,7 +2717,7 @@ namespace SMC
                         model.derr._par1 = W_filter.at(i);
                     }
 
-                    double ft_new = StateSpace::func_ft(model, t_new, theta_new, y);                 // ft(theta[t+1])
+                    double ft_new = StateSpace::func_ft(model.transfer, t_new, theta_new, y);                 // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, mu0_filter.at(i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
                     {
@@ -3023,7 +3023,7 @@ namespace SMC
 
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    mu_marginal.slice(i).col(t) = StateSpace::func_gt(model, mu_marginal.slice(i).col(t - 1), y.at(t - 1));
+                    mu_marginal.slice(i).col(t) = StateSpace::func_gt(model.transfer, mu_marginal.slice(i).col(t - 1), y.at(t - 1));
 
                     arma::mat Gt = LBA::func_Gt(model, mu_marginal.slice(i).col(t - 1), y.at(t - 1));
                     arma::mat Vt = arma::reshape(Sigma_marginal.slice(i).col(t - 1), model.dim.nP, model.dim.nP);
@@ -3156,7 +3156,7 @@ namespace SMC
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                     Theta_cur.col(i) = theta_cur;
 
-                    double ft_cur = StateSpace::func_ft(model, t_cur, theta_cur, y);
+                    double ft_cur = StateSpace::func_ft(model.transfer, t_cur, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, mu0_backward.at(i));
 
                     if (updated.at(i) == 1)
@@ -3384,9 +3384,9 @@ namespace SMC
                         model.dobs._par2 = rho_backward_new.at(i);
                     }
 
-                    arma::vec gtheta = StateSpace::func_gt(model, Theta_prev.col(i), y.at(t_prev));
+                    arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));
                     arma::vec Ft = LBA::func_Ft(model, t_cur, gtheta, y);
-                    double ft = StateSpace::func_ft(model, t_cur, gtheta, y);
+                    double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
                     double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
 
                     double eta = mu0_backward_new.at(i) + ft;
@@ -3448,10 +3448,10 @@ namespace SMC
                     {
                         unsigned int nlag = model.update_dlag(par1_backward_new.at(i), par2_backward_new.at(i), model.dim.nL, false);
                     }
-                    gtheta = StateSpace::func_gt(model, theta_cur, y.at(t_cur));
+                    gtheta = StateSpace::func_gt(model.transfer, theta_cur, y.at(t_cur));
                     logp.at(i) += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(W_backward_new.at(i)), true);
 
-                    ft = StateSpace::func_ft(model, t_cur, theta_cur, y);
+                    ft = StateSpace::func_ft(model.transfer, t_cur, theta_cur, y);
                     lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0_backward_new.at(i));
                     logp.at(i) += ObsDist::loglike(y.at(t_cur), model.dobs.name, lambda, rho_backward_new.at(i), true);
 

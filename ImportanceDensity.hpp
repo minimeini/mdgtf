@@ -74,19 +74,25 @@ static arma::vec qforecast(
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
+    ObsDist dobs = model.dobs;
+    TransFunc ftrans = model.transfer;
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
-
+    
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+        ftrans.dlag._par1 = param.at(2, i);
+        ftrans.dlag._par2 = param.at(3, i);
+        arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
         double eta = param.at(0, i) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
+        dobs._par1 = param.at(0, i);
+        dobs._par2 = param.at(1, i);
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, model.dobs, model.flink.name); // (eq 3.11)
+            lambda, dobs, model.flink.name); // (eq 3.11)
 
         if (!full_rank)
         {
@@ -157,13 +163,14 @@ static arma::vec qforecast(
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
+    TransFunc ftrans = model.transfer;
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
 
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -240,11 +247,12 @@ static arma::vec qforecast(
 {
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
+    TransFunc ftrans = model.transfer;
 
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -320,6 +328,7 @@ static void prior_forward(
     const arma::vec &y   // (nT + 1) x 1
 )
 {
+    TransFunc ftrans = model.transfer;
     const unsigned int nP = Wt.n_elem;
     const unsigned int nT = y.n_elem - 1;
     // arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
@@ -331,7 +340,7 @@ static void prior_forward(
 
     for (unsigned int t = 1; t <= nT; t++)
     {
-        mu.col(t) = StateSpace::func_gt(model, mu.col(t - 1), y.at(t - 1));
+        mu.col(t) = StateSpace::func_gt(ftrans, mu.col(t - 1), y.at(t - 1));
         arma::mat Gt = LBA::func_Gt(model, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t();
         sig.at(0, 0) += Wt.at(0);
@@ -502,7 +511,7 @@ static arma::vec qbackcast(
     {
         
         arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
-        double ft_ut = StateSpace::func_ft(model, t_cur, u_cur, y);
+        double ft_ut = StateSpace::func_ft(model.transfer, t_cur, u_cur, y);
         double eta = model.dobs.par1 + ft_ut;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
         if (lambda < EPS)
