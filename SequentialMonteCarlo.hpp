@@ -1792,14 +1792,13 @@ namespace SMC
                         theta_new = prec_chol_inv.slice(i) * zt;            // scaled
 
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
-                        double logp_tmp = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
                     }
                     else
                     {
                         theta_new = loc.col(i);
-                        theta_new.at(0) += R::rnorm(0, std::sqrt(Wt.at(0)));
-
-                        logq.at(i) += R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true); // sample from evolution distribution
+                        double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
+                        theta_new.at(0) += eps;
+                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true); // sample from evolution distribution
                     }
 
                     Theta.slice(t + 1).col(i) = theta_new;
@@ -2665,17 +2664,21 @@ namespace SMC
                 // start = std::chrono::high_resolution_clock::now();
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP); // nP
-                    Theta.slice(t_new).col(i) = theta_new;
-
+                    arma::vec theta_new; // nP x 1
                     if (full_rank)
                     {
+                        theta_new = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn(model.dim.nP);
                         logq.at(i) += MVNorm::dmvnorm2(theta_new, mu.col(i), Prec.slice(i), true); // sample from posterior
                     }
                     else
                     {
-                        logq.at(i) += R::dnorm4(theta_new.at(0), Theta_old.at(0, i), std::sqrt(W_filter.at(i)), true);
+                        theta_new = mu.col(i);
+                        double eps = R::rnorm(0., std::sqrt(W_filter.at(i)));
+                        theta_new.at(0) += eps;
+                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(W_filter.at(i)), true);
                     }
+
+                    Theta.slice(t_new).col(i) = theta_new;
 
                     double wtmp = prior_W.val;
                     if (filter_pass || (prior_W.infer && !burnin))
