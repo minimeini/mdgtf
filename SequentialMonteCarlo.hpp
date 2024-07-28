@@ -362,101 +362,6 @@ namespace SMC
             return pmarg;
         }
 
-        /**
-         * @brief At time t, importance weights of forward filtering particles z[t-1] = (theta[t-1], W[t-1], mu0[t-1]), based on conditional predictive distribution y[t] | z[t-1], y[1:t-1].
-         *
-         * @param model
-         * @param t_new Index of the time that is being predicted, t. The following inputs come from time t_old = t-1.
-         * @param Theta p x N, { theta[t-1, i], i = 1, ..., N }, samples of latent states at t-1
-         * @param W N x 1, { W[t-1, i], i = 1, ..., N }, samples of latent variance at t-1
-         * @param mu0 N x 1, { mu0[t-1, i], i = 1, ..., N }, samples of baseline at t-1
-         * @param mt_old p x N, m[t-1]. Assume no static parameters involved in ft.
-         * @param yhat y[t] after transformation.
-         * @return arma::vec
-         */
-        static arma::vec imp_weights_forecast(
-            arma::mat &loc,            // p x N
-            arma::cube &Prec_chol_inv, // p x p x N
-            arma::vec &logq,           // N x 1
-            const Model &model,
-            const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
-            const arma::mat &Theta_old, // p x N, {theta[t-1]}
-            const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
-            const arma::vec &mu0_old,   // N x 1, samples of baseline
-            const arma::vec &y,
-            const bool &obs_update = false,
-            const bool &lag_update = false,
-            const bool &full_rank = false)
-        {
-            ObsDist dobs = model.dobs;
-            TransFunc ftrans = model.transfer;
-            double y_old = y.at(t_new - 1);
-            double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
-
-            for (unsigned int i = 0; i < Theta_old.n_cols; i++)
-            {
-                if (obs_update)
-                {
-
-                }
-                if (lag_update)
-                {
-
-                }
-                arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old);
-                double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);
-                double eta = mu0_old.at(i) + ft_gtheta;
-                double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
-                lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
-
-                double Vt = ApproxDisturbance::func_Vt_approx(
-                    lambda, dobs, model.flink.name); // (eq 3.11)
-
-                if (!full_rank)
-                {
-                    loc.col(i) = gtheta_old_i;
-                    logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
-
-                } // One-step-ahead predictive density
-                else
-                {
-                    arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);
-                    double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-                    double delta = yhat_new - mu0_old.at(i) - ft_tilde; // (eq 3.16)
-
-                    arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
-                    Prec_i.diag() += EPS;
-                    Prec_i.at(0, 0) += 1. / W_old.at(i); // (eq 3.21)
-                    arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
-                    arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
-                    double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.;
-                    Prec_chol_inv.slice(i) = Rchol_inv;
-
-                    loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1
-                    loc.at(0, i) += gtheta_old_i.at(0) / W_old.at(i);
-
-                    double ldetV = std::log(std::abs(Vt) + EPS);
-                    double ldetW = std::log(std::abs(W_old.at(i)) + EPS);
-
-                    double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
-                    loglik += delta * delta / Vt;
-                    loglik += std::pow(gtheta_old_i.at(0), 2.) / W_old.at(i);
-                    loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
-                    loglik *= -0.5;                                      // (eq 3.24 - 3.25)
-
-                    logq.at(i) += loglik;
-                } // one-step-ahead predictive density
-            }
-
-            double logq_max = logq.max();
-            logq.for_each([&logq_max](arma::vec::elem_type &val)
-                          { val -= logq_max; });
-
-            arma::vec weights = arma::exp(logq);
-            bound_check<arma::vec>(weights, "imp_weights_forecast");
-
-            return weights;
-        } // func: imp_weights_forecast
 
         /**
          * @brief At time t, importance weights of forward filtering particles z[t-1] = (theta[t-1], W[t-1], mu0[t-1]), based on conditional predictive distribution y[t] | z[t-1], y[1:t-1].
@@ -2474,7 +2379,7 @@ namespace SMC
                     prec_chol_inv = arma::zeros<arma::cube>(dim.nP, dim.nP, N); // nP x nP x N
                 }
 
-                arma::vec tau = imp_weights_forecast(
+                arma::vec tau = qforecast(
                     loc, prec_chol_inv, logq,
                     model, t + 1,
                     Theta.slice(t),
@@ -2662,7 +2567,7 @@ namespace SMC
                     } // rho
 
                     {
-                        if (!prior_par1.infer && !prior_par2.infer)
+                        if (!lag_update)
                         {
                             par1_filter.at(i) = prior_par1.val;
                             par2_filter.at(i) = prior_par2.val;
@@ -2722,7 +2627,7 @@ namespace SMC
                             logq.at(i) += R::dnorm4(par2_filter.at(i), par2_old, par2_mh_sd * par2_old, 1);
                         }
 
-                        if (prior_par1.infer || prior_par2.infer)
+                        if (lag_update)
                         {
                             unsigned int nlag = model.update_dlag(par1_filter.at(i), par2_filter.at(i), model.dim.nL, false);
                         }
