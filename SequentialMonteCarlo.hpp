@@ -8,6 +8,7 @@
 #include <algorithm>
 // #include <chrono>
 #include <RcppArmadillo.h>
+#include <omp.h>
 #include "Model.hpp"
 #include "ImportanceDensity.hpp"
 
@@ -1587,13 +1588,15 @@ namespace SMC
                 }
 
                 // Propagate
-                arma::vec logp(N, arma::fill::zeros);
+                arma::mat Theta_new(dim.nP, N, arma::fill::zeros);
+                arma::vec theta_cur = arma::vectorise(Theta.slice(t).row(0)); // N x 1
+                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_new;
                     if (full_rank)
                     {
-                        arma::vec eps = arma::randn(dim.nP);
+                        arma::vec eps = arma::randn(Theta_new.n_rows);
                         arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
                         theta_new = prec_chol_inv.slice(i) * zt;            // scaled
 
@@ -1607,16 +1610,17 @@ namespace SMC
                         logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true); // sample from evolution distribution
                     }
 
-                    Theta.slice(t + 1).col(i) = theta_new;
+                    Theta_new.col(i) = theta_new;
 
-                    logp.at(i) = R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(Wt.at(0)), true);
+                    double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
                     double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
-                    logp.at(i) += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
-                    weights.at(i) = std::exp(logp.at(i) - logq.at(i));
+                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    weights.at(i) = std::exp(logp - logq.at(i));
                 }
 
                 log_cond_marginal.at(t + 1) = log_conditional_marginal(weights);
+                Theta.slice(t + 1) = Theta_new;
 
                 // if (eff_forward.at(t + 1) < 0.95 * N || t >= dim.nT - 1)
                 // {
@@ -1694,19 +1698,23 @@ namespace SMC
                 }
 
                 tau = tau.elem(resample_idx);
+                log_marg = log_marg.elem(resample_idx);
+                logq = logq.elem(resample_idx);
+
                 weights_backward.row(t + 1) = logq.t();
                 eff_backward.at(t) = effective_sample_size(tau);
 
-                log_marg = log_marg.elem(resample_idx);
-                logq = logq.elem(resample_idx);
-;
-                arma::vec logp(N, arma::fill::zeros);
+                arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
+                arma::vec theta_next = arma::vectorise(Theta_backward.slice(t + 1).row(dim.nP - 1));
+                arma::vec mu = mu_marginal.col(t);
+                arma::mat Prec = Prec_marginal.slice(t);
+                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_cur;
                     if (full_rank)
                     {
-                        arma::vec eps = arma::randn(dim.nP);
+                        arma::vec eps = arma::randn(Theta_cur.n_rows);
                         arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
                         theta_cur = prec_chol_inv.slice(i) * zt;
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
@@ -1719,24 +1727,24 @@ namespace SMC
                         logq.at(i) += R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
                     }
 
-                    logp.at(i) += R::dnorm4(Theta_backward.at(dim.nP - 1, i, t + 1), theta_cur.at(dim.nP - 1), std::sqrt(Wt.at(0)), true);
+                    double logp = R::dnorm4(theta_next.at(i), theta_cur.at(dim.nP - 1), std::sqrt(Wt.at(0)), true);
 
-                    Theta_backward.slice(t).col(i) = theta_cur;
+                    Theta_cur.col(i) = theta_cur;
 
                     double ft_cur = StateSpace::func_ft(model.transfer, t, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name, par.at(0));
 
-                    logp.at(i) += ObsDist::loglike(
+                    logp += ObsDist::loglike(
                         y.at(t), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
                     // logp.at(i) -= log_marg.at(i);
-                    logp.at(i) -= log_marg.at(i);
-                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t), Prec_marginal.slice(t), true);
-                    logp.at(i) += log_marg.at(i);
+                    logp -= log_marg.at(i);
+                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu, Prec, true);
+                    logp += log_marg.at(i);
 
-                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_next;
+                    weights.at(i) = std::exp(logp - logq.at(i)); // + logw_next;
                 } // loop over i, index of particles
 
-
+                Theta_backward.slice(t) = Theta_cur;
 
                 if (verbose)
                 {
@@ -1768,18 +1776,22 @@ namespace SMC
             arma::cube Prec_marginal(dim.nP, dim.nP, dim.nT + 1);
             prior_forward(mu_marginal, Prec_marginal, model, Wt, y);
 
-            
             for (unsigned int t = 1; t < dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
-
                 double yhat_cur = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-                arma::vec logp(N, arma::fill::zeros);
-                arma::vec logq = arma::vectorise(weights_forward.row(t - 1) + weights_backward.row(t + 1));
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
+                // arma::vec logp(N, arma::fill::zeros);
+                // arma::vec logq = arma::vectorise(weights_forward.row(t - 1) + weights_backward.row(t + 1));
 
+                arma::mat Theta_next = Theta_backward.slice(t + 1);
+                arma::vec mu = mu_marginal.col(t + 1);
+                arma::mat Prec = Prec_marginal.slice(t + 1);
+                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
+                    double logq = weights_forward.at(t - 1, i) + weights_backward.at(t + 1, i);
+
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta.slice(t - 1).col(i), y.at(t - 1));
                     double ft = StateSpace::func_ft(model.transfer, t, gtheta, y);
                     double eta = par.at(0) + ft;
@@ -1793,7 +1805,7 @@ namespace SMC
                         theta_cur = gtheta;
                         double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
                         theta_cur.at(0) += eps;
-                        logq.at(i) = R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true);
+                        logq += R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true);
                     }
                     else
                     {
@@ -1810,44 +1822,42 @@ namespace SMC
                         arma::mat Rchol, Sigma;
                         Sigma = inverse(Rchol, prec);
 
-                        arma::vec mu_part1 = Gt.t() * Wprec * Theta_backward.slice(t + 1).col(i);
+                        arma::vec mu_part1 = Gt.t() * Wprec * Theta_next.col(i);
                         mu_part1.at(0) += gtheta.at(0) / Wt.at(0);
 
                         arma::vec mu = Ft * (delta / Vt);
                         mu = Sigma * (mu_part1 + mu);
 
                         theta_cur = mu + Rchol.t() * arma::randn(model.dim.nP);
-                        logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu, prec, true);
+                        logq += MVNorm::dmvnorm2(theta_cur, mu, prec, true);
                     }
 
                     Theta_cur.col(i) = theta_cur;
 
-                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(Wt.at(0)), true);
+                    double logp = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(Wt.at(0)), true);
                     gtheta = StateSpace::func_gt(model.transfer, theta_cur, y.at(t));
-                    logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t + 1), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
+                    logp += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
 
                     ft = StateSpace::func_ft(model.transfer, t, theta_cur, y);
                     lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
-                    logp.at(i) += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+                    logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
 
-                    logp.at(i) -= MVNorm::dmvnorm2(Theta_backward.slice(t + 1).col(i), mu_marginal.col(t + 1), Prec_marginal.slice(t + 1), true);
+                    logp -= MVNorm::dmvnorm2(Theta_next.col(i), mu, Prec, true);
 
-                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + log_forward + log_backward;
+                    weights.at(i) = std::exp(logp - logq); // + log_forward + log_backward;
                 } // loop over particle i
 
                 arma::uvec resample_idx = get_resample_index(weights);
                 Theta_smooth.slice(t) = Theta_cur.cols(resample_idx);
-
-
                 if (verbose)
                 {
-                    Rcpp::Rcout << "\rSmoothing: " << t + 1 << "/" << dim.nT;
+                    std::cout << "\rSmoothing: " << t + 1 << "/" << dim.nT;
                 }
             }
 
             if (verbose)
             {
-                Rcpp::Rcout << std::endl;
+                std::cout << std::endl;
             }
 
             arma::mat psi = Theta_smooth.row_as_mat(0);
@@ -2337,12 +2347,14 @@ namespace SMC
                 }
 
                 arma::vec logp(N, arma::fill::zeros);
+
+                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_new; // nP x 1
                     if (full_rank)
                     {
-                        arma::vec eps = arma::randn(dim.nP);
+                        arma::vec eps = arma::randn(Theta.n_rows);
                         arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
                         theta_new = prec_chol_inv.slice(i) * zt;
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);

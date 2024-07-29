@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
+#include <omp.h>
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 
@@ -77,13 +78,14 @@ static arma::vec qforecast(
     const bool &full_rank = false,
     const unsigned int &max_lag = 30)
 {
-    ObsDist dobs = model.dobs;
-    TransFunc ftrans = model.transfer;
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
 
+    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
+        ObsDist dobs = model.dobs;
+        TransFunc ftrans = model.transfer;
         if (obs_update)
         {
             dobs._par1 = param.at(0, i);
@@ -162,14 +164,14 @@ static arma::vec qforecast(
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
-    TransFunc ftrans = model.transfer;
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
 
+    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -185,7 +187,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y); // Ft evaluated at a[t_new]
+            arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
@@ -247,12 +249,12 @@ static arma::vec qforecast(
 {
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
-    TransFunc ftrans = model.transfer;
 
+    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -268,7 +270,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, t_new, gtheta_old_i, y);
+            arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
@@ -497,10 +499,9 @@ static arma::vec qbackcast(
     double ldetU = 0.;
     backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, Wt, y);
     
-
+    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < N; i++)
     {
-        
         arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
         double ft_ut = StateSpace::func_ft(model.transfer, t_cur, u_cur, y);
         double eta = model.dobs.par1 + ft_ut;

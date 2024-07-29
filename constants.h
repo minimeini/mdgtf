@@ -18,6 +18,8 @@
 #define ARMA_USE_OPENMP
 #endif
 
+inline constexpr unsigned int NUM_THREADS = 8;
+
 inline constexpr double EPS = 2.220446e-16;
 inline constexpr double EPS8 = 1.e-8;
 inline constexpr double UPBND = 700.;
