@@ -2667,12 +2667,6 @@ namespace SMC
                 Prec_marginal.slice(i).col(0) = Prec_marg_init.as_col();
             }
 
-            arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
-            Ieps.for_each([](arma::mat::elem_type &val)
-                          { val *= EPS; });
-
-            arma::vec Wprec = 1. / W_backward;
-
             for (unsigned int t = 1; t <= dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
@@ -2685,7 +2679,7 @@ namespace SMC
                     arma::mat Vt = arma::reshape(Sigma_marginal.slice(i).col(t - 1), model.dim.nP, model.dim.nP);
                     arma::mat Sig = Gt * Vt * Gt.t();
                     Sig.at(0, 0) += W_backward.at(i);
-                    Sig = arma::symmatu(Sig + Ieps);
+                    Sig.diag() += EPS;
                     arma::mat Prec = inverse(Sig);
 
                     Sigma_marginal.slice(i).col(t) = Sig.as_col();
@@ -2819,14 +2813,8 @@ namespace SMC
                     logp.at(i) += log_marg.at(i);
 
                     // double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
-                    weights.at(i) = logp.at(i) - logq.at(i); // + logw_next;
+                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_next;
                 } // loop over i, index of particles
-
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
-                bound_check<arma::vec>(weights, "PL::backward_filter: propagation weights at t = " + std::to_string(t_cur));
 
                 Theta_backward.slice(t_cur) = Theta_cur;
                 // weights_prop_backward.row(t_cur) = weights.t();
@@ -2913,18 +2901,8 @@ namespace SMC
         void two_filter_smoother(Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
-            // arma::vec yhat = y; // (nT + 1) x 1
-            // for (unsigned int t = 0; t < y.n_elem; t++)
-            // {
-            //     yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            // }
-
             Theta_smooth.clear();
             Theta_smooth = Theta;
-
-            arma::mat Ieps(dim.nP, dim.nP, arma::fill::eye);
-            Ieps.for_each([](arma::mat::elem_type &val)
-                          { val *= EPS; });
 
             for (unsigned int t = 1; t < dim.nT; t++)
             {
@@ -2950,7 +2928,7 @@ namespace SMC
                 arma::vec par2_backward_new = arma::vectorise(param_backward.row(3)); //.elem(resample_idx);
 
                 arma::mat prec_tmp = Prec_marginal.col_as_mat(t_next); // nP^2 x N
-                arma::mat Prec_marg = prec_tmp;                        //.cols(resample_idx);     // nP^2 x N
+                arma::mat Prec_marg = prec_tmp;                        //.cols(resample_idx); 
                 arma::mat mu_marg = mu_marginal.col_as_mat(t_next);    // nP x N
 
                 arma::vec logp(N, arma::fill::zeros);
@@ -2971,24 +2949,15 @@ namespace SMC
                         model.dobs._par2 = rho_backward_new.at(i);
                     }
 
-                    arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));
-                    arma::vec Ft = LBA::func_Ft(model.transfer, t_cur, gtheta, y);
+                    arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));                    
                     double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
-                    double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
-
                     double eta = mu0_backward_new.at(i) + ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
                         lambda, model.dobs, model.flink.name); // (eq 3.11)
 
-                    double delta = yhat_cur - mu0_backward_new.at(i) - ft_tilde;
-                    double delta2 = delta * delta;
-
-                    arma::mat FFt_norm = Ft * Ft.t() / Vt;
-                    double FFt_det = arma::det(FFt_norm);
-
                     arma::vec theta_cur;
-                    if (FFt_det < EPS8)
+                    if (!full_rank)
                     {
                         theta_cur = gtheta;
                         theta_cur.at(0) += R::rnorm(0., std::sqrt(W_backward_new.at(i)));
@@ -2996,6 +2965,12 @@ namespace SMC
                     }
                     else
                     {
+                        arma::vec Ft = LBA::func_Ft(model.transfer, t_cur, gtheta, y);
+                        double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
+                        arma::mat FFt_norm = Ft * Ft.t() / Vt;
+
+                        double delta = yhat_cur - mu0_backward_new.at(i) - ft_tilde;
+
                         arma::mat Gt = LBA::func_Gt(model, gtheta, y.at(t_cur));
                         arma::mat Wprec(model.dim.nP, model.dim.nP, arma::fill::zeros);
                         Wprec.at(0, 0) = 1. / W_backward_new.at(i);
@@ -3004,18 +2979,7 @@ namespace SMC
 
                         arma::mat prec = prec_part1 + FFt_norm;
                         arma::mat Rchol, Sigma;
-                        try
-                        {
-                            Sigma = inverse(Rchol, prec);
-                        }
-                        catch (const std::exception &e)
-                        {
-                            prec_part1.brief_print("\n prec_part1: ");
-                            arma::vec eigval = arma::eig_sym(prec);
-                            eigval.t().brief_print("\n Eigen values of Prec: ");
-                            std::cout << "FFt_det = " << FFt_det;
-                            throw std::runtime_error(e.what());
-                        }
+                        Sigma = inverse(Rchol, prec);
 
                         arma::vec mu_part1 = Gt.t() * Wprec * Theta_next.col(i);
                         mu_part1.at(0) += gtheta.at(0) / W_backward_new.at(i);
