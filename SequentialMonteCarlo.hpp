@@ -1756,14 +1756,9 @@ namespace SMC
                     log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu_marginal.col(t), Prec_marginal.slice(t), true);
                     logp.at(i) += log_marg.at(i);
 
-                    // double logw_next = std::log(weights_prop_backward.at(t_next, i) + EPS);
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_next;
                 } // loop over i, index of particles
 
-                // double wmax = weights.max();
-                // weights.for_each([&wmax](arma::vec::elem_type &val)
-                //                  { val -= wmax; });
-                // weights = arma::exp(weights);
 
 
                 if (verbose)
@@ -1787,14 +1782,8 @@ namespace SMC
 
         void smoother(const Model &model, const bool &verbose = VERBOSE)
         {
-            
-            arma::vec yhat = y; // (nT + 1) x 1
-            for (unsigned int t = 0; t < y.n_elem; t++)
-            {
-                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            }
+            const bool full_rank = false;
 
-            // mu0_filter.fill(model.dobs.par1); // N x 1
             Theta_smooth.clear();
             Theta_smooth = Theta;
 
@@ -1811,70 +1800,49 @@ namespace SMC
                 unsigned int t_prev = t - 1;
                 unsigned int t_next = t + 1;
 
+                double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink.name, 0.);
+
                 arma::vec wfor = arma::vectorise(weights_forward.row(t_prev));
-                // arma::uvec resample_idx = get_resample_index(wfor);
                 arma::mat Theta_prev = Theta.slice(t_prev); // p x N
-                // Theta.slice(t_prev) = Theta_prev.cols(resample_idx);
 
                 arma::vec wback = arma::vectorise(weights_backward.row(t_next));
-                // resample_idx = get_resample_index(wback);
                 arma::mat Theta_next = Theta_backward.slice(t_next);
-                // Theta_backward.slice(t_next) = Theta_next.cols(resample_idx);
 
                 arma::vec logp(N, arma::fill::zeros);
                 arma::vec logq = arma::log(wfor + EPS) + arma::log(wback + EPS);
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
 
-
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta_prev.col(i), y.at(t_prev));
-                    arma::vec Ft = LBA::func_Ft(model.transfer, t_cur, gtheta, y);
                     double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
-                    double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
-
                     double eta = par.at(0) + ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
                         lambda, model.dobs, model.flink.name); // (eq 3.11)
 
-                    double delta = yhat.at(t_cur) - par.at(0) - ft_tilde;
-                    double delta2 = delta * delta;
-
-                    arma::mat FFt_norm = Ft * Ft.t() / Vt;
-                    double FFt_det = arma::det(FFt_norm);
-
-                    
-
                     arma::vec theta_cur;
-                    if (FFt_det < EPS8)
+                    if (!full_rank)
                     {
                         theta_cur = gtheta;
-                        theta_cur.at(0) += R::rnorm(0., std::sqrt(Wt.at(0)));
-                        logq.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(Wt.at(0)), true);
+                        double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
+                        theta_cur.at(0) += eps;
+                        logq.at(i) = R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true);
                     }
                     else
                     {
+                        arma::vec Ft = LBA::func_Ft(model.transfer, t_cur, gtheta, y);
+                        double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
+                        double delta = yhat_cur - par.at(0) - ft_tilde;
                         arma::mat Gt = LBA::func_Gt(model, gtheta, y.at(t_cur));
                         arma::mat Wprec(model.dim.nP, model.dim.nP, arma::fill::zeros);
                         Wprec.at(0, 0) = 1. / Wt.at(0);
                         arma::mat prec_part1 = Gt.t() * Wprec * Gt;
                         prec_part1.at(0, 0) += 1. / Wt.at(0);
 
-                        arma::mat prec = prec_part1 + FFt_norm;
+                        arma::mat prec = prec_part1 + Ft * Ft.t() / Vt;
                         arma::mat Rchol, Sigma;
-                        try
-                        {
-                            Sigma = inverse(Rchol, prec);
-                        }
-                        catch (const std::exception &e)
-                        {
-                            prec_part1.brief_print("\n prec_part1: ");
-                            arma::vec eigval = arma::eig_sym(prec);
-                            eigval.t().brief_print("\n Eigen values of Prec: ");
-                            std::cout << "FFt_det = " << FFt_det;
-                            throw std::runtime_error(e.what());
-                        }
+                        Sigma = inverse(Rchol, prec);
 
                         arma::vec mu_part1 = Gt.t() * Wprec * Theta_next.col(i);
                         mu_part1.at(0) += gtheta.at(0) / Wt.at(0);
@@ -1898,17 +1866,9 @@ namespace SMC
 
                     logp.at(i) -= MVNorm::dmvnorm2(Theta_next.col(i), mu_marginal.col(t_next), Prec_marginal.slice(t_next), true);
 
-                    // double log_forward = std::log(weights_prop_forward.at(t_prev, i) + EPS);
-                    // double log_backward = std::log(weights_prop_backward.at(t_next, i) + EPS);
-                    weights.at(i) = logp.at(i) - logq.at(i); // + log_forward + log_backward;
+                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + log_forward + log_backward;
                 } // loop over particle i
 
-                
-
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
                 arma::uvec resample_idx = get_resample_index(weights);
                 Theta_smooth.slice(t_cur) = Theta_cur.cols(resample_idx);
 
@@ -1924,7 +1884,6 @@ namespace SMC
                 Rcpp::Rcout << std::endl;
             }
 
-            // psi_smooth = Theta_smooth.row_as_mat(0);
             arma::mat psi = Theta_smooth.row_as_mat(0);
             output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
             return;
@@ -1932,25 +1891,11 @@ namespace SMC
 
         void infer(const Model &model, const bool &verbose = VERBOSE)
         {
-            // auto start = std::chrono::high_resolution_clock::now();
             forward_filter(model, verbose);
-            // auto stop = std::chrono::high_resolution_clock::now();
-            // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-            // std::cout << "\nForward filter: " << duration.count() << " microseconds" << std::endl;
-
             if (smoothing)
             {
-                // start = std::chrono::high_resolution_clock::now();
                 backward_filter(model, verbose);
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // std::cout << "\nBackward filter: " << duration.count() << " microseconds" << std::endl;
-
-                // start = std::chrono::high_resolution_clock::now();
                 smoother(model, verbose);
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // std::cout << "\nSmoother: " << duration.count() << " microseconds" << std::endl;
             }
 
             return;
@@ -2967,11 +2912,12 @@ namespace SMC
 
         void two_filter_smoother(Model &model, const bool &verbose = VERBOSE)
         {
-            arma::vec yhat = y; // (nT + 1) x 1
-            for (unsigned int t = 0; t < y.n_elem; t++)
-            {
-                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
-            }
+            const bool full_rank = false;
+            // arma::vec yhat = y; // (nT + 1) x 1
+            // for (unsigned int t = 0; t < y.n_elem; t++)
+            // {
+            //     yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
+            // }
 
             Theta_smooth.clear();
             Theta_smooth = Theta;
@@ -2988,42 +2934,24 @@ namespace SMC
                 unsigned int t_prev = t - 1;
                 unsigned int t_next = t + 1;
 
+                double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink.name, 0.);
+
                 arma::vec wfor = arma::vectorise(weights_forward.row(t_prev));
-                // arma::uvec resample_idx = get_resample_index(wfor);
                 arma::mat Theta_prev = Theta.slice(t_prev); // p x N
-                // Theta.slice(t_prev) = Theta_prev.cols(resample_idx);
                 arma::vec W_filter_new = W_filter;     //.elem(resample_idx);
                 arma::vec mu0_filter_new = arma::vectorise(param_filter.row(0)); // .elem(resample_idx);
 
-                // wfor = wfor.elem(resample_idx);
-                // weights_forward.row(t_prev) = wfor.t();
-
-                // arma::vec w_prop = arma::vectorise(weights_prop_forward.row(t_prev));
-                // w_prop = w_prop.elem(resample_idx);
-                // weights_prop_forward.row(t_prev) = w_prop.t();
-
                 arma::vec wback = arma::vectorise(weights_backward.row(t_next));
-                // resample_idx = get_resample_index(wback);
                 arma::mat Theta_next = Theta_backward.slice(t_next);
-                // Theta_backward.slice(t_next) = Theta_next.cols(resample_idx);
                 arma::vec W_backward_new = W_backward;       //.elem(resample_idx);
                 arma::vec mu0_backward_new = arma::vectorise(param_backward.row(0)); //.elem(resample_idx);
                 arma::vec rho_backward_new = arma::vectorise(param_backward.row(1)); //.elem(resample_idx);
                 arma::vec par1_backward_new = arma::vectorise(param_backward.row(2)); //.elem(resample_idx);
                 arma::vec par2_backward_new = arma::vectorise(param_backward.row(3)); //.elem(resample_idx);
 
-                // wback = wback.elem(resample_idx);
-                // weights_backward.row(t_next) = wback.t();
-                // should we reset wfor and wback to one after resampling?
-
-                // w_prop = arma::vectorise(weights_prop_backward.row(t_next));
-                // w_prop = w_prop.elem(resample_idx);
-                // weights_prop_backward.row(t_next) = w_prop.t();
-
                 arma::mat prec_tmp = Prec_marginal.col_as_mat(t_next); // nP^2 x N
                 arma::mat Prec_marg = prec_tmp;                        //.cols(resample_idx);     // nP^2 x N
                 arma::mat mu_marg = mu_marginal.col_as_mat(t_next);    // nP x N
-                // mu_marg = mu_marg.cols(resample_idx);
 
                 arma::vec logp(N, arma::fill::zeros);
                 arma::vec logq = arma::log(wfor + EPS) + arma::log(wback + EPS);
@@ -3053,7 +2981,7 @@ namespace SMC
                     double Vt = ApproxDisturbance::func_Vt_approx(
                         lambda, model.dobs, model.flink.name); // (eq 3.11)
 
-                    double delta = yhat.at(t_cur) - mu0_backward_new.at(i) - ft_tilde;
+                    double delta = yhat_cur - mu0_backward_new.at(i) - ft_tilde;
                     double delta2 = delta * delta;
 
                     arma::mat FFt_norm = Ft * Ft.t() / Vt;
@@ -3117,16 +3045,8 @@ namespace SMC
                     arma::mat pmarg = arma::reshape(Prec_marg.col(i), model.dim.nP, model.dim.nP);
                     logp.at(i) -= MVNorm::dmvnorm2(Theta_next.col(i), mu_marg.col(i), pmarg, true);
 
-                    // double log_forward = std::log(weights_prop_forward.at(t_prev, i) + EPS);
-                    // double log_backward = std::log(weights_prop_backward.at(t_next, i) + EPS);
-                    weights.at(i) = logp.at(i) - logq.at(i); // + log_forward + log_backward;
+                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + log_forward + log_backward;
                 } // loop over particle i
-
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
-                bound_check<arma::vec>(weights, "PL::two_filter_smoother: propagation weights at t = " + std::to_string(t_cur));
 
                 arma::uvec resample_idx = get_resample_index(weights);
                 Theta_smooth.slice(t_cur) = Theta_cur.cols(resample_idx);
