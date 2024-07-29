@@ -2788,7 +2788,7 @@ namespace SMC
                     if (updated.at(i) == 1)
                     {
                         logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
-                        logp.at(i) += R::dnorm4(theta_cur.at(0), Theta_next.at(0, i), std::sqrt(W_backward.at(i)), true);
+                        logp.at(i) += R::dnorm4(theta_cur.at(dim.nP - 1), Theta_next.at(dim.nP - 1, i), std::sqrt(W_backward.at(i)), true);
                     }
 
                     logp.at(i) += ObsDist::loglike(
