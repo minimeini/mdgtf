@@ -2917,10 +2917,12 @@ namespace SMC
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    if (prior_W.infer)
+                    if (lag_update)
                     {
-                        model.derr._par1 = W_backward.at(i);
+                        unsigned int nlag = model.transfer.update_dlag(param_filter.at(0, i), param_filter.at(1, i), 30, false);
                     }
+                    arma::vec gtheta_prev_fwd = StateSpace::func_gt(model.transfer, Theta.slice(t_prev).col(i), y.at(t_prev));
+
                     if (prior_mu0.infer)
                     {
                         model.dobs._par1 = param_backward.at(0, i);
@@ -2928,6 +2930,10 @@ namespace SMC
                     if (prior_rho.infer)
                     {
                         model.dobs._par2 = param_backward.at(1, i);
+                    }
+                    if (lag_update)
+                    {
+                        unsigned int nlag = model.transfer.update_dlag(param_backward.at(0, i), param_backward.at(1, i), 30, false);
                     }
 
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta.slice(t_prev).col(i), y.at(t_prev));
@@ -2974,12 +2980,8 @@ namespace SMC
 
                     Theta_cur.col(i) = theta_cur;
 
-                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta.at(0), std::sqrt(W_filter.at(i)), true);
+                    logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta_prev_fwd.at(0), std::sqrt(W_filter.at(i)), true);
 
-                    if (lag_update)
-                    {
-                        unsigned int nlag = model.update_dlag(param_backward.at(2, i), param_backward.at(3, i), model.dim.nL, false);
-                    }
                     gtheta = StateSpace::func_gt(model.transfer, theta_cur, y.at(t_cur));
                     logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t_next), theta_cur.at(0), std::sqrt(W_backward.at(i)), true);
 
