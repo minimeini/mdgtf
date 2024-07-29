@@ -1358,6 +1358,9 @@ namespace SMC
         // arma::mat weights_prop_forward;  // (nT + 1) x N
         // arma::mat weights_prop_backward; // (nT + 1) x N
         arma::cube Theta_backward; // p x N x (nT + 1)
+
+        bool resample_all = false;
+
     public:
         TFS(
             const Model &dgtf_model,
@@ -1367,6 +1370,11 @@ namespace SMC
         {
             Rcpp::List opts = opts_in;
             SequentialMonteCarlo::init(opts);
+
+            if (opts.containsElementNamed("resample_all"))
+            {
+                resample_all = Rcpp::as<bool>(opts["resample_all"]);
+            }
 
             // prior_W.infer = false;
             // prior_mu0.infer = false;
@@ -1395,6 +1403,7 @@ namespace SMC
         static Rcpp::List default_settings()
         {
             Rcpp::List opts = SequentialMonteCarlo::default_settings();
+            opts["resample_all"] = false;
             return opts;
         }
 
@@ -1561,11 +1570,20 @@ namespace SMC
 
                 arma::uvec resample_idx = get_resample_index(tau);
 
-                for (unsigned int k = 0; k <= t; k++)
+                if (resample_all)
                 {
-                    Theta.slice(k) = Theta.slice(k).cols(resample_idx);
-                    arma::vec wtmp = arma::vectorise(weights_forward.row(k));
-                    weights_forward.row(k) = wtmp.elem(resample_idx).t();
+                    for (unsigned int k = 0; k <= t; k++)
+                    {
+                        Theta.slice(k) = Theta.slice(k).cols(resample_idx);
+                        arma::vec wtmp = arma::vectorise(weights_forward.row(k));
+                        weights_forward.row(k) = wtmp.elem(resample_idx).t();
+                    }
+                }
+                else
+                {
+                    Theta.slice(t) = Theta.slice(t).cols(resample_idx);
+                    arma::vec wtmp = arma::vectorise(weights_forward.row(t));
+                    weights_forward.row(t) = wtmp.elem(resample_idx).t();
                 }
 
                 loc = loc.cols(resample_idx);

@@ -496,6 +496,7 @@ namespace VB
 
             smc_opts["use_discount"] = false;
             smc_opts["num_smooth"] = Rcpp::as<unsigned int>(smc_opts["num_particle"]);
+            smc_opts["resample_all"] = true;
 
             Rcpp::List W_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
@@ -518,6 +519,8 @@ namespace VB
             // smc_tmp["num_backward"] = 5;
 
             Rcpp::List smc_tmp = SMC::TFS::default_settings();
+            smc_tmp["resample_all"] = true;
+            smc_tmp["use_discount"] = false;
 
             Rcpp::List W_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
