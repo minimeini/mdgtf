@@ -1555,10 +1555,8 @@ namespace VB
             output["y_covered_all"] = Rcpp::wrap(y_covered_all);
             output["y_width_all"] = Rcpp::wrap(y_width_all);
 
-            output["tstart"] = tstart;
-            output["tend"] = (ntime - kstep);
-            output["time_indices"] = Rcpp::wrap(time_indices.t());
-
+            output["tstart"] = tstart + 1;
+            output["tend"] = tend + 1;
             return output;
         } // end of function
 
