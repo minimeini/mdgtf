@@ -1414,12 +1414,9 @@ namespace VB
             */
 
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
-            // arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
             arma::mat y_err_cast = y_cov_cast;
-
-            // arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
 
             Rcpp::NumericVector lag_param = {
                 model.transfer.dlag.par1,
@@ -1500,12 +1497,6 @@ namespace VB
                     ycast.slice(j).row(t) = yest.t(); // 1 x nsample
                     arma::vec tmp = evaluate(yest, ytrue, loss_func);
 
-                    // double ymin = arma::min(ynew.row(j));
-                    // double ymax = arma::max(ynew.row(j));
-
-                    // y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - ytrue); // 1 x nsample
-                    // y_width_cast.at(t, j) = std::abs(ymax - ymin);
-                    // y_cov_cast.at(t, j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
                     y_err_cast.at(t, j) = tmp.at(0);
                     y_width_cast.at(t, j) = tmp.at(1);
                     y_cov_cast.at(t, j) = tmp.at(2);
@@ -1513,7 +1504,7 @@ namespace VB
 
                 if (verbose)
                 {
-                    Rcpp::Rcout << "\rForecast error: " << t << "/" << tend;
+                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << tend + 1;
                 }
             } // k-step ahead forecasting with information D[t] for each t.
 
@@ -1522,15 +1513,6 @@ namespace VB
                 Rcpp::Rcout << std::endl;
             }
 
-            // submodel.dim.nT = ntime;
-            // submodel.dim.init(
-            //     submodel.dim.nT, submodel.dim.nL,
-            //     submodel.dobs.par2);
-
-            // submodel.transfer.init(
-            //     submodel.dim, submodel.transfer.name,
-            //     submodel.transfer.fgain.name,
-            //     submodel.transfer.dlag.name, lag_param);
 
             arma::uvec succ_idx = arma::find(success == 1);
 
@@ -1562,52 +1544,13 @@ namespace VB
                 {
                     y_loss_all.at(j) = std::sqrt(y_loss_all.at(j)); // RMSE
                 }
-                // arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
 
-                // switch (loss_list[tolower(loss_func)])
-                // {
-                // case AVAIL::L1: // mae
-                // {
-                //     // arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                //     // y_loss.col(j) = y_loss_tmp;
-
-                //     arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
-                //     y_loss_all.at(j) = arma::mean(y_loss_tmp2);
-
-                //     break;
-                // }
-                // case AVAIL::L2: // rmse
-                // {
-                //     ytmp = arma::square(ytmp);
-                //     arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                //     y_loss.col(j) = arma::sqrt(y_loss_tmp);
-
-                //     arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
-                //     y_loss_all.at(j) = arma::mean(y_loss_tmp2);
-                //     y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
-
-                //     break;
-                // }
-                // default:
-                // {
-                //     break;
-                // }
-                // } // switch by loss
 
             } // switch by kstep
-
-            // y.clear();
-            // y = yall;
-            // psi.clear();
-            // psi = psi_all;
-            // psi_stored.clear();
-            // psi_stored = psi_stored_all;
 
             Rcpp::List output;
             output["y_cast"] = Rcpp::wrap(ycast_qt);
             output["y_cast_all"] = Rcpp::wrap(ycast);
-            // output["y"] = Rcpp::wrap(yall);
-            // output["y_loss"] = Rcpp::wrap(y_loss);
             output["y_loss_all"] = Rcpp::wrap(y_loss_all);
             output["y_covered_all"] = Rcpp::wrap(y_covered_all);
             output["y_width_all"] = Rcpp::wrap(y_width_all);
