@@ -1462,8 +1462,8 @@ namespace VB
                     submodel.transfer.fgain.name,
                     submodel.transfer.dlag.name, lag_param);
 
-                psi.clear();
-                psi = psi_all.head(t + 1);
+                // psi.clear();
+                // psi = psi_all.head(t + 1);
                 y.clear();
                 y = yall.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
                 psi_stored.clear();
