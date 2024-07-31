@@ -1399,8 +1399,14 @@ namespace VB
             tstart = std::max(tstart, kstep);
             tstart += 1;
             tstart = std::max(tstart, static_cast<unsigned int>(tstart_pct * ntime));
+            unsigned int tend = ntime - kstep;
 
-            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, ntime - kstep);
+            if (tstart > tend)
+            {
+                throw std::invalid_argument("VB::Hybrid::forecast_error: tstart should <= tend.");
+            }
+
+            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, tend);
             /*
             Perform forecasting on `nforecast_err` time points in time interval [tstart, ntime - kstep].
             `time_indices` is a nforecast_err x 1 vector.
@@ -1507,7 +1513,7 @@ namespace VB
 
                 if (verbose)
                 {
-                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
+                    Rcpp::Rcout << "\rForecast error: " << t << "/" << tend;
                 }
             } // k-step ahead forecasting with information D[t] for each t.
 
