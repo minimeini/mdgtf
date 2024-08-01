@@ -1394,6 +1394,10 @@ namespace VB
             const unsigned int &kstep = 1,
             const bool &verbose = VERBOSE)
         {
+            if (kstep == 0)
+            {
+                throw std::invalid_argument("VB::Hybrid::forecast_error: kstep should be positive.");
+            }
             const unsigned int ntime = model.dim.nT;
             unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
             tstart = std::max(tstart, kstep);

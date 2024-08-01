@@ -819,19 +819,26 @@ namespace MCMC
             const unsigned int &kstep = 1,
             const bool &verbose = VERBOSE)
         {
+            if (kstep == 0)
+            {
+                throw std::invalid_argument("VB::Hybrid::forecast_error: kstep should be positive.");
+            }
             const unsigned int ntime = model.dim.nT;
             unsigned int tstart = std::max(model.dim.nP, model.dim.nL);
             tstart = std::max(tstart, kstep);
             tstart += 1;
             tstart = std::max(tstart, static_cast<unsigned int>(tstart_pct * ntime));
+            unsigned int tend = ntime - kstep;
+            if (tstart > tend)
+            {
+                throw std::invalid_argument("VB::Hybrid::forecast_error: tstart should <= tend.");
+            }
 
-            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, ntime - kstep); // nforecast x 1
-
+            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, tend); // nforecast x 1
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
-            arma::cube y_err_cast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
-            arma::mat y_loss(ntime + 1, kstep, arma::fill::zeros);
+            arma::mat y_err_cast = y_cov_cast;
 
             Rcpp::NumericVector lag_param = {
                 model.transfer.dlag.par1,
@@ -860,8 +867,6 @@ namespace MCMC
                 }
             }
 
-            Model submodel = model;
-
             /**
              * @brief Evaluate performance of k-step-ahead-forecasting
              *
@@ -876,6 +881,7 @@ namespace MCMC
 
                 unsigned int t = time_indices.at(i);
 
+                Model submodel = model;
                 submodel.dim.nT = t;
                 submodel.dim.init(
                     submodel.dim.nT, submodel.dim.nL,
@@ -915,19 +921,20 @@ namespace MCMC
 
                 for (unsigned int j = 0; j < kstep; j++)
                 {
-                    ycast.slice(j).row(t) = ynew.row(j); // 1 x nsample
-                    double ymin = arma::min(ynew.row(j));
-                    double ymax = arma::max(ynew.row(j));
+                    arma::vec yest = arma::vectorise(ynew.row(j));
                     double ytrue = yall.at(t + 1 + j);
 
-                    y_err_cast.slice(j).row(t) = arma::abs(ynew.row(j) - ytrue); // 1 x nsample
-                    y_width_cast.at(t, j) = std::abs(ymax - ymin);
-                    y_cov_cast.at(t, j) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
+                    ycast.slice(j).row(t) = yest.t(); // 1 x nsample
+                    arma::vec tmp = evaluate(yest, ytrue, loss_func);
+
+                    y_err_cast.at(t, j) = tmp.at(0);
+                    y_width_cast.at(t, j) = tmp.at(1);
+                    y_cov_cast.at(t, j) = tmp.at(2);
                 }
 
                 if (verbose)
                 {
-                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << ntime - kstep;
+                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << tend + 1;
                 }
             } // k-step ahead forecasting with information D[t] for each t.
 
@@ -935,16 +942,6 @@ namespace MCMC
             {
                 Rcpp::Rcout << std::endl;
             }
-
-            submodel.dim.nT = ntime;
-            submodel.dim.init(
-                submodel.dim.nT, submodel.dim.nL,
-                submodel.dobs.par2);
-
-            submodel.transfer.init(
-                submodel.dim, submodel.transfer.name,
-                submodel.transfer.fgain.name,
-                submodel.transfer.dlag.name, lag_param);
 
             arma::uvec succ_idx = arma::find(success == 1);
 
@@ -956,9 +953,10 @@ namespace MCMC
             arma::vec y_covered_all = y_loss_all;
             arma::vec y_width_all = y_loss_all;
 
+
             for (unsigned int j = 0; j < kstep; j++)
             {
-                arma::vec ycov_tmp0 = y_cov_cast.col(j); // ntime x 1
+                arma::vec ycov_tmp0 = y_cov_cast.col(j);
                 arma::vec ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
                 y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
 
@@ -968,52 +966,21 @@ namespace MCMC
 
                 arma::mat ycast_qtmp = arma::quantile(ycast.slice(j), qprob, 1); // (nT + 1) x nsample x k
                 ycast_qt.slice(j) = ycast_qtmp;
-                arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
 
-                switch (loss_list[tolower(loss_func)])
+                ycov_tmp0 = y_err_cast.col(j);
+                ycov_tmp = arma::vectorise(ycov_tmp0.elem(succ_idx));
+                y_loss_all.at(j) = arma::mean(ycov_tmp);
+                if (loss_list[tolower(loss_func)] == AVAIL::L2)
                 {
-                case AVAIL::L1: // mae
-                {
-                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                    y_loss.col(j) = y_loss_tmp;
-
-                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
-                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
-
-                    break;
+                    y_loss_all.at(j) = std::sqrt(y_loss_all.at(j)); // RMSE
                 }
-                case AVAIL::L2: // rmse
-                {
-                    ytmp = arma::square(ytmp);
-                    arma::vec y_loss_tmp = arma::mean(ytmp, 1); // (nT + 1) x 1
-                    arma::vec y_loss_tmp2 = y_loss_tmp.elem(succ_idx);
-                    y_loss_all.at(j) = arma::mean(y_loss_tmp2);
-
-                    y_loss.col(j) = arma::sqrt(y_loss_tmp);
-                    y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
-
-                    break;
-                }
-                default:
-                {
-                    break;
-                }
-                } // switch by loss
 
             } // switch by kstep
 
-            y.clear();
-            y = yall;
-            wt.clear();
-            wt = wt_all;
-            wt_stored.clear();
-            wt_stored = wt_stored_all;
 
             Rcpp::List output;
             output["y_cast"] = Rcpp::wrap(ycast_qt);
             output["y_cast_all"] = Rcpp::wrap(ycast);
-            output["y"] = Rcpp::wrap(yall);
-            output["y_loss"] = Rcpp::wrap(y_loss);
             output["y_loss_all"] = Rcpp::wrap(y_loss_all);
             output["y_covered_all"] = Rcpp::wrap(y_covered_all);
             output["y_width_all"] = Rcpp::wrap(y_width_all);
