@@ -834,7 +834,6 @@ namespace MCMC
                 throw std::invalid_argument("VB::Hybrid::forecast_error: tstart should <= tend.");
             }
 
-            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, tend); // nforecast x 1
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
@@ -871,15 +870,13 @@ namespace MCMC
              * @brief Evaluate performance of k-step-ahead-forecasting
              *
              */
-            for (unsigned int i = 0; i < time_indices.n_elem; i++)
+            for (unsigned int t = tstart; t <= tend; t++)
             {
                 /**
                  * @brief Perform k-step-ahead forecasting for each using all data up to time `t`, for each t.
                  *
                  */
                 Rcpp::checkUserInterrupt();
-
-                unsigned int t = time_indices.at(i);
 
                 Model submodel = model;
                 submodel.dim.nT = t;

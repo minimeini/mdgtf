@@ -1410,7 +1410,6 @@ namespace VB
                 throw std::invalid_argument("VB::Hybrid::forecast_error: tstart should <= tend.");
             }
 
-            arma::uvec time_indices = arma::regspace<arma::uvec>(tstart, 1, tend);
             /*
             Perform forecasting on `nforecast_err` time points in time interval [tstart, ntime - kstep].
             `time_indices` is a nforecast_err x 1 vector.
@@ -1449,11 +1448,9 @@ namespace VB
                 }
             }
 
-            for (unsigned int i = 0; i < time_indices.n_elem; i++)
+            for (unsigned int t = tstart; t <= tend; t++)
             {
                 Rcpp::checkUserInterrupt();
-
-                unsigned int t = time_indices.at(i);
 
                 Model submodel = model;
                 submodel.dim.nT = t;
