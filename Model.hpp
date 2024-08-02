@@ -89,19 +89,14 @@ public:
 
         Rcpp::List dim_settings = settings["dim"];
         unsigned int nlag, ntime;
-        bool truncated, regressor_baseline;
-        init_dim(nlag, ntime, truncated, regressor_baseline, dim_settings);
+        bool truncated;
+        init_dim(nlag, ntime, truncated, dim_settings);
 
         Rcpp::List param_settings = settings["param"];
         Rcpp::NumericVector lag_param, obs_param, err_param;
         init_param(obs_param, lag_param, err_param, param_settings);
 
-        // if (regressor_baseline)
-        // {
-        //     obs_param[0] = 0.;
-        // }
-
-        _dim.init(ntime, nlag, lag_param[1], regressor_baseline);
+        _dim.init(ntime, nlag, lag_param[1]);
         _dobs.init(obs_dist, obs_param[0], obs_param[1]);
         _flink.init(link_func);
         _transfer.init(_dim, trans_func, gain_func, lag_dist, lag_param);
@@ -179,7 +174,6 @@ public:
         unsigned int &nlag,
         unsigned int &ntime,
         bool &truncated,
-        bool &regressor_baseline,
         const Rcpp::List &dim_settings)
     {
         Rcpp::List dm = dim_settings;
@@ -214,15 +208,6 @@ public:
         else
         {
             truncated = true;
-        }
-
-        if (dm.containsElementNamed("regressor_baseline"))
-        {
-            regressor_baseline = Rcpp::as<bool>(dm["regressor_baseline"]);
-        }
-        else
-        {
-            regressor_baseline = false;
         }
         return;
     }
@@ -282,7 +267,6 @@ public:
         dm["nlag"] = _dim.nL;
         dm["ntime"] = _dim.nT;
         dm["truncated"] = _dim.truncated;
-        dm["regressor_baseline"] = _dim.regressor_baseline;
 
         Rcpp::List out;
         out["model"] = model;
@@ -311,7 +295,6 @@ public:
         dim_settings["nlag"] = 10;
         dim_settings["ntime"] = 200;
         dim_settings["truncated"] = true;
-        dim_settings["regressor_baseline"] = false;
 
         Rcpp::List settings;
         settings["model"] = model_settings;
@@ -328,15 +311,7 @@ public:
     {
         if (iloc == 0)
         {
-            // // update mu0
-            // if (!_dim.regressor_baseline)
-            // {
-                _dobs.update_par1(value);
-            // }
-            // else
-            // {
-            //     _dobs.update_par1(0.);
-            // }
+            _dobs.update_par1(value);
         }
         else
         {
@@ -358,10 +333,9 @@ public:
 
     void set_dim(
         const unsigned int &ntime,
-        const unsigned int &nlag = 0,
-        const bool &add_regressor_baseline = false)
+        const unsigned int &nlag = 0)
     {
-        _dim.init(ntime, nlag, _transfer.dlag.par2, add_regressor_baseline);
+        _dim.init(ntime, nlag, _transfer.dlag.par2);
         return;
     }
 
@@ -1309,11 +1283,6 @@ public:
         const arma::vec &psi, // (nT + 1) x 1
         const Model &model)
     {
-        if (model.dim.regressor_baseline)
-        {
-            throw std::invalid_argument("psi2theta: only for regression with zero mean.");
-        }
-
         unsigned int nr = model.dim.nP - 1;
         arma::mat Theta(model.dim.nP, model.dim.nT + 1, arma::fill::zeros); // nP x (nT + 1)
 
@@ -1341,11 +1310,6 @@ public:
         const arma::mat &psi, // (nT + B) x N
         const Model &model)
     {
-        if (model.dim.regressor_baseline)
-        {
-            throw std::invalid_argument("psi2theta: only for regression with zero mean.");
-        }
-
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         if (trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
         {
@@ -1525,9 +1489,7 @@ public:
         arma::vec ft(model.dim.nT + 1, arma::fill::zeros);
         arma::vec lambda(model.dim.nT + 1, arma::fill::zeros);
 
-        double mu0 = 0.;
-        if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
-
+        double mu0 = model.dobs.par1;
         for (unsigned int t = 1; t < model.dim.nT + 1; t ++)
         {
             
@@ -1568,10 +1530,7 @@ public:
             yall.row(t).fill(y.at(t));
         }
 
-        double mu0 = 0.;
-        if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
-
-
+        double mu0 = model.dobs.par1;
         for (unsigned int i = 0; i < nsample; i ++)
         {
             double Wsqrt = std::sqrt(W_stored.at(i));
@@ -1655,9 +1614,7 @@ public:
         // arma::cube psi_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
         arma::mat y_width_cast = y_cov_cast;
 
-        double mu0 = 0.;
-        if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
-
+        double mu0 = model.dobs.par1;
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1825,9 +1782,7 @@ public:
         arma::vec y_cover_cast(model.dim.nT, arma::fill::zeros);
         arma::vec y_width_cast = y_cover_cast;
 
-        double mu0 = 0.;
-        if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
-
+        double mu0 = model.dobs.par1;
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1987,10 +1942,7 @@ public:
         arma::mat residual(model.dim.nT + 1, nsample, arma::fill::zeros);
         arma::mat yhat(model.dim.nT + 1, nsample, arma::fill::zeros);
 
-        double mu0 = 0.;
-        if (!model.dim.regressor_baseline) { mu0 = model.dobs.par1; }
-
-
+        double mu0 = model.dobs.par1;
         for (unsigned int t = 1; t <= model.dim.nT; t++)
         {
             Rcpp::checkUserInterrupt();

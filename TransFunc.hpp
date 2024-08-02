@@ -234,21 +234,12 @@ public:
     {
         _F0.set_size(_dim.nP);
         _F0.zeros();
-
-        if (_dim.regressor_baseline)
-        {
-            _F0.at(_dim.nP - 1) = 1.;
-        }
         return;
     }
 
-    static arma::vec F0_sliding(const unsigned int &nP, const bool &regressor_baseline = false)
+    static arma::vec F0_sliding(const unsigned int &nP)
     {
         arma::vec F0(nP, arma::fill::zeros);
-        if (regressor_baseline)
-        {
-            F0.at(nP - 1) = 1.;
-        }
         return F0;
     }
 
@@ -260,12 +251,6 @@ public:
         _G0.at(0, 0) = 1.;
 
         unsigned int nr = _dim.nP - 1;
-        if (_dim.regressor_baseline)
-        {
-            nr -= 1;
-            _G0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
-        }
-
         for (unsigned int i = 1; i <= nr; i++)
         {
             _G0.at(i, i - 1) = 1.;
@@ -281,11 +266,6 @@ public:
         G0.at(0, 0) = 1.;
 
         unsigned int nr = dim.nP - 1;
-        if (dim.regressor_baseline)
-        {
-            nr -= 1;
-            G0.at(dim.nP - 1, dim.nP - 1) = 1.;
-        }
         for (unsigned int i = 1; i <= nr; i++)
         {
             G0.at(i, i - 1) = 1.;
@@ -303,13 +283,6 @@ public:
         _H0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
 
         unsigned int nr = _dim.nP - 1;
-        if (_dim.regressor_baseline)
-        {
-            // nr -= 1;
-            // _G0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
-            throw std::invalid_argument("H0_sliding with mu0 in state vector: not defined yet.");
-        }
-
         for (unsigned int i = 1; i <= nr; i++)
         {
             _H0.at(i - 1, i) = 1.;
@@ -325,12 +298,6 @@ public:
         H0.at(dim.nP - 1, dim.nP - 1) = 1.;
 
         unsigned int nr = dim.nP - 1;
-        if (dim.regressor_baseline)
-        {
-            // nr -= 1;
-            // H0.at(dim.nP - 1, dim.nP - 1) = 1.;
-            throw std::invalid_argument("H0_sliding with mu0 in state vector: not defined yet.");
-        }
         for (unsigned int i = 1; i <= nr; i++)
         {
             H0.at(i - 1, i) = 1.;
@@ -466,22 +433,13 @@ public:
         _F0.set_size(_dim.nP);
         _F0.zeros();
         _F0.at(1) = 1.;
-
-        if (_dim.regressor_baseline)
-        {
-            _F0.at(_dim.nP - 1) = 1.;
-        }
         return;
     }
 
-    static arma::vec F0_iterative(const unsigned int &nP, const bool &regressor_baseline)
+    static arma::vec F0_iterative(const unsigned int &nP)
     {
         arma::vec F0(nP, arma::fill::zeros);
         F0.at(1) = 1.;
-        if (regressor_baseline)
-        {
-            F0.at(nP - 1) = 1.;
-        }
         return F0;
     }
 
@@ -494,12 +452,6 @@ public:
         _G0.at(1, 0) = _coef_now;                          // (1 - kappa)^r
 
         unsigned int nr = _dim.nP - 1;
-        if (_dim.regressor_baseline)
-        {
-            nr -= 1;
-            _G0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
-        }
-
         _G0.submat(1, 1, 1, nr) = _iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
         for (unsigned int i = 2; i <= nr; i++)
         {
@@ -519,12 +471,6 @@ public:
         G0.at(1, 0) = coef_now;                         // (1 - kappa)^r
 
         unsigned int nr = dim.nP - 1;
-        if (dim.regressor_baseline)
-        {
-            nr -= 1;
-            G0.at(dim.nP - 1, dim.nP - 1) = 1.;
-        }
-
         G0.submat(1, 1, 1, nr) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
         for (unsigned int i = 2; i <= nr; i++)
         {

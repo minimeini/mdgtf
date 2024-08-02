@@ -96,7 +96,6 @@ namespace LBA
         const double &W = 0.01,
         const bool &use_discount = false,
         const double &delta_discount = 0.95,
-        const bool &regressor_baseline = false,
         const std::string &discount_type = "all_lag_elems")
     {
         arma::mat Rt = Gt * Ct_old * Gt.t(); // Pt
@@ -110,18 +109,6 @@ namespace LBA
             {
                 Rt.at(0, 0) /= delta_discount;
                 break;
-            }
-            case DiscountType::all_lag_elems:
-            {
-                if (regressor_baseline)
-                {
-                    arma::mat Rtmp = Rt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2);
-                    Rtmp.for_each([&delta_discount](arma::mat::elem_type &val)
-                                  { val /= delta_discount; });
-                    Rt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2) = Rtmp;
-
-                    break;
-                } // otherwise, discounting on the whole matrix
             }
             case DiscountType::all_elems:
             {
@@ -154,7 +141,6 @@ namespace LBA
         const double &W = 0.01,
         const bool &use_discount = false,
         const double &delta_discount = 0.95,
-        const bool &regressor_baseline = false,
         const std::string &discount_type = "all_lag_elems")
     {
         arma::mat Wt(Rt.n_rows, Rt.n_cols, arma::fill::zeros);
@@ -168,16 +154,6 @@ namespace LBA
             {
                 Wt.at(0, 0) = (1. - delta_discount) * Rt.at(0, 0);
                 break;
-            }
-            case DiscountType::all_lag_elems:
-            {
-                if (regressor_baseline)
-                {
-                    arma::mat Rtmp = Rt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2);
-                    Wt.submat(0, 0, Rt.n_rows - 2, Rt.n_cols - 2) = (1. - delta_discount) * Rtmp;
-
-                    break;
-                } // otherwise, discounting on the whole matrix
             }
             case DiscountType::all_elems:
             {
@@ -311,10 +287,7 @@ namespace LBA
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
 
         double regressor = ft;
-        if (!model.dim.regressor_baseline)
-        {
-            regressor += model.dobs.par1;
-        }
+        regressor += model.dobs.par1;
 
         switch (model.dobs.obs_list[model.dobs.name])
         {
@@ -435,11 +408,7 @@ namespace LBA
         }
         }
 
-        if (!model.dim.regressor_baseline)
-        {
-            mean_ft -= model.dobs.par1;
-        }
-        
+        mean_ft -= model.dobs.par1;
 
         bound_check(mean_ft, "func_posterior_ft: mean_ft");
         bound_check(var_ft, "func_posterior_ft: var_ft");
@@ -796,7 +765,6 @@ namespace LBA
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
                 _use_discount, _discount_factor,
-                _model.dim.regressor_baseline,
                 _discount_type);
 
             double ft_tmp = 0.;
@@ -852,7 +820,6 @@ namespace LBA
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
                     _use_discount, _discount_factor, 
-                    _model.dim.regressor_baseline,
                     _discount_type);
 
                 double ft_tmp = 0.;
@@ -956,12 +923,6 @@ namespace LBA
                     double rleft = (1. - _discount_factor) * _Ct.at(0, 0, t - 1);
                     double rright = std::pow(_discount_factor, 2.) * _Rtilde_t.at(0, 0, t);
                     _Rtilde_t.at(0, 0, t - 1) = rleft + rright;
-
-                    if (_model.dim.regressor_baseline)
-                    {
-                        _atilde_t.at(_model.dim.nP - 1, t - 1) = _atilde_t.at(_model.dim.nP - 1, t);
-                        _Rtilde_t.at(_model.dim.nP - 1, _model.dim.nP - 1, t - 1) = _Rtilde_t.at(_model.dim.nP - 1, _model.dim.nP - 1, t);
-                    }
                 }
 
                 _psi_mean.at(t - 1) = _atilde_t.at(0, t - 1);
@@ -1125,8 +1086,7 @@ namespace LBA
                 Rt_cast.at(j) = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nP, _model.dim.nT + 1);
             }
 
-            double mu0 = 0.;
-            if (!_model.dim.regressor_baseline) { mu0 = _model.dobs.par1; }
+            double mu0 = _model.dobs.par1;
 
             for (unsigned int t = k; t < _model.dim.nT; t ++)
             {
@@ -1151,7 +1111,6 @@ namespace LBA
                             arma::mat Rt_onestep = func_Rt(
                                 Gt_cast, Rt_cast.at(j - 1).slice(t), _W,
                                 _use_discount, _discount_factor,
-                                _model.dim.regressor_baseline,
                                 _discount_type);
                             
                             Rt_cast.at(j).slice(t) = Rt_onestep;
@@ -1159,7 +1118,6 @@ namespace LBA
                             Wt_onestep = Rt2Wt(
                                 Rt_onestep, _W, _use_discount,
                                 _discount_factor,
-                                _model.dim.regressor_baseline,
                                 _discount_type);
                         }
                         else
@@ -1173,7 +1131,6 @@ namespace LBA
                         Rt_cast.at(j).slice(t) = func_Rt(
                             Gt_cast, Rt_cast.at(j - 1).slice(t), _W,
                             _use_discount, _discount_factor,
-                            _model.dim.regressor_baseline,
                             _discount_type);
                     }
                     
@@ -1418,15 +1375,7 @@ namespace LBA
             output["psi"] = Rcpp::wrap(psi);
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
-            if (_model.dim.regressor_baseline)
-            {
-                output["mu0_filter"] = arma::vectorise(_mt.row(_model.dim.nP - 1));
-                output["mu0"] = arma::vectorise(_atilde_t.row(_model.dim.nP - 1));
-            }
-            else
-            {
-                output["mu0"] = _model.dobs.par1;
-            }
+            output["mu0"] = _model.dobs.par1;
 
             return output;
         }

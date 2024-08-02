@@ -575,7 +575,6 @@ class Dim
 public:
     unsigned int nT, nL, nP;
     bool truncated = true;
-    bool regressor_baseline = false;
 
 
     /**
@@ -594,25 +593,22 @@ public:
     Dim(
         const unsigned int &ntime, 
         const unsigned int &nlag = 0, 
-        const double &nb_r = 0.,
-        const bool &add_regressor_baseline = false)
+        const double &nb_r = 0.)
     {
-        init(ntime, nlag, nb_r, add_regressor_baseline);
+        init(ntime, nlag, nb_r);
     }
 
     Dim(
         const unsigned int &nlag,
         const unsigned int &np,
         const bool &truncated_,
-        const unsigned int &ntime = 0,
-        const bool &add_regressor_baseline = false
+        const unsigned int &ntime = 0
     )
     {
         nL = nlag;
         nP = np;
         truncated = truncated_;
         nT = ntime;
-        regressor_baseline = add_regressor_baseline;
     }
 
 
@@ -623,7 +619,6 @@ public:
     void init_default()
     {
         // an non-truncated example
-        regressor_baseline = false;
         truncated = true;
 
         nT = 200;
@@ -643,11 +638,9 @@ public:
     void init(
         const unsigned int &ntime, 
         const unsigned int &nlag = 0, 
-        const double &nb_r = 0,
-        const bool &add_regressor_baseline = false)
+        const double &nb_r = 0)
     {
         nT = ntime;
-        regressor_baseline = add_regressor_baseline;
 
         if (nlag > 0 && nlag < ntime)
         {
@@ -662,11 +655,6 @@ public:
             truncated = false;
             nL = ntime;
             nP = static_cast<unsigned int>(nb_r) + 1;
-        }
-
-        if (regressor_baseline)
-        {
-            nP += 1; // dim = (nL + 1) or (r + 2) if adding constant term to the state vector
         }
 
         return;
