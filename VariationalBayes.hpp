@@ -1411,7 +1411,7 @@ namespace VB
                 psi.clear();
                 psi = psi_all.head(t + 1);
                 y.clear();
-                y = y.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
+                y = yall.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
                 psi_stored.clear();
                 psi_stored = psi_stored_all.head_rows(t + 1); // (t + 1) x nsample
 

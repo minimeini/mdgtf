@@ -19,3 +19,5 @@ script*
 *.qmd
 *.rmd
 *.vdoc.r
+*.txt
+*hcp*
