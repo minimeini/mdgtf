@@ -1596,10 +1596,20 @@ namespace VB
                 // arma::mat psi_tmp = LBA::get_psi(lba.atilde, lba.Rtilde);
                 // psi = psi_tmp.col(1);
 
+                arma::mat psi_all;
                 smc.prior_W.val = W;
                 try
                 {
-                    smc.infer(model, false);
+                    // if (smc.smoothing)
+                    // {
+                    //     smc.infer(model, false);
+                    //     psi_all = smc.Theta_smooth.row_as_mat(0); // (nT + B) x N
+                    // }
+                    // else
+                    // {
+                        smc.forward_filter(model, false);
+                        psi_all = smc.Theta.row_as_mat(0); // (nT + B) x N
+                    // }
                 }
                 catch (const std::exception &e)
                 {
@@ -1607,15 +1617,7 @@ namespace VB
                     throw std::runtime_error(e.what());
                 }
 
-                arma::mat psi_all;
-                if (smc.smoothing)
-                {
-                    psi_all = smc.Theta.row_as_mat(0); // (nT + B) x N
-                }
-                else
-                {
-                    psi_all = smc.Theta_smooth.row_as_mat(0); // (nT + B) x N
-                }
+
                 // arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
                 psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
 
