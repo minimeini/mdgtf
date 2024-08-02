@@ -1573,55 +1573,17 @@ namespace VB
             par1 = model.transfer.dlag.par1;
             par2 = model.transfer.dlag.par2;
 
-            // Rcpp::List smc_opts = SMC::MCS::default_settings();
-            // smc_opts["num_particle"]  = N;
-            // smc_opts["num_backward"] = B;
-            // smc_opts["W"] = W;
-            // smc_opts["use_discount"] = false;
-
-            // SMC::MCS mcs(model, y);
-            // mcs.init(smc_opts);
-
             SMC::TFS smc(model, y);
             smc.init(smc_opts);
-
-            // arma::vec eta = init_eta(opts.params_selected, W, mu0, kappa, r, opts.update_static); // Checked. OK.
-            // arma::vec eta_tilde = eta2tilde(eta, opts.params_selected, W.prior.name);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                // LBA::LinearBayes lba(model, y, W, 0.95, false);
-                // lba.filter();
-                // lba.smoother();
-                // arma::mat psi_tmp = LBA::get_psi(lba.atilde, lba.Rtilde);
-                // psi = psi_tmp.col(1);
-
-                arma::mat psi_all;
                 smc.prior_W.val = W;
-                try
-                {
-                    // if (smc.smoothing)
-                    // {
-                    //     smc.infer(model, false);
-                    //     psi_all = smc.Theta_smooth.row_as_mat(0); // (nT + B) x N
-                    // }
-                    // else
-                    // {
-                        smc.forward_filter(model, false);
-                        psi_all = smc.Theta.row_as_mat(0); // (nT + B) x N
-                    // }
-                }
-                catch (const std::exception &e)
-                {
-                    std::cerr << "W = " << W << ", mu0 = " << mu0 << ", rho = " << rho << std::endl;
-                    throw std::runtime_error(e.what());
-                }
-
-
-                // arma::mat psi_all = mcs.get_psi_smooth(); // (nT + 1) x M
+                smc.forward_filter(model, false);
+                arma::mat psi_all = smc.Theta.row_as_mat(0); // (nT + B) x N
                 psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
 
                 arma::vec ft = psi;

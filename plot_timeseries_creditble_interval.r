@@ -400,7 +400,6 @@ plot_output <- function(
   
   if ("error" %in% names(out_list)) {
     if ("fitted" %in% names(out_list$error)) {
-      print("\nfitted")
       if ("filter" %in% names(out_list$error$fitted)) {
         yfit_filter <- plot_ts_ci_single(
           out_list$error$fitted$filter$yhat, ytrue,
