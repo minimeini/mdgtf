@@ -17,6 +17,134 @@ namespace MCMC
     class Posterior
     {
     public:
+        /**
+         * @brief Particle independent Metropolis-Hastings sampler (Andrieu, Doucet and Holenstein)
+         * @todo DEBUGGING, NOT WORKING YET
+         *
+         * @param psi
+         * @param psi_accept
+         * @param log_marg
+         * @param y
+         * @param model
+         * @param N
+         * @return double
+         */
+        static void update_psi(
+            arma::vec &psi, // (nT + 1)
+            double &psi_accept,
+            double &log_marg,
+            const arma::vec &y,
+            const Model &model,
+            const unsigned int &N = 100)
+        {
+            arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
+            arma::mat weights_stored(N, model.dim.nT + 1, arma::fill::zeros);
+
+            arma::vec Wt(model.dim.nP, arma::fill::zeros);
+            Wt.at(0) = model.derr.par1;
+
+            const bool full_rank = false;
+            arma::vec weights(N, arma::fill::zeros);
+            arma::vec par = {
+                model.dobs.par1, model.dobs.par2,
+                model.transfer.dlag.par1, model.transfer.dlag.par2};
+
+            for (unsigned int t = 0; t < model.dim.nT; t++)
+            {
+                Rcpp::checkUserInterrupt();
+
+                arma::vec logq(N, arma::fill::zeros);
+                arma::mat loc(model.dim.nP, N, arma::fill::zeros);
+                arma::cube prec_chol_inv; // nP x nP x N
+                arma::mat Theta_cur = Theta.slice(t);
+
+                if (full_rank)
+                {
+                    prec_chol_inv = arma::zeros<arma::cube>(model.dim.nP, model.dim.nP, N); // nP x nP x N
+                }
+
+                arma::vec tau = qforecast(
+                    loc, prec_chol_inv, logq, // sufficient statistics
+                    model, t + 1, Theta_cur,  // theta needs to be resampled
+                    Wt, par, y);
+
+                tau = weights % tau;
+                arma::uvec resample_idx = SMC::SequentialMonteCarlo::get_resample_index(tau);
+
+                Theta_cur = Theta_cur.cols(resample_idx);
+                loc = loc.cols(resample_idx);
+                if (full_rank)
+                {
+                    prec_chol_inv = prec_chol_inv.slices(resample_idx);
+                }
+
+                logq = logq.elem(resample_idx);
+
+                // Propagate
+                arma::mat Theta_new(model.dim.nP, N, arma::fill::zeros);
+                arma::vec theta_cur = arma::vectorise(Theta_cur.row(0)); // N x 1
+                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                for (unsigned int i = 0; i < N; i++)
+                {
+                    arma::vec theta_new;
+                    if (full_rank)
+                    {
+                        arma::vec eps = arma::randn(Theta_new.n_rows);
+                        arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                        theta_new = prec_chol_inv.slice(i) * zt;                      // scaled
+
+                        logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
+                    }
+                    else
+                    {
+                        theta_new = loc.col(i);
+                        double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
+                        theta_new.at(0) += eps;
+                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true); // sample from evolution distribution
+                    }
+
+                    Theta_new.col(i) = theta_new;
+
+                    double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
+                    double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
+                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
+                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    weights.at(i) = std::exp(logp - logq.at(i));
+                }
+
+                double eff = SMC::SequentialMonteCarlo::effective_sample_size(weights);
+                Theta.slice(t + 1) = Theta_new;
+
+                if (eff < 0.95 * N)
+                {
+                    resample_idx = SMC::SequentialMonteCarlo::get_resample_index(weights);
+                    Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
+                    weights.ones();
+                }
+
+                weights_stored.col(t + 1) = weights;
+            }
+
+            unsigned int idx = sample(N, true);                      // randomly select one
+            arma::vec wt = arma::vectorise(weights_stored.row(idx)); // (nT + 1) x 1
+            wt = arma::log(wt);
+            double log_marg_new = arma::accu(wt);
+            log_marg_new -= static_cast<double>(model.dim.nT + 1) * std::log(static_cast<double>(N));
+            arma::vec psi_new = Theta.tube(0, idx); // (nT + 1) x 1
+
+            double logratio = log_marg_new - log_marg;
+            logratio = std::min(0., logratio);
+            if (std::log(R::runif(0., 1.)) < logratio)
+            {
+                // accept
+                psi = psi_new;
+                log_marg = log_marg_new;
+                psi_accept += 1;
+            }
+
+            return;
+        }
+
         static void update_wt( // Checked. OK.
             arma::vec &wt,     // (nT + 1) x 1
             arma::vec &wt_accept,

@@ -292,7 +292,7 @@ plot_output <- function(
 
   if ("W" %in% names(out_list$fit)) {
     nd <- length(dim(out_list$fit$W))
-    if (nd == 1) {
+    if ((nd == 1) | (nd == 2 & ncol(out_list$fit$W) == 1) ) {
       Wtmp <- c(out_list$fit$W)
     } else if (nd == 2) {
       Wtmp <- out_list$fit$W[, ncol(out_list$fit$w)]
