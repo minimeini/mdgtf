@@ -677,8 +677,13 @@ namespace SMC
                     double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
-                    weights.at(i) = std::exp(logp - logq.at(i));
+                    weights.at(i) = logp - logq.at(i);
                 }
+
+                double wmax = weights.max();
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
+                weights = arma::exp(weights);
 
                 eff_forward.at(t + 1) = effective_sample_size(weights);
                 log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
