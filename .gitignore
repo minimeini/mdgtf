@@ -18,3 +18,4 @@ script*
 *.csv
 *.qmd
 *.rmd
+*.vdoc.r
