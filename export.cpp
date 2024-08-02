@@ -249,8 +249,8 @@ Rcpp::List dgtf_infer(
     const std::string &method,
     const Rcpp::List &method_settings,
     const bool &summarize = true,
-    const bool &forecast_error = true,
-    const bool &fitted_error = true,
+    const bool &forecast_error = false,
+    const bool &fitted_error = false,
     const std::string &loss_func = "quadratic",
     const unsigned int &k = 1,
     const bool &add_y0 = false)
@@ -461,11 +461,6 @@ Rcpp::List dgtf_infer(
             forecast = mcmc.forecast(model);
         }
 
-        if (forecast_error)
-        {
-            Rcpp::List tmp = mcmc.forecast_error(model, loss_func, k);
-            error["forecast"] = tmp;
-        }
         if (fitted_error)
         {
             Rcpp::List tmp = mcmc.fitted_error(model, loss_func);
@@ -491,11 +486,6 @@ Rcpp::List dgtf_infer(
             forecast = hvb.forecast(model);
         }
 
-        if (forecast_error)
-        {
-            Rcpp::List tmp = hvb.forecast_error(model, loss_func, k);
-            error["forecast"] = tmp;
-        }
         if (fitted_error)
         {
             Rcpp::List tmp = hvb.fitted_error(model, loss_func);
@@ -623,23 +613,14 @@ Rcpp::List dgtf_forecast(
 
 //' @export
 // [[Rcpp::export]]
-Rcpp::List dgtf_evaluate(
-    const Rcpp::List &model_settings,
-    const arma::vec &y,   // (nT + 1) x 1
-    const arma::mat &psi, // (nT + 1) x nsample
+arma::vec dgtf_evaluate(
+    const arma::vec &yest, // nsample x 1
+    const double &ytrue,
     const std::string &loss_func = "quadratic",
-    const unsigned int &k = 1
-)
+    const bool &eval_covarage_width = true,
+    const bool &eval_covarage_pct = true)
 {
-    Model model(model_settings);
-    Rcpp::List forecast = Model::forecast_error(psi, y, model, loss_func, k);
-    Rcpp::List fitted = Model::fitted_error(psi, y, model, loss_func);
-
-    Rcpp::List out;
-    out["forecast"] = forecast;
-    out["fitted"] = fitted;
-
-    return out;
+    return evaluate(yest, ytrue, loss_func, eval_covarage_width, eval_covarage_pct);
 }
 
 // //' @export
