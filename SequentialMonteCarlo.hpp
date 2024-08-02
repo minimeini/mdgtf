@@ -1554,142 +1554,6 @@ namespace SMC
             return stats;
         }
 
-        void forward_filter(const Model &model, const bool &verbose = VERBOSE)
-        {
-            const bool full_rank = false;
-            arma::vec eff_forward(dim.nT + 1, arma::fill::zeros);
-            arma::vec log_cond_marginal = eff_forward;
-
-            arma::vec par = {
-                model.dobs.par1, // mu0
-                model.dobs.par2, // rho
-                model.transfer.dlag.par1,
-                model.transfer.dlag.par2};
-
-            arma::vec Wt(model.dim.nP, arma::fill::zeros);
-            Wt.at(0) = model.derr.par1;
-
-            for (unsigned int t = 0; t < dim.nT; t++)
-            {
-                Rcpp::checkUserInterrupt();
-
-                arma::vec logq(N, arma::fill::zeros);
-                arma::mat loc(dim.nP, N, arma::fill::zeros);
-                arma::cube prec_chol_inv; // nP x nP x N
-                if (full_rank)
-                {
-                    prec_chol_inv = arma::zeros<arma::cube>(dim.nP, dim.nP, N); // nP x nP x N
-                }
-
-                arma::vec tau = qforecast(
-                    loc, prec_chol_inv, logq,     // sufficient statistics
-                    model, t + 1, Theta.slice(t), // theta needs to be resampled
-                    Wt, par, y);
-
-                tau = tau % weights; 
-                weights_forward.row(t) = logq.t();
-
-                eff_forward.at(t + 1) = effective_sample_size(tau);
-                arma::uvec resample_idx = get_resample_index(tau);
-
-                if (resample_all)
-                {
-                    for (unsigned int k = 0; k <= t; k++)
-                    {
-                        Theta.slice(k) = Theta.slice(k).cols(resample_idx);
-                        arma::vec wtmp = arma::vectorise(weights_forward.row(k));
-                        weights_forward.row(k) = wtmp.elem(resample_idx).t();
-                    }
-                }
-                else
-                {
-                    Theta.slice(t) = Theta.slice(t).cols(resample_idx);
-                    arma::vec wtmp = arma::vectorise(weights_forward.row(t));
-                    weights_forward.row(t) = wtmp.elem(resample_idx).t();
-                }
-
-                loc = loc.cols(resample_idx);
-                if (full_rank)
-                {
-                    prec_chol_inv = prec_chol_inv.slices(resample_idx);
-                }
-                logq = logq.elem(resample_idx);
-
-
-                if (use_discount)
-                { // Use discount factor if W is not given
-                    bool use_custom_val = (use_custom && t > 1) ? true : false;
-                    Wt.at(0) = SequentialMonteCarlo::discount_W(
-                        Theta.slice(t),
-                        custom_discount_factor,
-                        use_custom_val,
-                        default_discount_factor);
-                }
-
-                // Propagate
-                arma::mat Theta_new(dim.nP, N, arma::fill::zeros);
-                arma::vec theta_cur = arma::vectorise(Theta.slice(t).row(0)); // N x 1
-                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
-                for (unsigned int i = 0; i < N; i++)
-                {
-                    arma::vec theta_new;
-                    if (full_rank)
-                    {
-                        arma::vec eps = arma::randn(Theta_new.n_rows);
-                        arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
-                        theta_new = prec_chol_inv.slice(i) * zt;            // scaled
-
-                        logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
-                    }
-                    else
-                    {
-                        theta_new = loc.col(i);
-                        double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
-                        theta_new.at(0) += eps;
-                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true); // sample from evolution distribution
-                    }
-
-                    Theta_new.col(i) = theta_new;
-
-                    double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
-                    double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
-                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
-                    weights.at(i) = std::exp(logp - logq.at(i));
-                }
-
-                log_cond_marginal.at(t + 1) = std::log(arma::accu(weights)) - std::log((double)N);
-                Theta.slice(t + 1) = Theta_new;
-
-                // if (eff_forward.at(t + 1) < 0.95 * N || t >= dim.nT - 1)
-                // {
-                //     arma::uvec resample_idx = get_resample_index(weights);
-                //     Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
-                //     weights.ones();
-                // }
-                // else
-                // {
-                // Theta.slice(t_new) = Theta_new;
-                // }
-
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rForwawrd Filtering: " << t + 1 << "/" << dim.nT;
-                }
-            }
-
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
-
-            arma::mat psi = Theta.row_as_mat(0);
-            output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
-            output["eff_forward"] = Rcpp::wrap(eff_forward.t());
-            output["log_marginal_likelihood"] = arma::accu(log_cond_marginal);
-
-            return;
-        }
 
         void backward_filter(const Model &model, const bool &verbose = VERBOSE)
         {
@@ -1904,6 +1768,7 @@ namespace SMC
 
         void infer(const Model &model, const bool &verbose = VERBOSE)
         {
+            // forward filter
             arma::vec eff_forward(model.dim.nT + 1, arma::fill::zeros);
             double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, weights_forward, eff_forward, Wt,
@@ -1917,7 +1782,6 @@ namespace SMC
             output["eff_forward"] = Rcpp::wrap(eff_forward.t());
             output["log_marginal_likelihood"] = log_cond_marg;
 
-            // forward_filter(model, verbose);
 
             if (smoothing)
             {

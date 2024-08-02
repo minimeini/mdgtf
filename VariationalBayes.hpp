@@ -25,7 +25,6 @@ namespace VB
         unsigned int nburnin = 1000;
         unsigned int ntotal = 3001;
         unsigned int nforecast = 0;
-        unsigned int nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
         double tstart_pct = 0.9;
 
         unsigned int N = 500; // number of SMC particles
@@ -107,12 +106,6 @@ namespace VB
             if (opts.containsElementNamed("num_step_ahead_forecast"))
             {
                 nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
-            }
-
-            nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
-            if (opts.containsElementNamed("num_eval_forecast_error"))
-            {
-                nforecast_err = Rcpp::as<unsigned int>(opts["num_eval_forecast_error"]);
             }
 
             tstart_pct = 0.9;
@@ -247,7 +240,7 @@ namespace VB
             opts["nthin"] = 1;
             opts["nburnin"] = 1000;
 
-            opts["num_particle"] = 500;
+            opts["num_particle"] = 100;
             opts["num_step_ahead_forecast"] = 0;
             opts["num_eval_forecast_error"] = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
             opts["tstart_pct"] = 0.9;
@@ -484,27 +477,9 @@ namespace VB
                 B_uptri_idx = {0};
             }
 
-            if (opts.containsElementNamed("smc"))
-            {
-                smc_opts = Rcpp::as<Rcpp::List>(opts["smc"]);
-            }
-            else
-            {
-                // smc_opts = SMC::MCS::default_settings();
-                smc_opts = SMC::TFS::default_settings();
-            }
-
-            smc_opts["use_discount"] = false;
-            smc_opts["num_smooth"] = Rcpp::as<unsigned int>(smc_opts["num_particle"]);
-            smc_opts["resample_all"] = true;
-
             Rcpp::List W_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = W_prior.val);
-
-            unsigned int num_particle = Rcpp::as<unsigned int>(smc_opts["num_particle"]);
-            mu0_stored2.set_size(num_particle, nsample);
-            mu0_stored2.zeros();
         }
 
         static Rcpp::List default_settings()
@@ -513,29 +488,6 @@ namespace VB
             opts["learning_rate"] = 0.01;
             opts["eps_step_size"] = 1.e-6;
             opts["k"] = 1;
-
-            // Rcpp::List smc_tmp = SMC::MCS::default_settings();
-            // smc_tmp["use_discount"] = false;
-            // smc_tmp["num_backward"] = 5;
-
-            Rcpp::List smc_tmp = SMC::TFS::default_settings();
-            smc_tmp["resample_all"] = true;
-            smc_tmp["use_discount"] = false;
-
-            Rcpp::List W_opts = Rcpp::List::create(
-                Rcpp::Named("infer") = false,
-                Rcpp::Named("init") = 0.01);
-
-            smc_tmp["W"] = W_opts;
-
-            Rcpp::List mu0_opts = Rcpp::List::create(
-                Rcpp::Named("infer") = false,
-                Rcpp::Named("init") = 0);
-
-            smc_tmp["mu0"] = mu0_opts;
-
-            opts["smc"] = smc_tmp;
-
             return opts;
         }
 
@@ -1344,7 +1296,6 @@ namespace VB
 
                 unsigned int B = grid.at(i);
                 stats.at(i, 0) = B;
-                smc_opts["num_backward"] = B;
 
                 infer(model);
 
@@ -1409,12 +1360,6 @@ namespace VB
             {
                 throw std::invalid_argument("VB::Hybrid::forecast_error: tstart should <= tend.");
             }
-
-            /*
-            Perform forecasting on `nforecast_err` time points in time interval [tstart, ntime - kstep].
-            `time_indices` is a nforecast_err x 1 vector.
-            Set `nforecast_err = ntime - kstep - tstart + 1` to perform forecasting at every time point.
-            */
 
             arma::cube ycast = arma::zeros<arma::cube>(ntime + 1, nsample, kstep);
             arma::mat y_cov_cast(ntime + 1, kstep, arma::fill::zeros); // (nT + 1) x k
@@ -1572,18 +1517,22 @@ namespace VB
             rho = model.dobs.par2;
             par1 = model.transfer.dlag.par1;
             par2 = model.transfer.dlag.par2;
-
-            SMC::TFS smc(model, y);
-            smc.init(smc_opts);
+  
+            arma::vec eff_forward(model.dim.nT + 1, arma::fill::zeros);
+            arma::mat weights_forward(model.dim.nT + 1, N);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                smc.prior_W.val = W;
-                smc.forward_filter(model, false);
-                arma::mat psi_all = smc.Theta.row_as_mat(0); // (nT + B) x N
+                arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
+                arma::vec Wt(model.dim.nP, arma::fill::zeros);
+                Wt.at(0) = W;
+                double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
+                    Theta, weights_forward, eff_forward, Wt,
+                    model, y, N, true, false);
+                arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
                 psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
 
                 arma::vec ft = psi;
@@ -1656,20 +1605,11 @@ namespace VB
 
                     if (par1_prior.infer || par2_prior.infer)
                     {
-                        smc.update_np(model.dim.nP);
                         dim.nL = model.dim.nL;
                         dim.nP = model.dim.nP;
                     }
 
                 } // end update_static
-
-                // bool saveiter = false;
-                // unsigned int idx_run = 0;
-                // save(saveiter, idx_run, b);
-                // if (saveiter)
-                // {
-
-                // }
 
                 if (saveiter || b == (ntotal - 1))
                 {
@@ -1764,8 +1704,6 @@ namespace VB
         double eps_step_size = 1.e-6;
         unsigned int k = 1; // rank of unknown static parameters.
 
-        Rcpp::List smc_opts;
-
         // StaticParam W, mu0, delta, kappa, r;
         HybridParams grad_mu, grad_vecB, grad_d, grad_tau;
         arma::vec mu, d, gamma, nu, eps, eta, eta_tilde; // m x 1
@@ -1773,8 +1711,6 @@ namespace VB
         arma::mat B;                                     // m x k
         arma::vec vecL_B;                                // mk x 1
         arma::uvec B_uptri_idx;
-
-        arma::mat mu0_stored2;
     }; // class Hybrid
 }
 
