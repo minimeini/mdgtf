@@ -583,7 +583,7 @@ namespace SMC
             const bool &use_custom = false,
             const double &custom_discount_factor = 0.95,
             const double &default_discount_factor = 0.95,
-            const bool &verbose = VERBOSE)
+            const bool &verbose = false)
         {
             const double logN = std::log(static_cast<double>(N));
             const bool full_rank = false;
