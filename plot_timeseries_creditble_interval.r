@@ -290,7 +290,6 @@ plot_output <- function(
   }
 
 
-
   if ("W" %in% names(out_list$fit)) {
     nd <- length(dim(out_list$fit$W))
     if (nd == 1) {
@@ -398,8 +397,10 @@ plot_output <- function(
   }
 
 
+  
   if ("error" %in% names(out_list)) {
     if ("fitted" %in% names(out_list$error)) {
+      print("\nfitted")
       if ("filter" %in% names(out_list$error$fitted)) {
         yfit_filter <- plot_ts_ci_single(
           out_list$error$fitted$filter$yhat, ytrue,
@@ -425,7 +426,7 @@ plot_output <- function(
             height = height, width = width
           )
         }
-      }
+      } # error-fitted-filter
 
       if ("smooth" %in% names(out_list$error$fitted)) {
         yfit_smooth <- plot_ts_ci_single(
@@ -468,6 +469,7 @@ plot_output <- function(
           plots <- append(plots, list(yfit = yfit))
         }
 
+
         if (save_figures) {
           ggsave(
             file.path(
@@ -478,7 +480,7 @@ plot_output <- function(
             height = height, width = width
           )
         }
-      }
+      } # error-fitted-yhat
     }
 
     if ("forecast" %in% names(out_list$error)) {

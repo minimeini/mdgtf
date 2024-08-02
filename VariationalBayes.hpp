@@ -1463,10 +1463,10 @@ namespace VB
                     submodel.transfer.fgain.name,
                     submodel.transfer.dlag.name, lag_param);
 
-                // psi.clear();
-                // psi = psi_all.head(t + 1);
+                psi.clear();
+                psi = psi_all.head(t + 1);
                 y.clear();
-                y = yall.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
+                y = y.head(t + 1); // (t + 1) x 1, (y[0], y[1], ..., y[t])
                 psi_stored.clear();
                 psi_stored = psi_stored_all.head_rows(t + 1); // (t + 1) x nsample
 
@@ -1514,6 +1514,9 @@ namespace VB
                 Rcpp::Rcout << std::endl;
             }
 
+            psi = psi_all;
+            psi_stored = psi_stored_all;
+            y = yall;
 
             arma::uvec succ_idx = arma::find(success == 1);
 

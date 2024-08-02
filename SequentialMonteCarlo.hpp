@@ -152,8 +152,7 @@ namespace SMC
 
             Theta.set_size(dim.nP, N, dim.nT + B);
             Theta.zeros();
-            Theta_smooth.set_size(dim.nP, M, dim.nT + B);
-            Theta_smooth.zeros();
+            
 
             // psi_forward.set_size(dim.nT + B, N);
             // psi_forward.zeros();
@@ -1293,6 +1292,9 @@ namespace SMC
             arma::mat theta_last = Theta.slice(dim.nT);         // p x N
             arma::mat theta_sub = theta_last.cols(idx);         // p x M
 
+            Theta_smooth.set_size(dim.nP, M, dim.nT + B);
+            Theta_smooth.zeros();
+
             Theta_smooth.slice(dim.nT) = theta_sub;
             // psi_smooth.row(dim.nT) = theta_sub.row(0);
 
@@ -1786,8 +1788,6 @@ namespace SMC
         void smoother(const Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
-
-            Theta_smooth.clear();
             Theta_smooth = Theta;
 
             arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
@@ -2897,7 +2897,6 @@ namespace SMC
         void two_filter_smoother(Model &model, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
-            Theta_smooth.clear();
             Theta_smooth = Theta;
 
             for (unsigned int t = 1; t < dim.nT; t++)
