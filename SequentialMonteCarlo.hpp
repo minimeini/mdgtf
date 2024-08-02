@@ -2158,7 +2158,7 @@ namespace SMC
             Rcpp::List out;
             if (smoothing)
             {
-                out = StateSpace::forecast(y, Theta_smooth, W_smooth, model, nforecast);
+                out = StateSpace::forecast(y, Theta_smooth, W_backward, model, nforecast);
             }
             else
             {
@@ -2222,18 +2222,9 @@ namespace SMC
                     obs_update, lag_update, full_rank);
 
                 tau = tau % weights;
-                weights_forward.row(t) = logq.t();
-
                 arma::uvec resample_idx = get_resample_index(tau);
 
-                for (unsigned int k = 0; k <= t; k++)
-                {
-                    Theta.slice(k) = Theta.slice(k).cols(resample_idx);
-                    arma::vec wtmp = arma::vectorise(weights_forward.row(k));
-                    weights_forward.row(k) = wtmp.elem(resample_idx).t();
-                }
-
-
+                Theta.slice(t) = Theta.slice(t).cols(resample_idx);
                 logq = logq.elem(resample_idx);
                 loc = loc.cols(resample_idx);
                 if (full_rank)
@@ -2242,6 +2233,7 @@ namespace SMC
                 }
 
                 eff_forward.at(t + 1) = effective_sample_size(tau);
+                weights_forward.row(t) = logq.t();
 
                 // No need to update static parameters if we already inferred them during forward filtering once with the same data (filter_pass = true).
                 if (prior_W.infer)
@@ -2616,15 +2608,7 @@ namespace SMC
                     W_backward, mu0_backward, mu_marginal, Sigma_marginal, y, full_rank);
 
                 tau = tau % weights;
-                // weights_backward.row(t_next) = tau.t();
                 arma::uvec resample_idx = get_resample_index(tau);
-
-                // for (unsigned int k = model.dim.nT - 1; k >= t_next; k--)
-                // {
-                //     Theta_backward.slice(k) = Theta_backward.slice(k).cols(resample_idx);
-                //     arma::vec wtmp = arma::vectorise(weights_backward.row(k));
-                //     weights_backward.row(k) = wtmp.elem(resample_idx).t();
-                // }
 
                 Theta_next = Theta_next.cols(resample_idx); // theta[t]
                 Theta_backward.slice(t_next) = Theta_next;
@@ -2633,16 +2617,12 @@ namespace SMC
                 Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
 
-                tau = tau.elem(resample_idx);
-                weights_backward.row(t_next) = logq.t();
-                eff_backward.at(t_cur) = effective_sample_size(tau);
-
-                // weights = weights.elem(resample_idx);
-                // weights_prop_backward.row(t_next) = weights.t();
-                // weights_prop_backward should be consistent with the corresponding particles.
-
                 log_marg = log_marg.elem(resample_idx);
                 logq = logq.elem(resample_idx);
+                tau = tau.elem(resample_idx);
+
+                weights_backward.row(t_next) = logq.t();
+                eff_backward.at(t_cur) = effective_sample_size(tau);
 
                 if (prior_W.infer)
                 {
@@ -2966,7 +2946,7 @@ namespace SMC
         // arma::mat W_stored; // N x (nT + 1)
         // arma::vec W_backward; // N x 1
         arma::vec W_smooth; // M x 1
-        arma::vec W_backward;
+        arma::vec W_backward; // N x 1
         arma::vec W_forward; // N x 4, 1st filter, 2nd filter, backward filter, smoothing
 
         arma::mat param_filter, param_backward, param_smooth;
