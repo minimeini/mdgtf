@@ -38,8 +38,6 @@ namespace MCMC
             const unsigned int &N = 100)
         {
             arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
-            arma::mat weights_stored(N, model.dim.nT + 1, arma::fill::zeros);
-
             arma::vec Wt(model.dim.nP, arma::fill::zeros);
             Wt.at(0) = model.derr.par1;
 
@@ -49,6 +47,8 @@ namespace MCMC
                 model.dobs.par1, model.dobs.par2,
                 model.transfer.dlag.par1, model.transfer.dlag.par2};
 
+            double log_marg_new = 0.;
+            const double logN = std::log(static_cast<double>(N));
             for (unsigned int t = 0; t < model.dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
@@ -114,7 +114,6 @@ namespace MCMC
 
                 double eff = SMC::SequentialMonteCarlo::effective_sample_size(weights);
                 Theta.slice(t + 1) = Theta_new;
-
                 if (eff < 0.95 * N)
                 {
                     resample_idx = SMC::SequentialMonteCarlo::get_resample_index(weights);
@@ -122,15 +121,10 @@ namespace MCMC
                     weights.ones();
                 }
 
-                weights_stored.col(t + 1) = weights;
+                log_marg_new += std::log(arma::accu(weights) + EPS) - logN;
             }
 
-            unsigned int idx = sample(N, true);                      // randomly select one
-            arma::vec wt = arma::vectorise(weights_stored.row(idx)); // (nT + 1) x 1
-            wt = arma::log(wt);
-            double log_marg_new = arma::accu(wt);
-            log_marg_new -= static_cast<double>(model.dim.nT + 1) * std::log(static_cast<double>(N));
-            arma::vec psi_new = Theta.tube(0, idx); // (nT + 1) x 1
+            arma::vec psi_new = arma::mean(Theta.row_as_mat(0), 1); // (nT + 1) x 1
 
             double logratio = log_marg_new - log_marg;
             logratio = std::min(0., logratio);

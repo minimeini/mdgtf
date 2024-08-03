@@ -686,7 +686,6 @@ namespace SMC
                 weights = arma::exp(weights);
 
                 eff_forward.at(t + 1) = effective_sample_size(weights);
-                log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
                 Theta.slice(t + 1) = Theta_new;
 
                 if (final_resample_by_weights)
@@ -699,6 +698,8 @@ namespace SMC
                     }
                         
                 }
+
+                log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
 
                 if (verbose)
                 {
