@@ -14,6 +14,18 @@
 
 // [[Rcpp::depends(RcppArmadillo)]]
 
+/**
+ * @brief Sequential Monte Carlo methods.
+ * @todo Further improvement on SMC
+ *       1. Resample-move step after resamplin: we need to move the particles carefully because we have constrains on the augmented states Theta.
+ *       2. Residual resampling, systematic resampling, or stratified resampling.
+ *       3. Tampering SMC.
+ *
+ *       Reference:
+ *       1. Notes on sequential Monte Carlo (by N. Kantas);
+ *       2. Particle filters and data assimilation (by Fearnhead and Kunsch).
+ *       3. Online tutorial for particle MCMC - https://sbfnk.github.io/mfiidd/pmcmc_solution.html#calibrate-the-number-of-particles
+ */
 namespace SMC
 {
     class SequentialMonteCarlo
