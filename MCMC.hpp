@@ -35,7 +35,7 @@ namespace MCMC
             double &log_marg,
             const arma::vec &y,
             const Model &model,
-            const unsigned int &N = 100)
+            const unsigned int &N = 50)
         {
             arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
             arma::vec Wt(model.dim.nP, arma::fill::zeros);
@@ -124,7 +124,7 @@ namespace MCMC
                 log_marg_new += std::log(arma::accu(weights) + EPS) - logN;
             }
 
-            arma::vec psi_new = arma::mean(Theta.row_as_mat(0), 1); // (nT + 1) x 1
+            arma::vec psi_new = arma::median(Theta.row_as_mat(0), 1); // (nT + 1) x 1
 
             double logratio = log_marg_new - log_marg;
             logratio = std::min(0., logratio);
@@ -135,6 +135,10 @@ namespace MCMC
                 log_marg = log_marg_new;
                 psi_accept += 1;
             }
+            // else
+            // {
+            //     std::cout << "\n log_marg = " << log_marg << ", logratio = " << logratio << std::endl;
+            // }
 
             return;
         }
@@ -259,7 +263,7 @@ namespace MCMC
             {
                 double nSw_new = W_prior.par2 + res;                  // prior_params.at(1) = nSw
                 W = 1. / R::rgamma(0.5 * W_prior.par1, 2. / nSw_new); // prior_params.at(0) = nw_new
-                W_accept += 1.;
+                // W_accept += 1.;
                 break;
             }
             default:
@@ -890,16 +894,19 @@ namespace MCMC
 
         Rcpp::List get_output()
         {
+            arma::vec qprob = {0.025, 0.5, 0.975};
             Rcpp::List output;
             output["model"] = Rcpp::wrap(model_info);
 
-            output["wt"] = Rcpp::wrap(wt_stored); // (nT + 1) x nsample
-
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            arma::vec qprob = {0.025, 0.5, 0.975};
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1); // (nT + 1) x 3
             output["psi"] = Rcpp::wrap(psi_quantile);
             output["wt_accept"] = Rcpp::wrap(wt_accept / ntotal);
+            
+            // arma::mat psi_quantile = arma::quantile(wt_stored, qprob, 1); // (nT + 1) x 3
+            // output["psi"] = Rcpp::wrap(psi_quantile);
+            // output["wt_accept"] = Rcpp::wrap(W_accept / ntotal);
+            // output["log_marg"] = Rcpp::wrap(log_marg_stored.t());
 
             output["infer_W"] = W_prior.infer;
             output["W"] = Rcpp::wrap(W_stored);
@@ -929,6 +936,7 @@ namespace MCMC
         Rcpp::List forecast(const Model &model)
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            // arma::mat psi_stored = wt_stored;
             Rcpp::List out = Model::forecast(
                 y, psi_stored, W_stored, model, nforecast);
 
@@ -939,12 +947,14 @@ namespace MCMC
         Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            // arma::mat psi_stored = wt_stored;
             return Model::fitted_error(psi_stored, y, model, loss_func);
         }
 
         void fitted_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
+            // arma::mat psi_stored = wt_stored;
             Model::fitted_error(err, psi_stored, y, model, loss_func);
             return;
         }
@@ -982,6 +992,13 @@ namespace MCMC
 
             // wt.tail(wt_init.n_elem) = wt_init;
 
+            // arma::vec psi = wt;
+            // double log_marg = -9999;
+            // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
+            // W_accept = 0.;
+            // log_marg_stored.set_size(nsample);
+            // log_marg_stored.zeros();
+
             ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
 
             for (unsigned int b = 0; b < ntotal; b++)
@@ -991,10 +1008,13 @@ namespace MCMC
                 approx_dlm.set_Fphi(model.transfer.dlag, model.dim.nL);
                 Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, mh_sd);
                 arma::vec psi = arma::cumsum(wt);
+
+                // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain.name);
 
                 if (W_prior.infer)
                 {
+                    // arma::vec wt = arma::diff(psi);
                     double W_old = W;
                     W = Posterior::update_W(W_accept, W_old, wt, W_prior, mh_sd);
                     w0_prior.update_par2(W);
@@ -1039,6 +1059,8 @@ namespace MCMC
                         idx_run = nsample - 1;
                     }
 
+                    // log_marg_stored.at(idx_run) = log_marg;
+                    // wt_stored.col(idx_run) = psi;
                     wt_stored.col(idx_run) = wt;
                     W_stored.at(idx_run) = W;
                     mu0_stored.at(idx_run) = mu0;
@@ -1063,6 +1085,8 @@ namespace MCMC
         }
 
     private:
+        arma::vec log_marg_stored;
+
         double epsilon = 0.01;
         unsigned int L = 10;
         Rcpp::NumericVector m;
