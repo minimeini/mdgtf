@@ -338,7 +338,7 @@ Rcpp::List dgtf_infer(
 
         if (forecast_error)
         {
-            Rcpp::List tmp = mcs.forecast_error(model, loss_func, k);
+            Rcpp::List tmp = mcs.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
@@ -369,7 +369,7 @@ Rcpp::List dgtf_infer(
 
         if (forecast_error)
         {
-            Rcpp::List tmp = ffbs.forecast_error(model, loss_func, k);
+            Rcpp::List tmp = ffbs.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
@@ -400,7 +400,7 @@ Rcpp::List dgtf_infer(
 
         if (forecast_error)
         {
-            Rcpp::List tmp = tfs.forecast_error(model, loss_func, k);
+            Rcpp::List tmp = tfs.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
@@ -432,7 +432,7 @@ Rcpp::List dgtf_infer(
 
         if (forecast_error)
         {
-            Rcpp::List tmp = pl.forecast_error(model, loss_func, k);
+            Rcpp::List tmp = pl.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)

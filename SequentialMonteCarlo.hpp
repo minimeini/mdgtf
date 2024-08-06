@@ -530,15 +530,22 @@ namespace SMC
         Rcpp::List forecast_error(
             const Model &model,
             const std::string &loss_func = "quadratic",
-            const unsigned int &k = 1)
+            const unsigned int &k = 1,
+            const Rcpp::Nullable<unsigned int> &start_time = R_NilValue,
+            const Rcpp::Nullable<unsigned int> &end_time = R_NilValue)
         {
             arma::cube th_filter = Theta.tail_slices(dim.nT + 1); // p x N x (nT + 1)
-            Rcpp::List out2 = StateSpace::forecast_error(th_filter, y, model, loss_func, k);
+            Rcpp::List out2 = StateSpace::forecast_error(th_filter, y, model, loss_func, k, VERBOSE, start_time, end_time);
 
             return out2;
         }
 
-        void forecast_error(double &err, double &cov, double &width, const Model &model, const std::string &loss_func = "quadratic")
+        void forecast_error(
+            double &err,
+            double &cov,
+            double &width,
+            const Model &model,
+            const std::string &loss_func = "quadratic")
         {
             arma::cube theta_tmp = Theta.tail_slices(dim.nT + 1); // p x N x (nT + 1)
             StateSpace::forecast_error(err, cov, width, theta_tmp, y, model, loss_func);

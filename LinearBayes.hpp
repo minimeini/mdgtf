@@ -1076,8 +1076,8 @@ namespace LBA
             const Rcpp::Nullable<unsigned int> &end_time = R_NilValue)
         {
             arma::cube ycast(_model.dim.nT + 1, nsample, k, arma::fill::zeros);
-            arma::cube y_err_cast(_model.dim.nT + 1, nsample, k, arma::fill::zeros); // (nT + 1) x nsample x k
-            arma::mat y_cov_cast(_model.dim.nT + 1, k,arma::fill::zeros);               // (nT + 1) x k
+            arma::cube y_err_cast(_model.dim.nT + 1, nsample, k, arma::fill::zeros); // (nT+1) x nsample x k
+            arma::mat y_cov_cast(_model.dim.nT + 1, k,arma::fill::zeros);            // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
 
             arma::cube at_cast = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nT + 1, k + 1);
@@ -1095,6 +1095,9 @@ namespace LBA
             }
 
             unsigned int tend = _model.dim.nT - k;
+            if (end_time.isNotNull()) {
+                tend = Rcpp::as<unsigned int>(end_time);
+            }
 
             for (unsigned int t = tstart; t < tend; t ++)
             {

@@ -648,28 +648,34 @@ public:
         const Model &model,
         const std::string &loss_func = "quadratic",
         const unsigned int &k = 1,
-        const bool &verbose = VERBOSE)
+        const bool &verbose = VERBOSE,
+        const Rcpp::Nullable<unsigned int> &start_time = R_NilValue,
+        const Rcpp::Nullable<unsigned int> &end_time = R_NilValue)
     {
         unsigned int nsample = psi.n_cols;
-
-        // arma::cube psi_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
-        // arma::cube ft_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
         arma::cube ycast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
         arma::cube y_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
-        // arma::cube psi_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
+        arma::mat y_cov_cast(model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
+        arma::mat y_width_cast = y_cov_cast;
 
-        // for (unsigned int j = 0; j < k; j ++)
-        // {
-        //     psi_cast.slice(j).row(1) = psi.row(1); // 1 x nsample
-        // }
+        unsigned int tstart = std::max(k, model.dim.nP);
+        if (start_time.isNotNull()) 
+        {
+            tstart = Rcpp::as<unsigned int>(start_time);
+        }
 
+        unsigned int tend = model.dim.nT - k;
+        if (end_time.isNotNull())
+        {
+            tend = Rcpp::as<unsigned int>(end_time);
+        }
 
         for (unsigned int i = 0; i < nsample; i ++)
         {
             arma::vec psi_vec = psi.col(i); // (nT + 1) x 1
             arma::vec ft_vec(model.dim.nT + 1, arma::fill::zeros);
 
-            for (unsigned int t = 0; t < model.dim.nT; t++)
+            for (unsigned int t = 0; t < tstart; t++)
             {
                 ft_vec.at(t + 1) = TransFunc::func_ft(
                     t + 1, y, ft_vec, psi_vec, model.dim,
@@ -678,7 +684,7 @@ public:
                     model.transfer.name);
             }
 
-            for (unsigned int t = 1; t < model.dim.nT; t++)
+            for (unsigned int t = tstart; t < tend; t++)
             {
                 Rcpp::checkUserInterrupt();
 
@@ -690,8 +696,7 @@ public:
                 // ft_cast.at(t, i, 0) = ft_tmp.at(t);
                 ycast.at(t, i, 0) = ytmp.at(t);
 
-                unsigned int ncast = std::min(k, model.dim.nT - t);
-                for (unsigned int j = 1; j <= ncast; j++)
+                for (unsigned int j = 1; j <= k; j++)
                 {
                     psi_tmp.at(t + j) = psi_tmp.at(t + j - 1);
 
@@ -711,7 +716,7 @@ public:
 
                 if (verbose)
                 {
-                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
+                    Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << tend;
                 }
             } // loop over time
 
@@ -721,8 +726,7 @@ public:
             }
         } // loop over nsample
 
-        arma::mat y_cov_cast(model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
-        arma::mat y_width_cast = y_cov_cast;
+        
         for (unsigned int t = 1; t < model.dim.nT; t++)
         {
             arma::mat ycast_tmp = ycast.row_as_mat(t); // k x nsample
@@ -753,64 +757,42 @@ public:
         arma::vec y_width_all = y_loss_all;
         arma::cube yqt = arma::zeros<arma::cube>(model.dim.nT + 1, qprob.n_elem, k);
 
-        unsigned int tstart = std::max(k, model.dim.nP);
-        for (unsigned int i = 0; i < k; i ++)
+        
+        for (unsigned int j = 0; j < k; j ++)
         {
-            unsigned int tend = model.dim.nT - i - 1;
-
-            arma::mat ycast_qt = arma::quantile(ycast.slice(i), qprob, 1);
-            yqt.slice(i) = ycast_qt;
-            arma::mat y_loss_tmp0 = y_err_cast.slice(i);
+            arma::mat ycast_qt = arma::quantile(ycast.slice(j), qprob, 1);
+            yqt.slice(j) = ycast_qt;
+            arma::mat y_loss_tmp0 = y_err_cast.slice(j);
             arma::mat y_loss_tmp = y_loss_tmp0.submat(tstart, 0, tend, nsample - 1);
             y_loss_tmp = arma::abs(y_loss_tmp);
             arma::vec ytmp;
 
-            arma::vec ycov_tmp = arma::vectorise(y_cov_cast(arma::span(tstart, tend), arma::span(i)));
-            y_covered_all.at(i) = arma::mean(ycov_tmp) * 100.;
+            arma::vec ycov_tmp = arma::vectorise(y_cov_cast(arma::span(tstart, tend), arma::span(j)));
+            y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
 
-            ycov_tmp = arma::vectorise(y_width_cast(arma::span(tstart, tend), arma::span(i)));
-            y_width_all.at(i) = arma::mean(ycov_tmp);
+            ycov_tmp = arma::vectorise(y_width_cast(arma::span(tstart, tend), arma::span(j)));
+            y_width_all.at(j) = arma::mean(ycov_tmp);
 
-            // arma::mat psi_cast_qt = arma::quantile(psi_cast.slice(i), qprob, 1);
-            // psi_qt.slice(i) = psi_cast_qt;
-            // arma::mat psi_loss_tmp0 = psi_err_cast.slice(i); // (nT + 1) x nsample
-            // arma::mat psi_loss_tmp = psi_loss_tmp0.submat(1, 0, model.dim.nT - i - 1, nsample - 1);
-            // psi_loss_tmp = arma::abs(psi_loss_tmp);                                     // (nT - i) x nsample
-            // arma::vec psi_tmp;
-            
 
             switch (loss_list[tolower(loss_func)])
             {
             case AVAIL::L1: // mae
             {
-                // psi_tmp = arma::mean(psi_loss_tmp, 1); // // (nT - i) x 1
-                // psi_loss.submat(1, i, model.dim.nT - i - 1, i) = psi_tmp;
-                // psi_loss_all.at(i) = arma::mean(psi_tmp);
-
                 ytmp = arma::mean(y_loss_tmp, 1);
-                y_loss.submat(tstart, i, tend, i) = ytmp;
-                y_loss_all.at(i) = arma::mean(ytmp);
-                
+                y_loss.submat(tstart, j, tend, j) = ytmp;
+                y_loss_all.at(j) = arma::mean(ytmp);
 
                 break;
             }
             case AVAIL::L2: // rmse
             {
-                // psi_loss_tmp = arma::square(psi_loss_tmp); // (nT - i) x nsample
-
-                // psi_tmp = arma::mean(psi_loss_tmp, 1); // (nT - i) x 1
-                // psi_loss.submat(1, i, model.dim.nT - i - 1, i) = arma::sqrt(psi_tmp);
-
-                // psi_loss_all.at(i) = arma::mean(psi_tmp);
-                // psi_loss_all.at(i) = std::sqrt(psi_loss_all.at(i));
-
                 y_loss_tmp = arma::square(y_loss_tmp);
 
                 ytmp = arma::mean(y_loss_tmp, 1);      // (nT - i) x 1
-                y_loss.submat(tstart, i, tend, i) = arma::sqrt(ytmp);
+                y_loss.submat(tstart, j, tend, j) = arma::sqrt(ytmp);
 
-                y_loss_all.at(i) = arma::mean(ytmp);
-                y_loss_all.at(i) = std::sqrt(y_loss_all.at(i));
+                y_loss_all.at(j) = arma::mean(ytmp);
+                y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
                 break;
             }
             default:
@@ -822,12 +804,6 @@ public:
         }
 
         Rcpp::List out;
-        // out["psi_cast"] = Rcpp::wrap(psi_qt);
-        // out["psi_cast_all"] = Rcpp::wrap(psi_cast);
-        // out["psi"] = Rcpp::wrap(psi);
-        // out["psi_loss"] = Rcpp::wrap(psi_loss);
-        // out["psi_loss_all"] = Rcpp::wrap(psi_loss_all);
-
         out["y_cast"] = Rcpp::wrap(yqt);
         out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
@@ -1601,34 +1577,41 @@ public:
         const Model &model,
         const std::string &loss_func = "quadratic",
         const unsigned int &k = 1,
-        const bool &verbose = VERBOSE)
+        const bool &verbose = VERBOSE,
+        const Rcpp::Nullable<unsigned int> &start_time = R_NilValue,
+        const Rcpp::Nullable<unsigned int> &end_time = R_NilValue)
     {
         unsigned int p = theta.n_rows;
         unsigned int nsample = theta.n_cols;
         unsigned int tstart = std::max(k, model.dim.nP);
+        if (start_time.isNotNull())
+        {
+            tstart = Rcpp::as<unsigned int>(start_time);
+        }
 
-        // arma::cube psi_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
+        unsigned int tend = model.dim.nT - k;
+        if (end_time.isNotNull())
+        {
+            tend = Rcpp::as<unsigned int>(end_time);
+        }
+
         arma::cube ycast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
-        arma::cube y_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k); // (nT + 1) x nsample x k
+        arma::cube y_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);//(nT+1) x nsample x k
         arma::mat y_cov_cast(model.dim.nT + 1, k, arma::fill::zeros); // (nT + 1) x k
-        // arma::cube psi_err_cast = arma::zeros<arma::cube>(model.dim.nT + 1, nsample, k);
         arma::mat y_width_cast = y_cov_cast;
 
         double mu0 = model.dobs.par1;
-        for (unsigned int t = 1; t < model.dim.nT; t++)
+        for (unsigned int t = tstart; t < tend; t++)
         {
             Rcpp::checkUserInterrupt();
 
-            unsigned int ncast = std::min(k, model.dim.nT - t);
             for (unsigned int i = 0; i < nsample; i ++)
             {
                 arma::vec theta_cur = theta.slice(t).col(i); // p x 1
                 arma::vec ytmp = y;
-                for (unsigned int j = 1; j <= ncast; j ++)
+                for (unsigned int j = 1; j <= k; j ++)
                 {
                     arma::vec theta_next = func_gt(model.transfer, theta_cur, ytmp.at(t + j - 1));
-                    // psi_cast.at(t, i, j - 1) = theta_next.at(0);
-
                     double ft_next = func_ft(model.transfer, t + j, theta_next, ytmp);
                     double lambda = LinkFunc::ft2mu(ft_next, model.flink.name, mu0);
                     ycast.at(t, i, j - 1) = lambda;
@@ -1637,11 +1620,10 @@ public:
                     theta_cur = theta_next;
 
                     y_err_cast.at(t, i, j - 1) = y.at(t + j) - ytmp.at(t + j);
-                    // psi_err_cast.at(t, i, j - 1) = theta.at(0, i, t + j) - theta_next.at(0);
                 }
             }
 
-            for (unsigned int j = 0; j < ncast; j ++)
+            for (unsigned int j = 0; j < k; j ++)
             {
                 arma::vec ytmp = arma::vectorise(ycast.slice(j).row(t));
                 double ymin = arma::min(ytmp);
@@ -1656,7 +1638,7 @@ public:
 
             if (verbose)
             {
-                Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << model.dim.nT;
+                Rcpp::Rcout << "\rForecast error: " << t + 1 << "/" << tend;
             }
         }
 
@@ -1674,24 +1656,13 @@ public:
         arma::vec y_width_all = y_loss_all;
         arma::cube yqt = arma::zeros<arma::cube>(model.dim.nT + 1, qprob.n_elem, k);
 
-        // arma::mat psi_loss(model.dim.nT + 1, k, arma::fill::zeros);
-        // arma::vec psi_loss_all(k, arma::fill::zeros);
-        // arma::cube psi_qt = arma::zeros<arma::cube>(model.dim.nT + 1, qprob.n_elem, k);
-        
-
-
         std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
-
         for (unsigned int j = 0; j < k; j ++)
         {
-            unsigned int tend = model.dim.nT - j - 1;
             arma::mat ycast_qt = arma::quantile(ycast.slice(j), qprob, 1);
             yqt.slice(j) = ycast_qt;
             arma::mat ytmp = arma::abs(y_err_cast.slice(j)); // (nT + 1) x nsample
 
-            // arma::mat psi_cast_qt = arma::quantile(psi_cast.slice(j), qprob, 1);
-            // psi_qt.slice(j) = psi_cast_qt;
-            // arma::mat psi_tmp = arma::abs(psi_err_cast.slice(j));
             arma::vec ycov_tmp = arma::vectorise(y_cov_cast.submat(arma::span(tstart, tend), arma::span(j)));
             y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
             y_covered_all.at(j) *= 100.;
@@ -1708,12 +1679,6 @@ public:
 
                 arma::vec y_loss_tmp2 = y_loss_tmp.subvec(tstart, tend);
                 y_loss_all.at(j) = arma::mean(y_loss_tmp2);
-
-                // arma::vec psi_loss_tmp = arma::mean(psi_tmp, 1); // (nT + 1) x 1
-                // psi_loss.col(j) = psi_loss_tmp;
-                // arma::vec psi_loss_tmp2 = psi_loss_tmp.subvec(1, model.dim.nT - j - 1);
-                // psi_loss_all.at(j) = arma::mean(psi_loss_tmp2);
-
                 break;
             }
             case AVAIL::L2: // rmse
@@ -1725,16 +1690,6 @@ public:
                 
                 y_loss.col(j) = arma::sqrt(y_loss_tmp);
                 y_loss_all.at(j) = std::sqrt(y_loss_all.at(j));
-
-                // psi_tmp = arma::square(psi_tmp);
-                // arma::vec psi_loss_tmp = arma::mean(psi_tmp, 1);
-                // arma::vec psi_loss_tmp2 = psi_loss_tmp.subvec(1, model.dim.nT - j - 1);
-                // psi_loss_all.at(j) = arma::mean(psi_loss_tmp2);
-
-                // psi_loss.col(j) = arma::sqrt(psi_loss_tmp);
-                // psi_loss_all.at(j) = std::sqrt(psi_loss_all.at(j));
-
-
                 break;
             }
             default:
@@ -1745,13 +1700,6 @@ public:
         }
         
         Rcpp::List out;
-        // out["psi_cast"] = Rcpp::wrap(psi_qt);
-        // out["psi_cast_all"] = Rcpp::wrap(psi_cast);
-        // arma::mat psi = theta.row_as_mat(0);
-        // out["psi"] = Rcpp::wrap(psi);
-        // out["psi_loss"] = Rcpp::wrap(psi_loss);
-        // out["psi_loss_all"] = Rcpp::wrap(psi_loss_all);
-
         out["y_cast"] = Rcpp::wrap(yqt);
         out["y_cast_all"] = Rcpp::wrap(ycast);
         out["y"] = Rcpp::wrap(y);
