@@ -1351,6 +1351,9 @@ namespace VB
                 arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
                 arma::vec Wt(model.dim.nP, arma::fill::zeros);
                 Wt.at(0) = W;
+                /*
+                You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
+                */
                 double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                     Theta, weights_forward, eff_forward, Wt,
                     model, y, N, true, false);

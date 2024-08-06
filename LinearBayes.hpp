@@ -1071,7 +1071,9 @@ namespace LBA
         Rcpp::List forecast_error(
             const unsigned int &nsample = 5000, 
             const std::string &loss_func = "quadratic",
-            const unsigned int &k = 1)
+            const unsigned int &k = 1,
+            const Rcpp::Nullable<unsigned int> &start_time = R_NilValue,
+            const Rcpp::Nullable<unsigned int> &end_time = R_NilValue)
         {
             arma::cube ycast(_model.dim.nT + 1, nsample, k, arma::fill::zeros);
             arma::cube y_err_cast(_model.dim.nT + 1, nsample, k, arma::fill::zeros); // (nT + 1) x nsample x k
@@ -1087,8 +1089,14 @@ namespace LBA
             }
 
             double mu0 = _model.dobs.par1;
+            unsigned int tstart = std::max(k, _model.dim.nP);
+            if (start_time.isNotNull()) {
+                tstart = Rcpp::as<unsigned int>(start_time);
+            }
 
-            for (unsigned int t = k; t < _model.dim.nT; t ++)
+            unsigned int tend = _model.dim.nT - k;
+
+            for (unsigned int t = tstart; t < tend; t ++)
             {
                 arma::vec ytmp = _y;
 
@@ -1096,8 +1104,7 @@ namespace LBA
                 Rt_cast.at(0).slice(t) = _Ct.slice(t);
 
                 arma::mat Wt_onestep(_model.dim.nP, _model.dim.nP, arma::fill::zeros);
-                unsigned int ncast = std::min(k, _model.dim.nT - t);
-                for (unsigned int j = 1; j <= ncast; j ++)
+                for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
                         _model.transfer, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
@@ -1177,12 +1184,10 @@ namespace LBA
             y_err_cast = arma::abs(y_err_cast);
 
             std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
-            unsigned int tstart = std::max(k, _model.dim.nP);
+            
 
             for (unsigned int j = 0; j < k; j ++)
             {
-                unsigned int tend = _model.dim.nT - j;
-
                 arma::vec ycov_tmp = arma::vectorise(y_cov_cast(arma::span(tstart, tend), arma::span(j)));
                 y_covered_all.at(j) = arma::mean(ycov_tmp) * 100.;
 

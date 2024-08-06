@@ -253,6 +253,8 @@ Rcpp::List dgtf_infer(
     const bool &fitted_error = false,
     const std::string &loss_func = "quadratic",
     const unsigned int &k = 1,
+    const Rcpp::Nullable<unsigned int> &tstart_forecast = R_NilValue,
+    const Rcpp::Nullable<unsigned int> &tend_forecast = R_NilValue,
     const bool &add_y0 = false)
 {
     // Model model = dgtf_initialize(model_settings);
@@ -304,7 +306,7 @@ Rcpp::List dgtf_infer(
 
         if (forecast_error)
         {
-            Rcpp::List tmp = linear_bayes.forecast_error(1000, loss_func, k);
+            Rcpp::List tmp = linear_bayes.forecast_error(1000, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
