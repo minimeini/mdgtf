@@ -137,7 +137,7 @@ plot_ts_ci_single <- function(
 
   p <- ggplot(data = dat, aes(x = time, y = psi)) +
     theme_minimal() +
-    geom_line() +
+    geom_line(na.rm = TRUE) +
     geom_ribbon(aes(ymin = psi_min, ymax = psi_max), alpha = 0.5, fill = "lightgrey") +
     ylab(ylab) +
     labs(title = main)
@@ -488,8 +488,8 @@ plot_output <- function(
       forecast <- vector("list", length = kstep_forecast_err)
       for (j in 1:kstep_forecast_err) {
         forecast[[j]] <- plot_ts_ci_single(
-          out_list$error$forecast$y_cast[c(1:(length(ytrue) - j)), , j],
-          ytrue[(j + 1):length(ytrue)],
+          out_list$error$forecast$y_cast[, , j],
+          ytrue,
           main = paste0(j, "step-ahead forecast of y")
         ) +
           ylab(expression(y[t + k]))

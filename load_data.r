@@ -99,7 +99,7 @@ load_dat <- function(opath, seed, type = "sim", param_infer = "W") {
 
 
   if (all(param_infer == "W")) {
-    fn <- paste0(flab, c("-hva-W-forecast.RData", "-hva-W.RData", "-hva.RData"))
+    fn <- paste0(flab, c("-hva-W.RData", "-hva.RData"))
     fname <- file.path(opath, "data", fn)
     fname <- fname[sapply(fname, file.exists)]
     if (length(fname) > 0) {
@@ -146,7 +146,7 @@ load_dat <- function(opath, seed, type = "sim", param_infer = "W") {
 
 
   if (all(param_infer == "W")) {
-    fn <- paste0(flab, c("-mcmc-W-forecast.RData", "-mcmc-W.RData", "-mcmc.RData"))
+    fn <- paste0(flab, c("-mcmc-W.RData", "-mcmc.RData"))
     fname <- file.path(opath, "data", fn)
     fname <- fname[sapply(fname, file.exists)]
     if (length(fname) > 0) {
