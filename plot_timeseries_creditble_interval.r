@@ -22,8 +22,8 @@ plot_ts_ci_multi <- function(psi_list = NULL,
     "APF",
     "SMCF-BF",
     "SMCS-BS", "BS", "FFBS",
-    "Exponential", "lognorm",
-    "Softplus", "nbinom"
+    "Exponential", "lognorm", "Discretized Hawkes",
+    "Softplus", "nbinom", "Distributed Lags"
   ))
   clist_dgtf <- c(
     rep("maroon", 4), # LBA, LBE, LBA.DF, LBA.W
@@ -37,8 +37,8 @@ plot_ts_ci_multi <- function(psi_list = NULL,
     "gold", # APF
     "sandybrown", # SMCF-BF
     rep("mediumaquamarine", 3), # SMCS-BS
-    rep("maroon", 2),
-    rep("royalblue", 2)
+    rep("maroon", 3),
+    rep("royalblue", 3)
   )
 
   mlist <- c(mlist_external, mlist_dgtf)
@@ -517,29 +517,29 @@ plot_output <- function(
   }
 
 
-  if ("pred" %in% names(out_list)) {
-    ypred_qt <- t(apply(out_list$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
-    next10 <- plot_ypred(ypred_qt, ytrue) + labs(title = "Forecasting of the next 10 time points.")
+  # if ("pred" %in% names(out_list)) {
+  #   ypred_qt <- t(apply(out_list$pred$ypred, 1, quantile, c(0.025, 0.5, 0.975)))
+  #   next10 <- plot_ypred(ypred_qt, ytrue) + labs(title = "Forecasting of the next 10 time points.")
 
-    if (plot_figures) {
-      plot(next10)
-    }
+  #   if (plot_figures) {
+  #     plot(next10)
+  #   }
 
-    if (return_figures) {
-      plots <- append(plots, list(next10 = next10))
-    }
+  #   if (return_figures) {
+  #     plots <- append(plots, list(next10 = next10))
+  #   }
 
-    if (save_figures) {
-      ggsave(
-        file.path(
-          opath, "forecast",
-          paste0(tag, paste0("forecast-next10.pdf"))
-        ),
-        plot = next10, device = "pdf", dpi = 300,
-        height = height, width = width
-      )
-    }
-  }
+  #   if (save_figures) {
+  #     ggsave(
+  #       file.path(
+  #         opath, "forecast",
+  #         paste0(tag, paste0("forecast-next10.pdf"))
+  #       ),
+  #       plot = next10, device = "pdf", dpi = 300,
+  #       height = height, width = width
+  #     )
+  #   }
+  # }
 
 
   return(plots)

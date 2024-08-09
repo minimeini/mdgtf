@@ -10,203 +10,43 @@ load_dat <- function(opath, seed, type = "sim", param_infer = "W") {
     load(fname, envir = env)
   }
 
-
-  fname <- file.path(
-    opath, "data",
-    paste0(type, "-", seed, "-lba.RData")
-  )
-  if (file.exists(fname)) {
-    load(fname, envir = env)
-  }
-
-  fname <- file.path(
-    opath, "data",
-    paste0(type, "-", seed, "-mcs.RData")
-  )
-  if (file.exists(fname)) {
-    load(fname, envir = env)
-  }
-
-  fname <- file.path(
-    opath, "data",
-    paste0(type, "-", seed, "-ffbs.RData")
-  )
-  if (file.exists(fname)) {
-    load(fname, envir = env)
-  }
-
-  fname <- file.path(
-    opath, "data",
-    paste0(type, "-", seed, "-tfs.RData")
-  )
-  if (file.exists(fname)) {
-    load(fname, envir = env)
-  }
-
-
-  fname <- file.path(
-    opath, "data",
-    paste0(type, "-", seed, "-tfs2.RData")
-  )
-  if (file.exists(fname)) {
-    load(fname, envir = env)
-  }
-
-
-  # var_type = c("W", "rho", "mu0", "W-rho", "lag", "all-but-mu0", "all")
-
-  if (all(param_infer == "W")) {
-    fn <- paste0(flab, c("-pl-W.RData", "-pl.RData"))
-    fname <- file.path(opath, "data", fn)
-    fname <- fname[sapply(fname, file.exists)]
-    if (length(fname) > 0) {
-      load(fname[1], envir = env)
-      print(fname[1])
-    }
-  } else if (all(param_infer == "rho")) {
-    fname <- file.path(opath, "data", paste0(flab, "-pl-rho.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-pl-W-rho.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("par1", "par2"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-pl-lag.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("par1", "par2", "rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-pl-all-but-mu0.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("mu0", "par1", "par2", "rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-pl-all.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  }
-  # try({
-  #   load(file.path(
-  #     opath, "data",
-  #     paste0(type, "-", seed, "-pl.RData")),
-  #     envir = env
-  #   )
-  # })
-
-
-  if (all(param_infer == "W")) {
-    fn <- paste0(flab, c("-hva-W.RData", "-hva.RData"))
-    fname <- file.path(opath, "data", fn)
-    fname <- fname[sapply(fname, file.exists)]
-    if (length(fname) > 0) {
-      load(fname[1], envir = env)
-      print(fname[1])
-    }
-  } else if (all(param_infer == "rho")) {
-    fn <- paste0(flab, "-hva-rho.RData")
-    fname <- file.path(opath, "data", fn)
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("rho", "W"))) {
-    fn <- paste0(flab, c("-hva-W-rho.RData", "-hva-rhow.RData", "-hva-wrho.RData"))
-    fname <- file.path(opath, "data", fn)
-    fname <- fname[sapply(fname, file.exists)]
-    if (length(fname) > 0) {
-      load(fname[1], envir = env)
-    }
-  } else if (all(sort(param_infer) == c("par1", "par2"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-hva-lag.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("par1", "par2", "rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-hva-all-but-mu0.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("mu0", "par1", "par2", "rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-hva-all.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  }
-
-  # try({
-  #   load(file.path(
-  #     opath, "data",
-  #     paste0(type, "-", seed, "-hva.RData")),
-  #     envir = env
-  #   )
-  # })
-
-
-  if (all(param_infer == "W")) {
-    fn <- paste0(flab, c("-mcmc-W.RData", "-mcmc.RData"))
-    fname <- file.path(opath, "data", fn)
-    fname <- fname[sapply(fname, file.exists)]
-    if (length(fname) > 0) {
-      load(fname[1], envir = env)
-      print(fname[1])
-    }
-  } else if (all(param_infer == "rho")) {
-    fname <- file.path(opath, "data", paste0(flab, "-mcmc-rho.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-mcmc-W-rho.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("par1", "par2"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-mcmc-lag.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("par1", "par2", "rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-mcmc-all-but-mu0.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  } else if (all(sort(param_infer) == c("mu0", "par1", "par2", "rho", "W"))) {
-    fname <- file.path(opath, "data", paste0(flab, "-mcmc-all.RData"))
-    if (file.exists(fname)) {
-      load(fname, envir = env)
-    }
-  }
-
-  # try({
-  #   load(file.path(
-  #     opath, "data",
-  #     paste0(type, "-", seed, "-mcmc.RData")),
-  #     envir = env
-  #   )
-  # })
-
-  try({
-    load(
-      file.path(
-        opath, "data",
-        paste0(type, "-", seed, "-epi.RData")
-      ),
-      envir = env
+  load_dat1 = function(algo, flab, envir, opath) {
+    fname <- file.path(
+      opath, "data",
+      paste0(flab, "-", algo, ".RData")
     )
-  })
+    if (file.exists(fname)) {
+      load(fname, envir = envir)
+    } else {
+      warning(paste0("File ", fname, " does not exist."))
+    }
 
-  try({
-    load(
-      file.path(
-        opath, "data",
-        paste0(type, "-", seed, "-wt.RData")
-      ),
-      envir = env
-    )
-  })
+    return(envir)
+  }
+
+  env = load_dat1("lba", flab, env, opath)
+  env = load_dat1("mcs", flab, env, opath)
+  env = load_dat1("ffbs", flab, env, opath)
+  env = load_dat1("tfs2", flab, env, opath)
+  env = load_dat1("wt", flab, env, opath)
+  env = load_dat1("epi", flab, env, opath)
+
+
+  load_dat0 = function(algo, param_infer, flab, envir, opath) {
+    fn = paste0(flab, "-", algo, "-", paste(sort(param_infer), collapse = ""), ".RData")
+    fname <- file.path(opath, "data", fn)
+    if (file.exists(fname)) {
+      load(fname[1], envir = envir)
+    } else {
+      warning(paste0("File ", fname, " does not exist."))
+    }
+
+    return(envir)
+  }
+
+  env = load_dat0("pl", param_infer, flab, env, opath)
+  env = load_dat0("hva", param_infer, flab, env, opath)
+  env = load_dat0("mcmc", param_infer, flab, env, opath)
 
   return(env)
 }
