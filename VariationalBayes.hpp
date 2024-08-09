@@ -1004,7 +1004,7 @@ namespace VB
                     double mu0tilde = std::log(val + EPS);
 
                     deriv.at(i) = dloglike_dmu0tilde(
-                        y, ft, model.dobs, model.flink.name);
+                        y, ft, model.dobs, model.flink);
                     deriv.at(i) += logprior_mu0tilde(mu0tilde, 10.);
 
                     break;

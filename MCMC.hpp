@@ -107,7 +107,7 @@ namespace MCMC
 
                     double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
                     double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
+                    double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp - logq.at(i));
                 }
@@ -173,9 +173,9 @@ namespace MCMC
                 */
                 approx_dlm.update_by_wt(y, wt);
                 arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1);               // nT x 1, f0, Fn and psi is updated
-                arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink.name, 0.); // nT x 1
+                arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink, 0.); // nT x 1
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
-                    lambda, model.dobs, model.flink.name); // nT x 1
+                    lambda, model.dobs, model.flink); // nT x 1
 
                 arma::mat Fn = approx_dlm.get_Fn(); // nT x nT
                 arma::vec Fnt = Fn.col(t - 1);
@@ -296,13 +296,13 @@ namespace MCMC
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 eta.at(t) = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
-                lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink.name, mu0_old);
+                lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_old);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
-                // Vt_hat.at(t) = ApproxDisturbance::func_Vt_approx(lambda.at(t), model.dobs, model.flink.name);
+                // Vt_hat.at(t) = ApproxDisturbance::func_Vt_approx(lambda.at(t), model.dobs, model.flink);
             }
 
-            Vt_hat = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink.name);
+            Vt_hat = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink);
 
             arma::vec tmp = 1. / Vt_hat;
             double mu0_prec = arma::accu(tmp);
@@ -321,7 +321,7 @@ namespace MCMC
                 double logp_new = 0.;
                 for (unsigned int t = 1; t <= model.dim.nT; t++)
                 {
-                    lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink.name, mu0_new);
+                    lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_new);
                     logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
                 }
 
@@ -354,7 +354,7 @@ namespace MCMC
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
-                lambda.at(t) = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                lambda.at(t) = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_old, true);
             }
@@ -421,7 +421,7 @@ namespace MCMC
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
                 loglik_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
             double logp_old = loglik_old;
@@ -493,7 +493,7 @@ namespace MCMC
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
                 loglik_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
             logp_new += loglik_new;
@@ -544,7 +544,7 @@ namespace MCMC
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
@@ -572,7 +572,7 @@ namespace MCMC
             arma::vec grad_U = Model::dloglik_dpar(
                 Fphi_new, y, hpsi, nlag,
                 lag_dist, par1_old, par2_old,
-                model.dobs, model.flink.name);
+                model.dobs, model.flink);
 
             grad_U.at(0) += Prior::dlogprior_dpar(par1_old, par1_prior, true);
             grad_U.at(0) *= -1.;
@@ -594,7 +594,7 @@ namespace MCMC
                 grad_U = Model::dloglik_dpar(
                     Fphi_new, y, hpsi, nlag,
                     lag_dist, par1_new, par2_new,
-                    model.dobs, model.flink.name);
+                    model.dobs, model.flink);
                 grad_U.at(0) += Prior::dlogprior_dpar(par1_new, par1_prior, true);
                 grad_U.at(0) *= -1.;
                 grad_U.at(1) += Prior::dlogprior_dpar(par2_new, par2_prior, true);
@@ -616,7 +616,7 @@ namespace MCMC
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink.name, model.dobs.par1);
+                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
 
                 logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }

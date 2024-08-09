@@ -79,7 +79,7 @@ static arma::vec qforecast(
     const unsigned int &max_lag = 30)
 {
     double y_old = y.at(t_new - 1);
-    double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
+    double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
@@ -98,11 +98,11 @@ static arma::vec qforecast(
         arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, Theta_old.col(i), y_old);
         double ft_gtheta = StateSpace::func_ft(ftrans, t_new, gtheta_old_i, y);
         double eta = param.at(0, i) + ft_gtheta;
-        double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
+        double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, dobs, model.flink.name); // (eq 3.11)
+            lambda, dobs, model.flink); // (eq 3.11)
 
         if (!full_rank)
         {
@@ -165,7 +165,7 @@ static arma::vec qforecast(
     const bool &full_rank = false)
 {
     double y_old = y.at(t_new - 1);
-    double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
+    double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
@@ -173,11 +173,11 @@ static arma::vec qforecast(
         arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
         double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
-        double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
+        double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, model.dobs, model.flink.name); // (eq 3.11)
+            lambda, model.dobs, model.flink); // (eq 3.11)
 
         if (!full_rank)
         {
@@ -248,7 +248,7 @@ static arma::vec qforecast(
     const bool &full_rank = false)
 {
     double y_old = y.at(t_new - 1);
-    double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink.name, 0.);
+    double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
@@ -256,11 +256,11 @@ static arma::vec qforecast(
         arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, Theta_old.col(i), y_old); // gt(theta[t-1, i])
         double ft_gtheta = StateSpace::func_ft(model.transfer, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
-        double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.10)
+        double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, model.dobs, model.flink.name); // (eq 3.11)
+            lambda, model.dobs, model.flink); // (eq 3.11)
 
         if (!full_rank)
         {
@@ -487,7 +487,7 @@ static arma::vec qbackcast(
 {
     std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
 
-    double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink.name, 0.);
+    double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink, 0.);
 
     unsigned int N = Theta_next.n_cols;
     unsigned int nP = Theta_next.n_rows;
@@ -505,14 +505,14 @@ static arma::vec qbackcast(
         arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
         double ft_ut = StateSpace::func_ft(model.transfer, t_cur, u_cur, y);
         double eta = model.dobs.par1 + ft_ut;
-        double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
+        double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.58)
         if (lambda < EPS)
         {
             std::cerr << "\n lambda = " << lambda << ", mu0 = " << model.dobs.par1 << ", ft_ut = " << ft_ut;
             throw std::runtime_error("\n SMC::SequentialMonteCarlo::im_weights_backast: observation mean lambda should not be zero.\n");
         }
         double Vtilde = ApproxDisturbance::func_Vt_approx(
-            lambda, model.dobs, model.flink.name); // (eq 3.59)
+            lambda, model.dobs, model.flink); // (eq 3.59)
         Vtilde = std::abs(Vtilde) + EPS;
 
 

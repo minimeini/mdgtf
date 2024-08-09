@@ -293,7 +293,7 @@ namespace LBA
         {
         case AVAIL::Dist::poisson:
         {
-            switch (link_list[model.flink.name])
+            switch (link_list[model.flink])
             {
             case AVAIL::Func::identity:
             {
@@ -323,7 +323,7 @@ namespace LBA
         }
         case AVAIL::Dist::nbinomm:
         {
-            if (link_list[model.flink.name] == AVAIL::Func::identity)
+            if (link_list[model.flink] == AVAIL::Func::identity)
             {
                 beta = regressor * (regressor + model.dobs.par2);
                 beta /= qt;
@@ -369,7 +369,7 @@ namespace LBA
         {
         case AVAIL::Dist::poisson:
         {
-            switch (link_list[model.flink.name])
+            switch (link_list[model.flink])
             {
             case AVAIL::Func::identity:
             {
@@ -392,7 +392,7 @@ namespace LBA
         }
         case AVAIL::Dist::nbinomm:
         {
-            if (link_list[model.flink.name] == AVAIL::Func::identity)
+            if (link_list[model.flink] == AVAIL::Func::identity)
             {
                 nbinomm::moments_mean(mean_ft, var_ft, alpha, beta, model.dobs.par2);
             }
@@ -1156,14 +1156,14 @@ namespace LBA
                         _fill_zero
                     );
 
-                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink.name, mu0);
+                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink, mu0);
 
                     arma::vec ft_cast_tmp = ft_tmp + std::sqrt(qt_tmp) * arma::randn(nsample);
                     arma::vec lambda_cast_tmp(nsample);
                     for (unsigned int i = 0; i < nsample; i ++)
                     {
                         lambda_cast_tmp.at(i) = LinkFunc::ft2mu(
-                            ft_cast_tmp.at(i), _model.flink.name, mu0);
+                            ft_cast_tmp.at(i), _model.flink, mu0);
                     }
 
                     ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();

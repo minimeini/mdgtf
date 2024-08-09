@@ -23,35 +23,7 @@ mu2ft: inverse link
 
 class LinkFunc // between mean and regressor
 {
-private:
-    std::string _name;
-
 public:
-    const std::string &name;
-
-    LinkFunc() : name(_name)
-    {
-        init_default();
-        return;
-    }
-
-    LinkFunc(const std::string &name_) : name(_name)
-    {
-        
-        init(name_);
-    }
-
-    void init_default()
-    {
-        _name = "identity";
-        return;
-    }
-
-    void init(const std::string &name)
-    {
-        _name = name;
-    }
-
     /**
      * zeta: link function the maps regressor eta[t] to mean mu[t];
      *      zeta(eta[t]) = mu[t]

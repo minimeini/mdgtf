@@ -362,7 +362,7 @@ namespace SMC
         {
 
             std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-            double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink.name, 0.);
+            double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink, 0.);
 
             unsigned int N = Theta_next.n_cols;
             unsigned int nP = Theta_next.n_rows;
@@ -419,9 +419,9 @@ namespace SMC
                 arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
                 double ft_ut = StateSpace::func_ft(model.transfer, t_cur, u_cur, y);
                 double eta = mu0_filter.at(i) + ft_ut;
-                double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.); // (eq 3.58)
+                double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.58)
                 double Vtilde = ApproxDisturbance::func_Vt_approx(
-                    lambda, model.dobs, model.flink.name); // (eq 3.59)
+                    lambda, model.dobs, model.flink); // (eq 3.59)
                 Vtilde = std::abs(Vtilde) + EPS;
                 double ldetV = std::log(Vtilde);
 
@@ -694,7 +694,7 @@ namespace SMC
 
                     double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
                     double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
+                    double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = logp - logq.at(i);
                 }
@@ -1100,7 +1100,7 @@ namespace SMC
                     theta_new.at(0) += eps;
 
                     double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
+                    double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
 
                     weights.at(i) = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, par.at(1), false);
                     Theta_new.col(i) = theta_new;
@@ -1705,7 +1705,7 @@ namespace SMC
             for (unsigned int t = 1; t < dim.nT; t++)
             {
                 Rcpp::checkUserInterrupt();
-                double yhat_cur = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
+                double yhat_cur = LinkFunc::mu2ft(y.at(t), model.flink, 0.);
                 arma::mat Theta_cur(model.dim.nP, N, arma::fill::zeros);
                 // arma::vec logp(N, arma::fill::zeros);
                 // arma::vec logq = arma::vectorise(weights_forward.row(t - 1) + weights_backward.row(t + 1));
@@ -1721,9 +1721,9 @@ namespace SMC
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta.slice(t - 1).col(i), y.at(t - 1));
                     double ft = StateSpace::func_ft(model.transfer, t, gtheta, y);
                     double eta = par.at(0) + ft;
-                    double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
+                    double lambda = LinkFunc::ft2mu(eta, model.flink, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
-                        lambda, model.dobs, model.flink.name); // (eq 3.11)
+                        lambda, model.dobs, model.flink); // (eq 3.11)
 
                     arma::vec theta_cur;
                     if (!full_rank)
@@ -1765,7 +1765,7 @@ namespace SMC
                     logp += R::dnorm4(Theta_next.at(0, i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
 
                     ft = StateSpace::func_ft(model.transfer, t, theta_cur, y);
-                    lambda = LinkFunc::ft2mu(ft, model.flink.name, par.at(0));
+                    lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
                     logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
 
                     logp -= MVNorm::dmvnorm2(Theta_next.col(i), mu, Prec, true);
@@ -2216,7 +2216,7 @@ namespace SMC
             arma::vec yhat = y; // (nT + 1) x 1
             for (unsigned int t = 0; t < dim.nT; t++)
             {
-                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink.name, 0.);
+                yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink, 0.);
             }
 
             for (unsigned int t = 0; t < dim.nT; t++)
@@ -2350,12 +2350,12 @@ namespace SMC
                         model.dobs._par2 = param_filter.at(1, i);
                     }
                     double ft_new = StateSpace::func_ft(model.transfer, t + 1, theta_new, y); // ft(theta[t+1])
-                    double lambda_old = LinkFunc::ft2mu(ft_new, model.flink.name, param_filter.at(0, i)); // ft_new from time t + 1, mu0_filter from time t (old).
+                    double lambda_old = LinkFunc::ft2mu(ft_new, model.flink, param_filter.at(0, i)); // ft_new from time t + 1, mu0_filter from time t (old).
 
                     {
                         if (prior_mu0.infer && !filter_pass)
                         {
-                            double Vt_old = ApproxDisturbance::func_Vt_approx(lambda_old, model.dobs, model.flink.name);
+                            double Vt_old = ApproxDisturbance::func_Vt_approx(lambda_old, model.dobs, model.flink);
                             double amu_scl = amu_forward.at(i) / bmu_forward.at(i);
                             double prec = 1. / bmu_forward.at(i) + 1. / Vt_old;
                             bmu_forward.at(i) = 1. / prec;
@@ -2368,7 +2368,7 @@ namespace SMC
                             double sd = std::sqrt(bmu_forward.at(i));
                             double mu0 = R::rnorm(amu_forward.at(i), sd);
 
-                            if (link_list[model.flink.name] == AVAIL::Func::identity)
+                            if (link_list[model.flink] == AVAIL::Func::identity)
                             {
                                 unsigned int cnt = 0;
                                 while (mu0 < 0 && cnt < max_iter)
@@ -2810,7 +2810,7 @@ namespace SMC
                 unsigned int t_prev = t - 1;
                 unsigned int t_next = t + 1;
 
-                double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink.name, 0.);
+                double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink, 0.);
 
                 /**
                  * No resampling here because the resampling were performed in forward and backward filterings and the resampled particles are saved.
@@ -2848,9 +2848,9 @@ namespace SMC
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, Theta.slice(t_prev).col(i), y.at(t_prev));
                     double ft = StateSpace::func_ft(model.transfer, t_cur, gtheta, y);
                     double eta = param_backward.at(0, i) + ft;
-                    double lambda = LinkFunc::ft2mu(eta, model.flink.name, 0.);
+                    double lambda = LinkFunc::ft2mu(eta, model.flink, 0.);
                     double Vt = ApproxDisturbance::func_Vt_approx(
-                        lambda, model.dobs, model.flink.name); // (eq 3.11)
+                        lambda, model.dobs, model.flink); // (eq 3.11)
 
                     arma::vec theta_cur;
                     if (!full_rank)
@@ -2895,7 +2895,7 @@ namespace SMC
                     logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t_next), theta_cur.at(0), std::sqrt(W_backward.at(i)), true);
 
                     ft = StateSpace::func_ft(model.transfer, t_cur, theta_cur, y);
-                    lambda = LinkFunc::ft2mu(ft, model.flink.name, param_backward.at(0, i));
+                    lambda = LinkFunc::ft2mu(ft, model.flink, param_backward.at(0, i));
                     logp.at(i) += ObsDist::loglike(y.at(t_cur), model.dobs.name, lambda, param_backward.at(1, i), true);
 
                     arma::mat pmarg = arma::reshape(Prec_marg.col(i), model.dim.nP, model.dim.nP);

@@ -541,7 +541,7 @@ Rcpp::List dgtf_forecast(
     arma::mat ycast = Model::forecast(
         y, psi, W_stored, model.dim, 
         model.transfer, 
-        model.flink.name, mu0, k); // k x nsample
+        model.flink, mu0, k); // k x nsample
 
     Rcpp::List out;
     out["ycast_all"] = Rcpp::wrap(ycast);
