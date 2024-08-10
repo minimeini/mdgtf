@@ -164,6 +164,28 @@ public:
         return Fphi;
     }
 
+    static arma::vec get_Fphi(
+        const unsigned int &nlag,
+        const LagDist &dlag)
+    {
+        arma::vec Fphi(nlag, arma::fill::zeros);
+        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+
+        switch (lag_list[dlag.name])
+        {
+        case AVAIL::Dist::lognorm:
+            Fphi = lognorm::dlognorm(nlag, dlag.par1, dlag.par2);
+            break;
+        case AVAIL::Dist::nbinomp:
+            Fphi = nbinom::dnbinom(nlag, dlag.par1, dlag.par2);
+            break;
+        default:
+            throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
+        }
+
+        bound_check<arma::vec>(Fphi, "arma::vec get_Fphi: Fphi");
+        return Fphi;
+    }
 
     /**
      * @brief Fist-order derivative of the P.M.F of the lag distribution w.r.t. its two parameters (mapped to the whole real lines). For non-negative parameters, we take its logarithm. For parameters in (0, 1), we takes its logit.

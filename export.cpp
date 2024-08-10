@@ -214,14 +214,12 @@ Rcpp::List dgtf_simulate(
     {
     case method::TransFunc:
     {
-        // Model model = dgtf_initialize(settings);
-        arma::vec ysim = model.simulate();
-        arma::vec psi = model.transfer.fgain.psi;
-        arma::vec wt = model.derr.wt;
+        arma::vec psi, lambda, y;
+        Model::simulate(y, lambda, psi, model, y0);
 
-        output["y"] = Rcpp::wrap(ysim);
+        output["y"] = Rcpp::wrap(y);
         output["psi"] = Rcpp::wrap(psi);
-        output["wt"] = Rcpp::wrap(wt);
+        // output["wt"] = Rcpp::wrap(wt);
         output["lambda"] = Rcpp::wrap(model.lambda);
         break;
     }

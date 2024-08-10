@@ -82,20 +82,20 @@ public:
      * @return arma::vec 
      */
     static arma::vec sample(
+        const ErrDist &derr,
         const unsigned int &nT,
-        const double &W = 0.01,
-        const double &w0 = 0.,
         const bool &cumsum = true,
-        const std::string &err_dist = "gaussian",
-        const Rcpp::Nullable<Rcpp::NumericVector> &wt_init = R_NilValue
-        )
+        const Rcpp::Nullable<Rcpp::NumericVector> &wt_init = R_NilValue)
     {
-        std::map <std::string, AVAIL::Dist> err_list = AVAIL::err_list;
+        std::map<std::string, AVAIL::Dist> err_list = AVAIL::err_list;
         arma::vec wt(nT + 1, arma::fill::zeros);
 
-        if (W > 0)
+        double W = derr.par1;
+        double w0 = derr.par2;
+
+        if (WAKEMON_MAKE_FATAL > 0)
         {
-            switch (err_list[err_dist])
+            switch (err_list[derr.name])
             {
             case AVAIL::Dist::gaussian:
             {
@@ -128,8 +128,6 @@ public:
             }
             }
         }
-
-        
 
         arma::vec output = wt;
         if (cumsum)
