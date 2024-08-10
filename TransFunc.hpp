@@ -154,7 +154,7 @@ public:
             }
             else
             {
-                _ft.at(t) = transfer_sliding(t, y);
+                _ft.at(t) = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
             }
         }
     }
@@ -174,31 +174,6 @@ public:
         return ft;
     }
 
-    /**
-     * @brief Exact method that transfers psi[t] to f[t] using the sliding formula: f[t] is a sliding-window weighted-averaged of the past observations y[0:(t-1)] and gains h(psi[0:t]). It is a general methods for all kinds of lag distributions, truncated or not truncated. [Checked. OK.]
-     *
-     * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
-     * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
-     * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
-     *
-     * @return double
-     */
-    double transfer_sliding(
-        const unsigned int &t,
-        const arma::vec &y) // (nT + 1) x 1: y[0], y[1], ..., y[nT]
-    {
-        unsigned int nelem = std::min(t, _dim.nL);
-        arma::vec Fphi_t = dlag.Fphi.subvec(0, nelem - 1); // Fphi[t] = (phi[1], ..., phi[nL])'
-        Fphi_t = arma::reverse(Fphi_t);                    // rev(Fphi[t]) = (phi[nL], ..., phi[1])
-
-        arma::vec Fy_t = y.subvec(t - nelem, t - 1); // Fy[t] = (y[t-nL], ..., y[t-1])'
-
-        arma::vec Fhpsi_t = fgain.hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t] = (h(psi[t+1-nL]), ..., h(psi[t]))'
-
-        arma::vec Fast_t = Fy_t % Fhpsi_t;
-        double ft = arma::accu(Fphi_t % Fast_t);
-        return ft;
-    }
 
     /**
      * @brief f[t](btheta[t],y[0:t]) calculate: sum Fphi[k] * h(psi[t + 1 - k]) * y[t - k]. This is exact formula for sliding transfer function. The effective number of elements is min(nL, t).
@@ -575,7 +550,7 @@ public:
             psi[0], ..., psi[t]
             phi[1], ..., phi[nL]
             */
-            ft_now = transfer_sliding(t, y);
+            ft_now = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
             // ft_now = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
             break;
         }
