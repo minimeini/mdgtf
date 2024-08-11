@@ -100,43 +100,6 @@ Rcpp::List dgtf_default_model()
 
 //' @export
 // [[Rcpp::export]]
-arma::uvec dgtf_model_code(const Rcpp::List model)
-{
-    Rcpp::List opts = model;
-    std::string obs_dist, link_func, lag_dist, gain_func, err_dist;
-    if (opts.containsElementNamed("obs_dist"))
-    {
-        obs_dist = Rcpp::as<std::string>(opts["obs_dist"]);
-    }
-    if (opts.containsElementNamed("link_func"))
-    {
-        link_func = Rcpp::as<std::string>(opts["link_func"]);
-    }
-    if (opts.containsElementNamed("lag_dist"))
-    {
-        lag_dist = Rcpp::as<std::string>(opts["lag_dist"]);
-    }
-    if (opts.containsElementNamed("gain_func"))
-    {
-        gain_func = Rcpp::as<std::string>(opts["gain_func"]);
-    }
-    if (opts.containsElementNamed("err_dist"))
-    {
-        err_dist = Rcpp::as<std::string>(opts["err_dist"]);
-    }
-
-    const unsigned int obs_code = AVAIL::get_obs_code(obs_dist);
-    const unsigned int link_code = AVAIL::get_link_code(link_func);
-    const unsigned int trans_code = AVAIL::get_trans_code(lag_dist);
-    const unsigned int gain_code = AVAIL::get_gain_code(gain_func);
-    const unsigned int err_code = 0;
-
-    arma::uvec model_code = {obs_code, link_code, trans_code, gain_code, err_code};
-    return model_code;
-}
-
-//' @export
-// [[Rcpp::export]]
 Rcpp::List dgtf_model(
     const std::string &obs_dist = "nbinom",
     const std::string &link_func = "identity",
