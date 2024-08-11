@@ -22,17 +22,6 @@ public:
         MeanFieldVariation
     };
 
-    enum Filter {
-        BootstrapFilter,
-        AuxiliaryParticleFilter
-    };
-
-    enum Smoother {
-        FilterSmoother,
-        BackwardSmoother,
-        TwoFilterSmoother
-    };
-
     enum Dist {
         lognorm,
         nbinomm,
