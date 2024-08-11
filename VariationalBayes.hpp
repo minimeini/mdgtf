@@ -1359,13 +1359,13 @@ namespace VB
                     model, y, N, true, false);
                 arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
                 psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
-
+                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain.name);
                 arma::vec ft = psi;
                 ft.at(0) = 0.;
                 for (unsigned int t = 1; t < ft.n_elem; t++)
                 {
-                    ft.at(t) = TransFunc::func_ft(
-                        t, y, ft, psi, model.dim,
+                    ft.at(t) = TransFunc::func_ft2(
+                        t, y, ft, hpsi, model.dim,
                         model.transfer.dlag,
                         model.transfer.fgain.name,
                         model.transfer.name); // Checked. OK.

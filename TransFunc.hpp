@@ -137,27 +137,27 @@ public:
     }
 
     
-    /**
-     * @brief From latent state psi[t] to transfer effect f[t] using the exact formula. Note that psi[t] is the random-walk component of the latent state theta[t].
-     *
-     * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
-     * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
-     * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
-     */
-    void update_ft_exact(const arma::vec &y) // y[0], y[1], ..., y[nT]
-    {
-        for (unsigned int t = 1; t <= _dim.nT; t++)
-        {
-            if (trans_list[_name] == AVAIL::Transfer::iterative)
-            {
-                _ft.at(t + _r - 1) = transfer_iterative(t, y.at(t - 1));
-            }
-            else
-            {
-                _ft.at(t) = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
-            }
-        }
-    }
+    // /**
+    //  * @brief From latent state psi[t] to transfer effect f[t] using the exact formula. Note that psi[t] is the random-walk component of the latent state theta[t].
+    //  *
+    //  * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
+    //  * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
+    //  * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
+    //  */
+    // void update_ft_exact(const arma::vec &y) // y[0], y[1], ..., y[nT]
+    // {
+    //     for (unsigned int t = 1; t <= _dim.nT; t++)
+    //     {
+    //         if (trans_list[_name] == AVAIL::Transfer::iterative)
+    //         {
+    //             _ft.at(t + _r - 1) = transfer_iterative(t, y.at(t - 1));
+    //         }
+    //         else
+    //         {
+    //             _ft.at(t) = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
+    //         }
+    //     }
+    // }
 
     arma::vec get_ft(const bool &no_padding = true)
     {
@@ -340,39 +340,6 @@ public:
         return nlag;
     }
 
-    /**
-     * @brief Exact method that transfers psi[t] to g[t](theta[t]) = f[t](psi[t], f[t-1], ..., f[t-r]) using the iterative formula: f[t] is a sum of past transfer effects f[0:(t-1)], and current gain h(psi[t]) + previous observation (ancestor) y[t-1]. Only works for non-truncated negative-binomial lag distribution.
-     *
-     * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
-     * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
-     * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
-     *
-     * @return double
-     */
-    double transfer_iterative(
-        const unsigned int &t,
-        const double &y_prev)
-    {
-        /**
-         * @brief _ft: (nT + r) x 1
-         *
-         * Indx:     0,     , ..., r-1,  r   , ..., r + nT - 1
-         * _ft = ( f[-(r-1)], ..., f[0], f[1], ..., f[nT] ),
-         *         f[-(r-1)] = ... = f[0] = 0.
-         *
-         * f[t] is indexed by (t + r - 1).
-         */
-        arma::vec Fast_t = _ft.subvec(t - 1, t + _r - 2); // f[t-r], ..., f[t-1]
-        Fast_t = arma::reverse(Fast_t);                   // f[t-1], ..., f[t-r]
-        double ft = arma::accu(Fast_t % _iter_coef);
-        // iter_coef: c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
-
-        double Fast_now = fgain.hpsi.at(t) * y_prev;
-        ft += _coef_now * Fast_now;
-
-        bound_check(ft, "transfer_iterative: ft");
-        return ft;
-    }
 
     /**
      * @brief g[t](\btheta[t-1], y[t-1]), exact formula
@@ -383,9 +350,9 @@ public:
      * @param transfer
      * @return double
      */
-    static double transfer_iterative(
-        const arma::vec &ft_prev_rev, // (r x 1), f[t-1], ..., f[t-r]
-        const double &psi_now,        // psi[t]
+    static double transfer_iterative2(
+        const arma::vec &ft_prev_rev, // (r x 1), f[t-1], ..., f[t-r], _ft.subvec(t - 1, t + _r - 2);
+        const double &hpsi_now,        // psi[t]
         const double &y_prev,         // y[t-1]
         const std::string &gain_func,
         const double &lag_par1,
@@ -395,7 +362,7 @@ public:
         arma::vec iter_coef = nbinom::iter_coef(lag_par1, lag_par2);
         double ft = arma::accu(ft_prev_rev % iter_coef); // sum[k] f[t-k]c(r,k)(-kappa)^k
 
-        double hpsi_now = GainFunc::psi2hpsi(psi_now, gain_func);
+        // double hpsi_now = GainFunc::psi2hpsi(psi_now, gain_func);
         double Fast_now = hpsi_now * y_prev;
         ft += nbinom::coef_now(lag_par1, lag_par2) * Fast_now; // (1-kappa)^r y[t-1] * h(psi[t])
 
@@ -468,11 +435,11 @@ public:
      * @param trans_func
      * @return double
      */
-    static double func_ft(
+    static double func_ft2(
         const unsigned int &t, // 1, ..., nT
         const arma::vec &y,    // At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
         const arma::vec &ft,   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
-        const arma::vec &psi,  // At least (psi[0], psi[1], ..., psi[t]), could be longer including future values.
+        const arma::vec &hpsi,  // At least (hpsi[0], hpsi[1], ..., hpsi[t]), could be longer including future values.
         const Dim &dim,
         const LagDist &dlag,
         const std::string &gain_func,
@@ -494,7 +461,6 @@ public:
             phi[1], ..., phi[nL]
             */
             arma::vec Fphi = LagDist::get_Fphi(dim.nL, dlag.name, dlag.par1, dlag.par2);
-            arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, gain_func_name);
             ft_now = TransFunc::transfer_sliding(t, dim.nL, y, Fphi, hpsi);
             break;
         }
@@ -521,8 +487,8 @@ public:
             }
 
             arma::vec ft_prev_rev = arma::reverse(ft_prev);
-            ft_now = TransFunc::transfer_iterative(
-                ft_prev_rev, psi.at(t), y.at(t - 1),
+            ft_now = TransFunc::transfer_iterative2(
+                ft_prev_rev, hpsi.at(t), y.at(t - 1),
                 gain_func_name, dlag.par1, dlag.par2);
             break;
         }
@@ -532,75 +498,6 @@ public:
 
         return ft_now;
     }
-
-    double func_ft(
-        const unsigned int &t, // 1, ..., nT
-        const arma::vec &y,    // At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
-        const arma::vec &ft)   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
-    {
-        double ft_now = 0.;
-
-        switch (trans_list[name])
-        {
-        case AVAIL::Transfer::sliding:
-        {
-            /*
-            It uses:
-            y[0], ..., y[t-1]
-            psi[0], ..., psi[t]
-            phi[1], ..., phi[nL]
-            */
-            ft_now = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
-            // ft_now = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
-            break;
-        }
-        case AVAIL::Transfer::iterative:
-        {
-            /*
-            It uses:
-            f[0], ..., f[t-1]
-            y[t-1]
-            psi[t]
-            */
-            unsigned int r = static_cast<unsigned int>(dlag.par2);
-            arma::vec ft_prev(r, arma::fill::zeros);
-
-            int idx_s = std::max((int)(t - r), 0);
-            int idx_e = std::max((int)(t - 1), 0);
-            unsigned int nelem = idx_e - idx_s + 1;
-            try
-            {
-                
-                if (nelem > 1)
-                {
-                    ft_prev.tail(nelem) = ft.subvec(idx_s, idx_e); // 0, ..., 0, f[t-r], ..., f[t-1]
-                }
-                else
-                {
-                    ft_prev.at(r - 1) = ft.at(idx_e);
-                }
-            }
-            catch(const std::exception& e)
-            {
-                std::cout << "\n nelem = " << nelem;
-                std::cout << " idx_s = " << idx_s << " idx_e = " << idx_e << " ft = " << ft.n_elem << std::endl;
-                std::cerr << e.what() << '\n';
-            }
-            
-            
-
-            arma::vec ft_prev_rev = arma::reverse(ft_prev);
-            ft_now = transfer_iterative(t, y.at(t - 1));
-
-            break;
-        }
-        default:
-            break;
-        }
-
-        return ft_now;
-    }
-
 };
 
 #endif
