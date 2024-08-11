@@ -382,7 +382,7 @@ public:
 
         for (unsigned int t = 1; t < (model.dim.nT + 1); t++)
         {
-            ft.at(t) = TransFunc::func_ft2(t, y, ft, hpsi, model.dim, model.transfer.dlag, model.transfer.fgain.name, model.transfer.name);
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dim, model.transfer.dlag, model.transfer.fgain.name, model.transfer.name);
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1); // Checked. OK.
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }
@@ -433,7 +433,7 @@ public:
             for (unsigned int t = 1; t < (nT + 1); t++)
             {
                 yall.at(t, i) = y.at(t);
-                ft_vec.at(t) = TransFunc::func_ft2(
+                ft_vec.at(t) = TransFunc::func_ft(
                     t, y, ft_vec, hpsi, dim,
                     transfer.dlag,
                     transfer.fgain.name,
@@ -463,7 +463,7 @@ public:
                 unsigned int idx = t + nT; // idx of old
                 // psi_vec.at(idx + 1) = psi_vec.at(idx);
                 hpsi_vec.at(idx + 1) = hpsi_vec.at(idx);
-                ft_vec.at(idx + 1) = TransFunc::func_ft2(
+                ft_vec.at(idx + 1) = TransFunc::func_ft(
                     idx + 1, yvec, ft_vec, hpsi_vec, dim,
                     transfer.dlag,
                     transfer.fgain.name,
@@ -519,7 +519,7 @@ public:
             for (unsigned int t = 1; t < (nT + 1); t++)
             {
                 yall.at(t, i) = y.at(t);
-                ft_vec.at(t) = TransFunc::func_ft2(
+                ft_vec.at(t) = TransFunc::func_ft(
                     t, y, ft_vec, hpsi_vec, model.dim,
                     model.transfer.dlag,
                     model.transfer.fgain.name,
@@ -543,7 +543,7 @@ public:
             {
                 unsigned int idx = t + nT; // idx of old
                 hpsi_vec.at(idx + 1) = hpsi_vec.at(idx);
-                ft_vec.at(idx + 1) = TransFunc::func_ft2(
+                ft_vec.at(idx + 1) = TransFunc::func_ft(
                     idx + 1, yvec, ft_vec, hpsi_vec, model.dim,
                     model.transfer.dlag,
                     model.transfer.fgain.name,
@@ -630,7 +630,7 @@ public:
 
             for (unsigned int t = 0; t < tstart; t++)
             {
-                ft_vec.at(t + 1) = TransFunc::func_ft2(
+                ft_vec.at(t + 1) = TransFunc::func_ft(
                     t + 1, y, ft_vec, hpsi_vec, model.dim,
                     model.transfer.dlag,
                     model.transfer.fgain.name,
@@ -653,7 +653,7 @@ public:
                 {
                     hpsi_tmp.at(t + j) = hpsi_tmp.at(t + j - 1);
 
-                    ft_tmp.at(t + j) = TransFunc::func_ft2(
+                    ft_tmp.at(t + j) = TransFunc::func_ft(
                         t + j, ytmp, ft_tmp, hpsi_tmp, model.dim,
                         model.transfer.dlag,
                         model.transfer.fgain.name,
@@ -797,7 +797,7 @@ public:
             arma::vec psi_vec = psi.col(i);
             arma::vec hpsi_vec = GainFunc::psi2hpsi<arma::vec>(psi_vec, model.transfer.name); // (nT + 1) x 1
             arma::vec ft_vec(model.dim.nT + 1, arma::fill::zeros); // (nT + 1) x 1
-            ft_vec.at(1) = TransFunc::func_ft2(
+            ft_vec.at(1) = TransFunc::func_ft(
                 1, y, ft_vec, hpsi_vec, model.dim,
                 model.transfer.dlag,
                 model.transfer.fgain.name,
@@ -811,7 +811,7 @@ public:
                 // psi_err_cast.at(t + 1, i) = psi.at(t + 1, i) - psi_cast.at(t + 1, i);
 
                 arma::vec ft_tmp = ft_vec;
-                ft_tmp.at(t + 1) = TransFunc::func_ft2(
+                ft_tmp.at(t + 1) = TransFunc::func_ft(
                     t + 1, y, ft_tmp, hpsi_tmp, model.dim,
                     model.transfer.dlag,
                     model.transfer.fgain.name,
@@ -903,7 +903,7 @@ public:
             arma::vec hpsi_tmp = GainFunc::psi2hpsi<arma::vec>(psi_tmp, model.transfer.fgain.name);
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
-                ft.at(t) = TransFunc::func_ft2(
+                ft.at(t) = TransFunc::func_ft(
                     t, y, ft, hpsi_tmp, model.dim,
                     model.transfer.dlag, 
                     model.transfer.fgain.name,
@@ -984,7 +984,7 @@ public:
             arma::vec hpsi_tmp = GainFunc::psi2hpsi<arma::vec>(psi_tmp, model.transfer.fgain.name);
             for (unsigned int t = 1; t <= model.dim.nT; t++)
             {
-                ft.at(t) = TransFunc::func_ft2(
+                ft.at(t) = TransFunc::func_ft(
                     t, y, ft, hpsi_tmp, model.dim,
                     model.transfer.dlag,
                     model.transfer.fgain.name,
@@ -1047,7 +1047,7 @@ public:
         for (unsigned int t = 1; t <= dim.nT; t++)
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
-            ft.at(t) = TransFunc::func_ft2(t, y, ft, _transfer.fgain.hpsi, _dim, _transfer.dlag, _transfer.fgain.name, _transfer.name);
+            ft.at(t) = TransFunc::func_ft(t, y, ft, _transfer.fgain.hpsi, _dim, _transfer.dlag, _transfer.fgain.name, _transfer.name);
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), flink, _dobs.par1);
         }
 
@@ -1289,7 +1289,7 @@ public:
         {
             double hpsi = GainFunc::psi2hpsi(theta_cur.at(0), ftrans.fgain.name);
             theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
-            theta_next.at(1) = TransFunc::transfer_iterative2(
+            theta_next.at(1) = TransFunc::transfer_iterative(
                 theta_cur.subvec(1, nr), // f[t-1], ..., f[t-r]
                 hpsi, ycur, ftrans.name, ftrans.dlag.par1, ftrans.dlag.par2);
 

@@ -350,7 +350,7 @@ public:
      * @param transfer
      * @return double
      */
-    static double transfer_iterative2(
+    static double transfer_iterative(
         const arma::vec &ft_prev_rev, // (r x 1), f[t-1], ..., f[t-r], _ft.subvec(t - 1, t + _r - 2);
         const double &hpsi_now,        // psi[t]
         const double &y_prev,         // y[t-1]
@@ -435,7 +435,7 @@ public:
      * @param trans_func
      * @return double
      */
-    static double func_ft2(
+    static double func_ft(
         const unsigned int &t, // 1, ..., nT
         const arma::vec &y,    // At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
         const arma::vec &ft,   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
@@ -487,7 +487,7 @@ public:
             }
 
             arma::vec ft_prev_rev = arma::reverse(ft_prev);
-            ft_now = TransFunc::transfer_iterative2(
+            ft_now = TransFunc::transfer_iterative(
                 ft_prev_rev, hpsi.at(t), y.at(t - 1),
                 gain_func_name, dlag.par1, dlag.par2);
             break;

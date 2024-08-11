@@ -1364,7 +1364,7 @@ namespace VB
                 ft.at(0) = 0.;
                 for (unsigned int t = 1; t < ft.n_elem; t++)
                 {
-                    ft.at(t) = TransFunc::func_ft2(
+                    ft.at(t) = TransFunc::func_ft(
                         t, y, ft, hpsi, model.dim,
                         model.transfer.dlag,
                         model.transfer.fgain.name,
