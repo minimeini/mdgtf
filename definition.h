@@ -78,7 +78,7 @@ public:
     static const std::map<std::string, Algo> algo_list;
     static const std::map<std::string, Transfer> trans_list;
     static const std::map<std::string, Func> link_list;
-    static const std::map<std::string, Func> gain_list;
+    
 
     static const std::map<std::string, Dist> dist_list;
     static const std::map<std::string, Dist> obs_list;
@@ -152,18 +152,6 @@ private:
         LINK_MAP["exponential"] = Func::exponential;
         LINK_MAP["logistic"] = Func::logistic;
         return LINK_MAP;
-    }
-
-    static std::map<std::string, Func> map_gain_func()
-    {
-        std::map<std::string, Func> GAIN_MAP;
-
-        GAIN_MAP["ramp"] = Func::ramp;
-        GAIN_MAP["exponential"] = Func::exponential;
-        GAIN_MAP["identity"] = Func::identity;
-        GAIN_MAP["softplus"] = Func::softplus;
-        GAIN_MAP["logistic"] = Func::logistic;
-        return GAIN_MAP;
     }
 
     static std::map<std::string, Dist> map_dist()
@@ -324,13 +312,11 @@ private:
 inline const std::map<std::string, AVAIL::Algo> AVAIL::algo_list = AVAIL::map_algorithm();
 inline const std::map<std::string, AVAIL::Transfer> AVAIL::trans_list = AVAIL::map_trans_func();
 inline const std::map<std::string, AVAIL::Func> AVAIL::link_list = AVAIL::map_link_func();
-inline const std::map<std::string, AVAIL::Func> AVAIL::gain_list = AVAIL::map_gain_func();
 
 inline const std::map<std::string, AVAIL::Dist> AVAIL::dist_list = AVAIL::map_dist();
 inline const std::map<std::string, AVAIL::Dist> AVAIL::obs_list = AVAIL::map_obs_dist();
 inline const std::map<std::string, AVAIL::Dist> AVAIL::lag_list = AVAIL::map_lag_dist();
 inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
-
 
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 inline const std::map<std::string, AVAIL::Loss> AVAIL::loss_list = AVAIL::map_loss_func();

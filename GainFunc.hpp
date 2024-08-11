@@ -24,7 +24,22 @@
  */
 class GainFunc
 {
+private:
+    static std::map<std::string, AVAIL::Func> map_gain_func()
+    {
+        std::map<std::string, AVAIL::Func> GAIN_MAP;
+
+        GAIN_MAP["ramp"] = AVAIL::Func::ramp;
+        GAIN_MAP["exponential"] = AVAIL::Func::exponential;
+        GAIN_MAP["identity"] = AVAIL::Func::identity;
+        GAIN_MAP["softplus"] = AVAIL::Func::softplus;
+        GAIN_MAP["logistic"] = AVAIL::Func::logistic;
+        return GAIN_MAP;
+    }
+
 public:
+    static const std::map<std::string, AVAIL::Func> gain_list;
+
     template <typename T>
     static T psi2hpsi(
         const T &psi, 
@@ -32,7 +47,7 @@ public:
     {
         T hpsi = psi;
 
-        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        std::map<std::string, AVAIL::Func> gain_list = GainFunc::gain_list;
         switch (gain_list[gain_func])
         {
         case AVAIL::Func::ramp:
@@ -74,7 +89,7 @@ public:
         const double &psi,
         const std::string &gain_func)
     {
-        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        std::map<std::string, AVAIL::Func> gain_list = GainFunc::gain_list;
         double hpsi = psi;
 
         switch (gain_list[gain_func])
@@ -121,7 +136,7 @@ public:
         const std::string &gain_func
     )
     {
-        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        std::map<std::string, AVAIL::Func> gain_list = GainFunc::gain_list;
         T dhpsi = psi;
 
         switch (gain_list[gain_func])
@@ -166,7 +181,7 @@ public:
         const double &psi,
         const std::string &gain_func)
     {
-        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
+        std::map<std::string, AVAIL::Func> gain_list = GainFunc::gain_list;
         double dhpsi = psi;
 
         switch (gain_list[gain_func])
@@ -238,6 +253,6 @@ public:
     }
 };
 
-
+inline const std::map<std::string, AVAIL::Func> GainFunc::gain_list = GainFunc::map_gain_func();
 
 #endif
