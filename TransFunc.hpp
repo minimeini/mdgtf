@@ -33,7 +33,7 @@ private:
     
 public:
     LagDist dlag;
-    GainFunc fgain;
+    std::string fgain = "softplus";
     const arma::mat &G0;
     const arma::vec &F0;
     const arma::mat &H0;
@@ -71,7 +71,7 @@ public:
         dlag.init_default();
         dlag.get_Fphi(_dim.nL);
 
-        fgain.init_default();
+        fgain = "softplus";
 
         _r = 1;
         _ft.set_size(_dim.nT + 1);
@@ -97,7 +97,7 @@ public:
         dlag.init(lag_dist, lag_param[0], lag_param[1]);
         dlag.get_Fphi(dim.nL);
 
-        fgain.init(gain_func, dim);
+        fgain = gain_func;
 
         /*
          * We should only use iterative formula for non-truncated negative-binomial lags.
@@ -354,7 +354,6 @@ public:
         const arma::vec &ft_prev_rev, // (r x 1), f[t-1], ..., f[t-r], _ft.subvec(t - 1, t + _r - 2);
         const double &hpsi_now,        // psi[t]
         const double &y_prev,         // y[t-1]
-        const std::string &gain_func,
         const double &lag_par1,
         const double &lag_par2)
     {
@@ -442,13 +441,10 @@ public:
         const arma::vec &hpsi,  // At least (hpsi[0], hpsi[1], ..., hpsi[t]), could be longer including future values.
         const Dim &dim,
         const LagDist &dlag,
-        const std::string &gain_func,
         const std::string &trans_func)
     {
         double ft_now = 0.;
         std::string trans_func_name = tolower(trans_func);
-        std::string gain_func_name = tolower(gain_func);
-
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         switch (trans_list[trans_func_name])
         {
@@ -489,7 +485,7 @@ public:
             arma::vec ft_prev_rev = arma::reverse(ft_prev);
             ft_now = TransFunc::transfer_iterative(
                 ft_prev_rev, hpsi.at(t), y.at(t - 1),
-                gain_func_name, dlag.par1, dlag.par2);
+                dlag.par1, dlag.par2);
             break;
         }
         default:

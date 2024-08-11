@@ -999,7 +999,7 @@ namespace MCMC
             // log_marg_stored.set_size(nsample);
             // log_marg_stored.zeros();
 
-            ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain.name);
+            ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
@@ -1010,7 +1010,7 @@ namespace MCMC
                 arma::vec psi = arma::cumsum(wt);
 
                 // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
-                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain.name);
+                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain);
 
                 if (W_prior.infer)
                 {

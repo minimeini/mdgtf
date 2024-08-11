@@ -25,61 +25,6 @@
 class GainFunc
 {
 public:
-    GainFunc() : psi(_psi), hpsi(_hpsi), dhpsi(_dhpsi), name(_name)
-    {
-        init_default();
-        return;
-    };
-
-    GainFunc(
-        const std::string &name, 
-        const Dim &dim) : psi(_psi), hpsi(_hpsi), dhpsi(_dhpsi), name(_name)
-    {
-        init(name, dim);
-        return;
-    };
-
-    void init(
-        const std::string &name,
-        const Dim &dim)
-    {
-        gain_list = AVAIL::gain_list;
-        _name = name;
-
-        _psi.set_size(dim.nT + 1);
-        _psi.zeros();
-
-        _hpsi = _psi;
-        _dhpsi = _hpsi;
-
-        return;
-    }
-
-    void init_default()
-    {
-        Dim dim;
-        dim.init_default();
-
-        gain_list = AVAIL::gain_list;
-        _name = "identity";
-
-        _psi.set_size(dim.nT + 1);
-        _psi.zeros();
-
-        _hpsi = _psi;
-        _dhpsi = _hpsi;
-    }
-
-    const std::string &name;
-    const arma::vec &psi;   // Read-only. (nT + 1) x 1 vector: (psi[0], psi[1], ..., psi[nT]) with psi[0] = 0, the latent random walk, i.e., cumulative white noise.
-    const arma::vec &hpsi;  // Read-only. (nT + 1) x 1 vector: (h(psi[0]), h(psi[1]), ..., h(psi[nT]))
-    const arma::vec &dhpsi; // Read-only. (nT + 1) x 1 vector: (h'(psi[0]), h'(psi[1]), ..., h'(psi[nT])), where h' is the first-order derivative of h(psi[t]) with respect to psi[t].
-
-    void update_psi(const arma::vec &psi_) { _psi = psi_; }
-    void update_hpsi(const arma::vec &hpsi_) { _hpsi = hpsi_; }
-    void update_dhpsi(const arma::vec &dhpsi_) { _dhpsi = dhpsi_; }
-
-
     template <typename T>
     static T psi2hpsi(
         const T &psi, 
@@ -123,49 +68,6 @@ public:
         bound_check<T>(hpsi, "psi2hpsi");
 
         return hpsi;
-    }
-
-    void psi2hpsi()
-    {
-        std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
-        
-        _hpsi = _psi; 
-
-        switch (gain_list[_name])
-        {
-        case AVAIL::Func::ramp:
-        {
-            _hpsi.elem(arma::find(_hpsi < EPS)).fill(EPS);
-        }
-        break;
-        case AVAIL::Func::exponential:
-        {
-            _hpsi.elem(arma::find(_hpsi > UPBND)).fill(UPBND);
-            _hpsi = arma::exp(_hpsi);
-        }
-        break;
-        case AVAIL::Func::identity:
-        {
-            // do nothing
-        }
-        break;
-        case AVAIL::Func::softplus:
-        {
-            _hpsi.elem(arma::find(_hpsi > UPBND)).fill(UPBND);
-            arma::vec hpsi_tmp = arma::exp(_hpsi);
-            _hpsi = arma::log(1. + hpsi_tmp);
-        }
-        break;
-        default:
-        {
-            // Use identity gain: do nothing
-        }
-        break;
-        }
-
-        bound_check<arma::vec>(_hpsi, "psi2hpsi");
-
-        return;
     }
 
     static double psi2hpsi(
@@ -309,13 +211,14 @@ public:
      * @param t 
      * @return arma::vec 
      */
-    arma::vec Fhpsi(
+    static arma::vec Fhpsi(
+        const arma::vec &hpsi,
         const unsigned int &t, 
         const Dim &dim, 
         const bool &reverse = false)
     {
         unsigned int nelem = std::min(t, dim.nL);
-        arma::vec Fh = _hpsi.subvec(t - nelem + 1, t); // nelem x k
+        arma::vec Fh = hpsi.subvec(t - nelem + 1, t); // nelem x k
         if (reverse) { Fh = arma::reverse(Fh); }
         return Fh;
     }
@@ -326,21 +229,13 @@ public:
      * @param t
      * @return arma::vec
      */
-    arma::vec Fdhpsi(const unsigned int &t, const Dim &dim, const bool &reverse = false)
+    static arma::vec Fdhpsi(const arma::vec &dhpsi, const unsigned int &t, const Dim &dim, const bool &reverse = false)
     {
         unsigned int nelem = std::min(t, dim.nL);
-        arma::vec Fdh = _dhpsi.subvec(t - nelem + 1, t); // nelem x k
+        arma::vec Fdh = dhpsi.subvec(t - nelem + 1, t); // nelem x k
         if (reverse) { Fdh = arma::reverse(Fdh); }
         return Fdh;
     }
-
-    std::map<std::string, AVAIL::Func> gain_list = AVAIL::gain_list;
-
-private:
-    std::string _name = "softplus"; // name of the gain function.
-    arma::vec _psi;  // (nT + 1) x 1 vector: (psi[0], psi[1], ..., psi[nT]) with psi[0] = 0, the latent random walk, i.e., cumulative white noise.
-    arma::vec _hpsi; // (nT + 1) x 1 vector: (h(psi[0]), h(psi[1]), ..., h(psi[nT]))
-    arma::vec _dhpsi; // (nT + 1) x 1 vector: (h'(psi[0]), h'(psi[1]), ..., h'(psi[nT])), where h' is the first-order derivative of h(psi[t]) with respect to psi[t].
 };
 
 

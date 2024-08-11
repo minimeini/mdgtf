@@ -45,7 +45,7 @@ namespace LBA
         {
             double dhpsi_now = GainFunc::psi2dhpsi(
                 mt_old.at(0), // h'(psi[t])
-                model.transfer.fgain.name);
+                model.transfer.fgain);
             Gt.at(1, 0) = model.transfer.coef_now * yold * dhpsi_now;
         }
 
@@ -229,7 +229,7 @@ namespace LBA
             yold = arma::reverse(yold);
 
             arma::vec th = theta_cur.head(nL); // nL x 1
-            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, ftrans.fgain.name); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
+            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, ftrans.fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
             Ft_cur.head(nL) = Ftmp % ftrans.dlag.Fphi;
         }
