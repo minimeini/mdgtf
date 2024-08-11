@@ -35,7 +35,6 @@ public:
     Dim &dim;
     ObsDist &dobs;
     TransFunc &transfer;
-    std::string ftrans;
     std::string flink;
     ErrDist &derr;
 
@@ -43,7 +42,6 @@ public:
     {
         _dobs.init_default();
         flink = "identity";
-        ftrans = "sliding";
         _transfer.init_default();
         _derr.init_default();
         _dim.init_default();
@@ -68,7 +66,6 @@ public:
         _dim = dim_;
         _dobs.init(obs_dist, obs_param[0], obs_param[1]);
         flink = link_func;
-        ftrans = trans_func;
         _transfer.init(dim_, trans_func, gain_func, lag_dist, lag_param);
 
         _derr.init("gaussian", err_param[0], err_param[1]);
