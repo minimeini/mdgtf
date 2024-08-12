@@ -40,8 +40,9 @@ namespace LBA
         const arma::vec &mt_old,
         const double &yold)
     {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         arma::mat Gt = model.transfer.G0;
-        if (model.transfer.trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
+        if (trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
         {
             double dhpsi_now = GainFunc::psi2dhpsi(
                 mt_old.at(0), // h'(psi[t])
@@ -55,8 +56,9 @@ namespace LBA
 
     static arma::mat func_Ht(const Model &model)
     {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         arma::mat Ht = model.transfer.H0;
-        if (model.transfer.trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
+        if (trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
         {
             throw std::invalid_argument("Ht for iterative transfer function: not defined yet.");
         }
@@ -785,7 +787,8 @@ namespace LBA
 
         void smoother(const bool &use_pseudo = false)
         {
-            bool is_iterative = _model.transfer.trans_list[_model.transfer.name] == AVAIL::Transfer::iterative;
+            std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+            bool is_iterative = trans_list[_model.transfer.name] == AVAIL::Transfer::iterative;
             std::map<std::string, DiscountType> discount_list = map_discount_type();
             bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
 

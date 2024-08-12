@@ -37,7 +37,6 @@ public:
     const arma::mat &G0;
     const arma::vec &F0;
     const arma::mat &H0;
-    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
     const std::string &name;
     const arma::vec &iter_coef;
     const double &coef_now;
@@ -65,7 +64,6 @@ public:
         dlag.init("lognorm", LN_MU, LN_SD2);
         dlag.get_Fphi(_dim.nL);
 
-        trans_list = AVAIL::trans_list;
         _name = "sliding";
         _G0 = init_Gt(_dim.nP, dlag, name);
         _F0 = init_Ft(_dim.nP, name);
@@ -90,7 +88,7 @@ public:
         const std::string &lag_dist = "nbinom",
         const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R))
     {
-        trans_list = AVAIL::trans_list;
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         _dim = dim;
         _G0.set_size(_dim.nP, _dim.nP);
         _G0.zeros();
@@ -266,6 +264,7 @@ public:
 
     unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         unsigned int nlag = dlag.update_param(par1, par2, max_lag, update_num_lag);
 
         if (trans_list[_name] == AVAIL::Transfer::iterative)
