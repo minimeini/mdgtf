@@ -942,7 +942,7 @@ namespace VB
             arma::vec dllk_dpar, hpsi;
             if (infer_dlag || rho_prior.infer)
             {
-                hpsi = GainFunc::psi2hpsi(psi, model.transfer.fgain);
+                hpsi = GainFunc::psi2hpsi(psi, model.fgain);
                 if (infer_dlag)
                 {
                     dllk_dpar = Model::dloglik_dpar(y, hpsi, model);
@@ -1330,7 +1330,7 @@ namespace VB
                     model, y, N, true, false);
                 arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
                 psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
-                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain);
+                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
                 arma::vec ft = psi;
                 ft.at(0) = 0.;
                 for (unsigned int t = 1; t < ft.n_elem; t++)

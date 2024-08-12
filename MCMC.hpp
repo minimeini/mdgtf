@@ -106,7 +106,7 @@ namespace MCMC
                     Theta_new.col(i) = theta_new;
 
                     double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
-                    double ft = StateSpace::func_ft(model.transfer, t + 1, theta_new, y);
+                    double ft = StateSpace::func_ft(model.transfer, model.fgain, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp - logq.at(i));
@@ -983,7 +983,7 @@ namespace MCMC
             // log_marg_stored.set_size(nsample);
             // log_marg_stored.zeros();
 
-            ApproxDisturbance approx_dlm(nT, model.transfer.fgain);
+            ApproxDisturbance approx_dlm(nT, model.fgain);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
@@ -994,7 +994,7 @@ namespace MCMC
                 arma::vec psi = arma::cumsum(wt);
 
                 // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
-                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain);
+                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
 
                 if (W_prior.infer)
                 {

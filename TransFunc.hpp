@@ -24,7 +24,6 @@ private:
     
 public:
     LagDist dlag;
-    std::string fgain = "softplus";
     arma::mat G0;
     arma::vec F0;
     arma::vec ft;
@@ -41,11 +40,10 @@ public:
     TransFunc(
         const Dim &dim,
         const std::string &trans_func = "sliding",
-        const std::string &gain_func = "softplus",
         const std::string &lag_dist = "lognorm",
         const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2))
     {
-        init(dim, trans_func, gain_func, lag_dist, lag_param);
+        init(dim, trans_func, lag_dist, lag_param);
         return;
     }
 
@@ -64,8 +62,6 @@ public:
         dlag.init_default();
         dlag.get_Fphi(_dim.nL);
 
-        fgain = "softplus";
-
         _r = 1;
         ft.set_size(_dim.nT + 1);
         ft.zeros();
@@ -75,7 +71,6 @@ public:
     void init(
         const Dim &dim,
         const std::string &trans_func = "sliding",
-        const std::string &gain_func = "softplus",
         const std::string &lag_dist = "nbinom",
         const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R))
     {
@@ -88,8 +83,6 @@ public:
         // _ntime = dim.nT;
         dlag.init(lag_dist, lag_param[0], lag_param[1]);
         dlag.get_Fphi(dim.nL);
-
-        fgain = gain_func;
 
         /*
          * We should only use iterative formula for non-truncated negative-binomial lags.
@@ -126,28 +119,6 @@ public:
         return;
     }
 
-    
-    // /**
-    //  * @brief From latent state psi[t] to transfer effect f[t] using the exact formula. Note that psi[t] is the random-walk component of the latent state theta[t].
-    //  *
-    //  * @param y Observed count data, y = (y[0], y[1], ..., y[nT])'.
-    //  * @param dlag LagDist object that contains Fphi = (phi[1], ..., phi[nL])'.
-    //  * @param fgain GainFunc object that contains hpsi = (h(psi[0]), h(psi[1]), ..., h(psi[nT]))'.
-    //  */
-    // void update_ft_exact(const arma::vec &y) // y[0], y[1], ..., y[nT]
-    // {
-    //     for (unsigned int t = 1; t <= _dim.nT; t++)
-    //     {
-    //         if (trans_list[_name] == AVAIL::Transfer::iterative)
-    //         {
-    //             _ft.at(t + _r - 1) = transfer_iterative(t, y.at(t - 1));
-    //         }
-    //         else
-    //         {
-    //             _ft.at(t) = TransFunc::transfer_sliding(t, _dim.nL, y, dlag.Fphi, fgain.hpsi);
-    //         }
-    //     }
-    // }
 
     arma::vec get_ft(const bool &no_padding = true)
     {
