@@ -280,11 +280,10 @@ Rcpp::List dgtf_infer(
     } // case Linear Bayes
     case AVAIL::Algo::MCS:
     {
-        SMC::MCS mcs(model, y);
-        mcs.init(method_settings);
+        SMC::MCS mcs(model, method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
-        mcs.infer(model);
+        mcs.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 
@@ -294,17 +293,17 @@ Rcpp::List dgtf_infer(
 
         if (nforecast > 0)
         {
-            forecast = mcs.forecast(model);
+            forecast = mcs.forecast(model, y);
         }
 
         if (forecast_error)
         {
-            Rcpp::List tmp = mcs.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
+            Rcpp::List tmp = mcs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
         {
-            Rcpp::List tmp = mcs.fitted_error(model, loss_func);
+            Rcpp::List tmp = mcs.fitted_error(model, y, loss_func);
             error["fitted"] = tmp;
         }
 
@@ -312,11 +311,10 @@ Rcpp::List dgtf_infer(
     } // case MCS
     case AVAIL::Algo::FFBS:
     {
-        SMC::FFBS ffbs(model, y);
-        ffbs.init(method_settings);
+        SMC::FFBS ffbs(model, method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
-        ffbs.infer(model);
+        ffbs.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
@@ -325,17 +323,17 @@ Rcpp::List dgtf_infer(
 
         if (nforecast > 0)
         {
-            forecast = ffbs.forecast(model);
+            forecast = ffbs.forecast(model, y);
         }
 
         if (forecast_error)
         {
-            Rcpp::List tmp = ffbs.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
+            Rcpp::List tmp = ffbs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
         {
-            Rcpp::List tmp = ffbs.fitted_error(model, loss_func);
+            Rcpp::List tmp = ffbs.fitted_error(model, y, loss_func);
             error["fitted"] = tmp;
         }
 
@@ -343,11 +341,10 @@ Rcpp::List dgtf_infer(
     } // case FFBS
     case AVAIL::Algo::TFS:
     {
-        SMC::TFS tfs(model, y);
-        tfs.init(method_settings);
+        SMC::TFS tfs(model, method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
-        tfs.infer(model);
+        tfs.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
@@ -356,17 +353,17 @@ Rcpp::List dgtf_infer(
 
         if (nforecast > 0)
         {
-            forecast = tfs.forecast(model);
+            forecast = tfs.forecast(model, y);
         }
 
         if (forecast_error)
         {
-            Rcpp::List tmp = tfs.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
+            Rcpp::List tmp = tfs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
         {
-            Rcpp::List tmp = tfs.fitted_error(model, loss_func);
+            Rcpp::List tmp = tfs.fitted_error(model, y, loss_func);
             error["fitted"] = tmp;
         }
 
@@ -374,11 +371,10 @@ Rcpp::List dgtf_infer(
     } // case TFS
     case AVAIL::Algo::ParticleLearning:
     {
-        SMC::PL pl(model, y);
-        pl.init(method_settings);
+        SMC::PL pl(model, method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
-        pl.infer(model);
+        pl.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
@@ -388,17 +384,17 @@ Rcpp::List dgtf_infer(
 
         if (nforecast > 0)
         {
-            forecast = pl.forecast(model);
+            forecast = pl.forecast(model, y);
         }
 
         if (forecast_error)
         {
-            Rcpp::List tmp = pl.forecast_error(model, loss_func, k, tstart_forecast, tend_forecast);
+            Rcpp::List tmp = pl.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
         {
-            Rcpp::List tmp = pl.fitted_error(model, loss_func);
+            Rcpp::List tmp = pl.fitted_error(model, y, loss_func);
             error["fitted"] = tmp;
         }
 
@@ -663,14 +659,13 @@ arma::mat dgtf_tuning(
     } // case Linear Bayes
     case AVAIL::Algo::MCS:
     {
-        SMC::MCS mcs(model, y);
-        mcs.init(algo_opts);
+        SMC::MCS mcs(model, algo_opts);
 
         switch (tuning_param_list[tuning_param])
         {
         case AVAIL::Param::discount_factor:
         {
-            stats = mcs.optimal_discount_factor(model, from, to, delta, loss);
+            stats = mcs.optimal_discount_factor(model, y, from, to, delta, loss);
             break;
         }
         case AVAIL::Param::W:
@@ -680,7 +675,7 @@ arma::mat dgtf_tuning(
         }
         case AVAIL::Param::num_backward:
         {
-            stats = mcs.optimal_num_backward(model, from, to, delta, loss);
+            stats = mcs.optimal_num_backward(model, y, from, to, delta, loss);
             break;
         }
         default:
@@ -693,18 +688,17 @@ arma::mat dgtf_tuning(
     } // case MCS
     case AVAIL::Algo::FFBS:
     {
-        SMC::FFBS ffbs(model, y);
-        ffbs.init(algo_opts);
+        SMC::FFBS ffbs(model, algo_opts);
         switch (tuning_param_list[tuning_param])
         {
         case AVAIL::Param::discount_factor:
         {
-            stats = ffbs.optimal_discount_factor(model, from, to, delta, loss);
+            stats = ffbs.optimal_discount_factor(model, y, from, to, delta, loss);
             break;
         }
         case AVAIL::Param::W:
         {
-            stats = ffbs.optimal_W(model, param_grid, loss);
+            stats = ffbs.optimal_W(model, y, param_grid, loss);
             break;
         }
         default:
@@ -717,10 +711,7 @@ arma::mat dgtf_tuning(
     } // case FFBS
     case AVAIL::Algo::ParticleLearning:
     {
-        SMC::PL pl(model, y);
-        pl.init(algo_opts);
-        
-
+        SMC::PL pl(model, algo_opts);
         break;
     } // case particle learning
     case AVAIL::Algo::MCMC:
@@ -866,15 +857,13 @@ arma::mat dgtf_optimal_lag(
             } // case Linear Bayes
             case AVAIL::Algo::MCS:
             {
-                SMC::MCS mcs(model, y);
-                mcs.init(algo_opts);
-
+                SMC::MCS mcs(model, algo_opts);
                 try
                 {
-                    mcs.infer(model);
+                    mcs.infer(model, y);
 
-                    mcs.fitted_error(err_fit, model, loss);
-                    mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+                    mcs.fitted_error(err_fit, model, y, loss);
+                    mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
                 }
                 catch(...)
                 {
@@ -885,23 +874,21 @@ arma::mat dgtf_optimal_lag(
             } // case MCS
             case AVAIL::Algo::FFBS:
             {
-                SMC::FFBS ffbs(model, y);
-                ffbs.init(algo_opts);
-                ffbs.infer(model);
+                SMC::FFBS ffbs(model, algo_opts);
+                ffbs.infer(model, y);
                 
-                ffbs.fitted_error(err_fit, model, loss);
-                ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+                ffbs.fitted_error(err_fit, model, y, loss);
+                ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
                 break;
             } // case FFBS
             case AVAIL::Algo::ParticleLearning:
             {
-                SMC::PL pl(model, y);
-                pl.init(algo_opts);
-                pl.infer(model);
+                SMC::PL pl(model, algo_opts);
+                pl.infer(model, y);
                 
-                pl.fitted_error(err_fit, model, loss);
-                pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+                pl.fitted_error(err_fit, model, y, loss);
+                pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
                 break;
             } // case particle learning
@@ -1008,34 +995,31 @@ arma::mat dgtf_optimal_obs(
         } // case Linear Bayes
         case AVAIL::Algo::MCS:
         {
-            SMC::MCS mcs(model, y);
-            mcs.init(algo_opts);
-            mcs.infer(model);
+            SMC::MCS mcs(model, algo_opts);
+            mcs.infer(model, y);
 
             // mcs.fitted_error(err_fit, model, loss);
-            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
             break;
         } // case MCS
         case AVAIL::Algo::FFBS:
         {
-            SMC::FFBS ffbs(model, y);
-            ffbs.init(algo_opts);
-            ffbs.infer(model);
+            SMC::FFBS ffbs(model, algo_opts);
+            ffbs.infer(model, y);
 
             // ffbs.fitted_error(err_fit, model, loss);
-            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
             break;
         } // case FFBS
         case AVAIL::Algo::ParticleLearning:
         {
-            SMC::PL pl(model, y);
-            pl.init(algo_opts);
-            pl.infer(model);
+            SMC::PL pl(model, algo_opts);
+            pl.infer(model, y);
 
             // pl.fitted_error(err_fit, model, loss);
-            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
             break;
         } // case particle learning
@@ -1135,34 +1119,31 @@ arma::mat dgtf_optimal_nlag(
         } // case Linear Bayes
         case AVAIL::Algo::MCS:
         {
-            SMC::MCS mcs(model, y);
-            mcs.init(algo_opts);
-            mcs.infer(model);
+            SMC::MCS mcs(model, algo_opts);
+            mcs.infer(model, y);
 
-            mcs.fitted_error(err_fit, model, loss);
-            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+            mcs.fitted_error(err_fit, model, y, loss);
+            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
             break;
         } // case MCS
         case AVAIL::Algo::FFBS:
         {
-            SMC::FFBS ffbs(model, y);
-            ffbs.init(algo_opts);
-            ffbs.infer(model);
+            SMC::FFBS ffbs(model, algo_opts);
+            ffbs.infer(model, y);
 
-            ffbs.fitted_error(err_fit, model, loss);
-            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+            ffbs.fitted_error(err_fit, model, y, loss);
+            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
             break;
         } // case FFBS
         case AVAIL::Algo::ParticleLearning:
         {
-            SMC::PL pl(model, y);
-            pl.init(algo_opts);
-            pl.infer(model);
+            SMC::PL pl(model, algo_opts);
+            pl.infer(model, y);
 
-            pl.fitted_error(err_fit, model, loss);
-            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, loss);
+            pl.fitted_error(err_fit, model, y, loss);
+            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
             break;
         } // case particle learning
