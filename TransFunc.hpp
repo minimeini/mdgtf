@@ -61,11 +61,14 @@ public:
     void init_default()
     {
         _dim.init_default();
+        LagDist dlag;
+        dlag.init("lognorm", LN_MU, LN_SD2);
+        dlag.get_Fphi(_dim.nL);
 
         trans_list = AVAIL::trans_list;
         _name = "sliding";
-        _G0 = G0_sliding(_dim.nP);
-        _F0 = F0_sliding(_dim.nP);
+        _G0 = init_Gt(_dim.nP, dlag, name);
+        _F0 = init_Ft(_dim.nP, name);
         _H0 = H0_sliding(_dim.nP);
 
         dlag.init_default();
@@ -120,19 +123,17 @@ public:
             _coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
             _ft.set_size(dim.nT + _r);
-            _G0 = G0_iterative(_dim.nP, dlag);
-            _F0 = F0_iterative(_dim.nP);
         }
         else
         {
             _r = 1;
             _ft.set_size(dim.nT + 1);
-            _G0 = G0_sliding(_dim.nP);
-            _F0 = F0_sliding(_dim.nP);
             _H0 = H0_sliding(_dim.nP);
         }
 
         _ft.zeros();
+        _G0 = init_Gt(_dim.nP, dlag, name);
+        _F0 = init_Ft(_dim.nP, name);
         return;
     }
 
@@ -205,29 +206,46 @@ public:
         return ft;
     }
 
-
-    static arma::vec F0_sliding(const unsigned int &nP)
+    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding")
     {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         arma::vec F0(nP, arma::fill::zeros);
+        if (trans_list[trans_func] == AVAIL::Transfer::iterative)
+        {
+            F0.at(1) = 1.;
+        }
         return F0;
     }
 
-    static arma::mat G0_sliding(const unsigned int &nP) // Tested. OK.
+    static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding")
     {
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         arma::mat G0(nP, nP, arma::fill::zeros);
         G0.at(0, 0) = 1.;
+        unsigned int idx_end = nP - 1;
+        unsigned int idx_start;
 
-        unsigned int nr = nP - 1;
-        for (unsigned int i = 1; i <= nr; i++)
+        if (trans_list[trans_func] == AVAIL::Transfer::iterative)
+        {
+            arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            double coef_now = std::pow(1. - dlag.par1, dlag.par2);
+            idx_start = 2;
+
+            G0.at(1, 0) = coef_now;                      // (1 - kappa)^r
+            G0.submat(1, 1, 1, idx_end) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+        }
+        else
+        {
+            idx_start = 1;
+        }
+
+        for (unsigned int i = idx_start; i <= idx_end; i++)
         {
             G0.at(i, i - 1) = 1.;
         }
-        // G0.diag(-1).ones();
 
         return G0;
     }
-
-
 
     static arma::mat H0_sliding(const unsigned int &nP) // Tested. OK.
     {
@@ -257,16 +275,15 @@ public:
             _coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
             _ft.set_size(_dim.nT + _r);
-            _G0 = G0_iterative(_dim.nP, dlag);
-            _F0 = F0_iterative(_dim.nP);
         }
         else if (update_num_lag)
         {
             _dim.update_nL(nlag, name);
-            _G0 = G0_sliding(_dim.nP);
-            _F0 = F0_sliding(_dim.nP);
             _H0 = H0_sliding(_dim.nP);
         }
+
+        _G0 = init_Gt(_dim.nP, dlag, name);
+        _F0 = init_Ft(_dim.nP, name);
 
         return nlag;
     }
@@ -301,32 +318,6 @@ public:
     }
 
 
-    static arma::vec F0_iterative(const unsigned int &nP)
-    {
-        arma::vec F0(nP, arma::fill::zeros);
-        F0.at(1) = 1.;
-        return F0;
-    }
-
-
-    static arma::mat G0_iterative(const unsigned int &nP, const LagDist &dlag) // Tested. OK.
-    {
-        arma::mat G0(nP, nP, arma::fill::zeros);
-        arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-        double coef_now = std::pow(1. - dlag.par1, dlag.par2);
-
-        G0.at(0, 0) = 1.;
-        G0.at(1, 0) = coef_now;                         // (1 - kappa)^r
-
-        unsigned int nr = nP - 1;
-        G0.submat(1, 1, 1, nr) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
-        for (unsigned int i = 2; i <= nr; i++)
-        {
-            G0.at(i, i - 1) = 1.;
-        }
-
-        return G0;
-    }
 
     /**
      * @brief Transfer Function effect of the regressor.
