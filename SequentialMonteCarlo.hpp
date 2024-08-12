@@ -2757,7 +2757,7 @@ namespace SMC
                 {
                     if (lag_update)
                     {
-                        unsigned int nlag = model.transfer.update_dlag(param_filter.at(0, i), param_filter.at(1, i), 30, false);
+                        unsigned int nlag = model.update_dlag(param_filter.at(0, i), param_filter.at(1, i), 30, false);
                     }
                     arma::vec gtheta_prev_fwd = StateSpace::func_gt(model.transfer, model.fgain, Theta.slice(t_prev).col(i), y.at(t_prev));
 
@@ -2771,7 +2771,7 @@ namespace SMC
                     }
                     if (lag_update)
                     {
-                        unsigned int nlag = model.transfer.update_dlag(param_backward.at(0, i), param_backward.at(1, i), 30, false);
+                        unsigned int nlag = model.update_dlag(param_backward.at(0, i), param_backward.at(1, i), 30, false);
                     }
 
                     arma::vec gtheta = StateSpace::func_gt(model.transfer, model.fgain, Theta.slice(t_prev).col(i), y.at(t_prev));

@@ -323,12 +323,24 @@ public:
 
     unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
-        unsigned int nlag = transfer.update_dlag(par1, par2, max_lag, update_num_lag);
-        if (update_num_lag)
+        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        unsigned int nlag = transfer.dlag.update_param(par1, par2, max_lag, update_num_lag);
+        if (trans_list[transfer.name] == AVAIL::Transfer::iterative)
         {
-            dim.update_nL(nlag, transfer.name);
+            transfer.r = static_cast<unsigned int>(transfer.dlag.par2);
+            transfer.iter_coef = nbinom::iter_coef(transfer.dlag.par1, transfer.dlag.par2);
+            transfer.coef_now = std::pow(1. - transfer.dlag.par1, transfer.dlag.par2);
+
+            transfer.ft.set_size(transfer.dim.nT + transfer.r);
         }
-        
+        else if (update_num_lag)
+        {
+            transfer.dim.update_nL(nlag, transfer.name);
+            transfer.H0 = TransFunc::H0_sliding(transfer.dim.nP);
+        }
+
+        transfer.G0 = TransFunc::init_Gt(transfer.dim.nP, transfer.dlag, transfer.name);
+        transfer.F0 = TransFunc::init_Ft(transfer.dim.nP, transfer.name);
 
         return nlag;
     }

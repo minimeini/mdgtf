@@ -78,31 +78,30 @@ static arma::vec qforecast(
     const bool &full_rank = false,
     const unsigned int &max_lag = 30)
 {
+    Model mod = model;
     double y_old = y.at(t_new - 1);
     double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        ObsDist dobs = model.dobs;
-        TransFunc ftrans = model.transfer;
         if (obs_update)
         {
-            dobs.par1 = param.at(0, i);
-            dobs.par2 = param.at(1, i);
+            mod.dobs.par1 = param.at(0, i);
+            mod.dobs.par2 = param.at(1, i);
         }
         if (lag_update)
         {
-            unsigned int nlag = ftrans.update_dlag(param.at(2, i), param.at(3, i), max_lag, false);
+            unsigned int nlag = mod.update_dlag(param.at(2, i), param.at(3, i), max_lag, false);
         }
-        arma::vec gtheta_old_i = StateSpace::func_gt(ftrans, model.fgain, Theta_old.col(i), y_old);
-        double ft_gtheta = StateSpace::func_ft(ftrans, model.fgain, t_new, gtheta_old_i, y);
+        arma::vec gtheta_old_i = StateSpace::func_gt(mod.transfer, model.fgain, Theta_old.col(i), y_old);
+        double ft_gtheta = StateSpace::func_ft(mod.transfer, model.fgain, t_new, gtheta_old_i, y);
         double eta = param.at(0, i) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, dobs, model.flink); // (eq 3.11)
+            lambda, mod.dobs, model.flink); // (eq 3.11)
 
         if (!full_rank)
         {
@@ -112,7 +111,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(ftrans, model.fgain, t_new, gtheta_old_i, y);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.transfer, model.fgain, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - param.at(0, i) - ft_tilde;                          // (eq 3.16)
 
