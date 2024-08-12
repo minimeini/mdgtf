@@ -37,7 +37,7 @@ namespace MCMC
             const Model &model,
             const unsigned int &N = 50)
         {
-            arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
+            arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, y.n_elem);
             arma::vec Wt(model.dim.nP, arma::fill::zeros);
             Wt.at(0) = model.derr.par1;
 
@@ -49,7 +49,7 @@ namespace MCMC
 
             double log_marg_new = 0.;
             const double logN = std::log(static_cast<double>(N));
-            for (unsigned int t = 0; t < model.dim.nT; t++)
+            for (unsigned int t = 0; t < (y.n_elem - 1); t++)
             {
                 Rcpp::checkUserInterrupt();
 
@@ -152,16 +152,16 @@ namespace MCMC
             const Dist &w0_prior,
             const double &mh_sd = 0.1)
         {
-            arma::vec ft(model.dim.nT + 1, arma::fill::zeros);
+            arma::vec ft(y.n_elem, arma::fill::zeros);
             double prior_sd = std::sqrt(w0_prior.par2);
 
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double wt_old = wt.at(t);
                 arma::vec lam = model.wt2lambda(y, wt); // Checked. OK.
 
                 double logp_old = 0.;
-                for (unsigned int i = t; i <= model.dim.nT; i++)
+                for (unsigned int i = t; i < y.n_elem; i++)
                 {
                     logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
                 } // Checked. OK.
@@ -201,7 +201,7 @@ namespace MCMC
                 lam = model.wt2lambda(y, wt); // Checked. OK.
 
                 double logp_new = 0.;
-                for (unsigned int i = t; i <= model.dim.nT; i++)
+                for (unsigned int i = t; i < y.n_elem; i++)
                 {
                     logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
                 } // Checked. OK.
@@ -288,12 +288,12 @@ namespace MCMC
             double mu0_old = model.dobs.par1;
             double mu0 = mu0_old;
 
-            arma::vec Vt_hat(model.dim.nT + 1, arma::fill::zeros);
-            arma::vec lambda(model.dim.nT + 1, arma::fill::zeros);
-            arma::vec eta(model.dim.nT + 1, arma::fill::zeros);
+            arma::vec Vt_hat(y.n_elem, arma::fill::zeros);
+            arma::vec lambda(y.n_elem, arma::fill::zeros);
+            arma::vec eta(y.n_elem, arma::fill::zeros);
 
             double logp_old = 0.;
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 eta.at(t) = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
                 lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_old);
@@ -319,7 +319,7 @@ namespace MCMC
             {
                 mu0_new = std::abs(mu0_new);
                 double logp_new = 0.;
-                for (unsigned int t = 1; t <= model.dim.nT; t++)
+                for (unsigned int t = 1; t < y.n_elem; t++)
                 {
                     lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_new);
                     logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
@@ -350,8 +350,8 @@ namespace MCMC
         {
             double rho_old = model.dobs.par2;
             double logp_old = R::dgamma(rho_old, rho_prior.par1, 1. / rho_prior.par2, true);
-            arma::vec lambda(model.dim.nT + 1, arma::fill::zeros);
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            arma::vec lambda(y.n_elem, arma::fill::zeros);
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
                 lambda.at(t) = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
@@ -382,7 +382,7 @@ namespace MCMC
             }
 
             double logp_new = R::dgamma(rho_new, rho_prior.par1, 1. / rho_prior.par2, true);
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_new, true);
             }
@@ -418,7 +418,7 @@ namespace MCMC
             double par2_old = model.transfer.dlag.par2;
 
             double loglik_old = 0.;
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
@@ -490,7 +490,7 @@ namespace MCMC
             arma::vec Fphi_new = LagDist::get_Fphi(nlag, model.transfer.dlag.name, par1_new, par2_new);
 
             double loglik_new = 0.;
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
@@ -541,7 +541,7 @@ namespace MCMC
             logp_old += Prior::dprior(par1_old, par1_prior, true, true); // TODO: check it
             logp_old += Prior::dprior(par2_old, par2_prior, true, true); // TODO: check it
 
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
@@ -613,7 +613,7 @@ namespace MCMC
 
             // log of conditional posterior for the proposed lag parameters.
             double logp_new = 0.;
-            for (unsigned int t = 1; t <= model.dim.nT; t++)
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
@@ -652,20 +652,7 @@ namespace MCMC
     class Disturbance
     {
     public:
-        Disturbance()
-        {
-            dim.init_default();
-            y.set_size(dim.nT + 1);
-            y.zeros();
-        }
-
-        Disturbance(const Model &model, const arma::vec &y_in)
-        {
-            dim = model.dim;
-            y = y_in;
-        }
-
-        void init(const Rcpp::List &mcmc_settings)
+        Disturbance(const Model &model, const Rcpp::List &mcmc_settings)
         {
             Rcpp::List opts = mcmc_settings;
 
@@ -815,21 +802,7 @@ namespace MCMC
                 }
             }
 
-            wt = arma::randn(dim.nT + 1) * 0.01;
-            wt.at(0) = 0.;
-            wt.subvec(1, dim.nP) = arma::abs(wt.subvec(1, dim.nP));
-            bound_check(wt, "Disturbance::init");
-
-            wt_stored.set_size(dim.nT + 1, nsample);
-            wt_accept.set_size(dim.nT + 1);
-            wt_accept.zeros();
-
-            w0_prior.init("gaussian", 0., W);
-
-            double nw = W_prior.par1;
-            double nSw = W_prior.par1 * W_prior.par2;
-            double nw_new = nw + (double)wt.n_elem - 2.;
-            W_prior.init(W_prior.name, nw_new, nSw);
+            w0_prior.init("gaussian", 0., W_prior.val);
 
             return;
         }
@@ -896,7 +869,6 @@ namespace MCMC
         {
             arma::vec qprob = {0.025, 0.5, 0.975};
             Rcpp::List output;
-            output["model"] = Rcpp::wrap(model_info);
 
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1); // (nT + 1) x 3
@@ -928,12 +900,10 @@ namespace MCMC
             output["par2"] = Rcpp::wrap(par2_stored);
             output["par2_accept"] = par2_accept / ntotal;
 
-            output["model"] = model_info;
-
             return output;
         }
 
-        Rcpp::List forecast(const Model &model)
+        Rcpp::List forecast(const Model &model, const arma::vec &y)
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             // arma::mat psi_stored = wt_stored;
@@ -944,14 +914,14 @@ namespace MCMC
         }
 
 
-        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
+        Rcpp::List fitted_error(const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             // arma::mat psi_stored = wt_stored;
             return Model::fitted_error(psi_stored, y, model, loss_func);
         }
 
-        void fitted_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        void fitted_error(double &err, const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
         {
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             // arma::mat psi_stored = wt_stored;
@@ -959,9 +929,23 @@ namespace MCMC
             return;
         }
 
-        void infer(Model &model, const bool &verbose = VERBOSE)
+        void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
-            model_info = model.info();
+            const unsigned int nT = y.n_elem - 1;
+
+            wt = arma::randn(nT + 1) * 0.01;
+            wt.at(0) = 0.;
+            wt.subvec(1, model.dim.nP) = arma::abs(wt.subvec(1, model.dim.nP));
+            bound_check(wt, "Disturbance::init");
+
+            wt_stored.set_size(nT + 1, nsample);
+            wt_accept.set_size(nT + 1);
+            wt_accept.zeros();
+
+            double nw = W_prior.par1;
+            double nSw = W_prior.par1 * W_prior.par2;
+            double nw_new = nw + (double)wt.n_elem - 2.;
+            W_prior.init(W_prior.name, nw_new, nSw);
 
             if (!mu0_prior.infer)
             {
@@ -999,7 +983,7 @@ namespace MCMC
             // log_marg_stored.set_size(nsample);
             // log_marg_stored.zeros();
 
-            ApproxDisturbance approx_dlm(model.dim.nT, model.transfer.fgain);
+            ApproxDisturbance approx_dlm(nT, model.transfer.fgain);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
@@ -1101,11 +1085,6 @@ namespace MCMC
         double tstart_pct = 0.9;
 
         unsigned int max_lag = 30;
-
-        Rcpp::List model_info;
-
-        Dim dim;
-        arma::vec y;
 
         Dist w0_prior;
         arma::vec wt;

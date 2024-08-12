@@ -408,11 +408,10 @@ Rcpp::List dgtf_infer(
     } // case particle learning
     case AVAIL::Algo::MCMC:
     {
-        MCMC::Disturbance mcmc(model, y);
-        mcmc.init(method_settings);
+        MCMC::Disturbance mcmc(model, method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
-        mcmc.infer(model);
+        mcmc.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
@@ -421,12 +420,12 @@ Rcpp::List dgtf_infer(
 
         if (nforecast > 0)
         {
-            forecast = mcmc.forecast(model);
+            forecast = mcmc.forecast(model, y);
         }
 
         if (fitted_error)
         {
-            Rcpp::List tmp = mcmc.fitted_error(model, loss_func);
+            Rcpp::List tmp = mcmc.fitted_error(model, y, loss_func);
             error["fitted"] = tmp;
         }
         break;
@@ -727,11 +726,7 @@ arma::mat dgtf_tuning(
     } // case particle learning
     case AVAIL::Algo::MCMC:
     {
-        MCMC::Disturbance mcmc(model, y);
-        mcmc.init(algo_opts);
-
-
-        
+        MCMC::Disturbance mcmc(model, algo_opts);        
         break;
     }
     case AVAIL::Algo::HybridVariation:
@@ -914,9 +909,8 @@ arma::mat dgtf_optimal_lag(
             } // case particle learning
             case AVAIL::Algo::MCMC:
             {
-                MCMC::Disturbance mcmc(model, y);
-                mcmc.init(algo_opts);
-                mcmc.infer(model);
+                MCMC::Disturbance mcmc(model, algo_opts);
+                mcmc.infer(model, y);
                 
                 mcmc.fitted_error(err_fit, model, loss);
                 // mcmc.forecast_error(err_forecast, model, loss);
@@ -1050,9 +1044,8 @@ arma::mat dgtf_optimal_obs(
         } // case particle learning
         case AVAIL::Algo::MCMC:
         {
-            MCMC::Disturbance mcmc(model, y);
-            mcmc.init(algo_opts);
-            mcmc.infer(model);
+            MCMC::Disturbance mcmc(model, algo_opts);
+            mcmc.infer(model, y);
 
             // mcmc.fitted_error(err_fit, model, loss);
             // mcmc.forecast_error(err_forecast, model, loss);
@@ -1179,9 +1172,8 @@ arma::mat dgtf_optimal_nlag(
         } // case particle learning
         case AVAIL::Algo::MCMC:
         {
-            MCMC::Disturbance mcmc(model, y);
-            mcmc.init(algo_opts);
-            mcmc.infer(model);
+            MCMC::Disturbance mcmc(model, algo_opts);
+            mcmc.infer(model, y);
 
             mcmc.fitted_error(err_fit, model, loss);
             // mcmc.forecast_error(err_forecast, model, loss);
