@@ -21,27 +21,19 @@ class TransFunc
 private:
     Dim _dim;
     unsigned int _r;
-
-    std::string _name = "sliding";
-    arma::vec _iter_coef;
-    double _coef_now;
-
-    arma::vec _ft; // (nT + r) x 1, r = 1 if using sliding transfer function.
-    arma::vec _F0; // nP x 1
-    arma::mat _G0; // nP x nP
-    arma::mat _H0; // nP x nP
     
 public:
     LagDist dlag;
     std::string fgain = "softplus";
-    const arma::mat &G0;
-    const arma::vec &F0;
-    const arma::mat &H0;
-    const std::string &name;
-    const arma::vec &iter_coef;
-    const double &coef_now;
+    arma::mat G0;
+    arma::vec F0;
+    arma::vec ft;
+    arma::mat H0;
+    std::string name = "sliding";
+    arma::vec iter_coef;
+    double coef_now;
 
-    TransFunc() : G0(_G0), F0(_F0), H0(_H0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+    TransFunc()
     {
         init_default();
         return;
@@ -51,7 +43,7 @@ public:
         const std::string &trans_func = "sliding",
         const std::string &gain_func = "softplus",
         const std::string &lag_dist = "lognorm",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2)) : G0(_G0), F0(_F0), H0(_H0), name(_name), iter_coef(_iter_coef), coef_now(_coef_now)
+        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2))
     {
         init(dim, trans_func, gain_func, lag_dist, lag_param);
         return;
@@ -64,10 +56,10 @@ public:
         dlag.init("lognorm", LN_MU, LN_SD2);
         dlag.get_Fphi(_dim.nL);
 
-        _name = "sliding";
-        _G0 = init_Gt(_dim.nP, dlag, name);
-        _F0 = init_Ft(_dim.nP, name);
-        _H0 = H0_sliding(_dim.nP);
+        name = "sliding";
+        G0 = init_Gt(_dim.nP, dlag, name);
+        F0 = init_Ft(_dim.nP, name);
+        H0 = H0_sliding(_dim.nP);
 
         dlag.init_default();
         dlag.get_Fphi(_dim.nL);
@@ -75,9 +67,8 @@ public:
         fgain = "softplus";
 
         _r = 1;
-        _ft.set_size(_dim.nT + 1);
-
-        _ft.zeros();
+        ft.set_size(_dim.nT + 1);
+        ft.zeros();
         return;
     }
 
@@ -90,8 +81,8 @@ public:
     {
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         _dim = dim;
-        _G0.set_size(_dim.nP, _dim.nP);
-        _G0.zeros();
+        G0.set_size(_dim.nP, _dim.nP);
+        G0.zeros();
 
         // _nlag = dim.nL;
         // _ntime = dim.nT;
@@ -107,31 +98,31 @@ public:
         bool iterative_ok = !dim.truncated && dlag.isnbinom;
         if (!iterative_ok)
         {
-            _name = "sliding";
+            name = "sliding";
         }
         else
         {
-            _name = trans_func;
+            name = trans_func;
         }
 
-        if (trans_list[_name] == AVAIL::Transfer::iterative)
+        if (trans_list[name] == AVAIL::Transfer::iterative)
         {
             _r = static_cast<unsigned int>(dlag.par2);
-            _iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-            _coef_now = std::pow(1. - dlag.par1, dlag.par2);
+            iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
-            _ft.set_size(dim.nT + _r);
+            ft.set_size(dim.nT + _r);
         }
         else
         {
             _r = 1;
-            _ft.set_size(dim.nT + 1);
-            _H0 = H0_sliding(_dim.nP);
+            ft.set_size(dim.nT + 1);
+            H0 = H0_sliding(_dim.nP);
         }
 
-        _ft.zeros();
-        _G0 = init_Gt(_dim.nP, dlag, name);
-        _F0 = init_Ft(_dim.nP, name);
+        ft.zeros();
+        G0 = init_Gt(_dim.nP, dlag, name);
+        F0 = init_Ft(_dim.nP, name);
         return;
     }
 
@@ -163,11 +154,11 @@ public:
         arma::vec ft;
         if (no_padding)
         {
-            ft = _ft.tail(_dim.nL + 1);
+            ft = ft.tail(_dim.nL + 1);
         }
         else
         {
-            ft = _ft;
+            ft = ft;
         }
 
         return ft;
@@ -267,22 +258,22 @@ public:
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
         unsigned int nlag = dlag.update_param(par1, par2, max_lag, update_num_lag);
 
-        if (trans_list[_name] == AVAIL::Transfer::iterative)
+        if (trans_list[name] == AVAIL::Transfer::iterative)
         {
             _r = static_cast<unsigned int>(dlag.par2);
-            _iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-            _coef_now = std::pow(1. - dlag.par1, dlag.par2);
+            iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
-            _ft.set_size(_dim.nT + _r);
+            ft.set_size(_dim.nT + _r);
         }
         else if (update_num_lag)
         {
             _dim.update_nL(nlag, name);
-            _H0 = H0_sliding(_dim.nP);
+            H0 = H0_sliding(_dim.nP);
         }
 
-        _G0 = init_Gt(_dim.nP, dlag, name);
-        _F0 = init_Ft(_dim.nP, name);
+        G0 = init_Gt(_dim.nP, dlag, name);
+        F0 = init_Ft(_dim.nP, name);
 
         return nlag;
     }
