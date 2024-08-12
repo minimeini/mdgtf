@@ -33,10 +33,6 @@ namespace VB
         unsigned int m = 1; // number of unknown static parameters
         std::vector<std::string> param_selected = {"W"};
 
-        Dim dim;
-
-        arma::vec y;
-
         arma::vec psi;        // (nT + 1) x 1
         arma::mat psi_stored; // (nT + 1) x nsample
 
@@ -54,25 +50,7 @@ namespace VB
         arma::vec par1_stored; // nsample x 1
         arma::vec par2_stored; // nsample x 1
 
-        VariationalBayes()
-        {
-            dim.init_default();
-            psi.set_size(dim.nT + 1);
-            psi.zeros();
-
-            y = psi;
-        };
-
-        VariationalBayes(const Model &model, const arma::vec y_in)
-        {
-            dim = model.dim;
-            y = y_in;
-
-            psi.set_size(dim.nT + 1);
-            psi.zeros();
-        }
-
-        void init(const Rcpp::List &vb_opts)
+        VariationalBayes(const Model &model, const Rcpp::List &vb_opts)
         {
             Rcpp::List opts = vb_opts;
 
@@ -113,9 +91,6 @@ namespace VB
             {
                 tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
             }
-
-            psi_stored.set_size(psi.n_elem, nsample);
-            psi_stored.zeros();
 
             param_selected.clear();
             m = 0;
@@ -203,6 +178,7 @@ namespace VB
             }
         }
 
+
         static Rcpp::List default_settings()
         {
             Rcpp::List W_opts;
@@ -254,7 +230,7 @@ namespace VB
             return opts;
         }
 
-        Rcpp::List forecast(const Model &model)
+        Rcpp::List forecast(const Model &model, const arma::vec &y)
         {
             Rcpp::List out = Model::forecast(y, psi_stored, W_stored, model, nforecast);
             return out;
@@ -268,12 +244,12 @@ namespace VB
         //     return Model::forecast_error(psi_stored, y, model, loss_func, k);
         // }
 
-        Rcpp::List fitted_error(const Model &model, const std::string &loss_func = "quadratic")
+        Rcpp::List fitted_error(const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
         {
             return Model::fitted_error(psi_stored, y, model, loss_func);
         }
 
-        void fitted_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
+        void fitted_error(double &err, const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
         {
             Model::fitted_error(err, psi_stored, y, model, loss_func);
             return;
@@ -403,25 +379,9 @@ namespace VB
     class Hybrid : public VariationalBayes
     {
     public:
-        Hybrid(const Model &model_in, const arma::vec &y_in) : VariationalBayes(model_in, y_in)
-        {
-            dim = model_in.dim;
-            psi.set_size(dim.nT + 1);
-            psi.zeros();
-            y = y_in;
-
-            m = 1;
-            k = 1;
-            learning_rate = 0.01;
-            eps_step_size = 1.e-6;
-        }
-
-        Hybrid() : VariationalBayes() {}
-
-        void init(const Rcpp::List &hvb_opts)
+        Hybrid(const Model &model_in, const Rcpp::List &hvb_opts) : VariationalBayes(model_in, hvb_opts)
         {
             Rcpp::List opts = hvb_opts;
-            VariationalBayes::init(opts);
 
             learning_rate = 0.01;
             if (opts.containsElementNamed("learning_rate"))
@@ -481,6 +441,7 @@ namespace VB
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = W_prior.val);
         }
+
 
         static Rcpp::List default_settings()
         {
@@ -1158,13 +1119,15 @@ namespace VB
         }
 
         arma::mat optimal_learning_rate(
-            const Model &model,
+            const Model &model_in,
+            const arma::vec &y,
             const double &from,
             const double &to,
             const double &delta = 0.01,
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
         {
+            Model model = model_in;
             arma::vec grid = arma::regspace(from, delta, to);
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 4, arma::fill::zeros);
@@ -1192,7 +1155,7 @@ namespace VB
                 d.ones();
                 grad_d.init(m, lrate, eps_step_size);
 
-                infer(model);
+                infer(model, y);
 
                 double forecast_loss = 0.;
                 double forecast_cover = 0.;
@@ -1220,11 +1183,13 @@ namespace VB
         }
 
         arma::mat optimal_step_size(
-            const Model &model,
+            const Model &model_in,
+            const arma::vec &y,
             const arma::vec &step_size_grid,
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
         {
+            Model model = model_in;
             unsigned int nelem = step_size_grid.n_elem;
             arma::mat stats(nelem, 4, arma::fill::zeros);
 
@@ -1251,7 +1216,7 @@ namespace VB
                 d.ones();
                 grad_d.init(m, learning_rate, step_size);
 
-                infer(model);
+                infer(model, y);
 
                 double forecast_loss = 0.;
                 double forecast_cover = 0.;
@@ -1279,13 +1244,15 @@ namespace VB
         }
 
         arma::mat optimal_num_backward(
-            const Model &model,
+            const Model &model_in,
+            const arma::vec &y,
             const unsigned int &from,
             const unsigned int &to,
             const unsigned int &delta = 1,
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
         {
+            Model model = model_in;
             arma::uvec grid = arma::regspace<arma::uvec>(from, delta, to);
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 3, arma::fill::zeros);
@@ -1297,7 +1264,7 @@ namespace VB
                 unsigned int B = grid.at(i);
                 stats.at(i, 0) = B;
 
-                infer(model);
+                infer(model, y);
 
                 double err_forecast = 0.;
                 double forecast_cover = 0.;
@@ -1331,24 +1298,28 @@ namespace VB
         // }
 
        
-        void infer(const Model &model_in, const bool &verbose = VERBOSE)
+        void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
-            Model model = model_in;
+            psi.set_size(y.n_elem);
+            psi.zeros();
+            psi_stored.set_size(psi.n_elem, nsample);
+            psi_stored.zeros();
+
             W = model.derr.par1;
             mu0 = model.dobs.par1;
             rho = model.dobs.par2;
             par1 = model.transfer.dlag.par1;
             par2 = model.transfer.dlag.par2;
   
-            arma::vec eff_forward(model.dim.nT + 1, arma::fill::zeros);
-            arma::mat weights_forward(model.dim.nT + 1, N);
+            arma::vec eff_forward(y.n_elem, arma::fill::zeros);
+            arma::mat weights_forward(y.n_elem, N);
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, model.dim.nT + 1);
+                arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, y.n_elem);
                 arma::vec Wt(model.dim.nP, arma::fill::zeros);
                 Wt.at(0) = W;
                 /*
@@ -1358,7 +1329,7 @@ namespace VB
                     Theta, weights_forward, eff_forward, Wt,
                     model, y, N, true, false);
                 arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
-                psi = arma::mean(psi_all.head_rows(model.dim.nT + 1), 1);
+                psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.transfer.fgain);
                 arma::vec ft = psi;
                 ft.at(0) = 0.;
@@ -1426,12 +1397,6 @@ namespace VB
                     eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name);
 
                     update_params(W, mu0, rho, par1, par2, model, param_selected, eta);
-
-                    if (par1_prior.infer || par2_prior.infer)
-                    {
-                        dim.nL = model.dim.nL;
-                        dim.nP = model.dim.nP;
-                    }
 
                 } // end update_static
 

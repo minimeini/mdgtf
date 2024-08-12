@@ -432,11 +432,10 @@ Rcpp::List dgtf_infer(
     }
     case AVAIL::Algo::HybridVariation:
     {
-        VB::Hybrid hvb(model, y);
-        hvb.init(method_settings);
+        VB::Hybrid hvb(model, method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
-        hvb.infer(model);
+        hvb.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
@@ -445,12 +444,12 @@ Rcpp::List dgtf_infer(
 
         if (nforecast > 0)
         {
-            forecast = hvb.forecast(model);
+            forecast = hvb.forecast(model, y);
         }
 
         if (fitted_error)
         {
-            Rcpp::List tmp = hvb.fitted_error(model, loss_func);
+            Rcpp::List tmp = hvb.fitted_error(model, y, loss_func);
             error["fitted"] = tmp;
         }
         break;
@@ -731,15 +730,14 @@ arma::mat dgtf_tuning(
     }
     case AVAIL::Algo::HybridVariation:
     {
-        VB::Hybrid hva(model, y);
-        hva.init(algo_opts);
-        hva.infer(model);
+        VB::Hybrid hva(model, algo_opts);
+        hva.infer(model, y);
 
         switch (tuning_param_list[tuning_param])
         {
         case AVAIL::Param::learning_rate:
         {
-            stats = hva.optimal_learning_rate(model, from, to, delta, loss);
+            stats = hva.optimal_learning_rate(model, y, from, to, delta, loss);
             break;
         }
         case AVAIL::Param::step_size:
@@ -749,7 +747,7 @@ arma::mat dgtf_tuning(
         }
         case AVAIL::Param::num_backward:
         {
-            stats = hva.optimal_num_backward(model, from, to, delta, loss);
+            stats = hva.optimal_num_backward(model, y, from, to, delta, loss);
             break;
         }
         default:
@@ -918,12 +916,11 @@ arma::mat dgtf_optimal_lag(
             }
             case AVAIL::Algo::HybridVariation:
             {
-                VB::Hybrid hvb(model, y);
-                hvb.init(algo_opts);
+                VB::Hybrid hvb(model, algo_opts);
 
                 try
                 {
-                    hvb.infer(model);
+                    hvb.infer(model, y);
 
                     hvb.fitted_error(err_fit, model, loss);
                     // hvb.forecast_error(err_forecast, model, loss);
@@ -1053,9 +1050,8 @@ arma::mat dgtf_optimal_obs(
         }
         case AVAIL::Algo::HybridVariation:
         {
-            VB::Hybrid hvb(model, y);
-            hvb.init(algo_opts);
-            hvb.infer(model);
+            VB::Hybrid hvb(model, algo_opts);
+            hvb.infer(model, y);
 
             // hvb.fitted_error(err_fit, model, loss);
             // hvb.forecast_error(err_forecast, model, loss);
@@ -1181,9 +1177,8 @@ arma::mat dgtf_optimal_nlag(
         }
         case AVAIL::Algo::HybridVariation:
         {
-            VB::Hybrid hvb(model, y);
-            hvb.init(algo_opts);
-            hvb.infer(model);
+            VB::Hybrid hvb(model, algo_opts);
+            hvb.infer(model, y);
 
             hvb.fitted_error(err_fit, model, loss);
             // hvb.forecast_error(err_forecast, model, loss);
