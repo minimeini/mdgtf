@@ -64,9 +64,9 @@ public:
 
         trans_list = AVAIL::trans_list;
         _name = "sliding";
-        G0_sliding();
-        F0_sliding();
-        H0_sliding();
+        _G0 = G0_sliding(_dim.nP);
+        _F0 = F0_sliding(_dim.nP);
+        _H0 = H0_sliding(_dim.nP);
 
         dlag.init_default();
         dlag.get_Fphi(_dim.nL);
@@ -120,16 +120,16 @@ public:
             _coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
             _ft.set_size(dim.nT + _r);
-            G0_iterative();
-            F0_iterative();
+            _G0 = G0_iterative(_dim.nP, dlag);
+            _F0 = F0_iterative(_dim.nP);
         }
         else
         {
             _r = 1;
             _ft.set_size(dim.nT + 1);
-            G0_sliding();
-            F0_sliding();
-            H0_sliding();
+            _G0 = G0_sliding(_dim.nP);
+            _F0 = F0_sliding(_dim.nP);
+            _H0 = H0_sliding(_dim.nP);
         }
 
         _ft.zeros();
@@ -205,12 +205,6 @@ public:
         return ft;
     }
 
-    void F0_sliding()
-    {
-        _F0.set_size(_dim.nP);
-        _F0.zeros();
-        return;
-    }
 
     static arma::vec F0_sliding(const unsigned int &nP)
     {
@@ -218,29 +212,12 @@ public:
         return F0;
     }
 
-    void G0_sliding()
+    static arma::mat G0_sliding(const unsigned int &nP) // Tested. OK.
     {
-        // arma::mat G0(_dim.nP, _dim.nP, arma::fill::zeros);
-        _G0.set_size(_dim.nP, _dim.nP);
-        _G0.zeros();
-        _G0.at(0, 0) = 1.;
-
-        unsigned int nr = _dim.nP - 1;
-        for (unsigned int i = 1; i <= nr; i++)
-        {
-            _G0.at(i, i - 1) = 1.;
-        }
-        // G0.diag(-1).ones();
-
-        return;
-    }
-
-    static arma::mat G0_sliding(const Dim &dim) // Tested. OK.
-    {
-        arma::mat G0(dim.nP, dim.nP, arma::fill::zeros);
+        arma::mat G0(nP, nP, arma::fill::zeros);
         G0.at(0, 0) = 1.;
 
-        unsigned int nr = dim.nP - 1;
+        unsigned int nr = nP - 1;
         for (unsigned int i = 1; i <= nr; i++)
         {
             G0.at(i, i - 1) = 1.;
@@ -250,29 +227,14 @@ public:
         return G0;
     }
 
-    void H0_sliding()
+
+
+    static arma::mat H0_sliding(const unsigned int &nP) // Tested. OK.
     {
-        // arma::mat G0(_dim.nP, _dim.nP, arma::fill::zeros);
-        _H0.set_size(_dim.nP, _dim.nP);
-        _H0.zeros();
-        _H0.at(_dim.nP - 1, _dim.nP - 1) = 1.;
+        arma::mat H0(nP, nP, arma::fill::zeros);
+        H0.at(nP - 1, nP - 1) = 1.;
 
-        unsigned int nr = _dim.nP - 1;
-        for (unsigned int i = 1; i <= nr; i++)
-        {
-            _H0.at(i - 1, i) = 1.;
-        }
-        // G0.diag(-1).ones();
-
-        return;
-    }
-
-    static arma::mat H0_sliding(const Dim &dim) // Tested. OK.
-    {
-        arma::mat H0(dim.nP, dim.nP, arma::fill::zeros);
-        H0.at(dim.nP - 1, dim.nP - 1) = 1.;
-
-        unsigned int nr = dim.nP - 1;
+        unsigned int nr = nP - 1;
         for (unsigned int i = 1; i <= nr; i++)
         {
             H0.at(i - 1, i) = 1.;
@@ -282,34 +244,6 @@ public:
         return H0;
     }
 
-
-    void update_nlag(const unsigned int &nlag)
-    {
-        _dim.nL = nlag;
-
-        if (trans_list[_name] == AVAIL::Transfer::iterative)
-        {
-            _r = static_cast<unsigned int>(dlag.par2);
-            _iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-            _coef_now = std::pow(1. - dlag.par1, dlag.par2);
-
-            _ft.set_size(_dim.nT + _r);
-            G0_iterative();
-            F0_iterative();
-        }
-        else
-        {
-            _dim.nP = nlag;
-            _G0.reset();
-            _F0.reset();
-            _H0.reset();
-            G0_sliding();
-            F0_sliding();
-            H0_sliding();
-
-            dlag.get_Fphi(_dim.nL);
-        }
-    }
 
 
     unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
@@ -323,18 +257,15 @@ public:
             _coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
             _ft.set_size(_dim.nT + _r);
-            G0_iterative();
-            F0_iterative();
+            _G0 = G0_iterative(_dim.nP, dlag);
+            _F0 = F0_iterative(_dim.nP);
         }
         else if (update_num_lag)
         {
             _dim.update_nL(nlag, name);
-            _G0.reset();
-            _F0.reset();
-            _H0.reset();
-            G0_sliding();
-            F0_sliding();
-            H0_sliding();
+            _G0 = G0_sliding(_dim.nP);
+            _F0 = F0_sliding(_dim.nP);
+            _H0 = H0_sliding(_dim.nP);
         }
 
         return nlag;
@@ -369,13 +300,6 @@ public:
         return ft;
     }
 
-    void F0_iterative()
-    {
-        _F0.set_size(_dim.nP);
-        _F0.zeros();
-        _F0.at(1) = 1.;
-        return;
-    }
 
     static arma::vec F0_iterative(const unsigned int &nP)
     {
@@ -384,34 +308,17 @@ public:
         return F0;
     }
 
-    void G0_iterative()
+
+    static arma::mat G0_iterative(const unsigned int &nP, const LagDist &dlag) // Tested. OK.
     {
-        // arma::mat G0(_dim.nP, _dim.nP, arma::fill::zeros);
-        _G0.set_size(_dim.nP, _dim.nP);
-        _G0.zeros();
-        _G0.at(0, 0) = 1.;
-        _G0.at(1, 0) = _coef_now;                          // (1 - kappa)^r
-
-        unsigned int nr = _dim.nP - 1;
-        _G0.submat(1, 1, 1, nr) = _iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
-        for (unsigned int i = 2; i <= nr; i++)
-        {
-            _G0.at(i, i - 1) = 1.;
-        }
-
-        return;
-    }
-
-    static arma::mat G0_iterative(const Dim &dim, const LagDist &dlag) // Tested. OK.
-    {
-        arma::mat G0(dim.nP, dim.nP, arma::fill::zeros);
+        arma::mat G0(nP, nP, arma::fill::zeros);
         arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
         double coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
         G0.at(0, 0) = 1.;
         G0.at(1, 0) = coef_now;                         // (1 - kappa)^r
 
-        unsigned int nr = dim.nP - 1;
+        unsigned int nr = nP - 1;
         G0.submat(1, 1, 1, nr) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
         for (unsigned int i = 2; i <= nr; i++)
         {
