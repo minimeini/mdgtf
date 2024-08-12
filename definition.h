@@ -78,13 +78,8 @@ public:
     static const std::map<std::string, Algo> algo_list;
     static const std::map<std::string, Transfer> trans_list;
     static const std::map<std::string, Func> link_list;
-    
-
     static const std::map<std::string, Dist> dist_list;
-    static const std::map<std::string, Dist> obs_list;
-    static const std::map<std::string, Dist> lag_list;
     static const std::map<std::string, Dist> err_list;
-
     static const std::map<std::string, Param> static_param_list;
     static const std::map<std::string, Loss> loss_list;
     static const std::map<std::string, Param> tuning_param_list;
@@ -192,39 +187,7 @@ private:
         return map;
     }
 
-    static std::map<std::string, Dist> map_lag_dist()
-    {
-        std::map<std::string, Dist> LAG_MAP;
-
-        LAG_MAP["lognorm"] = Dist::lognorm;
-        LAG_MAP["koyama"] = Dist::lognorm;
-
-        LAG_MAP["nbinom"] = Dist::nbinomp;
-        LAG_MAP["nbinomp"] = Dist::nbinomp;
-        LAG_MAP["solow"] = Dist::nbinomp;
-
-        LAG_MAP["uniform"] = Dist::uniform;
-        LAG_MAP["flat"] = Dist::uniform;
-        LAG_MAP["identity"] = Dist::uniform;
-
-        return LAG_MAP;
-    }
-
-    static std::map<std::string, Dist> map_obs_dist()
-    {
-        std::map<std::string, Dist> OBS_MAP;
-
-        OBS_MAP["nbinom"] = Dist::nbinomm; // negative-binomial characterized by mean and location.
-        OBS_MAP["nbinomm"] = Dist::nbinomm;
-
-        OBS_MAP["nbinomp"] = Dist::nbinomp;
-
-        OBS_MAP["poisson"] = Dist::poisson;
-
-        OBS_MAP["gaussian"] = Dist::gaussian;
-        OBS_MAP["normal"] = Dist::gaussian;
-        return OBS_MAP;
-    }
+    
 
     static std::map<std::string, Dist> map_err_dist()
     {
@@ -314,8 +277,7 @@ inline const std::map<std::string, AVAIL::Transfer> AVAIL::trans_list = AVAIL::m
 inline const std::map<std::string, AVAIL::Func> AVAIL::link_list = AVAIL::map_link_func();
 
 inline const std::map<std::string, AVAIL::Dist> AVAIL::dist_list = AVAIL::map_dist();
-inline const std::map<std::string, AVAIL::Dist> AVAIL::obs_list = AVAIL::map_obs_dist();
-inline const std::map<std::string, AVAIL::Dist> AVAIL::lag_list = AVAIL::map_lag_dist();
+
 inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
 
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
@@ -463,8 +425,6 @@ public:
  */
 class Dist
 {
-    // Dist() : name(_name) {}
-
 public:
     std::string name = "undefined"; // name of the distribution
     double par1 = 0.; // first parameter of the distribution
@@ -473,11 +433,7 @@ public:
     bool infer = false; // if the corresponding parameter is unknown
     double val = 0.; // initial value of the corresponding parameter
 
-    std::string &_name; // deprecated
-    double &_par1; // deprecated
-    double &_par2; // deprecated
-
-    Dist() : _name(name), _par1(par1), _par2(par2)
+    Dist()
     {
         name = "undefined";
         par1 = 0.;
@@ -493,7 +449,7 @@ public:
         const double &par1_, // first parameter of the distribution
         const double &par2_, // second parameter of the distribution
         const bool &infer_ = false, // if the corresponding parameter is unknown
-        const double &init_val_ = 0.) : _name(name), _par1(par1), _par2(par2) // initial value of the corresponding parameter
+        const double &init_val_ = 0.) // initial value of the corresponding parameter
     {
         init(name_, par1_, par2_);
         init_param(infer_, init_val_);

@@ -88,8 +88,8 @@ static arma::vec qforecast(
         TransFunc ftrans = model.transfer;
         if (obs_update)
         {
-            dobs._par1 = param.at(0, i);
-            dobs._par2 = param.at(1, i);
+            dobs.par1 = param.at(0, i);
+            dobs.par2 = param.at(1, i);
         }
         if (lag_update)
         {

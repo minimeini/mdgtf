@@ -144,25 +144,25 @@ private:
 class Beta : public Dist
 {
 public: 
-    Beta() : Dist(), alpha(_par1), beta(_par2)
+    Beta() : Dist(), alpha(par1), beta(par2)
     {
-        _name = "beta";
-        _par1 = 1.;
-        _par2 = 1.;
+        name = "beta";
+        par1 = 1.;
+        par2 = 1.;
     }
     
-    Beta(const double &alpha_, const double &beta_) : Dist(), alpha(_par1), beta(_par2)
+    Beta(const double &alpha_, const double &beta_) : Dist(), alpha(par1), beta(par2)
     {
-        _name = "beta";
-        _par1 = alpha_;
-        _par2 = beta_;
+        name = "beta";
+        par1 = alpha_;
+        par2 = beta_;
     }
 
-    Beta(const Dist &dist_) : Dist(), alpha(_par1), beta(_par2)
+    Beta(const Dist &dist_) : Dist(), alpha(par1), beta(par2)
     {
-        _name = "beta";
-        _par1 = dist_.par1;
-        _par2 = dist_.par2;
+        name = "beta";
+        par1 = dist_.par1;
+        par2 = dist_.par2;
     }
 
     const double &alpha;
@@ -206,18 +206,18 @@ public:
 class InverseGamma : public Dist
 {
 public:
-    InverseGamma() : Dist(), alpha(_par1), beta(_par2) 
+    InverseGamma() : Dist(), alpha(par1), beta(par2) 
     {
-        _name = "invgamma";
-        _par1 = 0.01;
-        _par2 = 0.01;
+        name = "invgamma";
+        par1 = 0.01;
+        par2 = 0.01;
     }
 
-    InverseGamma(const double &shape, const double &rate) : Dist(), alpha(_par1), beta(_par2)
+    InverseGamma(const double &shape, const double &rate) : Dist(), alpha(par1), beta(par2)
     {
-        _name = "invgamma";
-        _par1 = shape;
-        _par2 = rate;
+        name = "invgamma";
+        par1 = shape;
+        par2 = rate;
     }
 
     const double &alpha; // shape
@@ -321,25 +321,25 @@ public:
 class Gamma : public Dist
 {
 public:
-    Gamma() : Dist(), alpha(_par1), beta(_par2)
+    Gamma() : Dist(), alpha(par1), beta(par2)
     {
-        _name = "gamma";
-        _par1 = 1.;
-        _par2 = 1.;
+        name = "gamma";
+        par1 = 1.;
+        par2 = 1.;
     }
 
-    Gamma(const double &shape, const double &rate) : Dist(), alpha(_par1), beta(_par2)
+    Gamma(const double &shape, const double &rate) : Dist(), alpha(par1), beta(par2)
     {
-        _name = "gamma";
-        _par1 = shape;
-        _par2 = rate;
+        name = "gamma";
+        par1 = shape;
+        par2 = rate;
     }
 
-    Gamma(const Dist &dist_) : Dist(), alpha(_par1), beta(_par2)
+    Gamma(const Dist &dist_) : Dist(), alpha(par1), beta(par2)
     {
-        _name = "gamma";
-        _par1 = dist_.par1;
-        _par2 = dist_.par2;
+        name = "gamma";
+        par1 = dist_.par1;
+        par2 = dist_.par2;
     }
 
     const double &alpha;
@@ -450,25 +450,25 @@ public:
 class Poisson : public Dist
 {
 public:
-    Poisson() : Dist(), lambda(_par1)
+    Poisson() : Dist(), lambda(par1)
     {
-        _name = "poisson";
-        _par1 = 1.;
-        _par2 = 0.;
+        name = "poisson";
+        par1 = 1.;
+        par2 = 0.;
     }
 
-    Poisson(const double &lambda_, const double &par2 = 0.) : Dist(), lambda(_par1)
+    Poisson(const double &lambda_, const double &par2_in = 0.) : Dist(), lambda(par1)
     {
-        _name = "poisson";
-        _par1 = lambda_;
-        _par2 = 0.;
+        name = "poisson";
+        par1 = lambda_;
+        par2 = par2_in;
     }
 
-    Poisson(const Dist &dist_) : Dist(), lambda(_par1)
+    Poisson(const Dist &dist_) : Dist(), lambda(par1)
     {
-        _name = "poisson";
-        _par1 = dist_.par1;
-        _par2 = dist_.par2;
+        name = "poisson";
+        par1 = dist_.par1;
+        par2 = dist_.par2;
     }
 
     const double &lambda;
@@ -603,11 +603,11 @@ private:
 class nbinomm : public Dist
 {
 public:
-    nbinomm() : Dist(), nu(_nu), lambda(_par1), delta(_par2)
+    nbinomm() : Dist(), nu(_nu), lambda(par1), delta(par2)
     {
-        _name = "nbinomm";
-        _par1 = NB_LAMBDA;
-        _par2 = NB_DELTA;
+        name = "nbinomm";
+        par1 = NB_LAMBDA;
+        par2 = NB_DELTA;
         mean2conj();
         return;
     }
@@ -616,11 +616,11 @@ public:
     const double &lambda;
     const double &delta;
 
-    nbinomm(const double &lambda, const double &delta) : Dist(), nu(_nu), lambda(_par1), delta(_par2)
+    nbinomm(const double &lambda, const double &delta) : Dist(), nu(_nu), lambda(par1), delta(par2)
     {
-        _name = "nbinomm";
-        _par1 = lambda;
-        _par2 = delta;
+        name = "nbinomm";
+        par1 = lambda;
+        par2 = delta;
         mean2conj();
     }
 
@@ -665,7 +665,7 @@ public:
 
     double mean()
     {
-        return _par1;
+        return par1;
     }
 
 
@@ -676,7 +676,7 @@ public:
 
     double mean2conj()
     {
-        _nu = _par1 / (_par1 + _par2);
+        _nu = par1 / (par1 + par2);
     }
 
     static double mean2conj(const double &lambda, const double &delta)
@@ -778,9 +778,9 @@ public:
     {
         _r = static_cast<unsigned int>(NB_R);
 
-        _name = "nbinomp";
-        _par1 = NB_KAPPA;
-        _par2 = NB_R;
+        name = "nbinomp";
+        par1 = NB_KAPPA;
+        par2 = NB_R;
         return;
     }
 
@@ -789,9 +789,9 @@ public:
     {
         _r = static_cast<unsigned int>(r);
 
-        _name = "nbinomp";
-        _par1 = kappa;
-        _par2 = r;
+        name = "nbinomp";
+        par1 = kappa;
+        par2 = r;
         return;
     }
     /**
@@ -855,11 +855,11 @@ public:
         }
 
         arma::vec output(nL, arma::fill::zeros);
-        double c3 = std::pow(1. - _par1, _par2);
+        double c3 = std::pow(1. - par1, par2);
 
         for (unsigned int d = 0; d < nL; d++)
         {
-            output.at(d) = dnbinom(static_cast<double>(d), _par1, _par2, c3);
+            output.at(d) = dnbinom(static_cast<double>(d), par1, par2, c3);
         }
 
         bound_check<arma::vec>(output, "dnbinom", false, true);
@@ -1018,9 +1018,9 @@ class lognorm : public Dist
 public:
     lognorm() : Dist()
     {
-        _name = "lognorm";
-        _par1 = LN_MU;
-        _par2 = LN_SD2;
+        name = "lognorm";
+        par1 = LN_MU;
+        par2 = LN_SD2;
     }
 
     
@@ -1028,9 +1028,9 @@ public:
         const double &mu,
         const double &sd2) : Dist()
     {
-        _name = "lognorm";
-        _par1 = mu;
-        _par2 = sd2;
+        name = "lognorm";
+        par1 = mu;
+        par2 = sd2;
     }
 
     static double mean(const double &mu, const double &sd2)
@@ -1109,7 +1109,7 @@ public:
         arma::vec output(nL);
         for (unsigned int d = 0; d < nL; d++)
         {
-            output.at(d) = dlognorm0(static_cast<double>(d) + 1., _par1, _par2);
+            output.at(d) = dlognorm0(static_cast<double>(d) + 1., par1, par2);
         }
 
         return output;

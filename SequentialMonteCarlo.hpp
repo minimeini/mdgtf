@@ -2336,7 +2336,7 @@ namespace SMC
 
                     if (prior_W.infer)
                     {
-                        model.derr._par1 = W_filter.at(i);
+                        model.derr.par1 = W_filter.at(i);
                     }
 
                     if (lag_update)
@@ -2346,8 +2346,8 @@ namespace SMC
 
                     if (obs_update)
                     {
-                        model.dobs._par1 = param_filter.at(0, i);
-                        model.dobs._par2 = param_filter.at(1, i);
+                        model.dobs.par1 = param_filter.at(0, i);
+                        model.dobs.par2 = param_filter.at(1, i);
                     }
                     double ft_new = StateSpace::func_ft(model.transfer, t + 1, theta_new, y); // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink, param_filter.at(0, i)); // ft_new from time t + 1, mu0_filter from time t (old).
@@ -2390,7 +2390,7 @@ namespace SMC
 
                         if (prior_mu0.infer)
                         {
-                            model.dobs._par1 = param_filter.at(0, i);
+                            model.dobs.par1 = param_filter.at(0, i);
                         }
                     } // mu0
 
@@ -2414,7 +2414,7 @@ namespace SMC
 
                         if (prior_rho.infer)
                         {
-                            model.dobs._par2 = param_filter.at(1, i);
+                            model.dobs.par2 = param_filter.at(1, i);
                         }
                     } // rho
 
@@ -2668,15 +2668,15 @@ namespace SMC
                 {
                     if (prior_W.infer)
                     {
-                        model.derr._par1 = W_backward.at(i);
+                        model.derr.par1 = W_backward.at(i);
                     }
                     if (prior_mu0.infer)
                     {
-                        model.dobs._par1 = param_backward.at(0, i);
+                        model.dobs.par1 = param_backward.at(0, i);
                     }
                     if (prior_rho.infer)
                     {
-                        model.dobs._par2 = param_backward.at(1, i);
+                        model.dobs.par2 = param_backward.at(1, i);
                     }
                     if (lag_update)
                     {
@@ -2834,11 +2834,11 @@ namespace SMC
 
                     if (prior_mu0.infer)
                     {
-                        model.dobs._par1 = param_backward.at(0, i);
+                        model.dobs.par1 = param_backward.at(0, i);
                     }
                     if (prior_rho.infer)
                     {
-                        model.dobs._par2 = param_backward.at(1, i);
+                        model.dobs.par2 = param_backward.at(1, i);
                     }
                     if (lag_update)
                     {

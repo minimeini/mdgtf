@@ -285,11 +285,12 @@ namespace LBA
         const bool &get_posterior = true)
     {
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         double regressor = ft;
         regressor += model.dobs.par1;
 
-        switch (model.dobs.obs_list[model.dobs.name])
+        switch (obs_list[model.dobs.name])
         {
         case AVAIL::Dist::poisson:
         {
@@ -364,8 +365,9 @@ namespace LBA
         const double &beta)
     {
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
-        switch (model.dobs.obs_list[model.dobs.name])
+        switch (obs_list[model.dobs.name])
         {
         case AVAIL::Dist::poisson:
         {

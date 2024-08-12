@@ -798,7 +798,7 @@ arma::mat dgtf_optimal_lag(
 
 
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
-    std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+    std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
     unsigned int idx = 0;
 

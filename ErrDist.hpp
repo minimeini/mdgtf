@@ -24,7 +24,7 @@
 class ErrDist : public Dist
 {
 public:
-    ErrDist() : par1(_par1), par2(_par2), wt(_wt), psi(_psi) 
+    ErrDist() : wt(_wt), psi(_psi) 
     {
         init_default();
         return;
@@ -33,22 +33,22 @@ public:
 
     ErrDist(
         const std::string &err_dist,
-        const double &par1,
-        const double &par2
-    ) : par1(_par1), par2(_par2), wt(_wt), psi(_psi)
+        const double &par1_in,
+        const double &par2_in
+    ) : wt(_wt), psi(_psi)
     {
-        init(err_dist, par1, par2);
+        init(err_dist, par1_in, par2_in);
     }
 
 
     void init(
         const std::string &err_dist = "gaussian",
-        const double &par1 = 0.01, // W
-        const double &par2 = 0.) // w[0]
+        const double &par1_in = 0.01, // W
+        const double &par2_in = 0.) // w[0]
     {
-        _name = err_dist;
-        _par1 = par1;
-        _par2 = par2;
+        name = err_dist;
+        par1 = par1_in;
+        par2 = par2_in;
 
         _err_list = AVAIL::err_list;
         return;
@@ -57,17 +57,15 @@ public:
 
     void init_default()
     {
-        _name = "gaussian";
-        _par1 = 0.01;  // W
-        _par2 = 0.0; // w[0]
+        name = "gaussian";
+        par1 = 0.01;  // W
+        par2 = 0.0; // w[0]
 
         _err_list = AVAIL::err_list;
         return;
     }
 
 
-    const double &par1;
-    const double &par2;
     const arma::vec &wt;
     const arma::vec &psi;
 
@@ -156,18 +154,18 @@ public:
         _wt.set_size(nT + 1);
         _wt.zeros();
 
-        if (_par1 > 0)
+        if (par1 > 0)
         {
-            switch (_err_list[_name])
+            switch (_err_list[name])
             {
             case AVAIL::Dist::gaussian:
             {
 
-                double Wsd = std::sqrt(_par1);
+                double Wsd = std::sqrt(par1);
                 _wt.randn();
                 _wt.for_each([&Wsd](arma::vec::elem_type &val)
                              { val *= Wsd; });
-                _wt.at(0) = _par2;
+                _wt.at(0) = par2;
                 break;
             }
             case AVAIL::Dist::constant:

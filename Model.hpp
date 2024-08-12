@@ -411,7 +411,7 @@ public:
         const double mu0 = 0.,
         const unsigned int &k = 1)
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         unsigned int nsample = psi_stored.n_cols;
         unsigned int nT = y.n_elem - 1;
 
@@ -496,7 +496,7 @@ public:
         const unsigned int &k = 1,
         const bool &random_sample = false)
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         unsigned int nsample = psi_stored.n_cols;
         unsigned int nT = y.n_elem - 1;
 
@@ -1047,7 +1047,7 @@ public:
         const std::string &obs_dist = "nbinomm", 
         const std::string &link_func = "identity")
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         double lambda;
         double dlam_deta = LinkFunc::dlambda_deta(lambda, eta, link_func);
@@ -1431,7 +1431,7 @@ public:
         const unsigned int k = 1
     )
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         unsigned int nT = y.n_elem - 1;
         unsigned int nsample = Theta_stored.n_cols;
 
@@ -2113,7 +2113,7 @@ public:
         const ObsDist &obs_dist,
         const std::string &link_func)
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
         arma::vec Vt = lambda;
 
@@ -2181,7 +2181,7 @@ public:
         const ObsDist &obs_dist,
         const std::string &link_func)
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
         double Vt = lambda;
 

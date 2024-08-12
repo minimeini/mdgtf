@@ -31,7 +31,9 @@
 class LagDist : public Dist
 {
 public:
-    LagDist() : Dist(), isnbinom(_isnbinom), par1(_par1), par2(_par2), Fphi(_Fphi)
+    static const std::map<std::string, AVAIL::Dist> lag_list;
+
+    LagDist() : Dist(), isnbinom(_isnbinom), Fphi(_Fphi)
     {
         init_default();
         return;
@@ -40,7 +42,7 @@ public:
     LagDist(
         const std::string &name,
         const double &par1,
-        const double &par2) : Dist(), isnbinom(_isnbinom), par1(_par1), par2(_par2), Fphi(_Fphi)
+        const double &par2) : Dist(), isnbinom(_isnbinom), Fphi(_Fphi)
     {
         init(name, par1, par2);
         return;
@@ -48,33 +50,30 @@ public:
 
     const bool &isnbinom;
     void init(
-        const std::string &name,
-        const double &par1,
-        const double &par2)
+        const std::string &name_in,
+        const double &par1_in,
+        const double &par2_in)
     {
-        _name = name;
-        _par1 = par1;
-        _par2 = par2;
-        lag_list = AVAIL::lag_list;
-        _isnbinom = (lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
+        name = name_in;
+        par1 = par1_in;
+        par2 = par2_in;
+        _isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
 
         return;
     }
 
     void init_default()
     {
-        _name = "nbinom";
-        _par1 = NB_KAPPA;
-        _par2 = NB_R;
-        lag_list = AVAIL::lag_list;
-        _isnbinom = (lag_list[_name] == AVAIL::Dist::nbinomp) ? true : false;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
+        name = "nbinom";
+        par1 = NB_KAPPA;
+        par2 = NB_R;
+        _isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
     }
 
 
-    const double &par1;
-    const double &par2;
     const arma::vec &Fphi;
-    std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
     /**
      * @brief Set Fphi based on number of lags, type of lag distribution and its corresponding parameters
      *
@@ -82,22 +81,23 @@ public:
      */
     void get_Fphi(const unsigned int &nlag)
     {
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
         _Fphi.set_size(nlag);
         _Fphi.zeros();
         
         double nlag2 = nlag;
 
-        switch (lag_list[_name])
+        switch (lag_list[name])
         {
         case AVAIL::Dist::lognorm:
         {
             try
             {
-                _Fphi = lognorm::dlognorm(nlag, _par1, _par2);
+                _Fphi = lognorm::dlognorm(nlag, par1, par2);
             }
             catch(const std::invalid_argument& e)
             {
-                std::cout << "Lag: lognorm(" << _par1 << ", " << _par2 << ")\n";
+                std::cout << "Lag: lognorm(" << par1 << ", " << par2 << ")\n";
                 std::cerr << e.what() << '\n';
                 throw;
             }
@@ -109,11 +109,11 @@ public:
         {
             try
             {
-                _Fphi = nbinom::dnbinom(nlag, _par1, _par2);
+                _Fphi = nbinom::dnbinom(nlag, par1, par2);
             }
             catch(const std::exception& e)
             {
-                std::cout << "Lag: nbinom(" << _par1 << ", " << _par2 << ")\n";
+                std::cout << "Lag: nbinom(" << par1 << ", " << par2 << ")\n";
                 std::cerr << e.what() << '\n';
                 throw;
             }
@@ -146,7 +146,7 @@ public:
         const double &lag_par2)
     {
         arma::vec Fphi(nlag, arma::fill::zeros);
-        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
         switch (lag_list[lag_dist])
         {
@@ -169,7 +169,7 @@ public:
         const LagDist &dlag)
     {
         arma::vec Fphi(nlag, arma::fill::zeros);
-        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
         switch (lag_list[dlag.name])
         {
@@ -199,7 +199,7 @@ public:
         const double &lag_par2)
     {
         arma::mat Fphi_deriv(nlag, 2, arma::fill::zeros);
-        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
         for (unsigned int d = 1; d <= nlag; d++)
         {
@@ -230,13 +230,13 @@ public:
 
     unsigned int update_param(const double &par1_new, const double &par2_new, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
-        _par1 = par1_new;
-        _par2 = par2_new;
+        par1 = par1_new;
+        par2 = par2_new;
 
         unsigned int nlag = Fphi.n_elem;
         if (update_num_lag)
         {
-            nlag = update_nlag(_name, _par1, _par2, 0.99, max_lag);
+            nlag = update_nlag(name, par1, par2, 0.99, max_lag);
         }
         
         get_Fphi(nlag);
@@ -265,7 +265,7 @@ public:
             throw std::invalid_argument("LagDist::update_nlag: probability must in (0, 1).");
         }
         double nlag_ = 1;
-        std::map<std::string, AVAIL::Dist> lag_list = AVAIL::lag_list;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
         switch (lag_list[lag_dist])
         {
@@ -348,6 +348,26 @@ public:
 private:
     arma::vec _Fphi; // a vector of the lag distribution CDF at desired length _nL.
     bool _isnbinom;
+
+    static std::map<std::string, AVAIL::Dist> map_lag_dist()
+    {
+        std::map<std::string, AVAIL::Dist> LAG_MAP;
+
+        LAG_MAP["lognorm"] = AVAIL::Dist::lognorm;
+        LAG_MAP["koyama"] = AVAIL::Dist::lognorm;
+
+        LAG_MAP["nbinom"] = AVAIL::Dist::nbinomp;
+        LAG_MAP["nbinomp"] = AVAIL::Dist::nbinomp;
+        LAG_MAP["solow"] = AVAIL::Dist::nbinomp;
+
+        LAG_MAP["uniform"] = AVAIL::Dist::uniform;
+        LAG_MAP["flat"] = AVAIL::Dist::uniform;
+        LAG_MAP["identity"] = AVAIL::Dist::uniform;
+
+        return LAG_MAP;
+    }
 };
+
+inline const std::map<std::string, AVAIL::Dist> LagDist::lag_list = LagDist::map_lag_dist();
 
 #endif

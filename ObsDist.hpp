@@ -20,82 +20,68 @@
  */
 class ObsDist : public Dist
 {
+private:
+    static std::map<std::string, AVAIL::Dist> map_obs_dist()
+    {
+        std::map<std::string, AVAIL::Dist> OBS_MAP;
+
+        OBS_MAP["nbinom"] = AVAIL::Dist::nbinomm; // negative-binomial characterized by mean and location.
+        OBS_MAP["nbinomm"] = AVAIL::Dist::nbinomm;
+
+        OBS_MAP["nbinomp"] = AVAIL::Dist::nbinomp;
+
+        OBS_MAP["poisson"] = AVAIL::Dist::poisson;
+
+        OBS_MAP["gaussian"] = AVAIL::Dist::gaussian;
+        OBS_MAP["normal"] = AVAIL::Dist::gaussian;
+        return OBS_MAP;
+    }
+
 public:
-    ObsDist() : Dist(), par1(_par1), par2(_par2) {init_default();}
+    static const std::map<std::string, AVAIL::Dist> obs_list;
+
+    ObsDist() : Dist() {init_default();}
     ObsDist(
         const std::string &obs_dist,
         const double &par1_,
-        const double &par2_) : Dist(), par1(_par1), par2(_par2)
+        const double &par2_) : Dist()
     {
         init(obs_dist, par1_, par2_);
         return;
     }
 
-    const double &par1;
-    const double &par2;
-    std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
-
     void init(
         const std::string &obs_dist = "nbinom",
-        const double &par1 = 0.,
-        const double &par2 = 30.)
+        const double &par1_in = 0.,
+        const double &par2_in = 30.)
     {
-        obs_list = AVAIL::obs_list;
-        _name = obs_dist;
-        _par1 = par1;
-        _par2 = par2;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+        name = obs_dist;
+        par1 = par1_in;
+        par2 = par2_in;
 
         if (obs_list[obs_dist] == AVAIL::Dist::poisson)
         {
-            _par2 = 1.;
+            par2 = 1.;
         }
         return;
     }
 
     void init_default()
     {
-        obs_list = AVAIL::obs_list;
-        _name = "nbinom";
-        _par1 = 0.;  // mu0
-        _par2 = 30.; // delta_nb
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+        name = "nbinom";
+        par1 = 1.;  // mu0
+        par2 = 30.; // delta_nb
 
-        if (obs_list[_name] == AVAIL::Dist::poisson)
+        if (obs_list[name] == AVAIL::Dist::poisson)
         {
-            _par2 = 1.;
+            par2 = 1.;
         }
         return;
     }
 
-    /**
-     * @brief Draw a single sample from the observation distribution, characterized by two parameters
-     *
-     * @param lambda first parameter of the observation distribution
-     * @param par2 second parameter of the observation distribution
-     * @param obs_dist name of the observation distribution
-     * @return double
-     */
-    double sample(const double &lambda)
-    {
-        double y = 0.;
-        switch (obs_list[_name])
-        {
-        case AVAIL::Dist::nbinomm:
-        {
-            double prob_succ = par2 / (lambda + par2);
-            y = R::rnbinom(par2, prob_succ);
-            break;
-        }        
-        default:
-        {
-            // Poisson observation distribution
-            y = R::rpois(lambda);
-            break;
-        }
-        }
 
-
-        return y;
-    }
 
 
     /**
@@ -111,7 +97,7 @@ public:
         const double &par2,
         const std::string &obs_dist)
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         double y = 0.;
         switch (obs_list[obs_dist])
         {
@@ -143,7 +129,7 @@ public:
         const double &par2 = 1.,
         const bool &return_log = true)
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         double density = 0.;
         // double ys = std::abs(y);
         // double lambda_s = std::max(lambda, EPS);
@@ -196,7 +182,7 @@ public:
     )
     {
         double deriv = 0.;
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         switch (obs_list[dobs.name])
         {
         case AVAIL::Dist::poisson:
@@ -241,7 +227,7 @@ public:
         const bool &return_log = true
     )
     {
-        std::map<std::string, AVAIL::Dist> obs_list = AVAIL::obs_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         std::string obs_name = tolower(obs_dist);
         double logp_pred = 0.;
 
@@ -310,6 +296,6 @@ public:
     
 };
 
-
+inline const std::map<std::string, AVAIL::Dist> ObsDist::obs_list = ObsDist::map_obs_dist();
 
 #endif
