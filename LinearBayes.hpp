@@ -192,6 +192,7 @@ namespace LBA
     static arma::vec func_Ft(
         const TransFunc &ftrans,
         const std::string &fgain,
+        const LagDist &dlag,
         const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,       // y[0], y[1], ..., y[nT]
@@ -234,7 +235,7 @@ namespace LBA
             arma::vec th = theta_cur.head(nL); // nL x 1
             arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
-            Ft_cur.head(nL) = Ftmp % ftrans.dlag.Fphi;
+            Ft_cur.head(nL) = Ftmp % dlag.Fphi;
         }
 
         bound_check<arma::vec>(Ft_cur, "func_Ft: Ft_cur");
@@ -264,8 +265,8 @@ namespace LBA
         const arma::mat &Rt,
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        mean_ft = StateSpace::func_ft(model.transfer, model.fgain, t, at, yall);
-        _Ft = func_Ft(model.transfer, model.fgain, t, at, yall, fill_zero);
+        mean_ft = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, t, at, yall);
+        _Ft = func_Ft(model.transfer, model.fgain, model.dlag, t, at, yall, fill_zero);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
     }
@@ -694,7 +695,7 @@ namespace LBA
 
         void filter_single_iter(const unsigned int &t)
         {
-            _at.col(t) = StateSpace::func_gt(_model.transfer, _model.fgain, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+            _at.col(t) = StateSpace::func_gt(_model.transfer, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
             _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
@@ -750,7 +751,7 @@ namespace LBA
             for (unsigned int t = tstart; t <= nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(_model.transfer, _model.fgain, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                _at.col(t) = StateSpace::func_gt(_model.transfer, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
                 _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
@@ -1049,7 +1050,7 @@ namespace LBA
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
-                        _model.transfer, _model.fgain, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                        _model.transfer, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
                     arma::mat Gt_cast = func_Gt(_model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 

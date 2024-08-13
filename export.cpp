@@ -494,7 +494,7 @@ Rcpp::List dgtf_forecast(
 {
     Model model(model_settings);
     arma::mat ycast = Model::forecast(
-        y, psi, W_stored, model.dim, 
+        y, psi, W_stored, model.dim, model.dlag,
         model.transfer, 
         model.flink, model.fgain, mu0, k); // k x nsample
 
@@ -791,7 +791,7 @@ arma::mat dgtf_optimal_lag(
         Rcpp::checkUserInterrupt();
         
         double par1 = par1_grid.at(i);
-        model.transfer.dlag.update_par1(par1);
+        model.dlag.update_par1(par1);
         
 
         for (unsigned int j = 0; j < npar2; j ++)
@@ -801,11 +801,11 @@ arma::mat dgtf_optimal_lag(
             stats.at(idx, 0) = par1;
             double par2 = par2_grid.at(j);
             stats.at(idx, 1) = par2;
-            model.transfer.dlag.update_par2(par2);
-            model.transfer.dlag.get_Fphi(model.dim.nL);
+            model.dlag.update_par2(par2);
+            model.dlag.get_Fphi(model.dim.nL);
 
 
-            switch (lag_list[model.transfer.dlag.name])
+            switch (lag_list[model.dlag.name])
             {
             case AVAIL::Dist::lognorm:
             {

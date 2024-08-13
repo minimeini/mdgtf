@@ -979,13 +979,13 @@ namespace VB
                 case AVAIL::Param::lag_par1:
                 {
                     deriv.at(i) = dllk_dpar.at(0);
-                    deriv.at(i) += Prior::dlogprior_dpar(model.transfer.dlag.par1, lag_par1_prior, true);
+                    deriv.at(i) += Prior::dlogprior_dpar(model.dlag.par1, lag_par1_prior, true);
                     break;
                 }
                 case AVAIL::Param::lag_par2:
                 {
                     deriv.at(i) = dllk_dpar.at(1);
-                    deriv.at(i) += Prior::dlogprior_dpar(model.transfer.dlag.par2, lag_par2_prior, true);
+                    deriv.at(i) += Prior::dlogprior_dpar(model.dlag.par2, lag_par2_prior, true);
                     break;
                 }
                 default:
@@ -1308,8 +1308,8 @@ namespace VB
             W = model.derr.par1;
             mu0 = model.dobs.par1;
             rho = model.dobs.par2;
-            par1 = model.transfer.dlag.par1;
-            par2 = model.transfer.dlag.par2;
+            par1 = model.dlag.par1;
+            par2 = model.dlag.par2;
   
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             arma::mat weights_forward(y.n_elem, N);
@@ -1337,7 +1337,7 @@ namespace VB
                 {
                     ft.at(t) = TransFunc::func_ft(
                         t, y, ft, hpsi, model.dim,
-                        model.transfer.dlag,
+                        model.dlag,
                         model.transfer.name); // Checked. OK.
                 }
 

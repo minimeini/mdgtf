@@ -21,7 +21,7 @@ class TransFunc
 public:
     Dim dim;
     unsigned int r;
-    LagDist dlag;
+    // LagDist dlag;
     arma::mat G0;
     arma::vec F0;
     arma::vec ft;
@@ -79,6 +79,7 @@ public:
 
         // _nlag = dim.nL;
         // _ntime = dim.nT;
+        LagDist dlag;
         dlag.init(lag_dist, lag_param[0], lag_param[1]);
         dlag.get_Fphi(dim.nL);
 

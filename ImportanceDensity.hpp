@@ -94,8 +94,8 @@ static arma::vec qforecast(
         {
             unsigned int nlag = mod.update_dlag(param.at(2, i), param.at(3, i), max_lag, false);
         }
-        arma::vec gtheta_old_i = StateSpace::func_gt(mod.transfer, model.fgain, Theta_old.col(i), y_old);
-        double ft_gtheta = StateSpace::func_ft(mod.transfer, model.fgain, t_new, gtheta_old_i, y);
+        arma::vec gtheta_old_i = StateSpace::func_gt(mod.transfer, model.fgain, model.dlag, Theta_old.col(i), y_old);
+        double ft_gtheta = StateSpace::func_ft(mod.transfer, model.fgain, model.dlag, t_new, gtheta_old_i, y);
         double eta = param.at(0, i) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -111,7 +111,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(mod.transfer, model.fgain, t_new, gtheta_old_i, y);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.transfer, model.fgain, model.dlag, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - param.at(0, i) - ft_tilde;                          // (eq 3.16)
 
@@ -169,8 +169,8 @@ static arma::vec qforecast(
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, model.fgain, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model.transfer, model.fgain, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, model.fgain, model.dlag, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -186,7 +186,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, model.fgain, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
+            arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, model.fgain, model.dlag, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
@@ -252,8 +252,8 @@ static arma::vec qforecast(
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, model.fgain, Theta_old.col(i), y_old); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model.transfer, model.fgain, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(model.transfer, model.fgain, model.dlag, Theta_old.col(i), y_old); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = par.at(0) + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -269,7 +269,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, model.fgain, t_new, gtheta_old_i, y);
+            arma::vec Ft_gtheta = LBA::func_Ft(model.transfer, model.fgain, model.dlag, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
@@ -332,7 +332,7 @@ static void prior_forward(
 
     for (unsigned int t = 1; t <= nT; t++)
     {
-        mu.col(t) = StateSpace::func_gt(ftrans, model.fgain, mu.col(t - 1), y.at(t - 1));
+        mu.col(t) = StateSpace::func_gt(ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1));
         arma::mat Gt = LBA::func_Gt(model, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t();
         sig.at(0, 0) += Wt.at(0);
@@ -502,7 +502,7 @@ static arma::vec qbackcast(
     for (unsigned int i = 0; i < N; i++)
     {
         arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
-        double ft_ut = StateSpace::func_ft(model.transfer, model.fgain, t_cur, u_cur, y);
+        double ft_ut = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, t_cur, u_cur, y);
         double eta = model.dobs.par1 + ft_ut;
         double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.58)
         if (lambda < EPS)
@@ -523,7 +523,7 @@ static arma::vec qbackcast(
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = LBA::func_Ft(model.transfer, model.fgain, t_cur, u_cur, y);
+            arma::vec F_cur = LBA::func_Ft(model.transfer, model.fgain, model.dlag, t_cur, u_cur, y);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 

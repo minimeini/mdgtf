@@ -34,6 +34,7 @@ class Model
 public:
     Dim &dim;
     ObsDist &dobs;
+    LagDist dlag;
     TransFunc &transfer;
     std::string flink;
     std::string fgain;
@@ -48,7 +49,8 @@ public:
         _derr.init_default();
         _dim.init_default();
 
-        _transfer.dlag.get_Fphi(_dim.nL);
+        dlag.init("lognorm", LN_MU, LN_SD2);
+        dlag.get_Fphi(_dim.nL);
 
         return;
     }
@@ -103,6 +105,9 @@ public:
         _dobs.init(obs_dist, obs_param[0], obs_param[1]);
         _transfer.init(_dim, trans_func, lag_dist, lag_param);
         _derr.init("gaussian", err_param[0], err_param[1]);
+
+        dlag.init(lag_dist, lag_param[0], lag_param[1]);
+        dlag.get_Fphi(_dim.nL);
 
         return;
     }
@@ -257,12 +262,12 @@ public:
         model["link_func"] = flink;
         model["trans_func"] = _transfer.name;
         model["gain_func"] = fgain;
-        model["lag_dist"] = _transfer.dlag.name;
+        model["lag_dist"] = dlag.name;
         model["err_dist"] = _derr.name;
 
         Rcpp::List param;
         param["obs"] = Rcpp::NumericVector::create(_dobs.par1, _dobs.par2);
-        param["lag"] = Rcpp::NumericVector::create(_transfer.dlag.par1, _transfer.dlag.par2);
+        param["lag"] = Rcpp::NumericVector::create(dlag.par1, dlag.par2);
         param["err"] = Rcpp::NumericVector::create(_derr.par1, _derr.par2);
 
         Rcpp::List dm;
@@ -324,12 +329,12 @@ public:
     unsigned int update_dlag(const double &par1, const double &par2, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
     {
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        unsigned int nlag = transfer.dlag.update_param(par1, par2, max_lag, update_num_lag);
+        unsigned int nlag = dlag.update_param(par1, par2, max_lag, update_num_lag);
         if (trans_list[transfer.name] == AVAIL::Transfer::iterative)
         {
-            transfer.r = static_cast<unsigned int>(transfer.dlag.par2);
-            transfer.iter_coef = nbinom::iter_coef(transfer.dlag.par1, transfer.dlag.par2);
-            transfer.coef_now = std::pow(1. - transfer.dlag.par1, transfer.dlag.par2);
+            transfer.r = static_cast<unsigned int>(dlag.par2);
+            transfer.iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            transfer.coef_now = std::pow(1. - dlag.par1, dlag.par2);
 
             transfer.ft.set_size(transfer.dim.nT + transfer.r);
         }
@@ -339,7 +344,7 @@ public:
             transfer.H0 = TransFunc::H0_sliding(transfer.dim.nP);
         }
 
-        transfer.G0 = TransFunc::init_Gt(transfer.dim.nP, transfer.dlag, transfer.name);
+        transfer.G0 = TransFunc::init_Gt(transfer.dim.nP, dlag, transfer.name);
         transfer.F0 = TransFunc::init_Ft(transfer.dim.nP, transfer.name);
 
         return nlag;
@@ -349,7 +354,7 @@ public:
         const unsigned int &ntime,
         const unsigned int &nlag = 0)
     {
-        _dim.init(ntime, nlag, _transfer.dlag.par2);
+        _dim.init(ntime, nlag, dlag.par2);
         return;
     }
 
@@ -389,11 +394,11 @@ public:
         arma::vec ft(model.dim.nT + 1, arma::fill::zeros);
 
         arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
-        arma::vec Fphi = LagDist::get_Fphi(model.dim.nL, model.transfer.dlag); // Checked. OK.
+        arma::vec Fphi = LagDist::get_Fphi(model.dim.nL, model.dlag); // Checked. OK.
 
         for (unsigned int t = 1; t < (model.dim.nT + 1); t++)
         {
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dim, model.transfer.dlag, model.transfer.name);
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dim, model.dlag, model.transfer.name);
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1); // Checked. OK.
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }
@@ -420,6 +425,7 @@ public:
         const arma::mat &psi_stored, // (nT + 1) x nsample
         const arma::vec &W_stored,   // nsample x 1
         const Dim &dim,
+        const LagDist &dlag,
         const TransFunc &transfer,
         const std::string &link_func = "identity",
         const std::string &gain_func = "softplus",
@@ -447,8 +453,7 @@ public:
                 yall.at(t, i) = y.at(t);
                 ft_vec.at(t) = TransFunc::func_ft(
                     t, y, ft_vec, hpsi, dim,
-                    transfer.dlag,
-                    transfer.name);
+                    dlag, transfer.name);
             }
 
             ft.col(i) = ft_vec;
@@ -476,8 +481,7 @@ public:
                 hpsi_vec.at(idx + 1) = hpsi_vec.at(idx);
                 ft_vec.at(idx + 1) = TransFunc::func_ft(
                     idx + 1, yvec, ft_vec, hpsi_vec, dim,
-                    transfer.dlag,
-                    transfer.name);
+                    dlag, transfer.name);
 
                 double lambda = LinkFunc::ft2mu(ft_vec.at(idx + 1), link_func, mu0);
                 yvec.at(idx + 1) = lambda;
@@ -531,7 +535,7 @@ public:
                 yall.at(t, i) = y.at(t);
                 ft_vec.at(t) = TransFunc::func_ft(
                     t, y, ft_vec, hpsi_vec, model.dim,
-                    model.transfer.dlag,
+                    model.dlag,
                     model.transfer.name);
             }
 
@@ -554,7 +558,7 @@ public:
                 hpsi_vec.at(idx + 1) = hpsi_vec.at(idx);
                 ft_vec.at(idx + 1) = TransFunc::func_ft(
                     idx + 1, yvec, ft_vec, hpsi_vec, model.dim,
-                    model.transfer.dlag,
+                    model.dlag,
                     model.transfer.name);
 
                 double lambda = LinkFunc::ft2mu(ft_vec.at(idx + 1), model.flink, model.dobs.par1);
@@ -640,7 +644,7 @@ public:
             {
                 ft_vec.at(t + 1) = TransFunc::func_ft(
                     t + 1, y, ft_vec, hpsi_vec, model.dim,
-                    model.transfer.dlag,
+                    model.dlag,
                     model.transfer.name);
             }
 
@@ -662,7 +666,7 @@ public:
 
                     ft_tmp.at(t + j) = TransFunc::func_ft(
                         t + j, ytmp, ft_tmp, hpsi_tmp, model.dim,
-                        model.transfer.dlag,
+                        model.dlag,
                         model.transfer.name);
                     ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp.at(t + j), model.flink, model.dobs.par1);
 
@@ -805,7 +809,7 @@ public:
             arma::vec ft_vec(model.dim.nT + 1, arma::fill::zeros); // (nT + 1) x 1
             ft_vec.at(1) = TransFunc::func_ft(
                 1, y, ft_vec, hpsi_vec, model.dim,
-                model.transfer.dlag,
+                model.dlag,
                 model.transfer.name);
 
             for (unsigned int t = 1; t < model.dim.nT; t++)
@@ -818,7 +822,7 @@ public:
                 arma::vec ft_tmp = ft_vec;
                 ft_tmp.at(t + 1) = TransFunc::func_ft(
                     t + 1, y, ft_tmp, hpsi_tmp, model.dim,
-                    model.transfer.dlag,
+                    model.dlag,
                     model.transfer.name);
                 // ft_cast.at(t + 1, i) = ft_tmp.at(t + 1);
 
@@ -909,7 +913,7 @@ public:
             {
                 ft.at(t) = TransFunc::func_ft(
                     t, y, ft, hpsi_tmp, model.dim,
-                    model.transfer.dlag, 
+                    model.dlag, 
                     model.transfer.name);
 
                 yhat.at(t, i) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1);
@@ -989,7 +993,7 @@ public:
             {
                 ft.at(t) = TransFunc::func_ft(
                     t, y, ft, hpsi_tmp, model.dim,
-                    model.transfer.dlag,
+                    model.dlag,
                     model.transfer.name);
 
                 yhat.at(t, i) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1);
@@ -1048,7 +1052,7 @@ public:
         for (unsigned int t = 1; t <= dim.nT; t++)
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, _dim, _transfer.dlag, _transfer.name);
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, _dim, dlag, _transfer.name);
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), flink, _dobs.par1);
         }
 
@@ -1144,13 +1148,13 @@ public:
         const arma::vec &hpsi,
         const Model &model)
     {
-        unsigned int nlag = model.transfer.dlag.Fphi.n_elem;
-        arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, model.transfer.dlag.name, model.transfer.dlag.par1, model.transfer.dlag.par2);
+        unsigned int nlag = model.dlag.Fphi.n_elem;
+        arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, model.dlag.name, model.dlag.par1, model.dlag.par2);
 
         arma::mat grad(y.n_elem, 2, arma::fill::zeros);
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            double eta = TransFunc::transfer_sliding(t, nlag, y, model.transfer.dlag.Fphi, hpsi);
+            double eta = TransFunc::transfer_sliding(t, nlag, y, model.dlag.Fphi, hpsi);
             eta += model.dobs.par1;
             double dll_deta = dloglik_deta(eta, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
 
@@ -1176,7 +1180,7 @@ public:
         double out = 0.;
         for (unsigned int t = 1; t <= nT; t ++)
         {
-            double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.transfer.dlag.Fphi, hpsi);
+            double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.dlag.Fphi, hpsi);
             double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
             out += nbinomm::dlogp_dpar2(y.at(t), lambda, model.dobs.par2, jacobian);
         }
@@ -1272,6 +1276,7 @@ public:
     static arma::vec func_gt( // Checked. OK.
         const TransFunc &ftrans,
         const std::string &fgain,
+        const LagDist &dlag,
         // const Model &model,
         const arma::vec &theta_cur, // nP x 1, (psi[t], f[t-1], ..., f[t-r])
         const double &ycur
@@ -1293,7 +1298,7 @@ public:
             theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
             theta_next.at(1) = TransFunc::transfer_iterative(
                 theta_cur.subvec(1, nr), // f[t-1], ..., f[t-r]
-                hpsi, ycur, ftrans.dlag.par1, ftrans.dlag.par2);
+                hpsi, ycur, dlag.par1, dlag.par2);
 
             theta_next.subvec(2, nr) = theta_cur.subvec(1, nr - 1);
             break;
@@ -1349,6 +1354,7 @@ public:
     static double func_ft(
         const TransFunc &ftrans,
         const std::string &fgain,
+        const LagDist &dlag,
         const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...;  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
@@ -1373,7 +1379,7 @@ public:
 
             yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
-            arma::vec ft_vec = ftrans.dlag.Fphi; // nL x 1
+            arma::vec ft_vec = dlag.Fphi; // nL x 1
             arma::vec th = theta_cur.head(nL);
             arma::vec hpsi_cur = GainFunc::psi2hpsi<arma::vec>(th, fgain); // (h(psi[t]), ..., h(psi[t+1 - nL])), nL x 1
             arma::vec ftmp = yold % hpsi_cur; // nL x 1
@@ -1424,8 +1430,8 @@ public:
         for (unsigned int t = 1; t < model.dim.nT + 1; t ++)
         {
             
-            theta.col(t) = func_gt(model.transfer, model.fgain, theta.col(t - 1), y.at(t - 1)) + wt_ss.col(t);
-            ft.at(t) = func_ft(model.transfer, model.fgain, t, theta.col(t), y);
+            theta.col(t) = func_gt(model.transfer, model.fgain, model.dlag, theta.col(t - 1), y.at(t - 1)) + wt_ss.col(t);
+            ft.at(t) = func_ft(model.transfer, model.fgain, model.dlag, t, theta.col(t), y);
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, mu0);
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }
@@ -1472,13 +1478,13 @@ public:
                 unsigned int idx = t + nT;
                 double ynow = yvec.at(idx);
                 arma::vec theta_now = Theta_all.slice(idx).col(i);
-                arma::vec theta_next = StateSpace::func_gt(model.transfer, model.fgain, theta_now, ynow);
+                arma::vec theta_next = StateSpace::func_gt(model.transfer, model.fgain, model.dlag, theta_now, ynow);
                 if (Wsqrt > 0)
                 {
                     theta_next.at(0) += R::rnorm(0., Wsqrt);
                 }
                 // arma::vec theta_next = StateSpace::func_state_propagate(model, theta_now, ynow, Wsqrt, false);
-                double ft_next = StateSpace::func_ft(model.transfer, model.fgain, idx + 1, theta_next, yvec);
+                double ft_next = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, idx + 1, theta_next, yvec);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
                 double ynext = 0.;
                 switch (obs_list[model.dobs.name])
@@ -1566,8 +1572,8 @@ public:
                 arma::vec ytmp = y;
                 for (unsigned int j = 1; j <= k; j ++)
                 {
-                    arma::vec theta_next = func_gt(model.transfer, model.fgain, theta_cur, ytmp.at(t + j - 1));
-                    double ft_next = func_ft(model.transfer, model.fgain, t + j, theta_next, ytmp);
+                    arma::vec theta_next = func_gt(model.transfer, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1));
+                    double ft_next = func_ft(model.transfer, model.fgain, model.dlag, t + j, theta_next, ytmp);
                     double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
                     ycast.at(t, i, j - 1) = lambda;
 
@@ -1692,8 +1698,8 @@ public:
 
             for (unsigned int i = 0; i < nsample; i++)
             {
-                arma::vec theta_next = func_gt(model.transfer, model.fgain, theta.slice(t).col(i), y.at(t));
-                double ft_next = func_ft(model.transfer, model.fgain, t + 1, theta_next, y);
+                arma::vec theta_next = func_gt(model.transfer, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t));
+                double ft_next = func_ft(model.transfer, model.fgain, model.dlag, t + 1, theta_next, y);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
                 ycast.at(t + 1, i) = lambda;
 
@@ -1775,7 +1781,7 @@ public:
             for (unsigned int i = 0; i < nsample; i ++)
             {                
                 arma::vec th = theta.slice(t).col(i); // p x 1
-                double ft = func_ft(model.transfer, model.fgain, t, th, y);
+                double ft = func_ft(model.transfer, model.fgain, model.dlag, t, th, y);
                 double lambda = LinkFunc::ft2mu(ft, model.flink, mu0);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
@@ -1853,7 +1859,7 @@ public:
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec th = theta.slice(t).col(i); // p x 1
-                double ft = func_ft(model.transfer, model.fgain, t, th, y);
+                double ft = func_ft(model.transfer, model.fgain, model.dlag, t, th, y);
                 double lambda = LinkFunc::ft2mu(ft, model.flink, mu0);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
