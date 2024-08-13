@@ -1996,7 +1996,7 @@ public:
         const std::string &link_func)
     {
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         arma::vec Vt = lambda;
 
         switch (obs_list[obs_dist.name])
@@ -2028,13 +2028,13 @@ public:
         {
             switch (link_list[tolower(link_func)])
             {
-            case AVAIL::Func::identity:
+            case LinkFunc::Func::identity:
             {
                 Vt = lambda % (lambda + obs_dist.par2);
                 Vt = Vt / obs_dist.par2;
                 break;
             }
-            case AVAIL::Func::exponential:
+            case LinkFunc::Func::exponential:
             {
                 arma::vec nom = (lambda + obs_dist.par2);
                 arma::vec denom = obs_dist.par2 * lambda;
@@ -2064,7 +2064,7 @@ public:
         const std::string &link_func)
     {
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         double Vt = lambda;
 
         switch (obs_list[obs_dist.name])
@@ -2073,12 +2073,12 @@ public:
         {
             switch (link_list[tolower(link_func)])
             {
-            case AVAIL::Func::identity:
+            case LinkFunc::Func::identity:
             {
                 Vt = lambda;
                 break;
             }
-            case AVAIL::Func::exponential:
+            case LinkFunc::Func::exponential:
             {
                 // Vt = 1 / lambda = exp( - log(lambda) )
                 Vt = -std::log(std::abs(lambda) + EPS);
@@ -2130,17 +2130,17 @@ public:
         const arma::vec &y,
         const std::string &link_func)
     {
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         arma::vec yhat;
 
         switch (link_list[tolower(link_func)])
         {
-        case AVAIL::Func::identity:
+        case LinkFunc::Func::identity:
         {
             yhat = y;
             break;
         }
-        case AVAIL::Func::exponential:
+        case LinkFunc::Func::exponential:
         {
             yhat = arma::log(arma::abs(y) + EPS);
             break;

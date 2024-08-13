@@ -73,7 +73,7 @@ public:
 
     static const std::map<std::string, Algo> algo_list;
     
-    static const std::map<std::string, Func> link_list;
+    
     static const std::map<std::string, Dist> dist_list;
     static const std::map<std::string, Dist> err_list;
     static const std::map<std::string, Param> static_param_list;
@@ -123,15 +123,7 @@ private:
 
     
 
-    static std::map<std::string, Func> map_link_func()
-    {
-        std::map<std::string, Func> LINK_MAP;
-
-        LINK_MAP["identity"] = Func::identity;
-        LINK_MAP["exponential"] = Func::exponential;
-        LINK_MAP["logistic"] = Func::logistic;
-        return LINK_MAP;
-    }
+    
 
     static std::map<std::string, Dist> map_dist()
     {
@@ -257,7 +249,7 @@ private:
 }; // class AVAIL
 
 inline const std::map<std::string, AVAIL::Algo> AVAIL::algo_list = AVAIL::map_algorithm();
-inline const std::map<std::string, AVAIL::Func> AVAIL::link_list = AVAIL::map_link_func();
+
 inline const std::map<std::string, AVAIL::Dist> AVAIL::dist_list = AVAIL::map_dist();
 inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();

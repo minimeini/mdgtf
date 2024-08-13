@@ -24,6 +24,14 @@ mu2ft: inverse link
 class LinkFunc // between mean and regressor
 {
 public:
+    enum Func
+    {
+        identity,
+        exponential,
+        logistic
+    };
+
+    static const std::map<std::string, LinkFunc::Func> link_list;
     /**
      * zeta: link function the maps regressor eta[t] to mean mu[t];
      *      zeta(eta[t]) = mu[t]
@@ -34,13 +42,13 @@ public:
      */
     static double ft2mu(const double &ft, const std::string &link_func, const double &mu0 = 0.)
     {
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
 
         double eta = mu0 + ft;
         double mu;
         switch (link_list[link_func])
         {
-        case AVAIL::Func::exponential:
+        case LinkFunc::Func::exponential:
         {
             mu = std::exp(eta);
             break;
@@ -58,13 +66,13 @@ public:
     template <class T>
     static T ft2mu(const T &ft, const std::string &link_func, const double &mu0 = 0.)
     {
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
 
         T eta = mu0 + ft;
         T mu;
         switch (link_list[tolower(link_func)])
         {
-        case AVAIL::Func::exponential:
+        case LinkFunc::Func::exponential:
         {
             mu = arma::exp(eta);
             break;
@@ -100,10 +108,10 @@ public:
     {
         T eta;
 
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         switch (link_list[tolower(link_func)])
         {
-        case AVAIL::Func::exponential:
+        case LinkFunc::Func::exponential:
         {
             eta = arma::log(mu);
             break;
@@ -128,10 +136,10 @@ public:
     {
         double eta = 0.;
 
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         switch (link_list[tolower(link_func)])
         {
-        case AVAIL::Func::exponential:
+        case LinkFunc::Func::exponential:
         {
             eta = std::log(mu);
             break;
@@ -154,16 +162,16 @@ public:
     {
         double deriv = 0.;
         lambda = 0.;
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         switch (link_list[link_func])
         {
-        case AVAIL::Func::exponential:
+        case LinkFunc::Func::exponential:
         {
             lambda = std::exp(lambda);
             deriv = lambda;
             break;
         }
-        case AVAIL::Func::logistic:
+        case LinkFunc::Func::logistic:
         {
             double tmp = std::exp(eta);
             lambda = tmp / (1. + tmp);
@@ -181,6 +189,19 @@ public:
         bound_check(deriv, "LinkFunc::dlambda_deta: deriv");
         return deriv;
     }
+
+private:
+    static std::map<std::string, Func> map_link_func()
+    {
+        std::map<std::string, Func> LINK_MAP;
+
+        LINK_MAP["identity"] = Func::identity;
+        LINK_MAP["exponential"] = Func::exponential;
+        LINK_MAP["logistic"] = Func::logistic;
+        return LINK_MAP;
+    }
 };
+
+inline const std::map<std::string, LinkFunc::Func> LinkFunc::link_list = LinkFunc::map_link_func();
 
 #endif

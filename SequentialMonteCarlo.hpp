@@ -1891,8 +1891,7 @@ namespace SMC
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             arma::vec log_cond_marginal = eff_forward;
 
-
-            std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+            std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             bool nonnegative_par1 = (dist_list[prior_par1.name] != AVAIL::Dist::gaussian);
             bool withinone_par1 = (dist_list[prior_par1.name] == AVAIL::Dist::beta);
@@ -2056,7 +2055,7 @@ namespace SMC
                             double sd = std::sqrt(bmu_forward.at(i));
                             double mu0 = R::rnorm(amu_forward.at(i), sd);
 
-                            if (link_list[model.flink] == AVAIL::Func::identity)
+                            if (link_list[model.flink] == LinkFunc::Func::identity)
                             {
                                 unsigned int cnt = 0;
                                 while (mu0 < 0 && cnt < max_iter)

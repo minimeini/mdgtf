@@ -281,7 +281,7 @@ namespace LBA
         const double &ycur = 0.,
         const bool &get_posterior = true)
     {
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         double regressor = ft;
@@ -293,13 +293,13 @@ namespace LBA
         {
             switch (link_list[model.flink])
             {
-            case AVAIL::Func::identity:
+            case LinkFunc::Func::identity:
             {
                 alpha = std::pow(regressor, 2.) / qt;
                 beta = regressor / qt;
                 break;
             }
-            case AVAIL::Func::exponential:
+            case LinkFunc::Func::exponential:
             {
                 alpha = 1. / qt;
                 double nom = std::exp(-regressor);
@@ -361,7 +361,7 @@ namespace LBA
         const double &alpha,
         const double &beta)
     {
-        std::map<std::string, AVAIL::Func> link_list = AVAIL::link_list;
+        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         switch (obs_list[model.dobs.name])
@@ -370,12 +370,12 @@ namespace LBA
         {
             switch (link_list[model.flink])
             {
-            case AVAIL::Func::identity:
+            case LinkFunc::Func::identity:
             {
                 Poisson::moments_mean(mean_ft, var_ft, alpha, beta, 0.);
                 break;
             }
-            case AVAIL::Func::exponential:
+            case LinkFunc::Func::exponential:
             {
                 mean_ft = Gamma::mean_logGamma(alpha, beta);
                 var_ft = Gamma::var_logGamma(alpha, 0.);
