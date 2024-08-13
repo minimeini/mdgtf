@@ -47,8 +47,8 @@ namespace LBA
         const arma::vec &mt_old,
         const double &yold)
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        if (trans_list[model.ftrans] == AVAIL::Transfer::iterative)
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
         {
             double coef_now = TransFunc::coef_iterative(model.dlag.par1, model.dlag.par2);
             double dhpsi_now = GainFunc::psi2dhpsi(
@@ -201,9 +201,9 @@ namespace LBA
         const arma::vec &yall,      // y[0], y[1], ..., y[nT]
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         arma::vec Ft(theta_cur.n_elem, arma::fill::zeros);
-        if (trans_list[ftrans] == AVAIL::sliding)
+        if (trans_list[ftrans] == TransFunc::sliding)
         {
             const unsigned int nL = theta_cur.n_elem;
             unsigned int nstart = (t > nL) ? (t - nL) : 0;
@@ -742,8 +742,8 @@ namespace LBA
 
         void smoother(const bool &use_pseudo = false)
         {
-            std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-            bool is_iterative = trans_list[_model.ftrans] == AVAIL::Transfer::iterative;
+            std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+            bool is_iterative = trans_list[_model.ftrans] == TransFunc::Transfer::iterative;
             std::map<std::string, DiscountType> discount_list = map_discount_type();
             bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
 

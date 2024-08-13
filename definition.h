@@ -44,11 +44,7 @@ public:
         logistic
     };
 
-    enum Transfer
-    {
-        sliding,
-        iterative
-    };
+    
 
     enum Param
     {
@@ -76,7 +72,7 @@ public:
 
 
     static const std::map<std::string, Algo> algo_list;
-    static const std::map<std::string, Transfer> trans_list;
+    
     static const std::map<std::string, Func> link_list;
     static const std::map<std::string, Dist> dist_list;
     static const std::map<std::string, Dist> err_list;
@@ -125,19 +121,7 @@ private:
         return ALGO_MAP;
     }
 
-    static std::map<std::string, Transfer> map_trans_func()
-    {
-        std::map<std::string, Transfer> TRANS_MAP;
-
-        TRANS_MAP["sliding"] = Transfer::sliding;
-        TRANS_MAP["slide"] = Transfer::sliding;
-        TRANS_MAP["koyama"] = Transfer::sliding;
-
-        TRANS_MAP["iterative"] = Transfer::iterative;
-        TRANS_MAP["iter"] = Transfer::iterative;
-        TRANS_MAP["solow"] = Transfer::iterative;
-        return TRANS_MAP;
-    }
+    
 
     static std::map<std::string, Func> map_link_func()
     {
@@ -273,13 +257,9 @@ private:
 }; // class AVAIL
 
 inline const std::map<std::string, AVAIL::Algo> AVAIL::algo_list = AVAIL::map_algorithm();
-inline const std::map<std::string, AVAIL::Transfer> AVAIL::trans_list = AVAIL::map_trans_func();
 inline const std::map<std::string, AVAIL::Func> AVAIL::link_list = AVAIL::map_link_func();
-
 inline const std::map<std::string, AVAIL::Dist> AVAIL::dist_list = AVAIL::map_dist();
-
 inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
-
 inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 inline const std::map<std::string, AVAIL::Loss> AVAIL::loss_list = AVAIL::map_loss_func();
 inline const std::map<std::string, AVAIL::Param> AVAIL::tuning_param_list = AVAIL::map_tuning_param();
@@ -304,17 +284,11 @@ public:
     double par1 = 0.; // first parameter of the distribution
     double par2 = 0.; // second parameter of the distribution
 
-    bool infer = false; // if the corresponding parameter is unknown
-    double val = 0.; // initial value of the corresponding parameter
-
     Dist()
     {
         name = "undefined";
         par1 = 0.;
         par2 = 0.;
-
-        infer = false;
-        val = 0.;
     }
 
 
@@ -326,9 +300,7 @@ public:
         const double &init_val_ = 0.) // initial value of the corresponding parameter
     {
         init(name_, par1_, par2_);
-        init_param(infer_, init_val_);
     }
-
 
     void init(const std::string &name_, const double &par1_, const double &par2_)
     {
@@ -337,22 +309,39 @@ public:
         par2 = par2_;
         return;
     }
+};
+
+
+class Prior : public Dist
+{
+public:
+    bool infer = false;
+    double val = 0.;
+
+    Prior() : Dist()
+    {
+        infer = false;
+        val = 0.;
+        return;
+    }
+
+    Prior(
+        const std::string &name_,   // name of the distribution
+        const double &par1_,        // first parameter of the distribution
+        const double &par2_,        // second parameter of the distribution
+        const bool &infer_ = false, // if the corresponding parameter is unknown
+        const double &init_val_ = 0.) : Dist(name_, par1_, par2_)
+    {
+        infer = infer_;
+        val = init_val_;
+        return;
+    }
 
     void init_param(const bool &param_infer, const double &param_init)
     {
         infer = param_infer;
         val = param_init;
-    }
-
-    // const std::string &name;
-    void update_par1(const double &par1_new)
-    {
-        par1 = par1_new;
-    }
-
-    void update_par2(const double &par2_new)
-    {
-        par2 = par2_new;
+        return;
     }
 
     static double dprior(const double &val, const Dist &prior, const bool &return_log = true, const double &jacobian = false)
@@ -368,7 +357,7 @@ public:
         }
         case AVAIL::Dist::invgamma: // non-negative
         {
-            double tau2 = std::abs(1. / val); // tau2 ~ Gamma
+            double tau2 = std::abs(1. / val);      // tau2 ~ Gamma
             double logtau2 = std::log(tau2 + EPS); // log jacobian
 
             out = R::dgamma(tau2, prior.par1, 1. / prior.par2, true);
@@ -435,18 +424,18 @@ public:
         {
             if (jacobian) // plus jacobian
             {
-                out = - prior.par1 + prior.par2 / val;
+                out = -prior.par1 + prior.par2 / val;
             }
             else
             {
-                out = - (prior.par1 + 1.) / val;
+                out = -(prior.par1 + 1.) / val;
                 out += prior.par2 / std::pow(val, 2.);
             }
             break;
         }
         case AVAIL::Dist::gaussian: // whole real line
         {
-            out = - val / prior.par2;
+            out = -val / prior.par2;
             break;
         }
         case AVAIL::Dist::gamma: // non-negative
@@ -519,7 +508,7 @@ public:
         {
             if (inverse_transform)
             { // logistic
-                double tmp = std::exp( - val);
+                double tmp = std::exp(-val);
                 out = 1. / (1. + tmp);
             }
             else
@@ -527,7 +516,7 @@ public:
                 double odd = std::abs(val / (1. - val));
                 out = std::log(odd + EPS);
             }
-            
+
             break;
         }
         default: // gaussian or other types
@@ -538,43 +527,6 @@ public:
 
         return out;
     }
-};
-
-
-class Prior : public Dist
-{
-public:
-    bool infer = false;
-    double val = 0.;
-
-    Prior() : Dist()
-    {
-        infer = false;
-        val = 0.;
-        return;
-    }
-
-    Prior(
-        const std::string &name_,   // name of the distribution
-        const double &par1_,        // first parameter of the distribution
-        const double &par2_,        // second parameter of the distribution
-        const bool &infer_ = false, // if the corresponding parameter is unknown
-        const double &init_val_ = 0.) : Dist(name_, par1_, par2_)
-    {
-        infer = infer_;
-        val = init_val_;
-        return;
-    }
-
-    void init_param(const bool &param_infer, const double &param_init)
-    {
-        infer = param_infer;
-        val = param_init;
-        return;
-    }
-
-
-    
 };
 
 

@@ -19,6 +19,12 @@
 class TransFunc
 {
 public:
+    enum Transfer
+    {
+        sliding,
+        iterative
+    };
+    static const std::map<std::string, Transfer> trans_list;
     /**
      * @brief f[t](btheta[t],y[0:t]) calculate: sum Fphi[k] * h(psi[t + 1 - k]) * y[t - k]. This is exact formula for sliding transfer function. The effective number of elements is min(nL, t).
      *
@@ -51,9 +57,9 @@ public:
 
     static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding")
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::vec F0(nP, arma::fill::zeros);
-        if (trans_list[trans_func] == AVAIL::Transfer::iterative)
+        if (trans_list[trans_func] == Transfer::iterative)
         {
             F0.at(1) = 1.;
         }
@@ -62,13 +68,13 @@ public:
 
     static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding")
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::mat G0(nP, nP, arma::fill::zeros);
         G0.at(0, 0) = 1.;
         unsigned int idx_end = nP - 1;
         unsigned int idx_start;
 
-        if (trans_list[trans_func] == AVAIL::Transfer::iterative)
+        if (trans_list[trans_func] == Transfer::iterative)
         {
             arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
             double coef_now = std::pow(1. - dlag.par1, dlag.par2);
@@ -168,10 +174,10 @@ public:
     {
         double ft_now = 0.;
         std::string trans_func_name = tolower(trans_func);
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         switch (trans_list[trans_func_name])
         {
-        case AVAIL::Transfer::sliding:
+        case Transfer::sliding:
         {
             /*
             It uses:
@@ -183,7 +189,7 @@ public:
             ft_now = TransFunc::transfer_sliding(t, dlag.nL, y, Fphi, hpsi);
             break;
         }
-        case AVAIL::Transfer::iterative:
+        case Transfer::iterative:
         {
             /*
             It uses:
@@ -217,6 +223,23 @@ public:
 
         return ft_now;
     }
+
+private:
+    static std::map<std::string, Transfer> map_trans_func()
+    {
+        std::map<std::string, Transfer> TRANS_MAP;
+
+        TRANS_MAP["sliding"] = Transfer::sliding;
+        TRANS_MAP["slide"] = Transfer::sliding;
+        TRANS_MAP["koyama"] = Transfer::sliding;
+
+        TRANS_MAP["iterative"] = Transfer::iterative;
+        TRANS_MAP["iter"] = Transfer::iterative;
+        TRANS_MAP["solow"] = Transfer::iterative;
+        return TRANS_MAP;
+    }
 };
+
+inline const std::map<std::string, TransFunc::Transfer> TransFunc::trans_list = TransFunc::map_trans_func();
 
 #endif

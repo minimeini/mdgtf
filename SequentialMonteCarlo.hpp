@@ -319,7 +319,7 @@ namespace SMC
         )
         {
 
-            std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+            std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
             double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink, 0.);
 
             unsigned int N = Theta_next.n_cols;
@@ -353,7 +353,7 @@ namespace SMC
                 arma::mat Urchol_cur = K_cur;
                 double ldetU = 0.;
 
-                if (trans_list[model.ftrans] == AVAIL::sliding)
+                if (trans_list[model.ftrans] == TransFunc::Transfer::sliding)
                 {
                     for (unsigned int i = 0; i < model.nP - 1; i++)
                     {

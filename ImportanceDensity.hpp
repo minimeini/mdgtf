@@ -431,13 +431,13 @@ static void backward_kernel(
     const arma::vec &Wt,
     const arma::vec &y)
 {
-    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
     const unsigned int nP = vt.n_rows;
     arma::mat U_cur = K;
     arma::mat Uprec_cur = K;
     arma::mat Urchol_cur = K;
 
-    if (trans_list[model.ftrans] == AVAIL::sliding)
+    if (trans_list[model.ftrans] == TransFunc::sliding)
     {
         for (unsigned int i = 0; i < nP - 1; i++)
         {
@@ -486,7 +486,7 @@ static arma::vec qbackcast(
     const bool &full_rank = false
 )
 {
-    std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
 
     double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink, 0.);
 

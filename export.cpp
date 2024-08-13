@@ -774,7 +774,7 @@ arma::mat dgtf_optimal_lag(
         Rcpp::checkUserInterrupt();
         
         double par1 = par1_grid.at(i);
-        model.dlag.update_par1(par1);
+        model.dlag.par1 = par1;
         
 
         for (unsigned int j = 0; j < npar2; j ++)
@@ -944,7 +944,7 @@ arma::mat dgtf_optimal_obs(
         Rcpp::checkUserInterrupt();
 
         double delta = delta_grid.at(i);
-        model.dobs.update_par2(delta);
+        model.dobs.par2 = delta;
         stats.at(i, 0) = delta;
 
         double err_forecast = 0.;

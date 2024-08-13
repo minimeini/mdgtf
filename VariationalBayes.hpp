@@ -42,7 +42,7 @@ namespace VB
         double par1 = 0.4;
         double par2 = 6;
 
-        Dist W_prior, mu0_prior, rho_prior, par1_prior, par2_prior;
+        Prior W_prior, mu0_prior, rho_prior, par1_prior, par2_prior;
 
         arma::vec W_stored;    // nsample x 1
         arma::vec mu0_stored;  // nsample x 1
@@ -929,10 +929,10 @@ namespace VB
             const arma::vec &ft,         // (nT + 1) x 1
             const arma::vec &eta,        // m x 1
             const std::vector<std::string> &param_selected,
-            const Dist &W_prior,
-            const Dist &lag_par1_prior,
-            const Dist &lag_par2_prior,
-            const Dist &rho_prior,
+            const Prior &W_prior,
+            const Prior &lag_par1_prior,
+            const Prior &lag_par2_prior,
+            const Prior &rho_prior,
             const Model &model)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
@@ -1075,19 +1075,19 @@ namespace VB
                 case AVAIL::Param::W: // W is selected
                 {
                     W = val;
-                    model.derr.update_par1(val);
+                    model.derr.par1 = val;
                     break;
                 }
                 case AVAIL::Param::mu0: // mu0 is selected
                 {
                     mu0 = val;
-                    model.dobs.update_par1(val);
+                    model.dobs.par1 = val;
                     break;
                 }
                 case AVAIL::Param::rho: // rho is selected
                 {
                     rho = val;
-                    model.dobs.update_par2(val);
+                    model.dobs.par2 = val;
                     break;
                 }
                 case AVAIL::Param::lag_par1: // par 1 is selected

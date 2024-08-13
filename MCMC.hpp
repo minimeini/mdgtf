@@ -329,7 +329,7 @@ namespace MCMC
 
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
-                    model.dobs.update_par1(mu0_new);
+                    model.dobs.par1 = mu0_new;
                     mu0 = mu0_new;
                     mu0_accept += 1.;
                     // logp_mu0 = logp_new;
@@ -392,7 +392,7 @@ namespace MCMC
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
                 rho = rho_new;
-                model.dobs.update_par2(rho_new);
+                model.dobs.par2 = rho_new;
                 rho_accept += 1.;
                 // logp_mu0 = logp_new;
             }
@@ -407,8 +407,8 @@ namespace MCMC
             Model &model,
             const arma::vec &y, // nobs x 1
             const arma::vec &hpsi,
-            const Dist &par1_prior,
-            const Dist &par2_prior,
+            const Prior &par1_prior,
+            const Prior &par2_prior,
             const double &par1_mh_sd = 0.1,
             const double &par2_mh_sd = 0.1,
             const unsigned int &max_lag = 30)
@@ -1010,8 +1010,8 @@ namespace MCMC
                     // arma::vec wt = arma::diff(psi);
                     double W_old = W;
                     W = Posterior::update_W(W_accept, W_old, wt, W_prior, mh_sd);
-                    w0_prior.update_par2(W);
-                    model.derr.update_par1(W);
+                    w0_prior.par2 = W;
+                    model.derr.par1 = W;
                 }
 
                 if (par1_prior.infer || par2_prior.infer)
@@ -1095,36 +1095,36 @@ namespace MCMC
 
         unsigned int max_lag = 30;
 
-        Dist w0_prior;
+        Prior w0_prior;
         arma::vec wt;
         arma::vec wt_accept; // nsample x 1
         arma::mat wt_stored; // (nT + 1) x nsample
 
-        Dist mu0_prior;
+        Prior mu0_prior;
         double mu0 = 0.;
         arma::vec mu0_stored;
         double mu0_accept = 0.;
         double mu0_mh_sd = 1.;
 
-        Dist rho_prior;
+        Prior rho_prior;
         double rho = 0.;
         arma::vec rho_stored;
         double rho_accept = 0.;
         double rho_mh_sd = 1.;
 
-        Dist par1_prior;
+        Prior par1_prior;
         double par1 = 0.;
         arma::vec par1_stored;
         double par1_accept = 0.;
         double par1_mh_sd = 1.;
 
-        Dist par2_prior;
+        Prior par2_prior;
         double par2 = 0.;
         arma::vec par2_stored;
         double par2_accept = 0.;
         double par2_mh_sd = 1.;
 
-        Dist W_prior;
+        Prior W_prior;
         double W = 0.01;
         arma::vec W_stored;
         double W_accept = 0.;

@@ -305,7 +305,7 @@ inline arma::vec randdraw(double d, int n)
 	return out;
 }
 
-inline void init_param(bool &infer, double &init, Dist &prior, const Rcpp::List &opts)
+inline void init_param(bool &infer, double &init, Prior &prior, const Rcpp::List &opts)
 {
 	Rcpp::List param_opts = opts;
 

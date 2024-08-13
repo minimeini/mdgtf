@@ -267,7 +267,7 @@ public:
         const unsigned int &ntime,
         const double &y0 = 0.)
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         if (!model.dlag.truncated)
         {
             model.dlag.nL = ntime;
@@ -1101,8 +1101,8 @@ public:
         const arma::mat &psi, // (nT + B) x N
         const Model &model)
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        if (trans_list[model.ftrans] == AVAIL::Transfer::iterative)
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
         {
             throw std::invalid_argument("psi2theta: only for sliding transfer function.");
         }
@@ -1137,7 +1137,7 @@ public:
         const double &ycur
     )
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         const unsigned int nP = theta_cur.n_elem;
         arma::vec theta_next(nP, arma::fill::zeros); // nP x 1
         // theta_next.copy_size(theta_cur);
@@ -1147,7 +1147,7 @@ public:
 
         switch (trans_list[ftrans])
         {
-        case AVAIL::Transfer::iterative:
+        case TransFunc::Transfer::iterative:
         {
             double hpsi = GainFunc::psi2hpsi(theta_cur.at(0), fgain);
             theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
@@ -1215,10 +1215,10 @@ public:
         const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
     )
     {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         const int nL = theta_cur.n_elem;
         double ft_cur;
-        if (trans_list[ftrans] == AVAIL::sliding)
+        if (trans_list[ftrans] == TransFunc::sliding)
         {
             int nelem = std::min(t, nL); // min(t,nL)
 
