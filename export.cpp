@@ -145,54 +145,20 @@ Rcpp::List dgtf_model(
 Rcpp::List dgtf_simulate(
     const Rcpp::List &settings, 
     const unsigned int &ntime,
-    const std::string &sim_algo = "transfunc",
     const double &y0 = 0.,
     const Rcpp::Nullable<Rcpp::NumericVector> theta0 = R_NilValue)
 {
-    std::string sim_method = tolower(sim_algo);
-    enum method {
-        TransFunc,
-        StateSpace
-    };
-
-    std::map<std::string, method> map;
-    map["transfunc"] = method::TransFunc;
-    map["transfer"] = method::TransFunc;
-    map["trans_func"] = method::TransFunc;
-    map["tf"] = method::TransFunc;
-
-    map["statespace"] = method::StateSpace;
-    map["state_space"] = method::StateSpace;
-    map["ss"] = method::StateSpace;
-
     Rcpp::List output = settings;
     Model model(settings);
 
-    switch (map[sim_algo])
-    {
-    case method::TransFunc:
-    {
-        arma::vec psi, lambda, y;
-        Model::simulate(y, lambda, psi, model, ntime, y0);
+    arma::vec psi, lambda, y;
+    Model::simulate(y, lambda, psi, model, ntime, y0);
 
-        output["y"] = Rcpp::wrap(y);
-        output["psi"] = Rcpp::wrap(psi);
-        // output["wt"] = Rcpp::wrap(wt);
-        output["lambda"] = Rcpp::wrap(lambda);
-        break;
-    }
-    case method::StateSpace:
-    {
-        output = StateSpace::simulate(model, ntime, y0, theta0);
-        break;
-    }
-    default:
-    {
-        break;
-    }
-    }
-    
-    
+    output["y"] = Rcpp::wrap(y);
+    output["psi"] = Rcpp::wrap(psi);
+    // output["wt"] = Rcpp::wrap(wt);
+    output["lambda"] = Rcpp::wrap(lambda);
+
     return output;
 }
 

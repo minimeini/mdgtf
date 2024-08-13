@@ -1252,55 +1252,6 @@ public:
         return ft_cur;
     }
 
-    static Rcpp::List simulate(
-        const Model &model,
-        const unsigned int &ntime,
-        const double &y0 = 0.,
-        const Rcpp::Nullable<Rcpp::NumericVector> &theta_init = R_NilValue)
-    {
-        arma::vec wt(ntime + 1, arma::fill::zeros);
-        if (model.derr.par1 > 0)
-        {
-            wt = ErrDist::sample(model.derr, ntime, false);
-        }
-        wt.at(0) = model.derr.par2;
-        arma::vec psi = arma::cumsum(wt);
-
-        arma::mat wt_ss(model.nP, ntime + 1, arma::fill::zeros);
-        wt_ss.row(0) = wt.t();
-
-        arma::vec theta0(model.nP, arma::fill::zeros);
-        if (theta_init.isNotNull())
-        {
-            theta0 = Rcpp::as<Rcpp::NumericVector>(theta_init);
-        }
-
-        arma::mat theta(model.nP, ntime + 1, arma::fill::zeros);
-        theta.col(0) = theta0;
-
-        arma::vec y(ntime + 1, arma::fill::zeros);
-        arma::vec ft(ntime + 1, arma::fill::zeros);
-        arma::vec lambda(ntime + 1, arma::fill::zeros);
-
-        double mu0 = model.dobs.par1;
-        for (unsigned int t = 1; t < ntime + 1; t++)
-        {
-            
-            theta.col(t) = func_gt(model.ftrans, model.fgain, model.dlag, theta.col(t - 1), y.at(t - 1)) + wt_ss.col(t);
-            ft.at(t) = func_ft(model.ftrans, model.fgain, model.dlag, t, theta.col(t), y);
-            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, mu0);
-            y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
-        }
-
-        Rcpp::List output;
-        output["y"] = Rcpp::wrap(y);
-        output["theta"] = Rcpp::wrap(theta);
-        output["psi"] = Rcpp::wrap(psi);
-        output["wt"] = Rcpp::wrap(wt);
-        output["lambda"] = Rcpp::wrap(lambda);
-
-        return output; // Checked. OK.
-    }
 
     static Rcpp::List forecast(
         const arma::vec &y, // (nT + 1)
