@@ -802,8 +802,7 @@ arma::mat dgtf_optimal_lag(
             double par2 = par2_grid.at(j);
             stats.at(idx, 1) = par2;
             model.dlag.update_par2(par2);
-            model.dlag.get_Fphi(model.dim.nL);
-
+            model.dlag.Fphi = LagDist::get_Fphi(model.dim.nL, model.dlag);
 
             switch (lag_list[model.dlag.name])
             {

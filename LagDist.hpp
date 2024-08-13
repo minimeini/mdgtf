@@ -35,6 +35,7 @@ public:
     unsigned int nL; // number of lags
     bool truncated = true;
     double prob_thres = 0.99;
+    arma::vec Fphi; // a vector of the lag distribution CDF at desired length _nL.
 
     LagDist() : Dist(), isnbinom(_isnbinom)
     {
@@ -76,61 +77,6 @@ public:
     }
 
 
-    /**
-     * @brief Set Fphi based on number of lags, type of lag distribution and its corresponding parameters
-     *
-     *
-     */
-    void get_Fphi(const unsigned int &nlag)
-    {
-        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
-        Fphi.set_size(nlag);
-        Fphi.zeros();
-        
-        double nlag2 = nlag;
-
-        switch (lag_list[name])
-        {
-        case AVAIL::Dist::lognorm:
-        {
-            try
-            {
-                Fphi = lognorm::dlognorm(nlag, par1, par2);
-            }
-            catch(const std::invalid_argument& e)
-            {
-                std::cout << "Lag: lognorm(" << par1 << ", " << par2 << ")\n";
-                std::cerr << e.what() << '\n';
-                throw;
-            }
-
-            break;
-            
-        }
-        case AVAIL::Dist::nbinomp:
-        {
-            try
-            {
-                Fphi = nbinom::dnbinom(nlag, par1, par2);
-            }
-            catch(const std::exception& e)
-            {
-                std::cout << "Lag: nbinom(" << par1 << ", " << par2 << ")\n";
-                std::cerr << e.what() << '\n';
-                throw;
-            }
-
-            break;
-        }            
-        default:
-            throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
-            break;
-        }
-
-        bound_check<arma::vec>(Fphi, "void get_Fphi: _Fphi");
-
-        return;
-    }
 
     /**
      * @brief Get P.M.F of the lag distribution. [Checked. OK.s]
@@ -240,8 +186,8 @@ public:
         {
             nlag = update_nlag(name, par1, par2, 0.99, max_lag);
         }
-        
-        get_Fphi(nlag);
+
+        Fphi = LagDist::get_Fphi(nlag, name, par1, par2);
 
         return nlag;
     }
@@ -309,11 +255,7 @@ public:
         return nlag;
     }
 
-    void update_Fphi(const arma::vec &Fphi_new)
-    {
-        Fphi = Fphi_new;
-        return;
-    }
+
 
     /**
      * @brief Get the optim number of lags that satisfy a specific margin of error.
@@ -346,9 +288,6 @@ public:
 
         return nlag;
     }
-
-
-    arma::vec Fphi; // a vector of the lag distribution CDF at desired length _nL.
 private:
     bool _isnbinom;
 

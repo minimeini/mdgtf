@@ -52,7 +52,7 @@ public:
         dim.init_default();
 
         dlag.init("lognorm", LN_MU, LN_SD2);
-        dlag.get_Fphi(dim.nL);
+        dlag.Fphi = LagDist::get_Fphi(dim.nL, dlag);
 
         return;
     }
@@ -110,7 +110,7 @@ public:
         derr.init("gaussian", err_param[0], err_param[1]);
 
         dlag.init(lag_dist, lag_param[0], lag_param[1]);
-        dlag.get_Fphi(dim.nL);
+        dlag.Fphi = LagDist::get_Fphi(dim.nL, dlag);
 
         return;
     }
