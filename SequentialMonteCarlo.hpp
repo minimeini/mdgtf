@@ -2252,6 +2252,7 @@ namespace SMC
             Theta_backward = Theta;
             W_backward = W_filter;
             param_backward = param_filter;
+            weights_backward = weights_forward;
 
             // mu0_filter.fill(model.dobs.par1); // N x 1
 
@@ -2307,6 +2308,7 @@ namespace SMC
                     theta, mu_marginal.slice(i).col(nT), Prec, true);
             }
 
+
             for (unsigned int t = nT - 1; t > 0; t--)
             {
                 Rcpp::checkUserInterrupt();
@@ -2323,7 +2325,6 @@ namespace SMC
                 arma::vec logq(N, arma::fill::zeros);
                 arma::mat mu;                // nP x N
                 arma::cube Prec, Sigma_chol; // nP x nP x N
-
                 arma::vec mu0_backward = arma::vectorise(param_backward.row(0));
 
                 arma::vec tau = imp_weights_backcast(
