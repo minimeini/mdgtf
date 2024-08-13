@@ -153,7 +153,6 @@ public:
      * @param y At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
      * @param ft At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
      * @param psi At least (psi[0], psi[1], ..., psi[t]), could be longer including future values.
-     * @param dim
      * @param dlag
      * @param gain_func
      * @param trans_func
@@ -164,7 +163,6 @@ public:
         const arma::vec &y,    // At least (y[0], y[1], ..., y[t-1]), could be longer including current and future values.
         const arma::vec &ft,   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
         const arma::vec &hpsi,  // At least (hpsi[0], hpsi[1], ..., hpsi[t]), could be longer including future values.
-        const Dim &dim,
         const LagDist &dlag,
         const std::string &trans_func)
     {
@@ -181,8 +179,8 @@ public:
             psi[0], ..., psi[t]
             phi[1], ..., phi[nL]
             */
-            arma::vec Fphi = LagDist::get_Fphi(dim.nL, dlag.name, dlag.par1, dlag.par2);
-            ft_now = TransFunc::transfer_sliding(t, dim.nL, y, Fphi, hpsi);
+            arma::vec Fphi = LagDist::get_Fphi(dlag.nL, dlag.name, dlag.par1, dlag.par2);
+            ft_now = TransFunc::transfer_sliding(t, dlag.nL, y, Fphi, hpsi);
             break;
         }
         case AVAIL::Transfer::iterative:

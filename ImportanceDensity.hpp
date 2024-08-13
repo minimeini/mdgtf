@@ -95,7 +95,6 @@ static arma::vec qforecast(
         {
             mod.dlag.par1 = param.at(2, i);
             mod.dlag.par2 = param.at(3, i);
-            //     unsigned int nlag = model.update_dlag(param_filter.at(2, i), param_filter.at(3, i), model.dim.nL, false);
         }
 
         arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old);
@@ -115,7 +114,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::init_Ft(mod.dim.nP, mod.ftrans);
+            arma::vec Ft_gtheta = TransFunc::init_Ft(mod.nP, mod.ftrans);
             LBA::func_Ft(Ft_gtheta, mod.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - param.at(0, i) - ft_tilde;                          // (eq 3.16)
@@ -191,7 +190,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::init_Ft(model.dim.nP, model.ftrans);
+            arma::vec Ft_gtheta = TransFunc::init_Ft(model.nP, model.ftrans);
             LBA::func_Ft(Ft_gtheta, model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
@@ -275,7 +274,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::init_Ft(model.dim.nP, model.ftrans);
+            arma::vec Ft_gtheta = TransFunc::init_Ft(model.nP, model.ftrans);
             LBA::func_Ft(Ft_gtheta, model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
@@ -329,10 +328,8 @@ static void prior_forward(
 {
     const unsigned int nP = Wt.n_elem;
     const unsigned int nT = y.n_elem - 1;
-    // arma::mat mu_marginal(dim.nP, dim.nT + 1, arma::fill::zeros);
-    // arma::cube Sigma_marginal(dim.nP, dim.nP, dim.nT + 1);
+
     arma::mat sig = arma::eye<arma::mat>(nP, nP) * 2.;
-    // arma::cube Prec_marginal = Sigma_marginal;
     prec.slice(0) = arma::eye<arma::mat>(nP, nP) * 0.5;
 
     arma::mat Gt = TransFunc::init_Gt(nP, model.dlag, model.ftrans);

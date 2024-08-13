@@ -229,10 +229,10 @@ public:
     static arma::vec Fhpsi(
         const arma::vec &hpsi,
         const unsigned int &t, 
-        const Dim &dim, 
+        const unsigned int &nL, 
         const bool &reverse = false)
     {
-        unsigned int nelem = std::min(t, dim.nL);
+        unsigned int nelem = std::min(t, nL);
         arma::vec Fh = hpsi.subvec(t - nelem + 1, t); // nelem x k
         if (reverse) { Fh = arma::reverse(Fh); }
         return Fh;
@@ -244,9 +244,9 @@ public:
      * @param t
      * @return arma::vec
      */
-    static arma::vec Fdhpsi(const arma::vec &dhpsi, const unsigned int &t, const Dim &dim, const bool &reverse = false)
+    static arma::vec Fdhpsi(const arma::vec &dhpsi, const unsigned int &t, const unsigned int &nL, const bool &reverse = false)
     {
-        unsigned int nelem = std::min(t, dim.nL);
+        unsigned int nelem = std::min(t, nL);
         arma::vec Fdh = dhpsi.subvec(t - nelem + 1, t); // nelem x k
         if (reverse) { Fdh = arma::reverse(Fdh); }
         return Fdh;

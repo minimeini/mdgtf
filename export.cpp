@@ -124,11 +124,6 @@ Rcpp::List dgtf_model(
     model["lag_dist"] = tolower(lag_dist);
     model["err_dist"] = tolower(err_dist);
 
-    Rcpp::List dim;
-    dim["nlag"] = nlag;
-    dim["ntime"] = ntime;
-    dim["truncated"] = truncated;
-
     Rcpp::List param;
     param["obs"] = obs_param;
     param["lag"] = lag_param;
@@ -136,7 +131,6 @@ Rcpp::List dgtf_model(
 
     Rcpp::List settings;
     settings["model"] = model;
-    settings["dim"] = dim;
     settings["param"] = param;
 
     return settings;
@@ -150,6 +144,7 @@ Rcpp::List dgtf_model(
 // [[Rcpp::export]]
 Rcpp::List dgtf_simulate(
     const Rcpp::List &settings, 
+    const unsigned int &ntime,
     const std::string &sim_algo = "transfunc",
     const double &y0 = 0.,
     const Rcpp::Nullable<Rcpp::NumericVector> theta0 = R_NilValue)
@@ -178,7 +173,7 @@ Rcpp::List dgtf_simulate(
     case method::TransFunc:
     {
         arma::vec psi, lambda, y;
-        Model::simulate(y, lambda, psi, model, y0);
+        Model::simulate(y, lambda, psi, model, ntime, y0);
 
         output["y"] = Rcpp::wrap(y);
         output["psi"] = Rcpp::wrap(psi);
@@ -188,7 +183,7 @@ Rcpp::List dgtf_simulate(
     }
     case method::StateSpace:
     {
-        output = StateSpace::simulate(model, y0, theta0);
+        output = StateSpace::simulate(model, ntime, y0, theta0);
         break;
     }
     default:
@@ -235,17 +230,17 @@ Rcpp::List dgtf_infer(
         y = y_in;
     }
 
+    const unsigned int nT = y.n_elem - 1;
+
     unsigned int nforecast = 0;
     if (method_settings.containsElementNamed("num_step_ahead_forecast"))
     {
         nforecast = Rcpp::as<unsigned int>(method_settings["num_step_ahead_forecast"]);
     }
 
-    // arma::vec ypad(model.dim.nT + 1, arma::fill::zeros);
-    // ypad.tail(y.n_elem) = y;
 
     Rcpp::List output, forecast, error;
-    arma::mat psi(model.dim.nT + 1, 3);
+    arma::mat psi(nT + 1, 3);
     arma::vec ci_prob = {0.025, 0.5, 0.975};
 
     switch (algo_list[algo_name])
@@ -494,9 +489,8 @@ Rcpp::List dgtf_forecast(
 {
     Model model(model_settings);
     arma::mat ycast = Model::forecast(
-        y, psi, W_stored, model.dim, model.dlag,
-        model.ftrans, 
-        model.flink, model.fgain, mu0, k); // k x nsample
+        y, psi, W_stored, model.dlag,
+        model.ftrans, model.flink, model.fgain, mu0, k); // k x nsample
 
     Rcpp::List out;
     out["ycast_all"] = Rcpp::wrap(ycast);
@@ -530,22 +524,11 @@ Rcpp::List dgtf_forecast(
         {
         case AVAIL::L1: // mae
         {
-            // psi_tmp = arma::mean(psi_loss_tmp, 1); // // (nT - i) x 1
-            // psi_loss.submat(1, i, model.dim.nT - i - 1, i) = psi_tmp;
-            // psi_loss_all.at(i) = arma::mean(psi_tmp);
-
             y_loss = arma::vectorise(arma::mean(ycast_err, 1)); // k x 1
             break;
         }
         case AVAIL::L2: // rmse
         {
-            // psi_loss_tmp = arma::square(psi_loss_tmp); // (nT - i) x nsample
-
-            // psi_tmp = arma::mean(psi_loss_tmp, 1); // (nT - i) x 1
-            // psi_loss.submat(1, i, model.dim.nT - i - 1, i) = arma::sqrt(psi_tmp);
-
-            // psi_loss_all.at(i) = arma::mean(psi_tmp);
-            // psi_loss_all.at(i) = std::sqrt(psi_loss_all.at(i));
             ycast_err = arma::square(ycast_err);
             y_loss = arma::vectorise(arma::mean(ycast_err, 1)); // k x 1
             y_loss = arma::sqrt(y_loss);
@@ -801,8 +784,8 @@ arma::mat dgtf_optimal_lag(
             stats.at(idx, 0) = par1;
             double par2 = par2_grid.at(j);
             stats.at(idx, 1) = par2;
-            model.dlag.update_par2(par2);
-            model.dlag.Fphi = LagDist::get_Fphi(model.dim.nL, model.dlag);
+            model.dlag.par2 = par2;
+            model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
 
             switch (lag_list[model.dlag.name])
             {
@@ -1059,152 +1042,4 @@ arma::mat dgtf_optimal_obs(
 
     return stats;
 }
-
-//' @export
-// [[Rcpp::export]]
-arma::mat dgtf_optimal_nlag(
-    const Rcpp::List &model_opts,
-    const arma::vec &y,
-    const std::string &algo_name,
-    const Rcpp::List &algo_opts,
-    const arma::uvec &nlag_grid,
-    const std::string &loss = "quadratic")
-{
-    unsigned int npar = nlag_grid.n_elem;
-    Rcpp::List opts = model_opts;
-    Rcpp::List dim_opts = Rcpp::as<Rcpp::List>(opts["dim"]);
-
-    arma::mat stats(npar, 3);
-    std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
-
-    for (unsigned int i = 0; i < npar; i++)
-    {
-        Rcpp::checkUserInterrupt();
-
-        unsigned int nlag = nlag_grid.at(i);
-        dim_opts["nlag"] = nlag;
-        opts["dim"] = dim_opts;
-        Model model(opts);
-
-        stats.at(i, 0) = nlag;
-
-        double err_forecast = 0.;
-        double err_fit = 0.;
-        double cov_forecast = 0.;
-        double width_forecast = 0.;
-
-        switch (algo_list[algo_name])
-        {
-        case AVAIL::Algo::LinearBayes:
-        {
-            LBA::LinearBayes linear_bayes(model, y);
-            linear_bayes.init(algo_opts);
-
-            try
-            {
-                linear_bayes.filter();
-                linear_bayes.smoother();
-
-                linear_bayes.fitted_error(err_fit, 1000, loss);
-                linear_bayes.forecast_error(err_forecast, cov_forecast, width_forecast, 1000, loss);
-            }
-            catch (...)
-            {
-                err_fit = NA_REAL;
-                err_forecast = NA_REAL;
-            }
-
-            break;
-        } // case Linear Bayes
-        case AVAIL::Algo::MCS:
-        {
-            SMC::MCS mcs(model, algo_opts);
-            mcs.infer(model, y);
-
-            mcs.fitted_error(err_fit, model, y, loss);
-            mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
-
-            break;
-        } // case MCS
-        case AVAIL::Algo::FFBS:
-        {
-            SMC::FFBS ffbs(model, algo_opts);
-            ffbs.infer(model, y);
-
-            ffbs.fitted_error(err_fit, model, y, loss);
-            ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
-
-            break;
-        } // case FFBS
-        case AVAIL::Algo::ParticleLearning:
-        {
-            SMC::PL pl(model, algo_opts);
-            pl.infer(model, y);
-
-            pl.fitted_error(err_fit, model, y, loss);
-            pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
-
-            break;
-        } // case particle learning
-        case AVAIL::Algo::MCMC:
-        {
-            MCMC::Disturbance mcmc(model, algo_opts);
-            mcmc.infer(model, y);
-
-            mcmc.fitted_error(err_fit, model, loss);
-            // mcmc.forecast_error(err_forecast, model, loss);
-            break;
-        }
-        case AVAIL::Algo::HybridVariation:
-        {
-            VB::Hybrid hvb(model, algo_opts);
-            hvb.infer(model, y);
-
-            hvb.fitted_error(err_fit, model, loss);
-            // hvb.forecast_error(err_forecast, model, loss);
-            break;
-        }
-        default:
-        {
-            throw std::invalid_argument("Unknown algorithm " + algo_name);
-            break;
-        }
-        } // switch by algorithm
-
-        stats.at(i, 1) = err_forecast;
-        stats.at(i, 2) = width_forecast;
-
-        Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << npar;
-
-    } // loop over par1
-
-    Rcpp::Rcout << std::endl;
-
-    return stats;
-}
-
-// [[Rcpp::export]]
-arma::vec rmvnorm_arma_solve(const arma::mat &precision, const arma::vec &location, const arma::vec &scaled_mu)
-{
-
-    arma::vec epsilon = arma::randn(precision.n_rows);
-    arma::mat precision_chol = arma::chol(precision);
-    // arma::vec scaled_mu = arma::solve(arma::trimatu(precision_chol.t()), location);
-    arma::vec draw = arma::solve(arma::trimatu(precision_chol), epsilon + scaled_mu);
-
-    return draw;
-}
-
-// [[Rcpp::export]]
-arma::vec rmvnorm_arma_inv(const arma::mat &precision, const arma::vec &location)
-{
-
-    arma::vec epsilon = arma::randn(precision.n_rows);
-    arma::mat precision_chol = arma::chol(precision);
-    arma::mat precision_chol_inv = arma::inv(arma::trimatu(precision_chol));
-    arma::vec draw = precision_chol_inv * (precision_chol_inv.t() * location + epsilon);
-
-    return draw;
-}
-
 

@@ -30,53 +30,73 @@
  */
 class LagDist : public Dist
 {
+private:
+    double prob_thres = 0.99;
 public:
     static const std::map<std::string, AVAIL::Dist> lag_list;
-    bool isnbinom;
-    unsigned int nL; // number of lags
+    unsigned int nL = 0; // number of lags
     bool truncated = true;
-    double prob_thres = 0.99;
     arma::vec Fphi; // a vector of the lag distribution CDF at desired length _nL.
 
     LagDist() : Dist()
     {
-        init_default();
+        name = "nbinom";
+        par1 = NB_KAPPA;
+        par2 = NB_R;
+        nL = 0;
+        truncated = false;
         return;
     }
 
     LagDist(
         const std::string &name,
         const double &par1,
-        const double &par2) : Dist()
+        const double &par2, 
+        const bool &truncated) : Dist()
     {
-        init(name, par1, par2);
+        init(name, par1, par2, truncated);
         return;
     }
 
     void init(
         const std::string &name_in,
         const double &par1_in,
-        const double &par2_in)
+        const double &par2_in,
+        const bool &truncated_in)
     {
         std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
         name = name_in;
         par1 = par1_in;
         par2 = par2_in;
-        isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
+        truncated = truncated_in;
+
+        if (truncated)
+        {
+            nL = get_nlag(name, par1, par2, prob_thres);
+            Fphi = get_Fphi(nL, name, par1, par2);
+        }
+        else
+        {
+            nL = 0;
+        }
 
         return;
     }
 
-    void init_default()
+    void update_param(const double &par1_new, const double &par2_new, const bool &update_num_lag = true, const unsigned int &max_lag = 30)
     {
-        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
-        name = "nbinom";
-        par1 = NB_KAPPA;
-        par2 = NB_R;
-        isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
+        par1 = par1_new;
+        par2 = par2_new;
+
+        if (update_num_lag)
+        {
+            nL = get_nlag(name, par1, par2, 0.99, max_lag);
+        }
+
+        Fphi = LagDist::get_Fphi(nL, name, par1, par2);
+
+        return;
     }
-
-
 
     /**
      * @brief Get P.M.F of the lag distribution. [Checked. OK.s]
@@ -112,27 +132,13 @@ public:
         return Fphi;
     }
 
-    static arma::vec get_Fphi(
-        const unsigned int &nlag,
-        const LagDist &dlag)
+    static arma::vec get_Fphi(const LagDist &dlag)
     {
-        arma::vec Fphi(nlag, arma::fill::zeros);
-        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
-
-        switch (lag_list[dlag.name])
+        if (dlag.nL == 0)
         {
-        case AVAIL::Dist::lognorm:
-            Fphi = lognorm::dlognorm(nlag, dlag.par1, dlag.par2);
-            break;
-        case AVAIL::Dist::nbinomp:
-            Fphi = nbinom::dnbinom(nlag, dlag.par1, dlag.par2);
-            break;
-        default:
-            throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
+            throw std::invalid_argument("LagDist::get_Fphi: dlag.nL must be a positive integer.");
         }
-
-        bound_check<arma::vec>(Fphi, "arma::vec get_Fphi: Fphi");
-        return Fphi;
+        return get_Fphi(dlag.nL, dlag.name, dlag.par1, dlag.par2);
     }
 
     /**
@@ -175,22 +181,6 @@ public:
         return Fphi_deriv;
     }
 
-
-    unsigned int update_param(const double &par1_new, const double &par2_new, const unsigned int &max_lag = 30, const bool &update_num_lag = true)
-    {
-        par1 = par1_new;
-        par2 = par2_new;
-
-        unsigned int nlag = Fphi.n_elem;
-        if (update_num_lag)
-        {
-            nlag = get_nlag(name, par1, par2, 0.99, max_lag);
-        }
-
-        Fphi = LagDist::get_Fphi(nlag, name, par1, par2);
-
-        return nlag;
-    }
 
     /**
      * @brief If number of lags changes, just run `get_nlag` and then run `get_Fphi` to update lag distribution.
@@ -255,6 +245,10 @@ public:
         return nlag;
     }
 
+    static unsigned int get_nlag(const LagDist &dlag)
+    {
+        return get_nlag(dlag.name, dlag.par1, dlag.par2);
+    }
 
 private:
     static std::map<std::string, AVAIL::Dist> map_lag_dist()

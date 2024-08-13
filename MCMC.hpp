@@ -37,8 +37,8 @@ namespace MCMC
             const Model &model,
             const unsigned int &N = 50)
         {
-            arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, y.n_elem);
-            arma::vec Wt(model.dim.nP, arma::fill::zeros);
+            arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+            arma::vec Wt(model.nP, arma::fill::zeros);
             Wt.at(0) = model.derr.par1;
 
             const bool full_rank = false;
@@ -54,13 +54,13 @@ namespace MCMC
                 Rcpp::checkUserInterrupt();
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat loc(model.dim.nP, N, arma::fill::zeros);
+                arma::mat loc(model.nP, N, arma::fill::zeros);
                 arma::cube prec_chol_inv; // nP x nP x N
                 arma::mat Theta_cur = Theta.slice(t);
 
                 if (full_rank)
                 {
-                    prec_chol_inv = arma::zeros<arma::cube>(model.dim.nP, model.dim.nP, N); // nP x nP x N
+                    prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
                 }
 
                 arma::vec tau = qforecast(
@@ -81,7 +81,7 @@ namespace MCMC
                 logq = logq.elem(resample_idx);
 
                 // Propagate
-                arma::mat Theta_new(model.dim.nP, N, arma::fill::zeros);
+                arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::vec theta_cur = arma::vectorise(Theta_cur.row(0)); // N x 1
                 #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
@@ -295,7 +295,7 @@ namespace MCMC
             double logp_old = 0.;
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                eta.at(t) = TransFunc::transfer_sliding(t, model.dim.nL, y, model.dlag.Fphi, hpsi);
+                eta.at(t) = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
                 lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_old);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
@@ -353,7 +353,7 @@ namespace MCMC
             arma::vec lambda(y.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.dlag.Fphi, hpsi);
+                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
                 lambda.at(t) = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_old, true);
@@ -420,7 +420,7 @@ namespace MCMC
             double loglik_old = 0.;
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.dlag.Fphi, hpsi);
+                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
                 loglik_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
@@ -506,12 +506,11 @@ namespace MCMC
                 par1_accept += 1;
                 par2_accept += 1;
 
-                /**
-                 * @todo update nL and SS dimension nP
-                 * 
-                 */
                 model.dlag.par1 = par1_new;
                 model.dlag.par2 = par2_new;
+                model.dlag.nL = LagDist::get_nlag(model.dlag);
+                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+
                 // nlag = model.update_dlag(par1_new, par2_new, max_lag);
                 par.at(0) = par1_new;
                 par.at(1) = par2_new;
@@ -549,7 +548,7 @@ namespace MCMC
 
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dim.nL, y, model.dlag.Fphi, hpsi);
+                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
                 double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
 
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
@@ -572,7 +571,7 @@ namespace MCMC
             current_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
 
             // half step update of momentum
-            unsigned int nlag = model.dim.nL;
+            unsigned int nlag = model.dlag.nL;
             arma::vec Fphi_new = model.dlag.Fphi;
 
             arma::vec grad_U = Model::dloglik_dpar(
@@ -643,12 +642,10 @@ namespace MCMC
                 par1_accept += 1;
                 par2_accept += 1;
 
-                /**
-                 * @todo update nL and SS dimension nP
-                 *
-                 */
                 model.dlag.par1 = par1_new;
                 model.dlag.par2 = par2_new;
+                model.dlag.nL = LagDist::get_nlag(model.dlag);
+                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
 
                 par.at(0) = par1_new;
                 par.at(1) = par2_new;
@@ -947,7 +944,7 @@ namespace MCMC
 
             wt = arma::randn(nT + 1) * 0.01;
             wt.at(0) = 0.;
-            wt.subvec(1, model.dim.nP) = arma::abs(wt.subvec(1, model.dim.nP));
+            wt.subvec(1, model.nP) = arma::abs(wt.subvec(1, model.nP));
             bound_check(wt, "Disturbance::init");
 
             wt_stored.set_size(nT + 1, nsample);
@@ -1001,7 +998,7 @@ namespace MCMC
             {
                 Rcpp::checkUserInterrupt();
 
-                approx_dlm.set_Fphi(model.dlag, model.dim.nL);
+                approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
                 Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, mh_sd);
                 arma::vec psi = arma::cumsum(wt);
 

@@ -206,7 +206,6 @@ namespace LBA
         if (trans_list[ftrans] == AVAIL::sliding)
         {
             const unsigned int nL = theta_cur.n_elem;
-            // unsigned int nelem = std::min(t, model.dim.nL); // min(t,nL)
             unsigned int nstart = (t > nL) ? (t - nL) : 0;
             // unsigned int nstart = std::max((unsigned int)0, t - nL);
             unsigned int nend = std::max(nL - 1, t - 1);
@@ -214,18 +213,6 @@ namespace LBA
 
             arma::vec yold(nL, arma::fill::zeros);
             yold.tail(nelem) = yall.subvec(nstart, nend);
-            // yold.head(nelem) = yall.subvec(t - nelem, t - 1); // y[t - min(t,nL)], ..., y[t-1], 0, ..., 0 => 
-            // yold = arma::reverse(yold);                       // y[t-1], ..., y[t-min(t,nL)]
-            // arma::vec ytmp = yall.subvec(t - nelem, t - 1);
-
-            // if (nelem > 1)
-            // {
-            //     yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
-            // }
-            // else
-            // {
-            //     yold.at(model.dim.nL - 1) = yall.at(t - 1);
-            // }
 
             if (fill_zero)
             {
@@ -484,45 +471,6 @@ namespace LBA
         const arma::cube &Rtilde;
         const arma::vec &alpha_t;
         const arma::vec &beta_t;
-        // LinearBayes() : at(_at), Rt(_Rt), mt(_mt), Ct(_Ct)
-        // {
-        //     Model model_;
-        //     _W = 0.01;
-        //     _use_discount = false;
-        //     _discount_factor = 0.95;
-
-        //     _nT = model_.dim.nT;
-        //     _nP = model_.dim.nP;
-
-        //     double _ft = 0.;
-        //     _ft_prior_mean = _ft;
-        //     _ft_prior_var = _ft;
-        //     _ft_post_mean = _ft;
-        //     _ft_post_var = _ft;
-        //     _alphat = _ft;
-        //     _betat = _ft;
-
-        //     _At.set_size(_nP);
-        //     _At.zeros();
-
-        //     _Ft = model_.transfer.F0; // set F[0]
-        //     _Gt = model_.transfer.G0; // set G[0]
-
-        //     _at.set_size(_nP, _nT + 1);
-        //     _at.zeros();
-        //     _mt = _at;
-        //     _atilde_t = _at;
-        //     // set m[0]
-
-        //     _Rt.set_size(_nP, _nP, _nT + 1);
-        //     _Rt.for_each([](arma::cube::elem_type &val)
-        //                  { val = 0.; });
-        //     _Rtilde_t = Rt;
-        //     _Ct = _Rt;
-        //     _Ct.slice(0) = arma::eye<arma::mat>(_nP, _nP);
-        //     _Ct.for_each([](arma::cube::elem_type &val)
-        //                  { val *= 10.; });
-        // }
 
         LinearBayes(
         const Model &model, 
@@ -536,8 +484,8 @@ namespace LBA
             _discount_factor = discount_factor;
             _use_discount = use_discount;
 
-            _nP = model.dim.nP;
-            _nT = model.dim.nT;
+            _nP = model.nP;
+            _nT = y.n_elem - 1;
 
             double _ft = 0.;
             // _ft_prior_mean = _ft;
@@ -565,8 +513,8 @@ namespace LBA
             _At.set_size(_nP);
             _At.zeros();
 
-            _Ft = TransFunc::init_Ft(model.dim.nP, model.ftrans); // set F[0]
-            _Gt = TransFunc::init_Gt(model.dim.nP, model.dlag, model.ftrans); // set G[0]
+            _Ft = TransFunc::init_Ft(model.nP, model.ftrans); // set F[0]
+            _Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans); // set G[0]
 
             _at.set_size(_nP, _nT + 1);
             _at.zeros();
@@ -583,7 +531,7 @@ namespace LBA
             _Ct.for_each([&theta_upbnd](arma::cube::elem_type &val) { val *= theta_upbnd; });
             // set C[0]
 
-            _y.set_size(model.dim.nT + 1);
+            _y.set_size(_nT + 1);
             _y.zeros();
             _y.tail(y.n_elem) = y; // (nT + 1) x 1;
             _y.elem(arma::find(_y < EPS)).fill(0.01 / static_cast<double>(_nP));
@@ -734,10 +682,10 @@ namespace LBA
         {
             const unsigned int nT = _y.n_elem - 1;
             unsigned int tstart = 1;
-            if (_do_reference_analysis && (_model.dim.nL < nT))
+            if (_do_reference_analysis && (_model.dlag.nL < nT))
             {
                 filter_single_iter(1);
-                for (unsigned int t = 2; t <= _model.dim.nL; t++)
+                for (unsigned int t = 2; t <= _model.dlag.nL; t++)
                 {
                     _at.col(t) = _at.col(1);
                     _Rt.slice(t) = _Rt.slice(1);
@@ -746,7 +694,7 @@ namespace LBA
                     _alpha_t.at(t) = _alpha_t.at(1);
                     _beta_t.at(t) = _beta_t.at(1);
                 }
-                tstart = _model.dim.nL + 1;
+                tstart = _model.dlag.nL + 1;
             }
 
 
@@ -1022,17 +970,17 @@ namespace LBA
             arma::mat y_cov_cast(nT + 1, k,arma::fill::zeros);            // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
 
-            arma::cube at_cast = arma::zeros<arma::cube>(_model.dim.nP, nT + 1, k + 1);
+            arma::cube at_cast = arma::zeros<arma::cube>(_model.nP, nT + 1, k + 1);
             arma::field<arma::cube> Rt_cast(k + 1);
-            arma::mat Gt_cast = TransFunc::init_Gt(_model.dim.nP, _model.dlag, _model.ftrans);
+            arma::mat Gt_cast = TransFunc::init_Gt(_model.nP, _model.dlag, _model.ftrans);
 
             for (unsigned int j = 0; j <= k; j ++)
             {
-                Rt_cast.at(j) = arma::zeros<arma::cube>(_model.dim.nP, _model.dim.nP, nT + 1);
+                Rt_cast.at(j) = arma::zeros<arma::cube>(_model.nP, _model.nP, nT + 1);
             }
 
             double mu0 = _model.dobs.par1;
-            unsigned int tstart = std::max(k, _model.dim.nP);
+            unsigned int tstart = std::max(k, _model.nP);
             if (start_time.isNotNull()) {
                 tstart = Rcpp::as<unsigned int>(start_time);
             }
@@ -1049,7 +997,7 @@ namespace LBA
                 at_cast.slice(0).col(t) = _mt.col(t);
                 Rt_cast.at(0).slice(t) = _Ct.slice(t);
 
-                arma::mat Wt_onestep(_model.dim.nP, _model.dim.nP, arma::fill::zeros);
+                arma::mat Wt_onestep(_model.nP, _model.nP, arma::fill::zeros);
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(

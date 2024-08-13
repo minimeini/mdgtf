@@ -1112,10 +1112,11 @@ namespace VB
                 }
             }
 
-            // if (update_dlag)
-            // {
-                // unsigned int nlag = model.update_dlag(par1, par2, 30, false);
-            // }
+            if (update_dlag)
+            {
+                model.dlag.nL = LagDist::get_nlag(model.dlag);
+                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+            }
 
             return;
         }
@@ -1321,8 +1322,8 @@ namespace VB
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                arma::cube Theta = arma::zeros<arma::cube>(model.dim.nP, N, y.n_elem);
-                arma::vec Wt(model.dim.nP, arma::fill::zeros);
+                arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+                arma::vec Wt(model.nP, arma::fill::zeros);
                 Wt.at(0) = W;
                 /*
                 You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
@@ -1338,8 +1339,7 @@ namespace VB
                 for (unsigned int t = 1; t < ft.n_elem; t++)
                 {
                     ft.at(t) = TransFunc::func_ft(
-                        t, y, ft, hpsi, model.dim,
-                        model.dlag, model.ftrans); // Checked. OK.
+                        t, y, ft, hpsi, model.dlag, model.ftrans); // Checked. OK.
                 }
 
                 if (update_static)
