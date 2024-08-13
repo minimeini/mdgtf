@@ -184,7 +184,7 @@ public:
         unsigned int nlag = Fphi.n_elem;
         if (update_num_lag)
         {
-            nlag = update_nlag(name, par1, par2, 0.99, max_lag);
+            nlag = get_nlag(name, par1, par2, 0.99, max_lag);
         }
 
         Fphi = LagDist::get_Fphi(nlag, name, par1, par2);
@@ -201,7 +201,7 @@ public:
      * @param prob 
      * @return unsigned int 
      */
-    static unsigned int update_nlag(
+    static unsigned int get_nlag(
         const std::string &lag_dist, 
         const double &lag_par1, 
         const double &lag_par2, 
@@ -210,7 +210,7 @@ public:
     {
         if (prob < 0 || prob > 1)
         {
-            throw std::invalid_argument("LagDist::update_nlag: probability must in (0, 1).");
+            throw std::invalid_argument("LagDist::get_nlag: probability must in (0, 1).");
         }
         double nlag_ = 1;
         std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
@@ -256,38 +256,6 @@ public:
     }
 
 
-
-    /**
-     * @brief Get the optim number of lags that satisfy a specific margin of error.
-     *
-     * @param error_margin double (default = 0.01): the lower bound of 1 - sum(Fphi)
-     * @return nlag - unsigned int.
-     */
-    static unsigned int get_optim_nlag(
-        const std::string &lag_dist = "nbinom",
-        const double &lag_par1 = NB_KAPPA,
-        const double &lag_par2 = NB_R,
-        const double &error_margin = 0.01)
-    {
-        unsigned int nlag = 1;
-        bool cont = true;
-        while (cont)
-        {
-            arma::vec Fphi_tmp = get_Fphi(nlag, lag_dist, lag_par1, lag_par2);
-            double prob = arma::accu(Fphi_tmp);
-
-            if (1. - prob <= error_margin)
-            {
-                cont = false;
-            }
-            else
-            {
-                nlag += 1;
-            }
-        }
-
-        return nlag;
-    }
 private:
     bool _isnbinom;
 
