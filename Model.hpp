@@ -32,6 +32,7 @@
 class Model
 {
 public:
+    unsigned int nP;
     Dim dim;
     ObsDist dobs;
     LagDist dlag;

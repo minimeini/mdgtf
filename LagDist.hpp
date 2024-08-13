@@ -32,6 +32,9 @@ class LagDist : public Dist
 {
 public:
     static const std::map<std::string, AVAIL::Dist> lag_list;
+    unsigned int nL; // number of lags
+    bool truncated = true;
+    double prob_thres = 0.99;
 
     LagDist() : Dist(), isnbinom(_isnbinom)
     {
