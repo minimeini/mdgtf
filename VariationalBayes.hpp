@@ -1094,11 +1094,13 @@ namespace VB
                 {
                     update_dlag = true;
                     par1 = val;
+                    model.dlag.par1 = par1;
                     break;
                 }
                 case AVAIL::Param::lag_par2: // par 2 is selected
                 {
                     update_dlag = true;
+                    model.dlag.par2 = par2;
                     par2 = val;
                     break;
                 }
@@ -1110,10 +1112,10 @@ namespace VB
                 }
             }
 
-            if (update_dlag)
-            {
-                unsigned int nlag = model.update_dlag(par1, par2, 30, false);
-            }
+            // if (update_dlag)
+            // {
+                // unsigned int nlag = model.update_dlag(par1, par2, 30, false);
+            // }
 
             return;
         }
@@ -1337,8 +1339,7 @@ namespace VB
                 {
                     ft.at(t) = TransFunc::func_ft(
                         t, y, ft, hpsi, model.dim,
-                        model.dlag,
-                        model.transfer.name); // Checked. OK.
+                        model.dlag, model.ftrans); // Checked. OK.
                 }
 
                 if (update_static)

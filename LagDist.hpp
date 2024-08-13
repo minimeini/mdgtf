@@ -33,7 +33,7 @@ class LagDist : public Dist
 public:
     static const std::map<std::string, AVAIL::Dist> lag_list;
 
-    LagDist() : Dist(), isnbinom(_isnbinom), Fphi(_Fphi)
+    LagDist() : Dist(), isnbinom(_isnbinom)
     {
         init_default();
         return;
@@ -42,7 +42,7 @@ public:
     LagDist(
         const std::string &name,
         const double &par1,
-        const double &par2) : Dist(), isnbinom(_isnbinom), Fphi(_Fphi)
+        const double &par2) : Dist(), isnbinom(_isnbinom)
     {
         init(name, par1, par2);
         return;
@@ -73,7 +73,6 @@ public:
     }
 
 
-    const arma::vec &Fphi;
     /**
      * @brief Set Fphi based on number of lags, type of lag distribution and its corresponding parameters
      *
@@ -82,8 +81,8 @@ public:
     void get_Fphi(const unsigned int &nlag)
     {
         std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
-        _Fphi.set_size(nlag);
-        _Fphi.zeros();
+        Fphi.set_size(nlag);
+        Fphi.zeros();
         
         double nlag2 = nlag;
 
@@ -93,7 +92,7 @@ public:
         {
             try
             {
-                _Fphi = lognorm::dlognorm(nlag, par1, par2);
+                Fphi = lognorm::dlognorm(nlag, par1, par2);
             }
             catch(const std::invalid_argument& e)
             {
@@ -109,7 +108,7 @@ public:
         {
             try
             {
-                _Fphi = nbinom::dnbinom(nlag, par1, par2);
+                Fphi = nbinom::dnbinom(nlag, par1, par2);
             }
             catch(const std::exception& e)
             {
@@ -125,7 +124,7 @@ public:
             break;
         }
 
-        bound_check<arma::vec>(_Fphi, "void get_Fphi: _Fphi");
+        bound_check<arma::vec>(Fphi, "void get_Fphi: _Fphi");
 
         return;
     }
@@ -309,7 +308,7 @@ public:
 
     void update_Fphi(const arma::vec &Fphi_new)
     {
-        _Fphi = Fphi_new;
+        Fphi = Fphi_new;
         return;
     }
 
@@ -345,8 +344,9 @@ public:
         return nlag;
     }
 
+
+    arma::vec Fphi; // a vector of the lag distribution CDF at desired length _nL.
 private:
-    arma::vec _Fphi; // a vector of the lag distribution CDF at desired length _nL.
     bool _isnbinom;
 
     static std::map<std::string, AVAIL::Dist> map_lag_dist()

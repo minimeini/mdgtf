@@ -495,7 +495,7 @@ Rcpp::List dgtf_forecast(
     Model model(model_settings);
     arma::mat ycast = Model::forecast(
         y, psi, W_stored, model.dim, model.dlag,
-        model.transfer, 
+        model.ftrans, 
         model.flink, model.fgain, mu0, k); // k x nsample
 
     Rcpp::List out;

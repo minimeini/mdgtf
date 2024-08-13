@@ -35,36 +35,39 @@ namespace LBA
      * @param yold
      * @return arma::mat
      */
-    static arma::mat func_Gt(
+    static void func_Gt(
+        arma::mat &Gt, // nP x nP, must be already initialized via `TransFunc::init_Gt()`
         const Model &model,
         const arma::vec &mt_old,
         const double &yold)
     {
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        arma::mat Gt = model.transfer.G0;
-        if (trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
+        if (trans_list[model.ftrans] == AVAIL::Transfer::iterative)
         {
+            double coef_now = TransFunc::coef_iterative(model.dlag.par1, model.dlag.par2);
             double dhpsi_now = GainFunc::psi2dhpsi(
                 mt_old.at(0), // h'(psi[t])
                 model.fgain);
-            Gt.at(1, 0) = model.transfer.coef_now * yold * dhpsi_now;
+            Gt.at(1, 0) = coef_now * yold * dhpsi_now;
         }
 
-        return Gt;
+        return;
     }
 
 
-    static arma::mat func_Ht(const Model &model)
-    {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        arma::mat Ht = model.transfer.H0;
-        if (trans_list[model.transfer.name] == AVAIL::Transfer::iterative)
-        {
-            throw std::invalid_argument("Ht for iterative transfer function: not defined yet.");
-        }
+    // static void func_Ht(
+    //     arma::mat &Ht, // np x nP, must be initialized via `TransFunc::H0_sliding()`
+    //     const Model &model)
+    // {
+    //     std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    //     // arma::mat Ht = model.transfer.H0;
+    //     if (trans_list[model.ftrans] == AVAIL::Transfer::iterative)
+    //     {
+    //         throw std::invalid_argument("Ht for iterative transfer function: not defined yet.");
+    //     }
 
-        return Ht;
-    }
+    //     return;
+    // }
 
     enum DiscountType
     {
@@ -189,19 +192,18 @@ namespace LBA
      * @param yall y[0], y[1], ..., y[nT]
      * @return arma::vec
      */
-    static arma::vec func_Ft(
-        const TransFunc &ftrans,
+    static void func_Ft(
+        arma::vec Ft, // nP x 1, must be initialized by `TransFunc::init_Ft()`.
+        const std::string &ftrans,
         const std::string &fgain,
         const LagDist &dlag,
         const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall,       // y[0], y[1], ..., y[nT]
-        const bool &fill_zero = LBA_FILL_ZERO
-    )
+        const arma::vec &yall,      // y[0], y[1], ..., y[nT]
+        const bool &fill_zero = LBA_FILL_ZERO)
     {
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        arma::vec Ft_cur = ftrans.F0;
-        if (trans_list[ftrans.name] == AVAIL::sliding)
+        if (trans_list[ftrans] == AVAIL::sliding)
         {
             const unsigned int nL = theta_cur.n_elem;
             // unsigned int nelem = std::min(t, model.dim.nL); // min(t,nL)
@@ -235,12 +237,12 @@ namespace LBA
             arma::vec th = theta_cur.head(nL); // nL x 1
             arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
-            Ft_cur.head(nL) = Ftmp % dlag.Fphi;
+            Ft.head(nL) = Ftmp % dlag.Fphi;
         }
 
-        bound_check<arma::vec>(Ft_cur, "func_Ft: Ft_cur");
+        bound_check<arma::vec>(Ft, "func_Ft: Ft");
 
-        return Ft_cur;
+        return;
     }
 
     /**
@@ -265,8 +267,8 @@ namespace LBA
         const arma::mat &Rt,
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        mean_ft = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, t, at, yall);
-        _Ft = func_Ft(model.transfer, model.fgain, model.dlag, t, at, yall, fill_zero);
+        mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t, at, yall);
+        func_Ft(_Ft, model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         return;
     }
@@ -563,8 +565,8 @@ namespace LBA
             _At.set_size(_nP);
             _At.zeros();
 
-            _Ft = model.transfer.F0; // set F[0]
-            _Gt = model.transfer.G0; // set G[0]
+            _Ft = TransFunc::init_Ft(model.dim.nP, model.ftrans); // set F[0]
+            _Gt = TransFunc::init_Gt(model.dim.nP, model.dlag, model.ftrans); // set G[0]
 
             _at.set_size(_nP, _nT + 1);
             _at.zeros();
@@ -695,8 +697,8 @@ namespace LBA
 
         void filter_single_iter(const unsigned int &t)
         {
-            _at.col(t) = StateSpace::func_gt(_model.transfer, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
-            _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+            _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+            func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
                 _use_discount, _discount_factor,
@@ -751,8 +753,8 @@ namespace LBA
             for (unsigned int t = tstart; t <= nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(_model.transfer, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
-                _Gt = func_Gt(_model, _mt.col(t-1), _y.at(t-1));
+                _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                func_Gt(_Gt, _model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
                     _use_discount, _discount_factor, 
@@ -790,7 +792,7 @@ namespace LBA
         void smoother(const bool &use_pseudo = false)
         {
             std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-            bool is_iterative = trans_list[_model.transfer.name] == AVAIL::Transfer::iterative;
+            bool is_iterative = trans_list[_model.ftrans] == AVAIL::Transfer::iterative;
             std::map<std::string, DiscountType> discount_list = map_discount_type();
             bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
 
@@ -806,7 +808,7 @@ namespace LBA
                 {
                     arma::mat Rtinv = inverse(_Rt.slice(t));
 
-                    _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+                    func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
                     arma::mat Bt = (_Ct.slice(t - 1) * _Gt.t()) * Rtinv;
 
                     arma::vec diff_a = _atilde_t.col(t) - _at.col(t);
@@ -821,7 +823,7 @@ namespace LBA
                 else if (is_iterative || (use_pseudo && !is_first_elem_discount))
                 {
                     // use discount factor + iterative transFunc / sliding transFunc with pseudo inverse for Gt
-                    _Gt = func_Gt(_model, _mt.col(t - 1), _y.at(t - 1));
+                    func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
                     arma::mat _Gt_inv;
                     if (is_iterative)
                     {
@@ -1022,6 +1024,7 @@ namespace LBA
 
             arma::cube at_cast = arma::zeros<arma::cube>(_model.dim.nP, nT + 1, k + 1);
             arma::field<arma::cube> Rt_cast(k + 1);
+            arma::mat Gt_cast = TransFunc::init_Gt(_model.dim.nP, _model.dlag, _model.ftrans);
 
             for (unsigned int j = 0; j <= k; j ++)
             {
@@ -1050,8 +1053,8 @@ namespace LBA
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
-                        _model.transfer, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
-                    arma::mat Gt_cast = func_Gt(_model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                        _model.ftrans, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                    func_Gt(Gt_cast, _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 
                     if (_use_discount)

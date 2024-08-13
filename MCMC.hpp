@@ -106,7 +106,7 @@ namespace MCMC
                     Theta_new.col(i) = theta_new;
 
                     double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
-                    double ft = StateSpace::func_ft(model.transfer, model.fgain, model.dlag, t + 1, theta_new, y);
+                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp - logq.at(i));
@@ -506,7 +506,13 @@ namespace MCMC
                 par1_accept += 1;
                 par2_accept += 1;
 
-                nlag = model.update_dlag(par1_new, par2_new, max_lag);
+                /**
+                 * @todo update nL and SS dimension nP
+                 * 
+                 */
+                model.dlag.par1 = par1_new;
+                model.dlag.par2 = par2_new;
+                // nlag = model.update_dlag(par1_new, par2_new, max_lag);
                 par.at(0) = par1_new;
                 par.at(1) = par2_new;
 
@@ -637,7 +643,13 @@ namespace MCMC
                 par1_accept += 1;
                 par2_accept += 1;
 
-                nlag = model.update_dlag(par1_new, par2_new, max_lag);
+                /**
+                 * @todo update nL and SS dimension nP
+                 *
+                 */
+                model.dlag.par1 = par1_new;
+                model.dlag.par2 = par2_new;
+                
                 par.at(0) = par1_new;
                 par.at(1) = par2_new;
 

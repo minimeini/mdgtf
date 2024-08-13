@@ -19,122 +19,6 @@
 class TransFunc
 {
 public:
-    Dim dim;
-    unsigned int r;
-    // LagDist dlag;
-    arma::mat G0;
-    arma::vec F0;
-    arma::vec ft;
-    arma::mat H0;
-    std::string name = "sliding";
-    arma::vec iter_coef;
-    double coef_now;
-
-    TransFunc()
-    {
-        init_default();
-        return;
-    }
-    TransFunc(
-        const Dim &dim,
-        const std::string &trans_func = "sliding",
-        const std::string &lag_dist = "lognorm",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(LN_MU, LN_SD2))
-    {
-        init(dim, trans_func, lag_dist, lag_param);
-        return;
-    }
-
-    void init_default()
-    {
-        dim.init_default();
-        LagDist dlag;
-        dlag.init("lognorm", LN_MU, LN_SD2);
-        dlag.get_Fphi(dim.nL);
-
-        name = "sliding";
-        G0 = init_Gt(dim.nP, dlag, name);
-        F0 = init_Ft(dim.nP, name);
-        H0 = H0_sliding(dim.nP);
-
-        dlag.init_default();
-        dlag.get_Fphi(dim.nL);
-
-        r = 1;
-        ft.set_size(dim.nT + 1);
-        ft.zeros();
-        return;
-    }
-
-    void init(
-        const Dim &dim_in,
-        const std::string &trans_func = "sliding",
-        const std::string &lag_dist = "nbinom",
-        const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(NB_KAPPA, NB_R))
-    {
-        std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-        dim = dim_in;
-        G0.set_size(dim.nP, dim.nP);
-        G0.zeros();
-
-        // _nlag = dim.nL;
-        // _ntime = dim.nT;
-        LagDist dlag;
-        dlag.init(lag_dist, lag_param[0], lag_param[1]);
-        dlag.get_Fphi(dim.nL);
-
-        /*
-         * We should only use iterative formula for non-truncated negative-binomial lags.
-         *
-         */
-        bool iterative_ok = !dim.truncated && dlag.isnbinom;
-        if (!iterative_ok)
-        {
-            name = "sliding";
-        }
-        else
-        {
-            name = trans_func;
-        }
-
-        if (trans_list[name] == AVAIL::Transfer::iterative)
-        {
-            r = static_cast<unsigned int>(dlag.par2);
-            iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-            coef_now = std::pow(1. - dlag.par1, dlag.par2);
-
-            ft.set_size(dim.nT + r);
-        }
-        else
-        {
-            r = 1;
-            ft.set_size(dim.nT + 1);
-            H0 = H0_sliding(dim.nP);
-        }
-
-        ft.zeros();
-        G0 = init_Gt(dim.nP, dlag, name);
-        F0 = init_Ft(dim.nP, name);
-        return;
-    }
-
-
-    arma::vec get_ft(const bool &no_padding = true)
-    {
-        arma::vec ft;
-        if (no_padding)
-        {
-            ft = ft.tail(dim.nL + 1);
-        }
-        else
-        {
-            ft = ft;
-        }
-
-        return ft;
-    }
-
-
     /**
      * @brief f[t](btheta[t],y[0:t]) calculate: sum Fphi[k] * h(psi[t + 1 - k]) * y[t - k]. This is exact formula for sliding transfer function. The effective number of elements is min(nL, t).
      *
@@ -250,6 +134,14 @@ public:
 
         bound_check(ft, "transfer_iterative: ft");
         return ft;
+    }
+
+
+    static double coef_iterative(const double &dlag_par1, const double &dlag_par2)
+    {
+        // iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+        // coef_now = std::pow(1. - dlag.par1, dlag.par2);
+        return std::pow(1. - dlag_par1, dlag_par2);
     }
 
 
