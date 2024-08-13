@@ -183,7 +183,7 @@ Rcpp::List dgtf_simulate(
         output["y"] = Rcpp::wrap(y);
         output["psi"] = Rcpp::wrap(psi);
         // output["wt"] = Rcpp::wrap(wt);
-        output["lambda"] = Rcpp::wrap(model.lambda);
+        output["lambda"] = Rcpp::wrap(lambda);
         break;
     }
     case method::StateSpace:

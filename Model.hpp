@@ -361,9 +361,6 @@ public:
     }
 
 
-    arma::vec lambda;
-
-
     /**
      * @brief Simulation via transfer function form
      * 
