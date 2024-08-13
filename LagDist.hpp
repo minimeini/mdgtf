@@ -32,12 +32,13 @@ class LagDist : public Dist
 {
 public:
     static const std::map<std::string, AVAIL::Dist> lag_list;
+    bool isnbinom;
     unsigned int nL; // number of lags
     bool truncated = true;
     double prob_thres = 0.99;
     arma::vec Fphi; // a vector of the lag distribution CDF at desired length _nL.
 
-    LagDist() : Dist(), isnbinom(_isnbinom)
+    LagDist() : Dist()
     {
         init_default();
         return;
@@ -46,13 +47,12 @@ public:
     LagDist(
         const std::string &name,
         const double &par1,
-        const double &par2) : Dist(), isnbinom(_isnbinom)
+        const double &par2) : Dist()
     {
         init(name, par1, par2);
         return;
     }
 
-    const bool &isnbinom;
     void init(
         const std::string &name_in,
         const double &par1_in,
@@ -62,7 +62,7 @@ public:
         name = name_in;
         par1 = par1_in;
         par2 = par2_in;
-        _isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
+        isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
 
         return;
     }
@@ -73,7 +73,7 @@ public:
         name = "nbinom";
         par1 = NB_KAPPA;
         par2 = NB_R;
-        _isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
+        isnbinom = (lag_list[name] == AVAIL::Dist::nbinomp) ? true : false;
     }
 
 
@@ -257,8 +257,6 @@ public:
 
 
 private:
-    bool _isnbinom;
-
     static std::map<std::string, AVAIL::Dist> map_lag_dist()
     {
         std::map<std::string, AVAIL::Dist> LAG_MAP;
