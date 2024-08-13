@@ -329,7 +329,6 @@ namespace SMC
             mu.zeros();
 
             arma::mat G_next = TransFunc::init_Gt(nP, model.dlag, model.ftrans);
-            arma::vec F_cur = TransFunc::init_Ft(nP, model.ftrans);
 
             Prec = arma::zeros<arma::cube>(nP, nP, N);
             Sigma_chol = Prec;
@@ -398,7 +397,7 @@ namespace SMC
                 } // one-step backcasting
                 else
                 {
-                    LBA::func_Ft(F_cur, model.ftrans, model.fgain, model.dlag, t_cur, u_cur, y);
+                    arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, u_cur, y);
                     double delta = yhat_cur - eta;
                     delta += arma::as_scalar(F_cur.t() * u_cur);
                     arma::mat FFt_norm = arma::symmatu(F_cur * F_cur.t() / Vtilde);
@@ -1534,8 +1533,7 @@ namespace SMC
                     }
                     else
                     {
-                        arma::vec Ft = TransFunc::init_Ft(nP, model.ftrans);
-                        LBA::func_Ft(Ft, model.ftrans, model.fgain, model.dlag, t, gtheta, y);
+                        arma::vec Ft = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t, gtheta, y);
                         double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
                         double delta = yhat_cur - par.at(0) - ft_tilde;
                         arma::mat Gt = TransFunc::init_Gt(nP, model.dlag, model.ftrans);
@@ -2562,8 +2560,7 @@ namespace SMC
                     }
                     else
                     {
-                        arma::vec Ft = TransFunc::init_Ft(nP, model.ftrans);
-                        LBA::func_Ft(Ft, model.ftrans, model.fgain, model.dlag, t_cur, gtheta, y);
+                        arma::vec Ft = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, gtheta, y);
                         double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
                         arma::mat FFt_norm = Ft * Ft.t() / Vt;
 

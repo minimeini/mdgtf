@@ -26,6 +26,12 @@
 
 namespace LBA
 {
+    enum DiscountType
+    {
+        all_elems,
+        all_lag_elems,
+        first_elem
+    };
 
     /**
      * @brief First-order derivative of g[t] w.r.t theta[t]; used in the calculation of R[t] = G[t] C[t-1] t(G[t]) + W[t].
@@ -69,12 +75,6 @@ namespace LBA
     //     return;
     // }
 
-    enum DiscountType
-    {
-        all_elems,
-        all_lag_elems,
-        first_elem
-    };
 
     std::map<std::string, DiscountType> map_discount_type()
     {
@@ -192,8 +192,7 @@ namespace LBA
      * @param yall y[0], y[1], ..., y[nT]
      * @return arma::vec
      */
-    static void func_Ft(
-        arma::vec Ft, // nP x 1, must be initialized by `TransFunc::init_Ft()`.
+    static arma::vec func_Ft(
         const std::string &ftrans,
         const std::string &fgain,
         const LagDist &dlag,
@@ -203,6 +202,7 @@ namespace LBA
         const bool &fill_zero = LBA_FILL_ZERO)
     {
         std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+        arma::vec Ft(theta_cur.n_elem, arma::fill::zeros);
         if (trans_list[ftrans] == AVAIL::sliding)
         {
             const unsigned int nL = theta_cur.n_elem;
@@ -226,10 +226,13 @@ namespace LBA
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
             Ft.head(nL) = Ftmp % dlag.Fphi;
         }
+        else
+        {
+            Ft.at(1) = 1.;
+        }
 
         bound_check<arma::vec>(Ft, "func_Ft: Ft");
-
-        return;
+        return Ft;
     }
 
     /**
@@ -255,8 +258,9 @@ namespace LBA
         const bool &fill_zero = LBA_FILL_ZERO)
     {
         mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t, at, yall);
-        func_Ft(_Ft, model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero);
+        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
+        bound_check(var_ft, "LBA::func_prior_ft: var_ft", true, true);
         return;
     }
 
@@ -696,7 +700,6 @@ namespace LBA
                 }
                 tstart = _model.dlag.nL + 1;
             }
-
 
             for (unsigned int t = tstart; t <= nT; t++)
             {

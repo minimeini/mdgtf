@@ -114,8 +114,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::init_Ft(mod.nP, mod.ftrans);
-            LBA::func_Ft(Ft_gtheta, mod.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - param.at(0, i) - ft_tilde;                          // (eq 3.16)
 
@@ -190,8 +189,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::init_Ft(model.nP, model.ftrans);
-            LBA::func_Ft(Ft_gtheta, model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
+            arma::vec Ft_gtheta = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
@@ -274,8 +272,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::init_Ft(model.nP, model.ftrans);
-            LBA::func_Ft(Ft_gtheta, model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);
+            arma::vec Ft_gtheta = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
             double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
 
@@ -528,8 +525,7 @@ static arma::vec qbackcast(
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = TransFunc::init_Ft(nP, model.ftrans);
-            LBA::func_Ft(F_cur, model.ftrans, model.fgain, model.dlag, t_cur, u_cur, y);
+            arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, u_cur, y);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 
