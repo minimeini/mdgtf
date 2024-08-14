@@ -458,10 +458,18 @@ static void backward_kernel(
 
         arma::mat VGt = Vt_cur * G_next.t();
         K = VGt * Vt_inv.slice(t_cur + 1);
-        U_cur = Vt_cur - VGt * Vt_inv.slice(t_cur + 1) * VGt.t();
-        U_cur = arma::symmatu(U_cur);
 
-        Urchol_cur = arma::chol(arma::symmatu(U_cur));
+        U_cur = arma::symmatu(Vt_cur - VGt * Vt_inv.slice(t_cur + 1) * VGt.t());
+        // arma::vec eigval;
+        // arma::mat eigvec;
+        // arma::eig_sym(eigval, eigvec, U_cur);
+
+        // eigval = arma::abs(eigval);
+        // arma::mat eiglam = arma::diagmat(1. / eigval);
+        // Uprec_cur = eigvec * eiglam * eigvec.t();
+        // ldetU = arma::accu(arma::log(eigval));
+
+        Urchol_cur = arma::chol(U_cur);
         arma::mat Urchol_inv = arma::inv(arma::trimatu(Urchol_cur));
         Uprec_cur = Urchol_inv * Urchol_inv.t();
         ldetU = arma::log_det_sympd(U_cur);
@@ -497,7 +505,7 @@ static arma::vec qbackcast(
     arma::mat Uprec_cur = K_cur;
     double ldetU = 0.;
     backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, Wt, y);
-    
+
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     for (unsigned int i = 0; i < N; i++)
     {

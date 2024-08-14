@@ -1352,6 +1352,8 @@ namespace SMC
         void backward_filter(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             const bool full_rank = false;
+            std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+
             arma::vec eff_backward(y.n_elem, arma::fill::zeros);
             Theta_backward = Theta; // p x N x (nT + B)
             weights_backward = weights_forward;
@@ -1367,6 +1369,7 @@ namespace SMC
                 log_marg.at(i) = MVNorm::dmvnorm2(
                     theta, mu_marginal.col(y.n_elem - 1), Prec_marginal.slice(y.n_elem - 1), true);
             }
+
 
             for (unsigned int t = y.n_elem - 2; t > 0; t--)
             {
@@ -1402,30 +1405,50 @@ namespace SMC
                 weights_backward.row(t + 1) = logq.t();
                 eff_backward.at(t) = effective_sample_size(tau);
 
+                arma::vec theta_next; // N x 1
+                if (trans_list[model.ftrans] == TransFunc::Transfer::sliding)
+                {
+                    theta_next = arma::vectorise(Theta_backward.slice(t + 1).row(model.nP - 1)); // N x 1
+                }
+                else
+                { // iterative transfer function
+                    theta_next = arma::vectorise(Theta_backward.slice(t + 1).row(0)); // N x 1
+                }
                 arma::mat Theta_cur(model.nP, N, arma::fill::zeros);
-                arma::vec theta_next = arma::vectorise(Theta_backward.slice(t + 1).row(model.nP - 1));
                 arma::vec mu = mu_marginal.col(t);
                 arma::mat Prec = Prec_marginal.slice(t);
                 #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_cur;
+                    double logp = 0.;
                     if (full_rank)
                     {
                         arma::vec eps = arma::randn(Theta_cur.n_rows);
                         arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
                         theta_cur = prec_chol_inv.slice(i) * zt;
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
+
+                        throw std::invalid_argument("TFS::backward_filter: logp for full rank update is not defined.");
                     }
                     else
                     {
                         theta_cur = loc.col(i);
                         double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
-                        theta_cur.at(model.nP - 1) += eps;
                         logq.at(i) += R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
-                    }
 
-                    double logp = R::dnorm4(theta_next.at(i), theta_cur.at(model.nP - 1), std::sqrt(Wt.at(0)), true);
+                        if (trans_list[model.ftrans] == TransFunc::Transfer::sliding)
+                        {
+                            theta_cur.at(model.nP - 1) += eps;
+                            logp = R::dnorm4(theta_next.at(i), theta_cur.at(model.nP - 1), std::sqrt(Wt.at(0)), true);
+                        }
+                        else
+                        {
+                            // iterative transfer function
+                            theta_cur.at(0) += eps;
+                            logp = R::dnorm4(theta_next.at(i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
+                        }
+                    }
 
                     Theta_cur.col(i) = theta_cur;
 
@@ -1715,44 +1738,6 @@ namespace SMC
 
             param_backward = param_filter;
             param_smooth = param_smooth;
-
-            mu_marg_init.set_size(model.nP);
-            mu_marg_init.zeros();
-            if (opts.containsElementNamed("mu_marg_init"))
-            {
-                arma::vec tmp = Rcpp::as<arma::vec>(opts["mu_marg_init"]);
-                unsigned int nelem = std::min(tmp.n_elem, model.nP);
-                mu_marg_init.head(nelem) = tmp.head(nelem);
-                if (model.nP > nelem)
-                {
-                    mu_marg_init.subvec(nelem, model.nP - 1).fill(tmp.at(nelem - 1));
-                }
-            }
-
-            Sig_marg_init.set_size(model.nP, model.nP);
-            Sig_marg_init.eye();
-            Sig_marg_init.diag() *= 2.;
-            if (opts.containsElementNamed("Sig_diag_marg_init"))
-            {
-                arma::vec Sig_diag_marg_init(model.nP, arma::fill::ones);
-                Sig_diag_marg_init.fill(2.);
-
-                arma::vec tmp = Rcpp::as<arma::vec>(opts["Sig_diag_marg_init"]);
-                unsigned int nelem = std::min(tmp.n_elem, model.nP);
-
-                Sig_diag_marg_init.head(nelem) = tmp.head(nelem);
-                if (model.nP > nelem)
-                {
-                    Sig_diag_marg_init.subvec(nelem, model.nP - 1).fill(tmp.at(nelem - 1));
-                }
-
-                Sig_marg_init.diag() = Sig_diag_marg_init;
-            }
-
-            if (!Sig_marg_init.is_sympd())
-            {
-                throw std::invalid_argument("PL::init: initial variance matrix of the artificial marginal should be sympd.");
-            }
 
             filter_pass = false;
 
@@ -2219,19 +2204,18 @@ namespace SMC
 
             // mu0_filter.fill(model.dobs.par1); // N x 1
 
-            arma::mat Prec_marg_init = Sig_marg_init; // nP x nP
-            Prec_marg_init.diag() = 1. / Sig_marg_init.diag();
-            mu_marginal.set_size(model.nP, y.n_elem, N);
-            mu_marginal.zeros();
+            arma::mat Sig_init(model.nP, model.nP, arma::fill::eye);
+            Sig_init.diag().fill(2.);
+            arma::mat Prec_init = Sig_init;
+            Prec_init.diag() = 1. / Sig_init.diag();
 
-            Sigma_marginal.set_size(model.nP * model.nP, y.n_elem, N);
-            Sigma_marginal.zeros();
+            mu_marginal = arma::zeros<arma::cube>(model.nP, y.n_elem, N);
+            Sigma_marginal = arma::zeros<arma::cube>(model.nP * model.nP, y.n_elem, N);
             Prec_marginal = Sigma_marginal;
             for (unsigned int i = 0; i < N; i++)
             {
-                mu_marginal.slice(i).col(0) = mu_marg_init;              // nP x 1
-                Sigma_marginal.slice(i).col(0) = Sig_marg_init.as_col(); // np^{2} x 1
-                Prec_marginal.slice(i).col(0) = Prec_marg_init.as_col();
+                Sigma_marginal.slice(i).col(0) = Sig_init.as_col(); // np^{2} x 1
+                Prec_marginal.slice(i).col(0) = Prec_init.as_col();
             }
 
             arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans);
@@ -2609,68 +2593,33 @@ namespace SMC
         bool obs_update = false;
         bool lag_update = false;
 
-        arma::vec mu_marg_init;  // nP x 1
-        arma::mat Sig_marg_init; // nP x nP
-
         arma::cube mu_marginal;    // nP x (nT + 1) x N
         arma::cube Sigma_marginal; // nP^2 x (nT + 1) x N
         arma::cube Prec_marginal;  // nP^2 x (nT + 1) x N
 
-        // arma::vec eff_forward;  // (nT + 1) x 1
-        // arma::vec eff_backward; // (nT + 1) x 1
-        // arma::vec eff_filter;
-
         arma::mat weights_forward;  // (nT + 1) x N
         arma::mat weights_backward; // (nT + 1) x N
-        // arma::mat weights_prop_forward;  // (nT + 1) x N
-        // arma::mat weights_prop_backward; // (nT + 1) x N
         arma::cube Theta_backward; // p x N x (nT + 1)
 
-        // arma::mat aw; // N x (nT + 1), shape of IG
-        // arma::mat bw; // N x (nT + 1), scale of IG (i.e. rate of corresponding Gamma)
         arma::vec aw_forward; // N x 1, shape of IG
         arma::vec bw_forward; // N x 1, scale of IG (i.e. rate of corresponding Gamma)
-        // arma::vec aw_backward; // N x 1, shape of IG
-        // arma::vec bw_backward; // N x 1, scale of IG (i.e. rate of corresponding Gamma)
-        // arma::mat W_stored; // N x (nT + 1)
-        // arma::vec W_backward; // N x 1
+
         arma::vec W_smooth; // M x 1
         arma::vec W_backward; // N x 1
         arma::vec W_forward; // N x 4, 1st filter, 2nd filter, backward filter, smoothing
 
         arma::mat param_filter, param_backward, param_smooth;
 
-        // arma::mat amu; // N x (nT + 1), mean of normal
-        // arma::mat bmu; // N x (nT + 1), precision of normal
         arma::vec amu_forward; // N x 1, mean of normal
         arma::vec bmu_forward; // N x 1, precision of normal
-        // arma::vec amu_backward; // N x 1
-        // arma::vec bmu_backward; // N x 1
-        // arma::mat mu0_stored; // N x (nT + 1)
-        // arma::vec mu0_backward; // N x 1
-        // arma::vec mu0_smooth; // M x 1
-        // arma::vec mu0_backward;
-        // arma::vec mu0_forward;
+
 
         Prior prior_rho;
         double rho_mh_sd = 1.;
-        // arma::vec rho_filter; // N x 1
-        // arma::vec rho_backward;
-        // arma::vec rho_forward;
-
         Prior prior_par1;
         double par1_mh_sd = 1.;
-        // arma::vec par1_filter; // N x 1
-        // arma::vec par1_backward;
-        // arma::vec par1_forward;
-
         Prior prior_par2;
         double par2_mh_sd = 1.;
-        // arma::vec par2_filter; // N x 1
-        // arma::vec par2_backward;
-        // arma::vec par2_forward;
-
-        arma::mat e11; // N x (nT + 1)
 
         unsigned int max_iter = 10;
     };
