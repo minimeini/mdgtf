@@ -1050,64 +1050,6 @@ class StateSpace
 {
 public:
     /**
-     * @brief Only for sliding transfer function and regressor with zero baseline intensity.
-     * 
-     * @param psi 
-     * @param model 
-     * @return arma::mat 
-     */
-    static arma::mat psi2theta(
-        const arma::vec &psi, // (nT + 1) x 1
-        const Model &model)
-    {
-        const unsigned int nT = psi.n_elem - 1;
-        const unsigned int nr = model.nP - 1;
-        arma::mat Theta(model.nP, nT + 1, arma::fill::zeros); // nP x (nT + 1)
-
-        Theta.at(0, 0) = psi.at(0);
-        for (unsigned int t = 0; t < nT; t++)
-        {
-            Theta.submat(1, t + 1, nr, t + 1) = Theta.submat(0, t, nr - 1, t);
-            Theta.at(0, t + 1) = psi.at(t + 1);
-        }
-
-        return Theta;
-    }
-
-
-    /**
-     * @brief Reconstruct theta[t, 1:N] from psi[0:t, 1:N]
-     * 
-     * @param t 
-     * @param psi (nT + B) x N
-     * @param model 
-     * @return arma::mat np x N
-     */
-    static arma::mat psi2theta(
-        const unsigned int &t,
-        const arma::mat &psi, // (nT + B) x N
-        const Model &model)
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
-        {
-            throw std::invalid_argument("psi2theta: only for sliding transfer function.");
-        }
-
-        arma::mat Theta(model.nP, psi.n_cols, arma::fill::zeros); // nP x N
-        for (unsigned int i = 0; i < model.nP; i++)
-        {
-            if (i <= t)
-            {
-                Theta.row(i) = psi.row(t - i);
-            }
-            
-        }
-
-        return Theta;
-    }
-
-    /**
      * @brief Expected state evolution equation for the DLM form model. Expectation of theta[t + 1] = g(theta[t]).
      *
      * @param model
@@ -1158,31 +1100,7 @@ public:
         return theta_next;
     }
 
-    // static arma::vec func_state_propagate(
-    //     const Model &model,
-    //     const arma::vec &theta_now,
-    //     const double &ynow,
-    //     const double &Wsqrt,
-    //     const bool &positive_noise = false)
-    // {
-    //     arma::vec theta_next = func_gt(model, theta_now, ynow);
 
-    //     double omega_next = 0.;
-    //     if (Wsqrt > 0)
-    //     {
-    //         omega_next = R::rnorm(0., Wsqrt); // [Input] - Wsqrt
-    //     }
-        
-    //     if (positive_noise)                      // t < Theta_now.n_rows
-    //     {
-    //         theta_next.at(0) += std::abs(omega_next);
-    //     }
-    //     else
-    //     {
-    //         theta_next.at(0) += omega_next;
-    //     }
-    //     return theta_next;
-    // }
 
     /**
      * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
@@ -1702,17 +1620,12 @@ public:
 
         return;
     }
-
-    // private:
-    //     arma::vec theta; // nP x 1
-    //     arma::mat theta_series; // nP x (nT + 1)
-    //     arma::vec theta_init;
-
-    //     arma::vec psi; // (nT + 1) x 1
-
-    //     Model model;
 };
 
+/**
+ * @brief Mostly used in MCMC.
+ * 
+ */
 class ApproxDisturbance
 {
 public:
