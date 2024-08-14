@@ -253,43 +253,6 @@ inline arma::mat inverse(
 	return mat_inv;
 }
 
-inline arma::mat inverse(
-	arma::mat &Rchol,
-	const arma::mat &matrice,
-	const bool &force_pseudo = false,
-	const bool &try_pseudo = false)
-{
-	arma::mat mat_inv;
-	if (force_pseudo)
-	{
-		mat_inv = arma::pinv(matrice);
-	}
-	else
-	{
-		try
-		{
-			Rchol = arma::chol(matrice);
-			arma::mat mat_Rinv = arma::inv(arma::trimatu(Rchol));
-			mat_inv = mat_Rinv * mat_Rinv.t();
-		}
-		catch (...)
-		{
-			if (try_pseudo)
-			{
-				std::cout << "\nWarning: matrice is not invertible, use pseudo inverse instead.\n\n";
-				mat_inv = arma::pinv(matrice);
-			}
-			else
-			{
-				throw std::runtime_error("\nError: matrice is not invertible.");
-			}
-		}
-	}
-
-	return mat_inv;
-}
-
-
 
 /**
  * @brief Evaluate forecasting performance with a specific loss function, calculate the width of credible interval and the covarage rate of credible interval.

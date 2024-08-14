@@ -63,13 +63,14 @@ public:
     {
         Rcpp::List model_settings = settings["model"];
         std::string obs_dist, lag_dist, err_dist;
+        bool truncated;
         init_model(
             obs_dist, flink, ftrans,
             fgain, lag_dist, err_dist,
+            truncated,
             model_settings);
 
         Rcpp::List param_settings = settings["param"];
-        bool truncated;
         Rcpp::NumericVector lag_param, obs_param, err_param;
         init_param(obs_param, lag_param, err_param, truncated, param_settings);
 
@@ -88,64 +89,58 @@ public:
         std::string &gain_func,
         std::string &lag_dist,
         std::string &err_dist,
+        bool &truncated,
         const Rcpp::List &model_settings)
     {
         Rcpp::List model = model_settings;
+        obs_dist = "nbinom";
         if (model.containsElementNamed("obs_dist"))
         {
             obs_dist = tolower(Rcpp::as<std::string>(model["obs_dist"]));
         }
-        else
-        {
-            obs_dist = "nbinom";
-        }
 
+        link_func = "identity";
         if (model.containsElementNamed("link_func"))
         {
             link_func = tolower(Rcpp::as<std::string>(model["link_func"]));
         }
-        else
-        {
-            link_func = "identity";
-        }
 
+        trans_func = "sliding";
         if (model.containsElementNamed("trans_func"))
         {
             trans_func = tolower(Rcpp::as<std::string>(model["trans_func"]));
         }
+
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        if (trans_list[trans_func] == TransFunc::Transfer::iterative)
+        {
+            truncated = false;
+        }
         else
         {
-            trans_func = "sliding";
+            truncated = true;
         }
 
+        gain_func = "softplus";
         if (model.containsElementNamed("gain_func"))
         {
             gain_func = tolower(Rcpp::as<std::string>(model["gain_func"]));
         }
-        else
-        {
-            gain_func = "softplus";
-        }
 
+        lag_dist = "lognorm";
         if (model.containsElementNamed("lag_dist"))
         {
             lag_dist = tolower(Rcpp::as<std::string>(model["lag_dist"]));
         }
-        else
-        {
-            lag_dist = "lognorm";
-        }
 
+        err_dist = "gaussian";
         if (model.containsElementNamed("err_dist"))
         {
             err_dist = tolower(Rcpp::as<std::string>(model["err_dist"]));
         }
-        else
-        {
-            err_dist = "gaussian";
-        }
-    }
 
+        return;
+    }
 
     static void init_param(
         Rcpp::NumericVector &obs,
@@ -173,12 +168,6 @@ public:
         {
             err = Rcpp::as<Rcpp::NumericVector>(param["err"]);
         }
-
-        truncated = true;
-        if (param.containsElementNamed("truncated"))
-        {
-            truncated = Rcpp::as<bool>(param["truncated"]);
-        }
     }
 
 
@@ -196,7 +185,6 @@ public:
         param["obs"] = Rcpp::NumericVector::create(dobs.par1, dobs.par2);
         param["lag"] = Rcpp::NumericVector::create(dlag.par1, dlag.par2);
         param["err"] = Rcpp::NumericVector::create(derr.par1, derr.par2);
-        param["truncated"] = dlag.truncated;
 
         Rcpp::List out;
         out["model"] = model;
@@ -219,7 +207,6 @@ public:
         param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
         param_settings["lag"] = Rcpp::NumericVector::create(1.4, 0.3);
         param_settings["err"] = Rcpp::NumericVector::create(0.01, 0.);
-        param_settings["truncated"] = true;
 
         Rcpp::List settings;
         settings["model"] = model_settings;

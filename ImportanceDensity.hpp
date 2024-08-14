@@ -460,7 +460,10 @@ static void backward_kernel(
         K = VGt * Vt_inv.slice(t_cur + 1);
         U_cur = Vt_cur - VGt * Vt_inv.slice(t_cur + 1) * VGt.t();
         U_cur = arma::symmatu(U_cur);
-        Uprec_cur = inverse(Urchol_cur, U_cur);
+
+        Urchol_cur = arma::chol(arma::symmatu(U_cur));
+        arma::mat Urchol_inv = arma::inv(arma::trimatu(Urchol_cur));
+        Uprec_cur = Urchol_inv * Urchol_inv.t();
         ldetU = arma::log_det_sympd(U_cur);
     }
 

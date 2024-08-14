@@ -341,7 +341,9 @@ namespace SMC
                     K_cur = V_cur * G_next.t() * Vprec_next;
                     U_cur = V_cur - V_cur * G_next.t() * Vprec_next * G_next * V_cur;
                     U_cur = arma::symmatu(U_cur);
-                    Uprec_cur = inverse(Urchol_cur, U_cur);
+                    Urchol_cur = arma::chol(arma::symmatu(U_cur));
+                    arma::mat Urchol_inv = arma::inv(arma::trimatu(Urchol_cur));
+                    Uprec_cur = Urchol_inv * Urchol_inv.t();
                     ldetU = arma::log_det_sympd(U_cur);
                 }
                 r_cur = v_cur - K_cur * v_next;
@@ -377,8 +379,9 @@ namespace SMC
                     double ldetPrec;
                     ldetPrec = arma::log_det_sympd(Prec.slice(i));
 
-                    arma::mat Rchol;
-                    arma::mat Sig = inverse(Rchol, Prec.slice(i));
+                    arma::mat Rchol = arma::chol(arma::symmatu(Prec.slice(i)));
+                    arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));
+                    arma::mat Sig = Rchol_inv * Rchol_inv.t();
                     Sigma_chol.slice(i) = Rchol;
 
                     arma::vec mu_tmp = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
@@ -1513,8 +1516,9 @@ namespace SMC
                         prec_part1.at(0, 0) += 1. / Wt.at(0);
 
                         arma::mat prec = prec_part1 + Ft * Ft.t() / Vt;
-                        arma::mat Rchol, Sigma;
-                        Sigma = inverse(Rchol, prec);
+                        arma::mat Rchol = arma::chol(arma::symmatu(prec));
+                        arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));
+                        arma::mat Sigma = Rchol_inv * Rchol_inv.t();
 
                         arma::vec mu_part1 = Gt.t() * Wprec * Theta_next.col(i);
                         mu_part1.at(0) += gtheta.at(0) / Wt.at(0);
@@ -2533,8 +2537,9 @@ namespace SMC
                         prec_part1.at(0, 0) += 1. / W_backward.at(i);
 
                         arma::mat prec = prec_part1 + FFt_norm;
-                        arma::mat Rchol, Sigma;
-                        Sigma = inverse(Rchol, prec);
+                        arma::mat Rchol = arma::chol(arma::symmatu(prec));
+                        arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));
+                        arma::mat Sigma = Rchol_inv * Rchol_inv.t();
 
                         arma::vec mu_part1 = Gt.t() * Wprec * Theta_backward.slice(t_next).col(i);
                         mu_part1.at(0) += gtheta.at(0) / W_backward.at(i);

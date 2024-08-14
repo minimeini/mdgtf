@@ -33,6 +33,15 @@ namespace LBA
         first_elem
     };
 
+    std::map<std::string, DiscountType> map_discount_type()
+    {
+        std::map<std::string, DiscountType> map;
+        map["all_elems"] = DiscountType::all_elems;
+        map["all_lag_elems"] = DiscountType::all_lag_elems;
+        map["first_elem"] = DiscountType::first_elem;
+        return map;
+    }
+
     /**
      * @brief First-order derivative of g[t] w.r.t theta[t]; used in the calculation of R[t] = G[t] C[t-1] t(G[t]) + W[t].
      *
@@ -76,23 +85,15 @@ namespace LBA
     // }
 
 
-    std::map<std::string, DiscountType> map_discount_type()
-    {
-        std::map<std::string, DiscountType> map;
-        map["all_elems"] = DiscountType::all_elems;
-        map["all_lag_elems"] = DiscountType::all_lag_elems;
-        map["first_elem"] = DiscountType::first_elem;
-        return map;
-    }
-
     /**
-     * @brief R[t] = G[t] C[t-1] t(G[t]) + W[t] = P[t] + W[t].
+     * @brief Variance of the one-step-ahead forecasting distribution of latent state, theta[t] | D[t-1].
      *
-     * @param Gt G[t]
-     * @param Ct_old C[t-1] = E( theta[t-1] | D[t] )
-     * @param W W of W[t] = diag(W, 0, ..., 0).
-     * @param use_discount If use discount factor, we have R[t] = P[t] / delta.
-     * @param delta_discount The value of discount factor delta.
+     * @param Gt nP x nP; First-order derivative of evolution function gt.
+     * @param Ct_old nP x nP; Posterior variance of latent state, theta[t-1] | D[t-1]
+     * @param W double; Univariate variance of latent random walk process.
+     * @param use_discount bool;
+     * @param delta_discount double in range (0, 1]
+     * @param discount_type string {'first_elem', 'all_elems'}
      * @return arma::mat
      */
     static arma::mat func_Rt(
@@ -101,7 +102,7 @@ namespace LBA
         const double &W = 0.01,
         const bool &use_discount = false,
         const double &delta_discount = 0.95,
-        const std::string &discount_type = "all_lag_elems")
+        const std::string &discount_type = "first_elem")
     {
         arma::mat Rt = Gt * Ct_old * Gt.t(); // Pt
         std::map<std::string, DiscountType> discount_list = map_discount_type();
@@ -112,21 +113,26 @@ namespace LBA
             {
             case DiscountType::first_elem:
             {
+                /*
+                The discounted Rt is invertible for iterative transfer function (almost guaranteed) and hopefully invertible for sliding transfer function.
+
+                 */
                 Rt.at(0, 0) /= delta_discount;
                 break;
             }
             case DiscountType::all_elems:
             {
                 // A unknown but general W[t] (could have non-zero off-diagonal values) with discount factor
+                /*
+                The discounted Rt is not invertible for sliding transfer function.
+                */
                 Rt.for_each([&delta_discount](arma::mat::elem_type &val)
                             { val /= delta_discount; });
                 break;
             }
             default:
             {
-                Rt.for_each([&delta_discount](arma::mat::elem_type &val)
-                            { val /= delta_discount; });
-                break;
+                throw std::invalid_argument("Unspecified discounting scheme.");
             }
             }
             
@@ -736,6 +742,8 @@ namespace LBA
                 _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
             }
 
+            
+
             return;
         }
 
@@ -890,7 +898,8 @@ namespace LBA
             */
             arma::vec psi_mean = arma::vectorise(_atilde_t.row(0)); // (nT + 1) x 1
             arma::vec psi_var = arma::vectorise(_Rtilde_t.tube(0, 0)); // (nT + 1) x 1
-            arma::vec psi_sd = arma::sqrt(psi_var);                    // (nT + 1) x 1
+            psi_var.elem(arma::find(psi_var < EPS)).fill(EPS8);
+            arma::vec psi_sd = arma::sqrt(psi_var); // (nT + 1) x 1
 
             arma::mat psi_sample(nT + 1, nsample, arma::fill::zeros);
             for (unsigned int i = 0; i < nsample; i ++)
@@ -900,7 +909,6 @@ namespace LBA
             }
 
             Rcpp::List out_smooth = Model::fitted_error(psi_sample, _y, _model, loss_func);
-
             Rcpp::List out;
             out["filter"] = out_filter;
             out["smooth"] = out_smooth;
