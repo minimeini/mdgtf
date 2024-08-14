@@ -36,12 +36,6 @@ namespace VB
         arma::vec psi;        // (nT + 1) x 1
         arma::mat psi_stored; // (nT + 1) x nsample
 
-        double W = 0.01;
-        double mu0 = 0.;
-        double rho = 30;
-        double par1 = 0.4;
-        double par2 = 6;
-
         Prior W_prior, mu0_prior, rho_prior, par1_prior, par2_prior;
 
         arma::vec W_stored;    // nsample x 1
@@ -97,43 +91,38 @@ namespace VB
 
             W_stored.set_size(nsample);
             W_stored.zeros();
-            bool infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
-            W = 0.01;
+            W_prior.infer = true;
             if (opts.containsElementNamed("W"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["W"]);
-                init_param(infer_W, W, W_prior, param_opts);
+                W_prior.init(param_opts);
             }
-            if (infer_W)
+            if (W_prior.infer)
             {
                 param_selected.push_back("W");
                 m += 1;
             }
 
             mu0_stored = W_stored;
-            bool infer_mu0 = false;
             mu0_prior.init("gaussian", 0., 10.);
-            mu0 = 0.;
             if (opts.containsElementNamed("mu0"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
-                init_param(infer_mu0, mu0, mu0_prior, param_opts);
+                mu0_prior.init(param_opts);
             }
-            if (infer_mu0)
+            if (mu0_prior.infer)
             {
                 param_selected.push_back("mu0");
                 m += 1;
             }
 
             rho_stored = W_stored;
-            bool infer_rho = false;
             rho_prior.init("gamma", 0.1, 0.1);
-            rho = 30.;
             if (opts.containsElementNamed("rho"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
-                init_param(infer_rho, rho, rho_prior, param_opts);
+                rho_prior.init(param_opts);
             }
             if (rho_prior.infer)
             {
@@ -141,14 +130,12 @@ namespace VB
                 m += 1;
             }
 
-            par1 = 0.;
             par1_stored.set_size(nsample);
-            bool infer_par1 = false;
             par1_prior.init("gamma", 0.1, 0.1);
             if (opts.containsElementNamed("par1"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
-                init_param(infer_par1, par1, par1_prior, param_opts);
+                par1_prior.init(param_opts);
             }
             if (par1_prior.infer)
             {
@@ -156,14 +143,12 @@ namespace VB
                 m += 1;
             }
 
-            par2 = 0.;
             par2_stored.set_size(nsample);
-            bool infer_par2 = false;
             par2_prior.init("gamma", 0.1, 0.1);
             if (opts.containsElementNamed("par2"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
-                init_param(infer_par2, par2, par2_prior, param_opts);
+                par2_prior.init(param_opts);
             }
             if (par2_prior.infer)
             {
@@ -183,31 +168,26 @@ namespace VB
         {
             Rcpp::List W_opts;
             W_opts["infer"] = true;
-            W_opts["init"] = 0.01;
             W_opts["prior_name"] = "invgamma";
             W_opts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
 
             Rcpp::List mu0_opts;
             mu0_opts["infer"] = false;
-            mu0_opts["init"] = 0.;
             mu0_opts["prior_name"] = "gaussian";
             mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
 
             Rcpp::List rho_opts;
             rho_opts["infer"] = false;
-            rho_opts["init"] = 30;
             rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             rho_opts["prior_name"] = "gamma";
 
             Rcpp::List par1_opts;
             par1_opts["infer"] = false;
-            par1_opts["init"] = 30;
             par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             par1_opts["prior_name"] = "gamma";
 
             Rcpp::List par2_opts;
             par2_opts["infer"] = false;
-            par2_opts["init"] = 30;
             par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             par2_opts["prior_name"] = "gamma";
 
@@ -416,7 +396,7 @@ namespace VB
 
             eps = d;
 
-            eta = init_eta(param_selected, W, mu0, rho, par1, par2, update_static); // Checked. OK.
+            eta = init_eta(param_selected, model_in, update_static); // Checked. OK.
             eta_tilde = eta2tilde(eta, param_selected, W_prior.name, par1_prior.name);
 
             nu = tYJ(eta_tilde, gamma);
@@ -436,10 +416,6 @@ namespace VB
             {
                 B_uptri_idx = {0};
             }
-
-            Rcpp::List W_opts = Rcpp::List::create(
-                Rcpp::Named("infer") = false,
-                Rcpp::Named("init") = W_prior.val);
         }
 
 
@@ -1000,11 +976,7 @@ namespace VB
 
         static arma::vec init_eta( // Checked. OK.
             const std::vector<std::string> &params_selected,
-            const double &W,
-            const double &mu0,
-            const double &rho,
-            const double &par1,
-            const double &par2,
+            const Model &model,
             const bool &update_static)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
@@ -1021,27 +993,27 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
-                    eta.at(i) = W;
+                    eta.at(i) = model.derr.par1;
                     break;
                 }
                 case AVAIL::Param::mu0:
                 {
-                    eta.at(i) = mu0;
+                    eta.at(i) = model.dobs.par1;
                     break;
                 }
                 case AVAIL::Param::rho:
                 {
-                    eta.at(i) = rho;
+                    eta.at(i) = model.dobs.par2;
                     break;
                 }
                 case AVAIL::Param::lag_par1:
                 {
-                    eta.at(i) = par1;
+                    eta.at(i) = model.dlag.par1;
                     break;
                 }
                 case AVAIL::Param::lag_par2:
                 {
-                    eta.at(i) = par2;
+                    eta.at(i) = model.dlag.par2;
                     break;
                 }
                 default:
@@ -1055,11 +1027,6 @@ namespace VB
         }
 
         static void update_params(
-            double &W,
-            double &mu0,
-            double &rho,
-            double &par1,
-            double &par2,
             Model &model,
             const std::vector<std::string> &params_selected,
             const arma::vec &eta)
@@ -1074,34 +1041,29 @@ namespace VB
                 {
                 case AVAIL::Param::W: // W is selected
                 {
-                    W = val;
                     model.derr.par1 = val;
                     break;
                 }
                 case AVAIL::Param::mu0: // mu0 is selected
                 {
-                    mu0 = val;
                     model.dobs.par1 = val;
                     break;
                 }
                 case AVAIL::Param::rho: // rho is selected
                 {
-                    rho = val;
                     model.dobs.par2 = val;
                     break;
                 }
                 case AVAIL::Param::lag_par1: // par 1 is selected
                 {
                     update_dlag = true;
-                    par1 = val;
-                    model.dlag.par1 = par1;
+                    model.dlag.par1 = val;
                     break;
                 }
                 case AVAIL::Param::lag_par2: // par 2 is selected
                 {
                     update_dlag = true;
-                    model.dlag.par2 = par2;
-                    par2 = val;
+                    model.dlag.par2 = val;
                     break;
                 }
                 default:
@@ -1116,6 +1078,7 @@ namespace VB
             {
                 model.dlag.nL = LagDist::get_nlag(model.dlag);
                 model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+                model.nP = Model::get_nP(model.dlag);
             }
 
             return;
@@ -1308,12 +1271,6 @@ namespace VB
             psi_stored.set_size(psi.n_elem, nsample);
             psi_stored.zeros();
 
-            W = model.derr.par1;
-            mu0 = model.dobs.par1;
-            rho = model.dobs.par2;
-            par1 = model.dlag.par1;
-            par2 = model.dlag.par2;
-  
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             arma::mat weights_forward(y.n_elem, N);
 
@@ -1324,7 +1281,7 @@ namespace VB
 
                 arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::vec Wt(model.nP, arma::fill::zeros);
-                Wt.at(0) = W;
+                Wt.at(0) = model.derr.par1;
                 /*
                 You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
                 */
@@ -1397,7 +1354,7 @@ namespace VB
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
                     eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name);
 
-                    update_params(W, mu0, rho, par1, par2, model, param_selected, eta);
+                    update_params(model, param_selected, eta);
 
                 } // end update_static
 
@@ -1417,23 +1374,23 @@ namespace VB
 
                     if (W_prior.infer)
                     {
-                        W_stored.at(idx_run) = W;
+                        W_stored.at(idx_run) = model.derr.par1;
                     }
 
                     if (mu0_prior.infer)
                     {
-                        mu0_stored.at(idx_run) = mu0;
+                        mu0_stored.at(idx_run) = model.dobs.par1;
                     }
 
                     if (rho_prior.infer)
                     {
-                        rho_stored.at(idx_run) = rho;
+                        rho_stored.at(idx_run) = model.dobs.par2;
                     }
 
                     if (par1_prior.infer || par2_prior.infer)
                     {
-                        par1_stored.at(idx_run) = par1;
-                        par2_stored.at(idx_run) = par2;
+                        par1_stored.at(idx_run) = model.dlag.par1;
+                        par2_stored.at(idx_run) = model.dlag.par2;
                     }
                 }
 

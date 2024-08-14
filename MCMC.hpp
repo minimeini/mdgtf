@@ -228,14 +228,14 @@ namespace MCMC
             }
         } // func update_wt
 
-        static double update_W( // Checked. OK.
+        static void update_W( // Checked. OK.
             double &W_accept,
-            const double &W_old,
+            Model &model,
             const arma::vec &wt,
             const Dist &W_prior,
             const double &mh_sd = 1.)
         {
-            double W = W_old;
+            double W_old = model.derr.par1;
             double res = arma::accu(arma::pow(wt.tail(wt.n_elem - 2), 2.));
 
             // double bw_prior = prior_params.at(1); // eta_prior_val.at(1, 0)
@@ -254,7 +254,7 @@ namespace MCMC
                 double logratio = std::min(0., logp_new - logp_old);
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
-                    W = W_new;
+                    model.derr.par1 = W_new;
                     W_accept += 1.;
                 }
                 break;
@@ -262,7 +262,7 @@ namespace MCMC
             case AVAIL::Dist::invgamma:
             {
                 double nSw_new = W_prior.par2 + res;                  // prior_params.at(1) = nSw
-                W = 1. / R::rgamma(0.5 * W_prior.par1, 2. / nSw_new); // prior_params.at(0) = nw_new
+                model.derr.par1 = 1. / R::rgamma(0.5 * W_prior.par1, 2. / nSw_new); // prior_params.at(0) = nw_new
                 // W_accept += 1.;
                 break;
             }
@@ -272,11 +272,11 @@ namespace MCMC
             }
             }
 
-            bound_check(W, "update: W", true, true);
-            return W;
+            bound_check(model.derr.par1, "update: W", true, true);
+            return;
         } // func update_W
 
-        static double update_mu0( // flat prior
+        static void update_mu0( // flat prior
             double &mu0_accept,
             Model &model,
             const arma::vec &y, // nobs x 1
@@ -286,7 +286,6 @@ namespace MCMC
         {
             // double mu0_old = mu0;
             double mu0_old = model.dobs.par1;
-            double mu0 = mu0_old;
 
             arma::vec Vt_hat(y.n_elem, arma::fill::zeros);
             arma::vec lambda(y.n_elem, arma::fill::zeros);
@@ -329,18 +328,17 @@ namespace MCMC
 
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
+                    bound_check(mu0_new, "Posterior::update_mu0");
                     model.dobs.par1 = mu0_new;
-                    mu0 = mu0_new;
                     mu0_accept += 1.;
                     // logp_mu0 = logp_new;
                 }
             }
 
-            bound_check(mu0, "Posterior::update_mu0");
-            return mu0;
+            return;
         } // func update_mu0
 
-        static double update_dispersion( // Checked. OK.
+        static void update_dispersion( // Checked. OK.
             double &rho_accept,
             Model &model,
             const arma::vec &y, // nobs x 1
@@ -388,20 +386,19 @@ namespace MCMC
             }
             double logratio = std::min(0., logp_new - logp_old);
 
-            double rho = rho_old;
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
-                rho = rho_new;
+                bound_check(rho_new, "Posterior::update_mu0");
                 model.dobs.par2 = rho_new;
                 rho_accept += 1.;
                 // logp_mu0 = logp_new;
             }
 
-            bound_check(rho, "Posterior::update_mu0");
-            return rho;
+            
+            return;
         } // func update_dispersion
 
-        static arma::vec update_dlag(
+        static void update_dlag(
             double &par1_accept,
             double &par2_accept,
             Model &model,
@@ -500,7 +497,6 @@ namespace MCMC
 
             double logratio = std::min(0., logp_new - logp_old);
 
-            arma::vec par = {par1_old, par2_old};
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
                 par1_accept += 1;
@@ -510,15 +506,10 @@ namespace MCMC
                 model.dlag.par2 = par2_new;
                 model.dlag.nL = LagDist::get_nlag(model.dlag);
                 model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
-
-                // nlag = model.update_dlag(par1_new, par2_new, max_lag);
-                par.at(0) = par1_new;
-                par.at(1) = par2_new;
-
-                // logp_mu0 = logp_new;
+                model.nP = Model::get_nP(model.dlag);
             }
 
-            return par;
+            return;
 
         } // update_lag
 
@@ -732,27 +723,23 @@ namespace MCMC
                 tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
             }
 
-            W = 0.01;
-            bool infer_W = true;
             W_prior.init("invgamma", 0.01, 0.01);
             W_stored.set_size(nsample);
             W_accept = 0.;
             if (opts.containsElementNamed("W"))
             {
                 Rcpp::List Wopts = Rcpp::as<Rcpp::List>(opts["W"]);
-                init_param(infer_W, W, W_prior, Wopts);
+                W_prior.init(Wopts);
             }
 
-            mu0 = 0.;
             mu0_prior.init("gaussian", 0., 10.);
             mu0_stored.set_size(nsample);
-            bool infer_mu0 = false;
             mu0_accept = 0.;
             mu0_mh_sd = 1.;
             if (opts.containsElementNamed("mu0"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
-                init_param(infer_mu0, mu0, mu0_prior, param_opts);
+                mu0_prior.init(param_opts);
 
                 if (param_opts.containsElementNamed("mh_sd"))
                 {
@@ -760,58 +747,49 @@ namespace MCMC
                 }
             }
 
-            rho = 30.;
             rho_stored.set_size(nsample);
-            bool infer_rho = false;
             rho_prior.init("gamma", 0.1, 0.1);
             rho_accept = 0.;
             rho_mh_sd = 0.1;
             if (opts.containsElementNamed("rho"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
-                init_param(infer_rho, rho, rho_prior, param_opts);
-
+                rho_prior.init(param_opts);
                 if (param_opts.containsElementNamed("mh_sd"))
                 {
                     rho_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
                 }
             }
 
-            par1 = 0.;
             par1_stored.set_size(nsample);
-            bool infer_par1 = false;
             par1_prior.init("gamma", 0.1, 0.1);
             par1_accept = 0.;
             par1_mh_sd = 0.1;
             if (opts.containsElementNamed("par1"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
-                init_param(infer_par1, par1, par1_prior, param_opts);
-
+                par1_prior.init(param_opts);
                 if (param_opts.containsElementNamed("mh_sd"))
                 {
                     par1_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
                 }
             }
 
-            par2 = 0.;
             par2_stored.set_size(nsample);
-            bool infer_par2 = false;
             par2_prior.init("gamma", 0.1, 0.1);
             par2_accept = 0.;
             par2_mh_sd = 0.1;
             if (opts.containsElementNamed("par2"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
-                init_param(infer_par2, par2, par2_prior, param_opts);
-
+                par2_prior.init(param_opts);
                 if (param_opts.containsElementNamed("mh_sd"))
                 {
                     par2_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
                 }
             }
 
-            w0_prior.init("gaussian", 0., W_prior.val);
+            w0_prior.init("gaussian", 0., model.derr.par1);
 
             return;
         }
@@ -820,32 +798,27 @@ namespace MCMC
         {
             Rcpp::List Wopts;
             Wopts["infer"] = true;
-            Wopts["init"] = 0.01;
             Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
             Wopts["prior_name"] = "invgamma";
 
             Rcpp::List mu0_opts;
             mu0_opts["infer"] = false;
-            mu0_opts["init"] = 0.;
             mu0_opts["mh_sd"] = 1.;
 
             Rcpp::List rho_opts;
             rho_opts["infer"] = false;
-            rho_opts["init"] = 30;
             rho_opts["mh_sd"] = 1.;
             rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             rho_opts["prior_name"] = "gamma";
 
             Rcpp::List par1_opts;
             par1_opts["infer"] = false;
-            par1_opts["init"] = 30;
             par1_opts["mh_sd"] = 1.;
             par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             par1_opts["prior_name"] = "gamma";
 
             Rcpp::List par2_opts;
             par2_opts["infer"] = false;
-            par2_opts["init"] = 30;
             par2_opts["mh_sd"] = 1.;
             par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             par2_opts["prior_name"] = "gamma";
@@ -951,30 +924,14 @@ namespace MCMC
             wt_accept.set_size(nT + 1);
             wt_accept.zeros();
 
-            double nw = W_prior.par1;
-            double nSw = W_prior.par1 * W_prior.par2;
-            double nw_new = nw + (double)wt.n_elem - 2.;
-            W_prior.init(W_prior.name, nw_new, nSw);
-
-            if (!mu0_prior.infer)
+            std::map<std::string, AVAIL::Dist> prior_dist = AVAIL::dist_list;
+            if ((prior_dist[W_prior.name] == AVAIL::Dist::invgamma) && W_prior.infer)
             {
-                mu0 = model.dobs.par1;
-            }
-            if (!rho_prior.infer)
-            {
-                rho = model.dobs.par2;
-            }
-            if (!par1_prior.infer)
-            {
-                par1 = model.dlag.par1;
-            }
-            if (!par2_prior.infer)
-            {
-                par2 = model.dlag.par2;
-            }
-            if (!W_prior.infer)
-            {
-                W = model.derr.par1;
+                double nw = W_prior.par1;
+                double nSw = W_prior.par1 * W_prior.par2;
+                double nw_new = nw + (double)wt.n_elem - 2.;
+                W_prior.par1 = nw_new;
+                W_prior.par2 = nSw;
             }
 
             // LBA::LinearBayes linear_bayes(model, y);
@@ -1008,35 +965,29 @@ namespace MCMC
                 if (W_prior.infer)
                 {
                     // arma::vec wt = arma::diff(psi);
-                    double W_old = W;
-                    W = Posterior::update_W(W_accept, W_old, wt, W_prior, mh_sd);
-                    w0_prior.par2 = W;
-                    model.derr.par1 = W;
+                    Posterior::update_W(W_accept, model, wt, W_prior, mh_sd);
+                    w0_prior.par2 = model.derr.par1;
                 }
 
                 if (par1_prior.infer || par2_prior.infer)
                 {
-                    arma::vec out = Posterior::update_dlag(
+                    Posterior::update_dlag(
                         par1_accept, par2_accept, model,
                         y, hpsi, par1_prior, par2_prior,
                         par1_mh_sd, par2_mh_sd, max_lag);
                     // arma::vec out = Posterior::update_dlag_hmc(
                     //     par1_accept, par2_accept, model, y, hpsi,
                     //     par1_prior, par2_prior, epsilon, L, m, max_lag);
-
-                    par1 = out.at(0);
-                    par2 = out.at(1);
                 }
 
                 if (mu0_prior.infer)
                 {
-                    mu0 = Posterior::update_mu0(mu0_accept, model, y, hpsi, mu0_mh_sd);
+                    Posterior::update_mu0(mu0_accept, model, y, hpsi, mu0_mh_sd);
                 }
 
                 if (rho_prior.infer)
                 {
-                    double rho_old = rho;
-                    rho = Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior, rho_mh_sd);
+                    Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior, rho_mh_sd);
                 }
 
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
@@ -1055,11 +1006,11 @@ namespace MCMC
                     // log_marg_stored.at(idx_run) = log_marg;
                     // wt_stored.col(idx_run) = psi;
                     wt_stored.col(idx_run) = wt;
-                    W_stored.at(idx_run) = W;
-                    mu0_stored.at(idx_run) = mu0;
-                    rho_stored.at(idx_run) = rho;
-                    par1_stored.at(idx_run) = par1;
-                    par2_stored.at(idx_run) = par2;
+                    W_stored.at(idx_run) = model.derr.par1;
+                    mu0_stored.at(idx_run) = model.dobs.par1;
+                    rho_stored.at(idx_run) = model.dobs.par2;
+                    par1_stored.at(idx_run) = model.dlag.par1;
+                    par2_stored.at(idx_run) = model.dlag.par2;
                 }
 
                 if (verbose)
@@ -1101,31 +1052,26 @@ namespace MCMC
         arma::mat wt_stored; // (nT + 1) x nsample
 
         Prior mu0_prior;
-        double mu0 = 0.;
         arma::vec mu0_stored;
         double mu0_accept = 0.;
         double mu0_mh_sd = 1.;
 
         Prior rho_prior;
-        double rho = 0.;
         arma::vec rho_stored;
         double rho_accept = 0.;
         double rho_mh_sd = 1.;
 
         Prior par1_prior;
-        double par1 = 0.;
         arma::vec par1_stored;
         double par1_accept = 0.;
         double par1_mh_sd = 1.;
 
         Prior par2_prior;
-        double par2 = 0.;
         arma::vec par2_stored;
         double par2_accept = 0.;
         double par2_mh_sd = 1.;
 
         Prior W_prior;
-        double W = 0.01;
         arma::vec W_stored;
         double W_accept = 0.;
     };

@@ -162,7 +162,6 @@ static arma::vec qforecast(
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
     const arma::mat &Wt,        // p x N, {W[t-1]} samples of latent variance
-    const arma::vec &par,       // m x 1, m = 4
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
@@ -174,7 +173,7 @@ static arma::vec qforecast(
     {
         arma::vec gtheta_old_i = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old); // gt(theta[t-1, i])
         double ft_gtheta = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);        // ft( gt(theta[t-1,i]) )
-        double eta = par.at(0) + ft_gtheta;
+        double eta = model.dobs.par1 + ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink, 0.); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
@@ -191,7 +190,7 @@ static arma::vec qforecast(
         {
             arma::vec Ft_gtheta = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y);  // Ft evaluated at a[t_new]
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - par.at(0) - ft_tilde; // (eq 3.16)
+            double delta = yhat_new - model.dobs.par1 - ft_tilde; // (eq 3.16)
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
@@ -323,13 +322,12 @@ static void prior_forward(
     const arma::vec &y   // (nT + 1) x 1
 )
 {
-    const unsigned int nP = Wt.n_elem;
     const unsigned int nT = y.n_elem - 1;
 
-    arma::mat sig = arma::eye<arma::mat>(nP, nP) * 2.;
-    prec.slice(0) = arma::eye<arma::mat>(nP, nP) * 0.5;
+    arma::mat sig = arma::eye<arma::mat>(model.nP, model.nP) * 2.;
+    prec.slice(0) = arma::eye<arma::mat>(model.nP, model.nP) * 0.5;
 
-    arma::mat Gt = TransFunc::init_Gt(nP, model.dlag, model.ftrans);
+    arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans);
     for (unsigned int t = 1; t <= nT; t++)
     {
         mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1));
@@ -432,27 +430,26 @@ static void backward_kernel(
     const arma::vec &y)
 {
     std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-    const unsigned int nP = vt.n_rows;
     arma::mat U_cur = K;
     arma::mat Uprec_cur = K;
     arma::mat Urchol_cur = K;
 
     if (trans_list[model.ftrans] == TransFunc::sliding)
     {
-        for (unsigned int i = 0; i < nP - 1; i++)
+        for (unsigned int i = 0; i < model.nP - 1; i++)
         {
             K.at(i, i + 1) = 1.;
         }
 
-        K.at(nP - 1, nP - 1) = 1.;
-        U_cur.at(nP - 1, nP - 1) = Wt.at(0);
-        Uprec_cur.at(nP - 1, nP - 1) = 1. / Wt.at(0);
-        Urchol_cur.at(nP - 1, nP - 1) = std::sqrt(Wt.at(0));
+        K.at(model.nP - 1, model.nP - 1) = 1.;
+        U_cur.at(model.nP - 1, model.nP - 1) = Wt.at(0);
+        Uprec_cur.at(model.nP - 1, model.nP - 1) = 1. / Wt.at(0);
+        Urchol_cur.at(model.nP - 1, model.nP - 1) = std::sqrt(Wt.at(0));
         ldetU = std::log(Wt.at(0));
     }
     else
     {
-        arma::mat G_next = TransFunc::init_Gt(nP, model.dlag, model.ftrans);
+        arma::mat G_next = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans);
         LBA::func_Gt(G_next, model, vt.col(t_cur), y.at(t_cur));
 
         arma::mat Vchol = arma::chol(Vt_inv.slice(t_cur));
@@ -481,7 +478,6 @@ static arma::vec qbackcast(
     const arma::mat &vt,         // nP x (nT + 1), v[t], mean of artificial prior for theta[t_cur]
     const arma::cube &Vt_inv,        // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
     const arma::vec &Wt, // p x 1
-    const arma::vec &par, // m x 1, m = 4
     const arma::vec &y,
     const bool &full_rank = false
 )
@@ -491,11 +487,10 @@ static arma::vec qbackcast(
     double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink, 0.);
 
     unsigned int N = Theta_next.n_cols;
-    unsigned int nP = Theta_next.n_rows;
     unsigned int t_next = t_cur + 1;
 
-    arma::vec r_cur(nP, arma::fill::zeros);
-    arma::mat K_cur(nP, nP, arma::fill::zeros);
+    arma::vec r_cur(model.nP, arma::fill::zeros);
+    arma::mat K_cur(model.nP, model.nP, arma::fill::zeros);
     arma::mat Uprec_cur = K_cur;
     double ldetU = 0.;
     backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, Wt, y);

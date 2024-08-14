@@ -49,8 +49,6 @@ public:
         name = err_dist;
         par1 = par1_in;
         par2 = par2_in;
-
-        _err_list = AVAIL::err_list;
         return;
     }
 
@@ -60,8 +58,6 @@ public:
         name = "gaussian";
         par1 = 0.01;  // W
         par2 = 0.0; // w[0]
-
-        _err_list = AVAIL::err_list;
         return;
     }
 
@@ -85,7 +81,7 @@ public:
         const bool &cumsum = true,
         const Rcpp::Nullable<Rcpp::NumericVector> &wt_init = R_NilValue)
     {
-        std::map<std::string, AVAIL::Dist> err_list = AVAIL::err_list;
+        std::map<std::string, AVAIL::Dist> err_list = ErrDist::err_list;
         arma::vec wt(nT + 1, arma::fill::zeros);
 
         double W = derr.par1;
@@ -151,12 +147,13 @@ public:
         const Rcpp::Nullable<Rcpp::NumericVector> &wt_init = R_NilValue
     )
     {
+        std::map<std::string, AVAIL::Dist> err_list = ErrDist::err_list;
         _wt.set_size(nT + 1);
         _wt.zeros();
 
         if (par1 > 0)
         {
-            switch (_err_list[name])
+            switch (err_list[name])
             {
             case AVAIL::Dist::gaussian:
             {
@@ -200,15 +197,25 @@ public:
         return;
     }
 
+    static const std::map<std::string, AVAIL::Dist> err_list;
 private:
     unsigned int _nT;
     arma::vec _wt;
     arma::vec _psi;           // Initial value (at time = 0) of the normal errors.
-    std::map<std::string, AVAIL::Dist> _err_list;
     arma::vec _wt_init;
-    
+
+    static std::map<std::string, AVAIL::Dist> map_err_dist()
+    {
+        std::map<std::string, AVAIL::Dist> ERR_MAP;
+
+        ERR_MAP["gaussian"] = AVAIL::Dist::gaussian;
+        ERR_MAP["normal"] = AVAIL::Dist::gaussian;
+
+        ERR_MAP["constant"] = AVAIL::Dist::constant;
+        return ERR_MAP;
+    }
 };
 
-
+inline const std::map<std::string, AVAIL::Dist> ErrDist::err_list = ErrDist::map_err_dist();
 
 #endif

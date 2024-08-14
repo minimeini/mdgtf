@@ -72,10 +72,7 @@ public:
 
 
     static const std::map<std::string, Algo> algo_list;
-    
-    
     static const std::map<std::string, Dist> dist_list;
-    static const std::map<std::string, Dist> err_list;
     static const std::map<std::string, Param> static_param_list;
     static const std::map<std::string, Loss> loss_list;
     static const std::map<std::string, Param> tuning_param_list;
@@ -165,17 +162,7 @@ private:
 
     
 
-    static std::map<std::string, Dist> map_err_dist()
-    {
-        std::map<std::string, Dist> ERR_MAP;
-
-        ERR_MAP["gaussian"] = Dist::gaussian;
-        ERR_MAP["normal"] = Dist::gaussian;
-
-        ERR_MAP["constant"] = Dist::constant;
-        return ERR_MAP;
-    }
-
+    
     static std::map<std::string, Param> map_static_param()
     {
         std::map<std::string, Param> map;
@@ -249,13 +236,10 @@ private:
 }; // class AVAIL
 
 inline const std::map<std::string, AVAIL::Algo> AVAIL::algo_list = AVAIL::map_algorithm();
-
 inline const std::map<std::string, AVAIL::Dist> AVAIL::dist_list = AVAIL::map_dist();
-inline const std::map<std::string, AVAIL::Dist> AVAIL::err_list = AVAIL::map_err_dist();
-inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 inline const std::map<std::string, AVAIL::Loss> AVAIL::loss_list = AVAIL::map_loss_func();
 inline const std::map<std::string, AVAIL::Param> AVAIL::tuning_param_list = AVAIL::map_tuning_param();
-
+inline const std::map<std::string, AVAIL::Param> AVAIL::static_param_list = AVAIL::map_static_param();
 
 /**
  * @brief Define a two-parameter distributions.
@@ -301,6 +285,26 @@ public:
         par2 = par2_;
         return;
     }
+
+    void init(const Rcpp::List &opts)
+    {
+        Rcpp::List param_opts = opts;
+        if (param_opts.containsElementNamed("prior_name"))
+        {
+            std::string prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
+            name = prior_name;
+        }
+
+        if (param_opts.containsElementNamed("prior_param"))
+        {
+            Rcpp::NumericVector param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
+            par1 = param[0];
+            par2 = param[1];
+        }
+
+
+        return;
+    }
 };
 
 
@@ -308,12 +312,10 @@ class Prior : public Dist
 {
 public:
     bool infer = false;
-    double val = 0.;
 
     Prior() : Dist()
     {
         infer = false;
-        val = 0.;
         return;
     }
 
@@ -321,18 +323,36 @@ public:
         const std::string &name_,   // name of the distribution
         const double &par1_,        // first parameter of the distribution
         const double &par2_,        // second parameter of the distribution
-        const bool &infer_ = false, // if the corresponding parameter is unknown
-        const double &init_val_ = 0.) : Dist(name_, par1_, par2_)
+        const bool &infer_ = false) : Dist(name_, par1_, par2_)
     {
         infer = infer_;
-        val = init_val_;
         return;
     }
 
-    void init_param(const bool &param_infer, const double &param_init)
+    void init(const std::string &name_in, const double &par1_in, const double &par2_in)
     {
-        infer = param_infer;
-        val = param_init;
+        name = name_in;
+        par1 = par1_in;
+        par2 = par2_in;
+        infer = false;
+        return;
+    }
+
+    void init(const Rcpp::List &opts)
+    {
+        Rcpp::List param_opts = opts;
+
+        name = "invgamma";
+        par1 = 0.01;
+        par2 = 0.01;
+        Dist::init(param_opts);
+
+        infer = false;
+        if (param_opts.containsElementNamed("infer"))
+        {
+            infer = Rcpp::as<bool>(param_opts["infer"]);
+        }
+
         return;
     }
 
@@ -519,15 +539,10 @@ public:
 
         return out;
     }
+
+
+
 };
 
-
-
-
-// struct Sys
-// {
-//     Discount discount_factor;
-//     unsigned int nburnin, nthin, nsample, ntotal, nsmc, nbackward;
-// };
 
 #endif
