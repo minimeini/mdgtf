@@ -16,6 +16,9 @@
 
 /**
  * @brief Sequential Monte Carlo methods.
+ * @todo Bugs to be fixed
+ *       1. Backward evolution
+ *       2. Discount factor is not working.
  * @todo Further improvement on SMC
  *       1. Resample-move step after resamplin: we need to move the particles carefully because we have constrains on the augmented states Theta.
  *       2. Residual resampling, systematic resampling, or stratified resampling.
