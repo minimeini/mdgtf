@@ -786,13 +786,15 @@ namespace LBA
                     arma::mat _Gt_inv;
                     if (is_iterative)
                     {
-                        // Gt is invertible for iterative transfer function.
-                        _Gt_inv = inverse(_Gt);
+                        /*
+                        Gt is invertible but asymmetric for iterative transfer function.
+                        */
+                        _Gt_inv = arma::inv(_Gt);
                     }
                     else
                     {
                         // Gt is not invertible for sliding transfer function, use pseudo inverse instead.
-                        _Gt_inv = inverse(_Gt, true);
+                        _Gt_inv = arma::pinv(_Gt);
                     }
 
                     arma::vec _atilde_left = (1. - _discount_factor) * _mt.col(t - 1);
