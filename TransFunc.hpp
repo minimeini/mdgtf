@@ -113,7 +113,6 @@ public:
 
 
 
-
     /**
      * @brief g[t](\btheta[t-1], y[t-1]), exact formula
      *
@@ -142,13 +141,6 @@ public:
         return ft;
     }
 
-
-    static double coef_iterative(const double &dlag_par1, const double &dlag_par2)
-    {
-        // iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
-        // coef_now = std::pow(1. - dlag.par1, dlag.par2);
-        return std::pow(1. - dlag_par1, dlag_par2);
-    }
 
 
 

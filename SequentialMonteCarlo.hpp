@@ -17,12 +17,12 @@
 /**
  * @brief Sequential Monte Carlo methods.
  * @todo Bugs to be fixed
- *       1. Backward evolution
  *       1. Discount factor is not working.
  * @todo Further improvement on SMC
  *       1. Resample-move step after resamplin: we need to move the particles carefully because we have constrains on the augmented states Theta.
  *       2. Residual resampling, systematic resampling, or stratified resampling.
  *       3. Tampering SMC.
+ *       4. Another option for iterative transfer function: change theta to the sliding style in propagation but use the theta in iterative style as the true probability density.
  *
  *       Reference:
  *       1. Notes on sequential Monte Carlo (by N. Kantas);
@@ -1581,21 +1581,24 @@ namespace SMC
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, weights_forward, eff_forward, Wt,
-                model, y, N, false, false,
+                model, y, N, !smoothing, false,
                 use_discount, use_custom,
                 custom_discount_factor,
                 default_discount_factor, verbose);
 
             arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
-            output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
             output["eff_forward"] = Rcpp::wrap(eff_forward.t());
             output["log_marginal_likelihood"] = log_cond_marg;
 
-
             if (smoothing)
             {
+                output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
                 backward_filter(model, y, verbose);
                 smoother(model, y, verbose);
+            }
+            else
+            {
+                output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
             }
 
             return;

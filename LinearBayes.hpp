@@ -59,7 +59,7 @@ namespace LBA
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
         {
-            double coef_now = TransFunc::coef_iterative(model.dlag.par1, model.dlag.par2);
+            double coef_now = std::pow(1. - model.dlag.par1, model.dlag.par2);
             double dhpsi_now = GainFunc::psi2dhpsi(
                 mt_old.at(0), // h'(psi[t])
                 model.fgain);
