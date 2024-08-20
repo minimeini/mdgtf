@@ -151,12 +151,12 @@ Rcpp::List dgtf_simulate(
     Rcpp::List output = settings;
     Model model(settings);
 
-    arma::vec psi, lambda, y;
-    Model::simulate(y, lambda, psi, model, ntime, y0);
+    arma::vec psi, ft, lambda, y;
+    Model::simulate(y, lambda, ft, psi, model, ntime, y0);
 
     output["y"] = Rcpp::wrap(y);
     output["psi"] = Rcpp::wrap(psi);
-    // output["wt"] = Rcpp::wrap(wt);
+    output["ft"] = Rcpp::wrap(ft);
     output["lambda"] = Rcpp::wrap(lambda);
 
     return output;

@@ -985,15 +985,17 @@ public:
      * @param r
      * @return arma::vec
      */
-    static arma::vec iter_coef(const double &kappa, const double &r)
+    static arma::vec iter_coef(const double &kappa, const double &r, const bool &reciprocal = false)
     {
         unsigned int _r = static_cast<unsigned int>(r);
         arma::vec coef(_r, arma::fill::zeros);
         for (unsigned int k = 0; k <_r; k ++)
         {
             double c1 = binom(r, k+1);
-            double c2 = std::pow(-kappa, k+1);
-            coef.at(k) = -c1 * c2; // coef[0]=c(r,1)(-kappa)^1, ..., coef[_r-1]=c(r,r)(-kappa)^r
+            double power = static_cast<double>(k + 1);
+            power *= reciprocal ? -1 : 1;
+            double c2 = std::pow(-kappa, power);
+            coef.at(k) = -c1 * c2; // coef[0]=-c(r,1)(-kappa)^1, ..., coef[_r-1]=-c(r,r)(-kappa)^r
         }
 
         bound_check<arma::vec>(coef, "nbinom::iter_coef: coef");

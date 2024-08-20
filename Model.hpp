@@ -249,6 +249,7 @@ public:
     static void simulate(
         arma::vec &y, 
         arma::vec &lambda,
+        arma::vec &ft,
         arma::vec &psi, // (ntime + 1) x 1
         Model &model,
         const unsigned int &ntime,
@@ -265,9 +266,9 @@ public:
         y.zeros();
         y.at(0) = y0;
         lambda = y;
+        ft = y;
 
         psi = ErrDist::sample(model.derr, ntime, true);
-        arma::vec ft(ntime + 1, arma::fill::zeros);
         arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
 
         for (unsigned int t = 1; t < (ntime + 1); t++)
@@ -1100,7 +1101,91 @@ public:
         return theta_next;
     }
 
+    /**
+     * @brief A backward propagate from theta[t] to theta[t-1]
+     *
+     * @param ftrans
+     * @param fgain
+     * @param dlag
+     * @param theta theta[t]
+     * @param yprev y[t-1]
+     * @return arma::vec, theta[t-1]
+     *
+     * @note
+     * Backward propagation doesn't work for iterative transfer functions.
+     * 
+     * For an iterative transfer function, theta[t] = (psi[t+1],f[t],...,f[t+1-r]);
+     * For a sliding transfer function, theta[t] = (psi[t],...,psi[t+1-nlag]).
+     * 
+     * The backward propagate probably is not gonna work for iterative transfer function.
+     */
+    static arma::vec func_backward_gt(
+        const std::string &ftrans,
+        const std::string &fgain,
+        const LagDist &dlag,
+        const arma::vec &theta, // nP x 1, theta[t]
+        const double &yprev, // y[t-1]
+        const double &eps = 0.
+    )
+    {
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        const unsigned int nP = theta.n_elem;
+        arma::vec theta_prev(nP, arma::fill::zeros); // nP x 1
 
+        if (trans_list[ftrans] == TransFunc::Transfer::iterative)
+        {
+            /*
+            From theta[t] to theta[t-1]
+            <=>
+            from (psi[t+1],f[t],...,f[t+1-r]) to (psi[t],f[t-1],...,f[t-r]).
+
+            First, we need to get psi[t] = psi[t+1] + eps;
+            Second, we need to get f[t-r]
+            */
+            theta_prev.subvec(1, nP - 2) = theta.subvec(2, nP - 1);
+
+            arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2, true);
+            iter_coef = arma::reverse(iter_coef); // r x 1, r = nP - 1
+            double ctmp = arma::accu(iter_coef % theta.subvec(1, nP - 1));
+            double coef_now = std::pow((dlag.par1 - 1) / dlag.par1, dlag.par2);
+
+            double hpsi_bnd = -ctmp / yprev;
+            hpsi_bnd /= coef_now;
+            double psi_bnd = GainFunc::hpsi2psi(hpsi_bnd, fgain);
+            double eps_bnd = psi_bnd - theta.at(0);
+
+            bool in_bound = (static_cast<int>(dlag.par2) % 2 == 0) ? (eps > eps_bnd) : (eps < eps_bnd);
+            if (!in_bound)
+            {
+                throw std::runtime_error("StateSpace::func_backward_gt: invalid eps leads a negative ft.");
+            }
+
+            theta_prev.at(0) = theta.at(0) + eps; // psi[t] = psi[t+1] + eps
+
+            /*
+            hpsi_bnd
+            It is an lower bound if r is even, an upper bound otherwise.
+            */
+
+            double hpsi = GainFunc::psi2hpsi(theta_prev.at(0), fgain);
+            double ft_old = ctmp + coef_now * hpsi * yprev;
+
+            if (ft_old < 0)
+            {
+                throw std::invalid_argument("State::Space::func_backward_gt: ft must be non-negative");
+            }
+
+            theta_prev.at(nP - 1) = ft_old;
+        }
+        else
+        {
+            // theta[t] = K[t] * theta[t + 1] + w[t]
+            theta_prev.subvec(0, nP - 2) = theta.subvec(1, nP - 1);
+            theta_prev.at(nP - 1) = theta.at(nP - 1) + eps;
+        }
+
+        return theta_prev;
+    }
 
     /**
      * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].

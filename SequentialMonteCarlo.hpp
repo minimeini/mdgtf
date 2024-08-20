@@ -18,7 +18,7 @@
  * @brief Sequential Monte Carlo methods.
  * @todo Bugs to be fixed
  *       1. Backward evolution
- *       2. Discount factor is not working.
+ *       1. Discount factor is not working.
  * @todo Further improvement on SMC
  *       1. Resample-move step after resamplin: we need to move the particles carefully because we have constrains on the augmented states Theta.
  *       2. Residual resampling, systematic resampling, or stratified resampling.
@@ -554,16 +554,11 @@ namespace SMC
 
             arma::vec weights(N, arma::fill::zeros);
             double log_cond_marginal = 0.;
-            arma::vec par = {
-                model.dobs.par1, model.dobs.par2, 
-                model.dlag.par1, model.dlag.par2};
 
             for (unsigned int t = 0; t < nT; t++)
             {
-                Rcpp::checkUserInterrupt();
-
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat loc(model.nP, N, arma::fill::zeros);
+                arma::mat loc; // (model.nP, N, arma::fill::zeros);
                 arma::cube prec_chol_inv; // nP x nP x N
                 if (full_rank)
                 {
@@ -573,7 +568,7 @@ namespace SMC
                 arma::vec tau = qforecast(
                     loc, prec_chol_inv, logq,     // sufficient statistics
                     model, t + 1, Theta.slice(t), // theta needs to be resampled
-                    Wt, par, y);
+                    Wt, y);
 
                 tau = weights % tau;
                 weights_forward.row(t) = logq.t();
@@ -595,9 +590,10 @@ namespace SMC
                     weights_forward.row(t) = wtmp.elem(resample_idx).t();
                 }
 
-                loc = loc.cols(resample_idx);
+
                 if (full_rank)
                 {
+                    loc = loc.cols(resample_idx);
                     prec_chol_inv = prec_chol_inv.slices(resample_idx);
                 }
 
@@ -615,7 +611,7 @@ namespace SMC
 
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
-                arma::vec theta_cur = arma::vectorise(Theta.slice(t).row(0)); // N x 1
+                arma::mat Theta_cur = Theta.slice(t); // nP x N
                 #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
@@ -630,17 +626,18 @@ namespace SMC
                     }
                     else
                     {
-                        theta_new = loc.col(i);
                         double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
-                        theta_new.at(0) += eps;
                         logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true); // sample from evolution distribution
+
+                        theta_new = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t));
+                        theta_new.at(0) += eps;
                     }
 
                     Theta_new.col(i) = theta_new;
 
-                    double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
+                    double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), std::sqrt(Wt.at(0)), true);
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
+                    double lambda = LinkFunc::ft2mu(ft, model.flink, model.dobs.par1);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = logp - logq.at(i);
                 }
@@ -650,11 +647,11 @@ namespace SMC
                                  { val -= wmax; });
                 weights = arma::exp(weights);
 
-                eff_forward.at(t + 1) = effective_sample_size(weights);
                 Theta.slice(t + 1) = Theta_new;
 
                 if (final_resample_by_weights)
                 {
+                    eff_forward.at(t + 1) = effective_sample_size(weights);
                     if (eff_forward.at(t + 1) < 0.95 * N || t >= nT - 1)
                     {
                         resample_idx = get_resample_index(weights);
@@ -1404,19 +1401,13 @@ namespace SMC
                 tau = tau.elem(resample_idx);
                 log_marg = log_marg.elem(resample_idx);
                 logq = logq.elem(resample_idx);
-
                 weights_backward.row(t + 1) = logq.t();
-                eff_backward.at(t) = effective_sample_size(tau);
 
-                arma::vec theta_next; // N x 1
-                if (trans_list[model.ftrans] == TransFunc::Transfer::sliding)
-                {
-                    theta_next = arma::vectorise(Theta_backward.slice(t + 1).row(model.nP - 1)); // N x 1
-                }
-                else
-                { // iterative transfer function
-                    theta_next = arma::vectorise(Theta_backward.slice(t + 1).row(0)); // N x 1
-                }
+
+                /*
+                Propagation
+                */
+                arma::mat Theta_next = Theta_backward.slice(t + 1); // nP x N;
                 arma::mat Theta_cur(model.nP, N, arma::fill::zeros);
                 arma::vec mu = mu_marginal.col(t);
                 arma::mat Prec = Prec_marginal.slice(t);
@@ -1436,21 +1427,11 @@ namespace SMC
                     }
                     else
                     {
-                        theta_cur = loc.col(i);
                         double eps = R::rnorm(0., std::sqrt(Wt.at(0)));
-                        logq.at(i) += R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
+                        theta_cur = StateSpace::func_backward_gt(model.ftrans, model.fgain, model.dlag, Theta_next.col(i), y.at(t), eps);
 
-                        if (trans_list[model.ftrans] == TransFunc::Transfer::sliding)
-                        {
-                            theta_cur.at(model.nP - 1) += eps;
-                            logp = R::dnorm4(theta_next.at(i), theta_cur.at(model.nP - 1), std::sqrt(Wt.at(0)), true);
-                        }
-                        else
-                        {
-                            // iterative transfer function
-                            theta_cur.at(0) += eps;
-                            logp = R::dnorm4(theta_next.at(i), theta_cur.at(0), std::sqrt(Wt.at(0)), true);
-                        }
+                        logq.at(i) += R::dnorm4(eps, 0, std::sqrt(Wt.at(0)), true);
+                        logp = R::dnorm4(eps, 0., std::sqrt(Wt.at(0)), true);
                     }
 
                     Theta_cur.col(i) = theta_cur;
@@ -1465,10 +1446,15 @@ namespace SMC
                     log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu, Prec, true);
                     logp += log_marg.at(i);
 
-                    weights.at(i) = std::exp(logp - logq.at(i)); // + logw_next;
+                    weights.at(i) = logp - logq.at(i); // + logw_next;
                 } // loop over i, index of particles
 
                 Theta_backward.slice(t) = Theta_cur;
+                double wmax = weights.max();
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
+                weights = arma::exp(weights);
+                eff_backward.at(t + 1) = effective_sample_size(weights);
 
                 if (verbose)
                 {

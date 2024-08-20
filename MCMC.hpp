@@ -43,10 +43,6 @@ namespace MCMC
 
             const bool full_rank = false;
             arma::vec weights(N, arma::fill::zeros);
-            arma::vec par = {
-                model.dobs.par1, model.dobs.par2,
-                model.dlag.par1, model.dlag.par2};
-
             double log_marg_new = 0.;
             const double logN = std::log(static_cast<double>(N));
             for (unsigned int t = 0; t < (y.n_elem - 1); t++)
@@ -66,7 +62,7 @@ namespace MCMC
                 arma::vec tau = qforecast(
                     loc, prec_chol_inv, logq, // sufficient statistics
                     model, t + 1, Theta_cur,  // theta needs to be resampled
-                    Wt, par, y);
+                    Wt, y);
 
                 tau = weights % tau;
                 arma::uvec resample_idx = SMC::SequentialMonteCarlo::get_resample_index(tau);
@@ -107,7 +103,7 @@ namespace MCMC
 
                     double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink, par.at(0));
+                    double lambda = LinkFunc::ft2mu(ft, model.flink, model.dobs.par1);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp - logq.at(i));
                 }

@@ -126,6 +126,48 @@ public:
         return hpsi;
     }
 
+    static double hpsi2psi(
+        const double &hpsi,
+        const std::string &gain_func)
+    {
+        std::map<std::string, AVAIL::Func> gain_list = GainFunc::gain_list;
+        double psi;
+
+        switch (gain_list[gain_func])
+        {
+        case AVAIL::Func::ramp:
+        {
+            psi = hpsi;
+        }
+        break;
+        case AVAIL::Func::exponential:
+        {
+            psi = std::log(std::abs(hpsi) + EPS);
+        }
+        break;
+        case AVAIL::Func::identity:
+        {
+            // do nothing
+            psi = hpsi;
+        }
+        break;
+        case AVAIL::Func::softplus:
+        {
+            psi = std::log(std::exp(hpsi) - 1.);
+        }
+        break;
+        default:
+        {
+            // Use identity gain: do nothing
+            throw std::invalid_argument("Unknown gain function");
+        }
+        break;
+        }
+
+        bound_check(hpsi, "hpsi2psi");
+        return hpsi;
+    }
+
     /**
      * @brief First-order derivative of the gain function, h'(psi[t]).
      * 
