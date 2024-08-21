@@ -167,7 +167,7 @@ Rcpp::List dgtf_simulate(
     output["psi"] = Rcpp::wrap(psi.t());
     output["ft"] = Rcpp::wrap(ft.t());
     output["lambda"] = Rcpp::wrap(lambda.t());
-    
+
     output["seasonality"] = Rcpp::wrap(model.seas.t());
     output["nlag"] = model.dlag.nL;
 
@@ -236,7 +236,7 @@ Rcpp::List dgtf_infer(
 
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
         
-         output = linear_bayes.get_output();
+        output = linear_bayes.get_output();
 
         if (forecast_error)
         {

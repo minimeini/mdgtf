@@ -205,36 +205,42 @@ namespace LBA
         const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,      // y[0], y[1], ..., y[nT]
-        const bool &fill_zero = LBA_FILL_ZERO)
+        const bool &fill_zero = LBA_FILL_ZERO,
+        const unsigned int &seasonal_period = 0)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         arma::vec Ft(theta_cur.n_elem, arma::fill::zeros);
         if (trans_list[ftrans] == TransFunc::sliding)
         {
-            const unsigned int nL = theta_cur.n_elem;
-            unsigned int nstart = (t > nL) ? (t - nL) : 0;
+            unsigned int nstart = (t > dlag.nL) ? (t - dlag.nL) : 0;
             // unsigned int nstart = std::max((unsigned int)0, t - nL);
-            unsigned int nend = std::max(nL - 1, t - 1);
+            unsigned int nend = std::max(dlag.nL - 1, t - 1);
             unsigned int nelem = nend - nstart + 1;
 
-            arma::vec yold(nL, arma::fill::zeros);
+            arma::vec yold(dlag.nL, arma::fill::zeros);
             yold.tail(nelem) = yall.subvec(nstart, nend);
 
             if (fill_zero)
             {
-                yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(nL));
+                yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(dlag.nL));
             }
             
             yold = arma::reverse(yold);
 
-            arma::vec th = theta_cur.head(nL); // nL x 1
+            arma::vec th = theta_cur.head(dlag.nL); // nL x 1
             arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
             arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
-            Ft.head(nL) = Ftmp % dlag.Fphi;
+            Ft.head(dlag.nL) = Ftmp % dlag.Fphi;
         }
         else
         {
             Ft.at(1) = 1.;
+        }
+
+        if (seasonal_period > 0)
+        {
+            unsigned int nstate = theta_cur.n_elem - seasonal_period;
+            Ft.at(nstate) = 1.;
         }
 
         bound_check<arma::vec>(Ft, "func_Ft: Ft");
@@ -263,8 +269,8 @@ namespace LBA
         const arma::mat &Rt,
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t, at, yall);
-        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero);
+        mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t, at, yall, model.seasonal_period);
+        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seasonal_period);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         bound_check(var_ft, "LBA::func_prior_ft: var_ft", true, true);
         return;
@@ -523,22 +529,25 @@ namespace LBA
             _At.set_size(_nP);
             _At.zeros();
 
-            _Ft = TransFunc::init_Ft(model.nP, model.ftrans); // set F[0]
-            _Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans); // set G[0]
+            _Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seasonal_period); // set F[0]
+            _Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seasonal_period); // set G[0]
 
             _at.set_size(_nP, _nT + 1);
             _at.zeros();
+            if (model.seasonal_period > 0)
+            {
+                _at.submat(model.nP - model.seasonal_period, 0, model.nP - 1, 0) = arma::randu(model.seasonal_period, arma::distr_param(0, 10));
+            }
             _mt = _at;
             _atilde_t = _at;
             // set m[0]
 
-            _Rt.set_size(_nP, _nP, _nT + 1);
-            _Rt.for_each([](arma::cube::elem_type &val)
-                         { val = 0.; });
-            _Rtilde_t = _Rt;
-            _Ct = _Rt;
+            _Ct = arma::zeros<arma::cube>(_nP, _nP, _nT + 1);
             _Ct.slice(0) = arma::eye<arma::mat>(_nP, _nP);
             _Ct.for_each([&theta_upbnd](arma::cube::elem_type &val) { val *= theta_upbnd; });
+
+            _Rt = arma::zeros<arma::cube>(_nP, _nP, _nT + 1);
+            _Rtilde_t = _Rt;
             // set C[0]
 
             _y.set_size(_nT + 1);
@@ -655,7 +664,7 @@ namespace LBA
 
         void filter_single_iter(const unsigned int &t)
         {
-            _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+            _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seasonal_period); // Checked. OK.
             func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
@@ -707,10 +716,11 @@ namespace LBA
                 tstart = _model.dlag.nL + 1;
             }
 
+
             for (unsigned int t = tstart; t <= nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1)); // Checked. OK.
+                _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seasonal_period); // Checked. OK.
                 func_Gt(_Gt, _model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
@@ -992,7 +1002,6 @@ namespace LBA
                 Rt_cast.at(j) = arma::zeros<arma::cube>(_model.nP, _model.nP, nT + 1);
             }
 
-            double mu0 = _model.dobs.par1;
             unsigned int tstart = std::max(k, _model.nP);
             if (start_time.isNotNull()) {
                 tstart = Rcpp::as<unsigned int>(start_time);
@@ -1014,7 +1023,7 @@ namespace LBA
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
-                        _model.ftrans, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                        _model.ftrans, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), _model.seasonal_period);
                     func_Gt(Gt_cast, _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 
@@ -1060,14 +1069,14 @@ namespace LBA
                         _fill_zero
                     );
 
-                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink, mu0);
+                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink, _model.dobs.par1);
 
                     arma::vec ft_cast_tmp = ft_tmp + std::sqrt(qt_tmp) * arma::randn(nsample);
                     arma::vec lambda_cast_tmp(nsample);
                     for (unsigned int i = 0; i < nsample; i ++)
                     {
                         lambda_cast_tmp.at(i) = LinkFunc::ft2mu(
-                            ft_cast_tmp.at(i), _model.flink, mu0);
+                            ft_cast_tmp.at(i), _model.flink, _model.dobs.par1);
                     }
 
                     ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();
@@ -1287,6 +1296,27 @@ namespace LBA
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
             output["mu0"] = _model.dobs.par1;
+            output["nlag"] = _model.dlag.nL;
+            output["seasonal_period"] = _model.seasonal_period;
+
+            if (_model.seasonal_period > 0)
+            {
+                arma::mat seas = _atilde_t.tail_rows(_model.seasonal_period);
+                output["seasonality"] = Rcpp::wrap(seas);
+            }
+
+            if (DEBUG)
+            {
+                output["mt"] = Rcpp::wrap(_mt);
+                output["Ct"] = Rcpp::wrap(_Ct);
+                output["at"] = Rcpp::wrap(_at);
+                output["Rt"] = Rcpp::wrap(_Rt);
+                output["at_tilde"] = Rcpp::wrap(_atilde_t);
+                output["Rt_tilde"] = Rcpp::wrap(_Rtilde_t);
+
+                output["Gt"] = Rcpp::wrap(_Gt);
+                output["Ft"] = Rcpp::wrap(_Ft);
+            }
 
             return output;
         }

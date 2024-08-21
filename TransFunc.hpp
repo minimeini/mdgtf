@@ -55,7 +55,17 @@ public:
         return ft;
     }
 
-    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding")
+    /**
+     * @brief init_Ft
+     *
+     * @param nP
+     * @param trans_func
+     * @param seasonal_period
+     * @return F0: arma::vec, nP x 1
+     *
+     * @note Non-transfer function part, i.e., seasonal component is also added to F0.
+     */
+    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0)
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::vec F0(nP, arma::fill::zeros);
@@ -63,34 +73,67 @@ public:
         {
             F0.at(1) = 1.;
         }
+
+        if (seasonal_period > 0)
+        {
+            unsigned int nstate = nP - seasonal_period;
+            F0.at(nstate) = 1.;
+        }
         return F0;
     }
 
-    static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding")
+    /**
+     * @brief init_Gt
+     * 
+     * @param nP 
+     * @param dlag 
+     * @param trans_func 
+     * @param seasonal_period 
+     * @return G0: arma::mat, nP x nP
+     * 
+     * @note Non-transfer function part, i.e., seasonal component is also added to G0.
+     */
+    static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0)
     {
+        unsigned int nstate = nP - seasonal_period;
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::mat G0(nP, nP, arma::fill::zeros);
         G0.at(0, 0) = 1.;
-        unsigned int idx_end = nP - 1;
-        unsigned int idx_start;
 
         if (trans_list[trans_func] == Transfer::iterative)
         {
             arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
             double coef_now = std::pow(1. - dlag.par1, dlag.par2);
-            idx_start = 2;
 
             G0.at(1, 0) = coef_now;                      // (1 - kappa)^r
-            G0.submat(1, 1, 1, idx_end) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+            G0.submat(1, 1, 1, nstate - 1) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+
+            for (unsigned int i = 2; i < nstate; i++)
+            {
+                G0.at(i, i - 1) = 1.;
+            }
         }
         else
         {
-            idx_start = 1;
+            for (unsigned int i = 1; i < dlag.nL; i++)
+            {
+                G0.at(i, i - 1) = 1.;
+            }
         }
 
-        for (unsigned int i = idx_start; i <= idx_end; i++)
+        if (seasonal_period == 1)
         {
-            G0.at(i, i - 1) = 1.;
+            // first-order trend
+            G0.at(nP - 1, nP - 1) = 1.;
+        }
+        else if (seasonal_period > 1)
+        {
+            // Seasonal permutation matrix
+            G0.at(nP - 1, nstate) = 1.;
+            for (unsigned int i = 1; i < seasonal_period; i++)
+            {
+                G0.at(nstate + i - 1, nstate + i) = 1.;
+            }
         }
 
         return G0;

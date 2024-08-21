@@ -58,7 +58,7 @@ public:
         dobs.init_default();
         derr.init_default();
         dlag.init("lognorm", LN_MU, LN_SD2, true);
-        nP = get_nP(dlag);
+        nP = get_nP(dlag, seasonal_period);
         return;
     }
 
@@ -85,7 +85,7 @@ public:
 
         dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
 
-        nP = get_nP(dlag);
+        nP = get_nP(dlag, seasonal_period);
 
         if (seasonal_period > 0)
         {
@@ -289,6 +289,9 @@ public:
         }
         model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
 
+        psi = ErrDist::sample(model.derr, ntime, true);
+        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
+
         arma::mat seas_pmat;
         if (model.seasonal_period > 1)
         {
@@ -314,16 +317,12 @@ public:
             }
         }
 
-        
 
         y.set_size(ntime + 1);
         y.zeros();
         y.at(0) = y0;
         lambda = y;
         ft = y;
-
-        psi = ErrDist::sample(model.derr, ntime, true);
-        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
 
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {

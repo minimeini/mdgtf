@@ -257,6 +257,9 @@ plot_output <- function(
 
   stopifnot(!is.null(out_list))
   stopifnot(!is.null(ytrue))
+  ytrue = c(ytrue)
+  psi_true = c(psi_true)
+  
   if (save_figures) {
     stopifnot(!is.null(opath))
 
@@ -266,7 +269,7 @@ plot_output <- function(
   }
 
   posterior_psi <- plot_ts_ci_single(
-    out_list$fit$psi, psi_true,
+    out_list$fit$psi, c(psi_true),
     main = "Posterior distribution of psi"
   ) +
     ylab(expression(psi[t]))
