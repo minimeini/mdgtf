@@ -146,18 +146,28 @@ Rcpp::List dgtf_simulate(
     const Rcpp::List &settings, 
     const unsigned int &ntime,
     const double &y0 = 0.,
-    const Rcpp::Nullable<Rcpp::NumericVector> theta0 = R_NilValue)
+    const Rcpp::Nullable<Rcpp::NumericVector> seasonal_bnd = R_NilValue)
 {
     Rcpp::List output = settings;
     Model model(settings);
 
-    arma::vec psi, ft, lambda, y;
-    Model::simulate(y, lambda, ft, psi, model, ntime, y0);
+    double seas_lobnd = 1.;
+    double seas_hibnd = 10.;
+    if (seasonal_bnd.isNotNull())
+    {
+        arma::vec seas_bnd = Rcpp::as<arma::vec>(seasonal_bnd);
+        seas_lobnd = seas_bnd.at(0);
+        seas_hibnd = seas_bnd.at(1);
+    }
 
-    output["y"] = Rcpp::wrap(y);
-    output["psi"] = Rcpp::wrap(psi);
-    output["ft"] = Rcpp::wrap(ft);
-    output["lambda"] = Rcpp::wrap(lambda);
+    arma::vec psi, ft, lambda, y;
+    Model::simulate(y, lambda, ft, psi, model, ntime, y0, seas_lobnd, seas_hibnd);
+
+    output["y"] = Rcpp::wrap(y.t());
+    output["psi"] = Rcpp::wrap(psi.t());
+    output["ft"] = Rcpp::wrap(ft.t());
+    output["lambda"] = Rcpp::wrap(lambda.t());
+    output["seasonality"] = Rcpp::wrap(model.seas.t());
 
     return output;
 }

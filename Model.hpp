@@ -33,15 +33,24 @@ class Model
 {
 public:
     unsigned int nP;
+    unsigned int seasonal_period = 0;
+    arma::vec seas; // seasonal levels
+
     ObsDist dobs;
     LagDist dlag;
     ErrDist derr;
+
     std::string ftrans;
     std::string flink;
     std::string fgain;
     
     Model()
     {
+        // no seasonality and no baseline mean in the latent state by default
+        seasonal_period = 0;
+        seas.set_size(1);
+        seas.at(0) = 0.;
+
         flink = "identity";
         fgain = "softplus";
         ftrans = "sliding";
@@ -62,81 +71,92 @@ public:
     void init(const Rcpp::List &settings)
     {
         Rcpp::List model_settings = settings["model"];
-        std::string obs_dist, lag_dist, err_dist;
-        bool truncated;
-        init_model(
-            obs_dist, flink, ftrans,
-            fgain, lag_dist, err_dist,
-            truncated,
-            model_settings);
+        init_model(model_settings);
 
         Rcpp::List param_settings = settings["param"];
         Rcpp::NumericVector lag_param, obs_param, err_param;
-        init_param(obs_param, lag_param, err_param, truncated, param_settings);
+        init_param(obs_param, lag_param, err_param, dlag.truncated, param_settings);
 
-        dobs.init(obs_dist, obs_param[0], obs_param[1]);
-        derr.init("gaussian", err_param[0], err_param[1]);
-        dlag.init(lag_dist, lag_param[0], lag_param[1], truncated);
+        dobs.par1 = obs_param[0];
+        dobs.par2 = obs_param[1];
+
+        derr.par1 = err_param[0];
+        derr.par2 = err_param[1];
+
+        dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
+
         nP = get_nP(dlag);
-        return;
-    }
 
-
-    static void init_model(
-        std::string &obs_dist,
-        std::string &link_func,
-        std::string &trans_func,
-        std::string &gain_func,
-        std::string &lag_dist,
-        std::string &err_dist,
-        bool &truncated,
-        const Rcpp::List &model_settings)
-    {
-        Rcpp::List model = model_settings;
-        obs_dist = "nbinom";
-        if (model.containsElementNamed("obs_dist"))
+        if (seasonal_period > 0)
         {
-            obs_dist = tolower(Rcpp::as<std::string>(model["obs_dist"]));
-        }
+            seas.set_size(seasonal_period);
+            seas.zeros();
 
-        link_func = "identity";
-        if (model.containsElementNamed("link_func"))
-        {
-            link_func = tolower(Rcpp::as<std::string>(model["link_func"]));
-        }
-
-        trans_func = "sliding";
-        if (model.containsElementNamed("trans_func"))
-        {
-            trans_func = tolower(Rcpp::as<std::string>(model["trans_func"]));
-        }
-
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        if (trans_list[trans_func] == TransFunc::Transfer::iterative)
-        {
-            truncated = false;
+            seas.at(0) = dobs.par1;
+            dobs.par1 = 0.; // the mean is moved into the state space
         }
         else
         {
-            truncated = true;
+            seas.set_size(1);
+            seas.at(0) = 0.;
         }
 
-        gain_func = "softplus";
+        return;
+    }
+
+    void init_model(const Rcpp::List &model_settings)
+    {
+        Rcpp::List model = model_settings;
+        dobs.name = "nbinom";
+        if (model.containsElementNamed("obs_dist"))
+        {
+            dobs.name = tolower(Rcpp::as<std::string>(model["obs_dist"]));
+        }
+
+        flink = "identity";
+        if (model.containsElementNamed("link_func"))
+        {
+            flink = tolower(Rcpp::as<std::string>(model["link_func"]));
+        }
+
+        ftrans = "sliding";
+        if (model.containsElementNamed("trans_func"))
+        {
+            ftrans = tolower(Rcpp::as<std::string>(model["trans_func"]));
+        }
+
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        if (trans_list[ftrans] == TransFunc::Transfer::iterative)
+        {
+            dlag.truncated = false;
+        }
+        else
+        {
+            dlag.truncated = true;
+        }
+
+        fgain = "softplus";
         if (model.containsElementNamed("gain_func"))
         {
-            gain_func = tolower(Rcpp::as<std::string>(model["gain_func"]));
+            fgain = tolower(Rcpp::as<std::string>(model["gain_func"]));
         }
 
-        lag_dist = "lognorm";
+        dlag.name = "lognorm";
         if (model.containsElementNamed("lag_dist"))
         {
-            lag_dist = tolower(Rcpp::as<std::string>(model["lag_dist"]));
+            dlag.name = tolower(Rcpp::as<std::string>(model["lag_dist"]));
         }
 
-        err_dist = "gaussian";
+        derr.name = "gaussian";
         if (model.containsElementNamed("err_dist"))
         {
-            err_dist = tolower(Rcpp::as<std::string>(model["err_dist"]));
+            derr.name = tolower(Rcpp::as<std::string>(model["err_dist"]));
+        }
+
+        seasonal_period = 0;
+        if (model.containsElementNamed("seasonal_period"))
+        {
+            seasonal_period = Rcpp::as<unsigned int>(model["seasonal_period"]);
         }
 
         return;
@@ -180,6 +200,7 @@ public:
         model["gain_func"] = fgain;
         model["lag_dist"] = dlag.name;
         model["err_dist"] = derr.name;
+        model["seasonal_period"] = seasonal_period;
 
         Rcpp::List param;
         param["obs"] = Rcpp::NumericVector::create(dobs.par1, dobs.par2);
@@ -189,7 +210,6 @@ public:
         Rcpp::List out;
         out["model"] = model;
         out["param"] = param;
-
         return out;
     }
 
@@ -202,6 +222,7 @@ public:
         model_settings["gain_func"] = "softplus";
         model_settings["lag_dist"] = "lognorm";
         model_settings["err_dist"] = "gaussian";
+        model_settings["seasonal_period"] = 0;
 
         Rcpp::List param_settings;
         param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
@@ -217,7 +238,9 @@ public:
 
 
 
-    static unsigned int get_nP(const LagDist &dlag)
+    static unsigned int get_nP(
+        const LagDist &dlag, 
+        const unsigned int &seasonal_period = 0)
     {
         unsigned int nP;
         if (dlag.truncated)
@@ -228,6 +251,8 @@ public:
         {
             nP = static_cast<unsigned int>(dlag.par2) + 1;
         }
+
+        nP += seasonal_period;
         return nP;
     }
 
@@ -253,7 +278,9 @@ public:
         arma::vec &psi, // (ntime + 1) x 1
         Model &model,
         const unsigned int &ntime,
-        const double &y0 = 0.)
+        const double &y0 = 0.,
+        const double &seasonal_lobnd = 1.,
+        const double &seasonal_hibnd = 10.)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         if (!model.dlag.truncated)
@@ -261,6 +288,33 @@ public:
             model.dlag.nL = ntime;
         }
         model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+
+        arma::mat seas_pmat;
+        if (model.seasonal_period > 1)
+        {
+            seas_pmat.set_size(model.seasonal_period, model.seasonal_period);
+            seas_pmat.zeros();
+            seas_pmat.at(model.seasonal_period - 1, 0) = 1.;
+
+            for (unsigned int i = 1; i < model.seasonal_period; i++)
+            {
+                model.seas.at(i) = R::runif(seasonal_lobnd, seasonal_hibnd);
+                seas_pmat.at(i - 1, i) = 1.;
+            }
+        }
+        else
+        {
+            seas_pmat.set_size(1, 1);
+            seas_pmat.at(0, 0) = 1.;
+
+            if (model.seasonal_period == 0)
+            {
+                model.seas.at(0) = model.dobs.par1;
+                model.dobs.par1 = 0;
+            }
+        }
+
+        
 
         y.set_size(ntime + 1);
         y.zeros();
@@ -274,6 +328,9 @@ public:
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
             ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
+            model.seas = seas_pmat * model.seas;
+            ft.at(t) += model.seas.at(0);
+
             lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1); // Checked. OK.
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }
@@ -1064,7 +1121,8 @@ public:
         const LagDist &dlag,
         // const Model &model,
         const arma::vec &theta_cur, // nP x 1, (psi[t], f[t-1], ..., f[t-r])
-        const double &ycur
+        const double &ycur,
+        const unsigned int &seasonal_period = 0
     )
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -1073,7 +1131,7 @@ public:
         // theta_next.copy_size(theta_cur);
 
         unsigned int nr = nP - 1;
-
+        nr -= seasonal_period;
 
         switch (trans_list[ftrans])
         {
@@ -1095,6 +1153,22 @@ public:
             theta_next.subvec(1, nr) = theta_cur.subvec(0, nr - 1);
             break;
         }
+        }
+
+        if (seasonal_period == 1)
+        {
+            theta_next.at(nr + 1) = theta_cur.at(nr + 1);
+        }
+        else if (seasonal_period == 2)
+        {
+            // nP - 1 = nr + 2 
+            theta_next.at(nr + 1) = theta_cur.at(nr + 2);
+            theta_next.at(nr + 2) = theta_cur.at(nr + 1);
+        }
+        else if (seasonal_period > 2)
+        {
+            theta_next.subvec(nr + 1, nP - 2) = theta_cur.subvec(nr + 2, nP - 1);
+            theta_next.at(nP - 1) = theta_cur.at(nr + 1);
         }
 
         bound_check<arma::vec>(theta_next, "func_gt: theta_next");
@@ -1202,30 +1276,30 @@ public:
         const LagDist &dlag,
         const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...;  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
+        const arma::vec &yall,       // We use y[t - nelem], ..., y[t-1]
+        const unsigned int &seasonal_period = 0
     )
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        const int nL = theta_cur.n_elem;
         double ft_cur;
         if (trans_list[ftrans] == TransFunc::sliding)
         {
-            int nelem = std::min(t, nL); // min(t,nL)
+            int nelem = std::min(t, (int)dlag.nL); // min(t,nL)
 
-            arma::vec yold(nL, arma::fill::zeros);
+            arma::vec yold(dlag.nL, arma::fill::zeros);
             if (nelem > 1)
             {
                 yold.tail(nelem) = yall.subvec(t - nelem, t - 1); // 0, ..., 0, y[t - nelem], ..., y[t-1]
             }
             else if (t > 0) // nelem = 1 at t = 1
             {
-                yold.at(nL - 1) = yall.at(t - 1);
+                yold.at(dlag.nL - 1) = yall.at(t - 1);
             }
 
             yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
             arma::vec ft_vec = dlag.Fphi; // nL x 1
-            arma::vec th = theta_cur.head(nL);
+            arma::vec th = theta_cur.head(dlag.nL);
             arma::vec hpsi_cur = GainFunc::psi2hpsi<arma::vec>(th, fgain); // (h(psi[t]), ..., h(psi[t+1 - nL])), nL x 1
             arma::vec ftmp = yold % hpsi_cur; // nL x 1
             ft_vec = ft_vec % ftmp;
@@ -1237,6 +1311,11 @@ public:
             ft_cur = theta_cur.at(1);
         } // iterative
 
+        if (seasonal_period > 0)
+        {
+            // Add the current seasonal level
+            ft_cur += theta_cur.at(theta_cur.n_elem - seasonal_period);
+        }
 
         bound_check(ft_cur, "func_ft: ft_cur");
         return ft_cur;
