@@ -1114,8 +1114,11 @@ public:
      * @param theta_cur
      * @param ycur
      * @return arma::vec
+     * 
+     * 
+     * @note Checked. OK.
      */
-    static arma::vec func_gt( // Checked. OK.
+    static arma::vec func_gt(
         const std::string &ftrans,
         const std::string &fgain,
         const LagDist &dlag,
@@ -1269,6 +1272,9 @@ public:
      * @param theta_cur theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
      * @param yall
      * @return double
+     * 
+     * 
+     * @note Checked. OK.
      */
     static double func_ft(
         const std::string &ftrans,
@@ -1314,6 +1320,8 @@ public:
         if (seasonal_period > 0)
         {
             // Add the current seasonal level
+            theta_cur.t().print("theta_cur");
+            std::cout << "val = " << theta_cur.at(theta_cur.n_elem - seasonal_period) << std::endl;
             ft_cur += theta_cur.at(theta_cur.n_elem - seasonal_period);
         }
 

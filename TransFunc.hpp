@@ -155,6 +155,8 @@ public:
      * @param gain_func
      * @param trans_func
      * @return double
+     * 
+     * @note Checked. OK.
      */
     static double func_ft(
         const unsigned int &t, // 1, ..., nT
