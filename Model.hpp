@@ -1320,8 +1320,6 @@ public:
         if (seasonal_period > 0)
         {
             // Add the current seasonal level
-            theta_cur.t().print("theta_cur");
-            std::cout << "val = " << theta_cur.at(theta_cur.n_elem - seasonal_period) << std::endl;
             ft_cur += theta_cur.at(theta_cur.n_elem - seasonal_period);
         }
 
