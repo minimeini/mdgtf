@@ -37,19 +37,9 @@ public:
         const double &par2_in
     )
     {
-        init(err_dist, par1_in, par2_in);
-    }
-
-
-    void init(
-        const std::string &err_dist = "gaussian",
-        const double &par1_in = 0.01, // W
-        const double &par2_in = 0.) // w[0]
-    {
         name = err_dist;
         par1 = par1_in;
         par2 = par2_in;
-        return;
     }
 
 
