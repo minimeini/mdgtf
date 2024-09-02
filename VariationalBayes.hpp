@@ -31,6 +31,7 @@ namespace VB
 
         bool update_static = true;
         unsigned int m = 1; // number of unknown static parameters
+        std::string state_sampler = "smc";
         std::vector<std::string> param_selected = {"W"};
 
         arma::vec psi;        // (nT + 1) x 1
@@ -84,6 +85,12 @@ namespace VB
             if (opts.containsElementNamed("tstart_pct"))
             {
                 tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
+            }
+
+            state_sampler = "smc";
+            if (opts.containsElementNamed("state_sampler"))
+            {
+                state_sampler = Rcpp::as<std::string>(opts["state_sampler"]);
             }
 
             param_selected.clear();
@@ -196,6 +203,7 @@ namespace VB
             opts["nsample"] = 1000;
             opts["nthin"] = 1;
             opts["nburnin"] = 1000;
+            opts["state_sampler"] = "smc";
 
             opts["num_particle"] = 100;
             opts["num_step_ahead_forecast"] = 0;
@@ -880,7 +888,7 @@ namespace VB
             log(mu0) ~ N(0,sig2_mu0)
             */
             arma::vec logp = - logseas / sig2_mu0;
-            bound_check<arma::vec>(logp, "logprior_logmu0: logp");
+            bound_check<arma::vec>(logp, "logprior_logseas: logp");
             return logp;
         }
 
@@ -949,7 +957,7 @@ namespace VB
                 }
                 case AVAIL::Param::seas:
                 {
-                    arma::vec seas = eta.subvec(idx, idx + model.seas.period - 1);
+                    arma::vec seas = arma::abs(eta.subvec(idx, idx + model.seas.period - 1));
                     arma::vec logseas = arma::log(seas + EPS);
 
                     arma::vec dloglik = dloglike_dlogseas(
@@ -1307,6 +1315,9 @@ namespace VB
             const Rcpp::Nullable<Rcpp::NumericMatrix> &X = R_NilValue,
             const bool &verbose = VERBOSE)
         {
+            std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
+            const unsigned int nT = y.n_elem - 1;
+
             psi.set_size(y.n_elem);
             psi.zeros();
             psi_stored.set_size(psi.n_elem, nsample);
@@ -1315,23 +1326,56 @@ namespace VB
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             arma::mat weights_forward(y.n_elem, N);
 
+            ApproxDisturbance approx_dlm(nT, model.fgain);
+            Prior w0_prior("gaussian", 0., model.derr.par1, true);
+            if (algo_list[state_sampler] == AVAIL::Algo::MCMC)
+            {
+                approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
+            }
+
+            arma::vec Wt(model.nP, arma::fill::zeros);
+            Wt.at(0) = model.derr.par1;
+
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-                arma::vec Wt(model.nP, arma::fill::zeros);
-                Wt.at(0) = model.derr.par1;
+                switch (algo_list[state_sampler])
+                {
+                case AVAIL::Algo::SMC:
+                {
+                    // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
+                    arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
 
-                /*
-                You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
-                */
-                double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
-                    Theta, weights_forward, eff_forward, Wt,
-                    model, y, N, true, false);
-                arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
-                psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
+                    double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
+                        Theta, weights_forward, eff_forward, Wt,
+                        model, y, N, true, false);
+                    arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
+                    psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
+
+                    break;
+                }
+                case AVAIL::Algo::MCMC:
+                {
+                    arma::vec wt(psi.n_elem, arma::fill::zeros);
+                    arma::vec wt_accept = wt;
+                    wt.tail(psi.n_elem - 1) = arma::diff(psi);
+
+                    for (unsigned int i = 0; i < N; i++)
+                    {
+                        MCMC::Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, 0.1);
+                    }
+                    psi = arma::cumsum(wt);
+                    break;
+                }
+                default:
+                {
+                    throw std::invalid_argument("Unknown state sampler.");
+                    break;
+                }
+                }
+                
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
                 arma::vec ft = psi;
                 ft.at(0) = 0.;
@@ -1401,6 +1445,16 @@ namespace VB
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
                     eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name, model.seas.period, model.seas.in_state);
                     update_params(model, param_selected, eta);
+
+                    if (W_prior.infer)
+                    {
+                        Wt.at(0) = model.derr.par1;
+                    }
+
+                    if ((par1_prior.infer || par2_prior.infer) && (algo_list[state_sampler] == AVAIL::Algo::MCMC))
+                    {
+                        approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
+                    }
                 } // end update_static
 
                 if (saveiter || b == (ntotal - 1))
@@ -1420,6 +1474,7 @@ namespace VB
                     if (W_prior.infer)
                     {
                         W_stored.at(idx_run) = model.derr.par1;
+                        
                     }
 
                     if (seas_prior.infer)

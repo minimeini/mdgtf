@@ -12,6 +12,7 @@ class AVAIL
 public:
     enum Algo {
         LinearBayes,
+        SMC,
         TFS, // Two-filter Smoothing
         FFBS,
         MCS,
@@ -87,7 +88,8 @@ private:
         ALGO_MAP["linearbayes"] = Algo::LinearBayes;
         ALGO_MAP["linear_bayes"] = Algo::LinearBayes;
 
-        ALGO_MAP["smc"] = Algo::MCS;
+        ALGO_MAP["smc"] = Algo::SMC;
+        
         ALGO_MAP["mcs"] = Algo::MCS;
 
         ALGO_MAP["ffbs"] = Algo::FFBS;
