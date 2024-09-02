@@ -1952,10 +1952,11 @@ namespace SMC
                 aseas_forward.set_size(model.seas.period, N);
                 aseas_forward.fill(prior_seas.par1); // mean
                 bseas_forward.set_size(model.seas.period, model.seas.period, N);
-                bseas_forward.fill(prior_seas.par2); // variance
+                bseas_forward.zeros();
 
                 for (unsigned int i = 0; i < N; i++)
                 {
+                    bseas_forward.slice(i).diag().fill(prior_seas.par2);
                     // if (prior_seas.infer)
                     // {
                     //     param_filter.col(i).head(model.seas.period) = arma::randu<arma::vec>(
@@ -1963,7 +1964,7 @@ namespace SMC
                     // }
                     // else
                     // {
-                        param_filter.col(i).head(model.seas.period) = model.seas.val;
+                    param_filter.col(i).head(model.seas.period) = model.seas.val;
                     // }
                 }
             }
