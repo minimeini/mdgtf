@@ -7,6 +7,7 @@
 #include "TransFunc.hpp"
 #include "ObsDist.hpp"
 #include "LinkFunc.hpp"
+#include "Regression.hpp"
 #include "utils.h"
 
 // #ifdef _OPENMP
@@ -18,6 +19,7 @@
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
+
 
 /**
  * @brief Define a dynamic generalized transfer function (DGTF) model using the transfer function form.
@@ -33,8 +35,7 @@ class Model
 {
 public:
     unsigned int nP;
-    unsigned int seasonal_period = 0;
-    arma::vec seas; // seasonal levels
+    Season seas;
 
     ObsDist dobs;
     LagDist dlag;
@@ -47,10 +48,6 @@ public:
     Model()
     {
         // no seasonality and no baseline mean in the latent state by default
-        seasonal_period = 0;
-        seas.set_size(1);
-        seas.at(0) = 0.;
-
         flink = "identity";
         fgain = "softplus";
         ftrans = "sliding";
@@ -58,7 +55,9 @@ public:
         dobs.init_default();
         derr.init_default();
         dlag.init("lognorm", LN_MU, LN_SD2, true);
-        nP = get_nP(dlag, seasonal_period);
+
+        seas.init_default();
+        nP = get_nP(dlag, seas.period, seas.in_state);
         return;
     }
 
@@ -77,6 +76,16 @@ public:
         Rcpp::NumericVector lag_param, obs_param, err_param;
         init_param(obs_param, lag_param, err_param, dlag.truncated, param_settings);
 
+        if (settings.containsElementNamed("season"))
+        {
+            Rcpp::List season_settings = settings["season"];
+            seas.init(season_settings);
+        }
+        else
+        {
+            seas.init_default();
+        }
+
         dobs.par1 = obs_param[0];
         dobs.par2 = obs_param[1];
 
@@ -84,23 +93,7 @@ public:
         derr.par2 = err_param[1];
 
         dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
-
-        nP = get_nP(dlag, seasonal_period);
-
-        if (seasonal_period > 0)
-        {
-            seas.set_size(seasonal_period);
-            seas.zeros();
-
-            seas.at(0) = dobs.par1;
-            dobs.par1 = 0.; // the mean is moved into the state space
-        }
-        else
-        {
-            seas.set_size(1);
-            seas.at(0) = 0.;
-        }
-
+        nP = get_nP(dlag, seas.period, seas.in_state);
         return;
     }
 
@@ -152,13 +145,6 @@ public:
         {
             derr.name = tolower(Rcpp::as<std::string>(model["err_dist"]));
         }
-
-        seasonal_period = 0;
-        if (model.containsElementNamed("seasonal_period"))
-        {
-            seasonal_period = Rcpp::as<unsigned int>(model["seasonal_period"]);
-        }
-
         return;
     }
 
@@ -200,7 +186,6 @@ public:
         model["gain_func"] = fgain;
         model["lag_dist"] = dlag.name;
         model["err_dist"] = derr.name;
-        model["seasonal_period"] = seasonal_period;
 
         Rcpp::List param;
         param["obs"] = Rcpp::NumericVector::create(dobs.par1, dobs.par2);
@@ -210,6 +195,9 @@ public:
         Rcpp::List out;
         out["model"] = model;
         out["param"] = param;
+
+        Rcpp::List season = seas.info();
+        out["season"] = season;
         return out;
     }
 
@@ -222,7 +210,8 @@ public:
         model_settings["gain_func"] = "softplus";
         model_settings["lag_dist"] = "lognorm";
         model_settings["err_dist"] = "gaussian";
-        model_settings["seasonal_period"] = 0;
+        model_settings["seasonal_period"] = 1;
+        model_settings["season_in_state"] = false;
 
         Rcpp::List param_settings;
         param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
@@ -232,6 +221,7 @@ public:
         Rcpp::List settings;
         settings["model"] = model_settings;
         settings["param"] = param_settings;
+        settings["season"] = Season::default_settings();
 
         return settings;
     }
@@ -240,7 +230,8 @@ public:
 
     static unsigned int get_nP(
         const LagDist &dlag, 
-        const unsigned int &seasonal_period = 0)
+        const unsigned int &seasonal_period = 0,
+        const bool &season_in_state = false)
     {
         unsigned int nP;
         if (dlag.truncated)
@@ -252,7 +243,11 @@ public:
             nP = static_cast<unsigned int>(dlag.par2) + 1;
         }
 
-        nP += seasonal_period;
+        if (season_in_state)
+        {
+            nP += seasonal_period;
+        }
+        
         return nP;
     }
 
@@ -275,48 +270,40 @@ public:
         arma::vec &y, 
         arma::vec &lambda,
         arma::vec &ft,
+        arma::mat &Theta,
         arma::vec &psi, // (ntime + 1) x 1
         Model &model,
         const unsigned int &ntime,
-        const double &y0 = 0.,
-        const double &seasonal_lobnd = 1.,
-        const double &seasonal_hibnd = 10.)
+        const double &y0 = 0.)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         if (!model.dlag.truncated)
         {
             model.dlag.nL = ntime;
         }
         model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
-
-        psi = ErrDist::sample(model.derr, ntime, true);
-        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
-
-        arma::mat seas_pmat;
-        if (model.seasonal_period > 1)
+        arma::mat Gmat = TransFunc::init_Gt(
+            model.nP, model.dlag, model.ftrans, 
+            model.seas.period, model.seas.in_state);
+        
+        if (model.seas.period > 0)
         {
-            seas_pmat.set_size(model.seasonal_period, model.seasonal_period);
-            seas_pmat.zeros();
-            seas_pmat.at(model.seasonal_period - 1, 0) = 1.;
+            model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
+        }
 
-            for (unsigned int i = 1; i < model.seasonal_period; i++)
-            {
-                model.seas.at(i) = R::runif(seasonal_lobnd, seasonal_hibnd);
-                seas_pmat.at(i - 1, i) = 1.;
-            }
+        arma::vec hpsi;
+        if (obs_list[model.dobs.name] == AVAIL::Dist::gaussian)
+        {
+            Theta.set_size(model.nP, ntime + 1);
+            Theta.zeros();
+            Theta.col(0) = arma::randu(model.nP);
         }
         else
         {
-            seas_pmat.set_size(1, 1);
-            seas_pmat.at(0, 0) = 1.;
-
-            if (model.seasonal_period == 0)
-            {
-                model.seas.at(0) = model.dobs.par1;
-                model.dobs.par1 = 0;
-            }
+            psi = ErrDist::sample(model.derr, ntime, true);
+            hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
         }
-
 
         y.set_size(ntime + 1);
         y.zeros();
@@ -326,11 +313,23 @@ public:
 
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
-            model.seas = seas_pmat * model.seas;
-            ft.at(t) += model.seas.at(0);
+            if (obs_list[model.dobs.name] == AVAIL::Dist::gaussian)
+            {
+                arma::vec eps = arma::randn(model.nP) * std::sqrt(model.derr.par1);
+                Theta.col(t) = Gmat * Theta.col(t - 1) + eps;
+                ft.at(t) = arma::as_scalar(model.dlag.Fphi.t() * Theta.col(t));
+            }
+            else
+            {
+                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
+            }
 
-            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1); // Checked. OK.
+            if (model.seas.period > 0)
+            {
+                ft.at(t) += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+            }
+            
+            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, 0); // Checked. OK.
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }
 
@@ -1124,7 +1123,8 @@ public:
         // const Model &model,
         const arma::vec &theta_cur, // nP x 1, (psi[t], f[t-1], ..., f[t-r])
         const double &ycur,
-        const unsigned int &seasonal_period = 0
+        const unsigned int &seasonal_period = 0,
+        const bool &season_in_state = false
     )
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -1133,7 +1133,11 @@ public:
         // theta_next.copy_size(theta_cur);
 
         unsigned int nr = nP - 1;
-        nr -= seasonal_period;
+        if (season_in_state)
+        {
+            nr -= seasonal_period;
+        }
+        
 
         switch (trans_list[ftrans])
         {
@@ -1157,21 +1161,25 @@ public:
         }
         }
 
-        if (seasonal_period == 1)
+        if (season_in_state)
         {
-            theta_next.at(nr + 1) = theta_cur.at(nr + 1);
+            if (seasonal_period == 1)
+            {
+                theta_next.at(nr + 1) = theta_cur.at(nr + 1);
+            }
+            else if (seasonal_period == 2)
+            {
+                // nP - 1 = nr + 2
+                theta_next.at(nr + 1) = theta_cur.at(nr + 2);
+                theta_next.at(nr + 2) = theta_cur.at(nr + 1);
+            }
+            else if (seasonal_period > 2)
+            {
+                theta_next.subvec(nr + 1, nP - 2) = theta_cur.subvec(nr + 2, nP - 1);
+                theta_next.at(nP - 1) = theta_cur.at(nr + 1);
+            }
         }
-        else if (seasonal_period == 2)
-        {
-            // nP - 1 = nr + 2 
-            theta_next.at(nr + 1) = theta_cur.at(nr + 2);
-            theta_next.at(nr + 2) = theta_cur.at(nr + 1);
-        }
-        else if (seasonal_period > 2)
-        {
-            theta_next.subvec(nr + 1, nP - 2) = theta_cur.subvec(nr + 2, nP - 1);
-            theta_next.at(nP - 1) = theta_cur.at(nr + 1);
-        }
+        
 
         bound_check<arma::vec>(theta_next, "func_gt: theta_next");
         return theta_next;
@@ -1201,11 +1209,19 @@ public:
         const LagDist &dlag,
         const arma::vec &theta, // nP x 1, theta[t]
         const double &yprev, // y[t-1]
-        const double &eps = 0.
+        const double &eps = 0.,
+        const unsigned int &seasonal_period = 0,
+        const bool &season_in_state = false
     )
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         const unsigned int nP = theta.n_elem;
+        unsigned int nstate = nP;
+        if (season_in_state)
+        {
+            nstate -= seasonal_period;
+        }
+
         arma::vec theta_prev(nP, arma::fill::zeros); // nP x 1
 
         if (trans_list[ftrans] == TransFunc::Transfer::iterative)
@@ -1256,9 +1272,26 @@ public:
         else
         {
             // theta[t] = K[t] * theta[t + 1] + w[t]
-            theta_prev.subvec(0, nP - 2) = theta.subvec(1, nP - 1);
-            theta_prev.at(nP - 1) = theta.at(nP - 1) + eps;
+            theta_prev.subvec(0, nstate - 2) = theta.subvec(1, nstate - 1);
+            theta_prev.at(nstate - 1) = theta.at(nstate - 1) + eps;
         }
+
+        if (season_in_state)
+        {
+            if (seasonal_period == 1)
+            {
+                theta_prev.at(nstate) = theta.at(nstate);
+            }
+            else if (seasonal_period > 1)
+            {
+                theta_prev.at(nstate) = theta.at(nP - 1);
+                for (unsigned int i = nstate + 1; i < nP; i++)
+                {
+                    theta_prev.at(i) = theta.at(i - 1);
+                }
+            }
+        }
+        
 
         return theta_prev;
     }
@@ -1279,10 +1312,10 @@ public:
         const std::string &ftrans,
         const std::string &fgain,
         const LagDist &dlag,
+        const Season &seas,
         const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...;  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall,       // We use y[t - nelem], ..., y[t-1]
-        const unsigned int &seasonal_period = 0
+        const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
     )
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -1316,10 +1349,18 @@ public:
             ft_cur = theta_cur.at(1);
         } // iterative
 
-        if (seasonal_period > 0)
+        if (seas.period > 0)
         {
             // Add the current seasonal level
-            ft_cur += theta_cur.at(theta_cur.n_elem - seasonal_period);
+            if (seas.in_state)
+            {
+                
+                ft_cur += theta_cur.at(theta_cur.n_elem - seas.period);
+            }
+            else
+            {
+                ft_cur += arma::as_scalar(seas.X.col(t) * seas.val);
+            }
         }
 
         bound_check(ft_cur, "func_ft: ft_cur");
@@ -1359,13 +1400,13 @@ public:
                 unsigned int idx = t + nT;
                 double ynow = yvec.at(idx);
                 arma::vec theta_now = Theta_all.slice(idx).col(i);
-                arma::vec theta_next = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, theta_now, ynow);
+                arma::vec theta_next = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, theta_now, ynow, model.seas.period, model.seas.in_state);
                 if (Wsqrt > 0)
                 {
                     theta_next.at(0) += R::rnorm(0., Wsqrt);
                 }
                 // arma::vec theta_next = StateSpace::func_state_propagate(model, theta_now, ynow, Wsqrt, false);
-                double ft_next = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, idx + 1, theta_next, yvec);
+                double ft_next = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, idx + 1, theta_next, yvec);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
                 double ynext = 0.;
                 switch (obs_list[model.dobs.name])
@@ -1454,8 +1495,8 @@ public:
                 arma::vec ytmp = y;
                 for (unsigned int j = 1; j <= k; j ++)
                 {
-                    arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1));
-                    double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, t + j, theta_next, ytmp);
+                    arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
+                    double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + j, theta_next, ytmp);
                     double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
                     ycast.at(t, i, j - 1) = lambda;
 
@@ -1581,8 +1622,8 @@ public:
 
             for (unsigned int i = 0; i < nsample; i++)
             {
-                arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t));
-                double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, t + 1, theta_next, y);
+                arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t), model.seas.period, model.seas.in_state);
+                double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_next, y);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
                 ycast.at(t + 1, i) = lambda;
 
@@ -1665,7 +1706,7 @@ public:
             for (unsigned int i = 0; i < nsample; i ++)
             {                
                 arma::vec th = theta.slice(t).col(i); // p x 1
-                double ft = func_ft(model.ftrans, model.fgain, model.dlag, t, th, y);
+                double ft = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
                 double lambda = LinkFunc::ft2mu(ft, model.flink, mu0);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
@@ -1743,7 +1784,7 @@ public:
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec th = theta.slice(t).col(i); // p x 1
-                double ft = func_ft(model.ftrans, model.fgain, model.dlag, t, th, y);
+                double ft = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
                 double lambda = LinkFunc::ft2mu(ft, model.flink, mu0);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
