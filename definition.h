@@ -49,7 +49,7 @@ public:
     enum Param
     {
         W,
-        mu0,   // par1 of dobs
+        seas,   // par1 of dobs
         rho, // par2 of dobs
         kappa, // par1 of dlag - nbinom
         r,     // par2 of dlag - nbinom
@@ -169,7 +169,7 @@ private:
 
         map["W"] = Param::W;
         map["w"] = Param::W;
-        map["mu0"] = Param::mu0;
+        map["seas"] = Param::seas;
         map["rho"] = Param::rho;
         map["delta"] = Param::rho;
         map["kappa"] = Param::kappa;

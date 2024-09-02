@@ -36,10 +36,10 @@ namespace VB
         arma::vec psi;        // (nT + 1) x 1
         arma::mat psi_stored; // (nT + 1) x nsample
 
-        Prior W_prior, mu0_prior, rho_prior, par1_prior, par2_prior;
+        Prior W_prior, seas_prior, rho_prior, par1_prior, par2_prior;
 
         arma::vec W_stored;    // nsample x 1
-        arma::vec mu0_stored;  // nsample x 1
+        arma::mat seas_stored;  // period x nsample
         arma::vec rho_stored;  // nsample x 1
         arma::vec par1_stored; // nsample x 1
         arma::vec par2_stored; // nsample x 1
@@ -104,17 +104,18 @@ namespace VB
                 m += 1;
             }
 
-            mu0_stored = W_stored;
-            mu0_prior.init("gaussian", 0., 10.);
-            if (opts.containsElementNamed("mu0"))
+            seas_stored.set_size(model.seas.period, nsample);
+            seas_stored.zeros();
+            seas_prior.init("gaussian", 0., 10.);
+            if (opts.containsElementNamed("seas"))
             {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
-                mu0_prior.init(param_opts);
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["seas"]);
+                seas_prior.init(param_opts);
             }
-            if (mu0_prior.infer)
+            if (seas_prior.infer)
             {
-                param_selected.push_back("mu0");
-                m += 1;
+                param_selected.push_back("seas");
+                m += model.seas.period;
             }
 
             rho_stored = W_stored;
@@ -171,10 +172,10 @@ namespace VB
             W_opts["prior_name"] = "invgamma";
             W_opts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
 
-            Rcpp::List mu0_opts;
-            mu0_opts["infer"] = false;
-            mu0_opts["prior_name"] = "gaussian";
-            mu0_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+            Rcpp::List seas_opts;
+            seas_opts["infer"] = false;
+            seas_opts["prior_name"] = "gaussian";
+            seas_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
 
             Rcpp::List rho_opts;
             rho_opts["infer"] = false;
@@ -202,7 +203,7 @@ namespace VB
             opts["tstart_pct"] = 0.9;
 
             opts["W"] = W_opts;
-            opts["mu0"] = mu0_opts;
+            opts["seas"] = seas_opts;
             opts["rho"] = rho_opts;
             opts["par1"] = par1_opts;
             opts["par2"] = par2_opts;
@@ -397,7 +398,7 @@ namespace VB
             eps = d;
 
             eta = init_eta(param_selected, model_in, update_static); // Checked. OK.
-            eta_tilde = eta2tilde(eta, param_selected, W_prior.name, par1_prior.name);
+            eta_tilde = eta2tilde(eta, param_selected, W_prior.name, par1_prior.name, model_in.seas.period, model_in.seas.in_state);
 
             nu = tYJ(eta_tilde, gamma);
 
@@ -432,15 +433,18 @@ namespace VB
             const arma::vec &eta,   // m x 1
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma",
-            const std::string &lag_par1_prior = "gaussian")
+            const std::string &lag_par1_prior = "gaussian",
+            const unsigned int &seasonal_period = 1,
+            const bool &season_in_state = false)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
             arma::vec eta_tilde = eta;
+            unsigned int idx = 0;
             for (unsigned int i = 0; i < param_selected.size(); i++)
             {
-                double val = eta.at(i);
+                double val = eta.at(idx);
                 switch (static_param_list[tolower(param_selected[i])])
                 {
                 case AVAIL::Param::W:
@@ -449,12 +453,12 @@ namespace VB
                     {
                     case AVAIL::Dist::invgamma:
                     {
-                        eta_tilde.at(i) = -std::log(std::abs(val) + EPS);
+                        eta_tilde.at(idx) = -std::log(std::abs(val) + EPS);
                         break;
                     }
                     case AVAIL::Dist::gamma:
                     {
-                        eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
                         break;
                     }
                     default:
@@ -463,17 +467,27 @@ namespace VB
                         break;
                     }
                     } // switch W prior.
+
+                    idx += 1;
                     break;
                 } // W
-                case AVAIL::Param::mu0:
+                case AVAIL::Param::seas:
                 {
-                    bound_check(val, "VB::Hybrid::eta2tilde: mu0", false, true);
-                    eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                    // bound_check(val, "VB::Hybrid::eta2tilde: mu0", false, true);
+                    if (!season_in_state)
+                    {
+                        arma::vec seas = eta.subvec(idx, idx + seasonal_period - 1);
+                        bound_check<arma::vec>(seas, "VB::Hybrid::eta2tilde: seas", false, true);
+                        eta_tilde.subvec(idx, idx + seasonal_period - 1) = arma::log(seas + EPS);
+
+                        idx += seasonal_period;
+                    }
                     break;
                 } // mu0
                 case AVAIL::Param::rho:
                 {
-                    eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                    eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
+                    idx += 1;
                     break;
                 } // rho
                 case AVAIL::Param::lag_par1:
@@ -482,22 +496,22 @@ namespace VB
                     {
                     case AVAIL::Dist::gaussian:
                     {
-                        eta_tilde.at(i) = val;
+                        eta_tilde.at(idx) = val;
                         break;
                     }
                     case AVAIL::Dist::invgamma:
                     {
-                        eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
                         break;
                     }
                     case AVAIL::Dist::gamma:
                     {
-                        eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
                         break;
                     }
                     case AVAIL::Dist::beta:
                     {
-                        eta_tilde.at(i) = std::log(std::abs(val) + EPS) - std::log(std::abs(1. - val) + EPS);
+                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS) - std::log(std::abs(1. - val) + EPS);
                         break;
                     }
                     default:
@@ -506,11 +520,14 @@ namespace VB
                         break;
                     }
                     } // switch prior type for lag_par1.
+
+                    idx += 1;
                     break;
                 } // lag_par1
                 case AVAIL::Param::lag_par2:
                 {
                     eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                    idx += 1;
                     break;
                 } // lag_par2
                 default:
@@ -519,10 +536,9 @@ namespace VB
                     break;
                 }
                 } // switch param
-
-                bound_check(eta_tilde.at(i), "eta2tilde: eta_tilde");
             }
 
+            bound_check<arma::vec>(eta_tilde, "VB::Hybrid::eta2tilde: eta_tilde");
             return eta_tilde;
         }
 
@@ -530,15 +546,18 @@ namespace VB
             const arma::vec &eta_tilde, // m x 1
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma",
-            const std::string &lag_par1_prior = "gaussian")
+            const std::string &lag_par1_prior = "gaussian",
+            const unsigned int &seasonal_period = 1,
+            const bool &season_in_state = false)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
             arma::vec eta = eta_tilde;
+            unsigned int idx = 0;
             for (unsigned int i = 0; i < param_selected.size(); i++)
             {
-                double val = eta_tilde.at(i);
+                double val = eta_tilde.at(idx);
                 switch (static_param_list[tolower(param_selected[i])])
                 {
                 case AVAIL::Param::W:
@@ -549,13 +568,13 @@ namespace VB
                     {
                         val *= -1.;
                         val = std::min(val, UPBND);
-                        eta.at(i) = std::exp(val);
+                        eta.at(idx) = std::exp(val);
                         break;
                     }
                     case AVAIL::Dist::gamma:
                     {
                         val = std::min(val, UPBND);
-                        eta.at(i) = std::exp(val);
+                        eta.at(idx) = std::exp(val);
                         break;
                     }
                     default:
@@ -563,18 +582,27 @@ namespace VB
                         break;
                     }
                     } // switch W prior.
+
+                    idx += 1;
                     break;
                 } // W
-                case AVAIL::Param::mu0:
+                case AVAIL::Param::seas:
                 {
-                    val = std::min(val, UPBND);
-                    eta.at(i) = std::exp(val);
+                    if (!season_in_state)
+                    {
+                        arma::vec log_seas = eta_tilde.subvec(idx, idx + seasonal_period - 1);
+                        log_seas.clamp(log_seas.min(), UPBND);
+                        eta.subvec(idx, idx + seasonal_period - 1) = arma::exp(log_seas);
+                        idx += seasonal_period;
+                    }
                     break;
                 } // mu0
                 case AVAIL::Param::rho:
                 {
                     val = std::min(val, UPBND);
-                    eta.at(i) = std::exp(val);
+                    eta.at(idx) = std::exp(val);
+
+                    idx += 1;
                     break;
                 } // rho
                 case AVAIL::Param::lag_par1:
@@ -583,27 +611,27 @@ namespace VB
                     {
                     case AVAIL::Dist::gaussian:
                     {
-                        eta.at(i) = val;
+                        eta.at(idx) = val;
                         break;
                     }
                     case AVAIL::Dist::invgamma:
                     {
                         val = std::min(val, UPBND);
-                        eta.at(i) = std::exp(val);
+                        eta.at(idx) = std::exp(val);
                         break;
                     }
                     case AVAIL::Dist::gamma:
                     {
                         val = std::min(val, UPBND);
-                        eta.at(i) = std::exp(val);
+                        eta.at(idx) = std::exp(val);
                         break;
                     }
                     case AVAIL::Dist::beta:
                     {
                         val = std::min(val, UPBND);
                         double tmp = std::exp(val);
-                        eta.at(i) = tmp;
-                        eta.at(i) /= (1. + tmp);
+                        eta.at(idx) = tmp;
+                        eta.at(idx) /= (1. + tmp);
                         break;
                     }
                     default:
@@ -612,12 +640,15 @@ namespace VB
                         break;
                     }
                     } // switch prior type for lag_par1.
+
+                    idx += 1;
                     break;
                 } // lag_par1
                 case AVAIL::Param::lag_par2:
                 {
                     val = std::min(val, UPBND);
-                    eta.at(i) = std::exp(val);
+                    eta.at(idx) = std::exp(val);
+                    idx += 1;
                     break;
                 } // lag_par2
                 default:
@@ -627,9 +658,10 @@ namespace VB
                 }
                 } // switch param
 
-                bound_check(eta.at(i), "tilde2eta: eta");
+                
             }
 
+            bound_check<arma::vec>(eta, "tilde2eta: eta");
             return eta;
         }
 
@@ -798,64 +830,32 @@ namespace VB
         mu0 > 0 has a Gamma prior:
             mu[0] ~ Gamma(amu,bmu)
         */
-        static double dloglike_dmu0tilde( // Checked. OK.
+        static arma::vec dloglike_dlogseas( // Checked. OK.
             const arma::vec &y,           // (nT+1) x 1
             const arma::vec &ft,          // (n+1) x 1, (f[0],f[1],...,f[nT])
             const ObsDist &dobs,
+            const arma::vec &seas,
+            const arma::mat &Xseas,
             const std::string &link_func)
         { // 0 - negative binomial; 1 - poisson
 
-            double dy_dlambda = 0.;
+            arma::vec deriv(seas.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double lambda = LinkFunc::ft2mu(ft.at(t), link_func, dobs.par1);
-                dy_dlambda += ObsDist::dloglike_dlambda(y.at(t), lambda, dobs);
-            }
+                double eta = ft.at(t);
+                if (seas.n_elem > 0)
+                {
+                    eta += arma::as_scalar(Xseas.col(t).t() * seas);
+                }
+                double lambda = LinkFunc::ft2mu(eta, link_func);
 
-            double dlambda_dmu = 1.;
-            double dmu_dmu0tilde = dobs.par1;
-            double deriv = (dy_dlambda * dlambda_dmu) * dmu_dmu0tilde;
+                double dy_dlambda = ObsDist::dloglike_dlambda(y.at(t), lambda, dobs);
+                arma::vec dlambda_dlogseas = Xseas.col(t) % seas;
+                deriv = deriv + dy_dlambda * dlambda_dlogseas;
+            }
             return deriv;
         }
 
-        // double dloglike_dmu0tilde(
-        //     const arma::vec &ypad,  // (n+1) x 1
-        //     const arma::vec &theta, // (n+1) x 1, (theta[0],theta[1],...,theta[n])
-        //     const arma::vec &hpsi_pad, // (n+1) x 1
-        //     const arma::vec &lag_par,
-        //     const arma::vec &obs_par,
-        //     const unsigned int &nlag_in = 20,
-        //     const unsigned int &obs_code = 0,
-        //     const unsigned int &trans_code = 1,
-        //     const bool &truncated = true)
-        // { // 0 - negative binomial; 1 - poisson
-        //     unsigned int nobs = ypad.n_elem - 1;
-        //     double mu0 = obs_par.at(0);
-        //     double delta_nb = obs_par.at(1);
-
-        //     double dy_dmu0 = 0.;
-        //     for (unsigned int t = 1; t <= nobs; t++)
-        //     {
-        //         double lambda = mu0 + theta.at(t);
-        //         double dy_dlambda = dloglike_dlambda(
-        //             ypad.at(t), lambda, delta_nb, obs_code);
-
-        //         unsigned int nelem = theta_nelem(nobs, nlag_in, t, truncated);
-        //         arma::vec Fphi_sub; arma::vec hpsi_sub;
-        //         theta_subset(
-        //             Fphi_sub, hpsi_sub,
-        //             hpsi_pad, lag_par,
-        //             t, nelem, trans_code);
-        //         arma::vec coef = Fphi_times_hpsi(Fphi_sub, hpsi_sub);
-        //         double dlambda_dmu0 = 1. - arma::accu(coef);
-
-        //         dy_dmu0 += dy_dlambda * dlambda_dmu0;
-        //     }
-
-        //     double dmu0_dmu0tilde = mu0;
-        //     double deriv = dy_dmu0 * dmu0_dmu0tilde;
-        //     return deriv;
-        // }
 
         static double logprior_mu0tilde(
             const double &logmu0, // evolution variance conditional on V
@@ -872,15 +872,15 @@ namespace VB
             return logp;
         }
 
-        static double logprior_mu0tilde(
-            const double &logmu0, // evolution variance conditional on V
+        static arma::vec logprior_logseas(
+            const arma::vec &logseas, // evolution variance conditional on V
             const double &sig2_mu0 = 10.)
         {
             /*
             log(mu0) ~ N(0,sig2_mu0)
             */
-            double logp = -logmu0 / sig2_mu0;
-            bound_check(logp, "logprior_logmu0: logp");
+            arma::vec logp = - logseas / sig2_mu0;
+            bound_check<arma::vec>(logp, "logprior_logmu0: logp");
             return logp;
         }
 
@@ -909,10 +909,19 @@ namespace VB
             const Prior &lag_par1_prior,
             const Prior &lag_par2_prior,
             const Prior &rho_prior,
+            const Prior &seas_prior,
             const Model &model)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-            arma::vec deriv(param_selected.size());
+            unsigned int nelem = param_selected.size();
+            for (unsigned int i = 0; i < param_selected.size(); i++)
+            {
+                if (static_param_list[tolower(param_selected[i])] == AVAIL::Param::seas)
+                {
+                    nelem += model.seas.period - 1;
+                }
+            }
+            arma::vec deriv(nelem, arma::fill::zeros);
 
             bool infer_dlag = lag_par1_prior.infer || lag_par2_prior.infer;
             arma::vec dllk_dpar, hpsi;
@@ -925,43 +934,51 @@ namespace VB
                 }
             }
 
+            unsigned int idx = 0;
             for (unsigned int i = 0; i < param_selected.size(); i++)
             {
-                double val = eta.at(i);
+                double val = eta.at(idx);
 
                 switch (static_param_list[tolower(param_selected[i])])
                 {
                 case AVAIL::Param::W:
                 {
-                    deriv.at(i) = dlogJoint_dWtilde(psi, 1., val, W_prior);
+                    deriv.at(idx) = dlogJoint_dWtilde(psi, 1., val, W_prior);
+                    idx += 1;
                     break;
                 }
-                case AVAIL::Param::mu0:
+                case AVAIL::Param::seas:
                 {
-                    double mu0tilde = std::log(val + EPS);
+                    arma::vec seas = eta.subvec(idx, idx + model.seas.period - 1);
+                    arma::vec logseas = arma::log(seas + EPS);
 
-                    deriv.at(i) = dloglike_dmu0tilde(
-                        y, ft, model.dobs, model.flink);
-                    deriv.at(i) += logprior_mu0tilde(mu0tilde, 10.);
+                    arma::vec dloglik = dloglike_dlogseas(
+                        y, ft, model.dobs, seas, model.seas.X, model.flink);
+                    arma::vec dlogprior = logprior_logseas(logseas, seas_prior.par2);
 
+                    deriv.subvec(idx, idx + model.seas.period - 1) = dloglik + dlogprior;
+                    idx += model.seas.period;
                     break;
                 }
                 case AVAIL::Param::rho:
                 {
-                    deriv.at(i) = Model::dlogp_dpar2_obs(model, y, hpsi, true);
-                    deriv.at(i) += Prior::dlogprior_dpar(model.dobs.par2, rho_prior, true);
+                    deriv.at(idx) = Model::dlogp_dpar2_obs(model, y, hpsi, true);
+                    deriv.at(idx) += Prior::dlogprior_dpar(model.dobs.par2, rho_prior, true);
+                    idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par1:
                 {
-                    deriv.at(i) = dllk_dpar.at(0);
-                    deriv.at(i) += Prior::dlogprior_dpar(model.dlag.par1, lag_par1_prior, true);
+                    deriv.at(idx) = dllk_dpar.at(0);
+                    deriv.at(idx) += Prior::dlogprior_dpar(model.dlag.par1, lag_par1_prior, true);
+                    idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par2:
                 {
-                    deriv.at(i) = dllk_dpar.at(1);
-                    deriv.at(i) += Prior::dlogprior_dpar(model.dlag.par2, lag_par2_prior, true);
+                    deriv.at(idx) = dllk_dpar.at(1);
+                    deriv.at(idx) += Prior::dlogprior_dpar(model.dlag.par2, lag_par2_prior, true);
+                    idx += 1;
                     break;
                 }
                 default:
@@ -980,40 +997,54 @@ namespace VB
             const bool &update_static)
         {
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-            arma::vec eta(params_selected.size(), arma::fill::zeros);
+            unsigned int nelem = params_selected.size();
+            for (unsigned int i = 0; i < params_selected.size(); i++)
+            {
+                if (static_param_list[tolower(params_selected[i])] == AVAIL::Param::seas)
+                {
+                    nelem += model.seas.period - 1;
+                }
+            }
+            arma::vec eta(nelem, arma::fill::zeros);
 
             if (!update_static)
             {
                 return eta;
             }
 
+            unsigned int idx = 0;
             for (unsigned int i = 0; i < params_selected.size(); i++)
             {
                 switch (static_param_list[params_selected[i]])
                 {
                 case AVAIL::Param::W:
                 {
-                    eta.at(i) = model.derr.par1;
+                    eta.at(idx) = model.derr.par1;
+                    idx += 1;
                     break;
                 }
-                case AVAIL::Param::mu0:
+                case AVAIL::Param::seas:
                 {
-                    eta.at(i) = model.dobs.par1;
+                    eta.subvec(idx, idx + model.seas.period - 1) = model.seas.val;
+                    idx += model.seas.period;
                     break;
                 }
                 case AVAIL::Param::rho:
                 {
                     eta.at(i) = model.dobs.par2;
+                    idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par1:
                 {
                     eta.at(i) = model.dlag.par1;
+                    idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par2:
                 {
                     eta.at(i) = model.dlag.par2;
+                    idx += 1;
                     break;
                 }
                 default:
@@ -1034,36 +1065,42 @@ namespace VB
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
             bool update_dlag = false;
 
+            unsigned int idx = 0;
             for (unsigned int i = 0; i < params_selected.size(); i++)
             {
-                double val = eta.at(i);
+                double val = eta.at(idx);
                 switch (static_param_list[params_selected[i]])
                 {
                 case AVAIL::Param::W: // W is selected
                 {
                     model.derr.par1 = val;
+                    idx += 1;
                     break;
                 }
-                case AVAIL::Param::mu0: // mu0 is selected
+                case AVAIL::Param::seas: // mu0 is selected
                 {
-                    model.dobs.par1 = val;
+                    model.seas.val = eta.subvec(idx, idx + model.seas.period - 1);
+                    idx += model.seas.period;
                     break;
                 }
                 case AVAIL::Param::rho: // rho is selected
                 {
                     model.dobs.par2 = val;
+                    idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par1: // par 1 is selected
                 {
                     update_dlag = true;
                     model.dlag.par1 = val;
+                    idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par2: // par 2 is selected
                 {
                     update_dlag = true;
                     model.dlag.par2 = val;
+                    idx += 1;
                     break;
                 }
                 default:
@@ -1078,7 +1115,7 @@ namespace VB
             {
                 model.dlag.nL = LagDist::get_nlag(model.dlag);
                 model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
-                model.nP = Model::get_nP(model.dlag);
+                model.nP = Model::get_nP(model.dlag, model.seas.period, model.seas.in_state);
             }
 
             return;
@@ -1264,7 +1301,11 @@ namespace VB
         // }
 
        
-        void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
+        void infer(
+            Model &model, 
+            const arma::vec &y,
+            const Rcpp::Nullable<Rcpp::NumericMatrix> &X = R_NilValue,
+            const bool &verbose = VERBOSE)
         {
             psi.set_size(y.n_elem);
             psi.zeros();
@@ -1282,6 +1323,7 @@ namespace VB
                 arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::vec Wt(model.nP, arma::fill::zeros);
                 Wt.at(0) = model.derr.par1;
+
                 /*
                 You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
                 */
@@ -1299,11 +1341,13 @@ namespace VB
                         t, y, ft, hpsi, model.dlag, model.ftrans); // Checked. OK.
                 }
 
+
                 if (update_static)
                 {
                     arma::vec dlogJoint = dlogJoint_deta(
                         y, psi, ft, eta, param_selected,
-                        W_prior, par1_prior, par2_prior, rho_prior, model); // Checked. OK.
+                        W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model); // Checked. OK.
+
 
                     arma::mat SigInv = get_sigma_inv(B, d, k);
                     arma::vec dlogq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu);
@@ -1312,6 +1356,7 @@ namespace VB
                     arma::vec L_mu = dYJinv_dnu(nu, gamma) * ddiff;
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
+
 
                     if (m > 1)
                     {
@@ -1339,6 +1384,7 @@ namespace VB
                         }
                     }
 
+
                     // d
                     arma::vec L_d = dYJinv_dD(nu, gamma, eps) * ddiff; // m x 1
                     grad_d.update_grad(L_d);
@@ -1351,11 +1397,10 @@ namespace VB
                     tau = tau + grad_tau.change;
                     gamma = tau2gamma(tau);
 
+
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                    eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name);
-
+                    eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name, model.seas.period, model.seas.in_state);
                     update_params(model, param_selected, eta);
-
                 } // end update_static
 
                 if (saveiter || b == (ntotal - 1))
@@ -1377,9 +1422,9 @@ namespace VB
                         W_stored.at(idx_run) = model.derr.par1;
                     }
 
-                    if (mu0_prior.infer)
+                    if (seas_prior.infer)
                     {
-                        mu0_stored.at(idx_run) = model.dobs.par1;
+                        seas_stored.col(idx_run) = model.seas.val;
                     }
 
                     if (rho_prior.infer)
@@ -1418,27 +1463,27 @@ namespace VB
 
             if (W_prior.infer)
             {
-                output["W"] = Rcpp::wrap(W_stored);
+                output["W"] = Rcpp::wrap(W_stored.t());
             }
 
-            if (mu0_prior.infer)
+            if (seas_prior.infer)
             {
-                output["mu0"] = Rcpp::wrap(mu0_stored);
+                output["seas"] = Rcpp::wrap(seas_stored);
             }
 
             if (rho_prior.infer)
             {
-                output["rho"] = Rcpp::wrap(rho_stored);
+                output["rho"] = Rcpp::wrap(rho_stored.t());
             }
 
             if (par1_prior.infer)
             {
-                output["par1"] = Rcpp::wrap(par1_stored);
+                output["par1"] = Rcpp::wrap(par1_stored.t());
             }
 
             if (par2_prior.infer)
             {
-                output["par2"] = Rcpp::wrap(par2_stored);
+                output["par2"] = Rcpp::wrap(par2_stored.t());
             }
 
             output["inferred"] = Rcpp::wrap(param_selected);
