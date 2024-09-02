@@ -1957,15 +1957,15 @@ namespace SMC
                 for (unsigned int i = 0; i < N; i++)
                 {
                     bseas_forward.slice(i).diag().fill(prior_seas.par2);
-                    // if (prior_seas.infer)
-                    // {
-                    //     param_filter.col(i).head(model.seas.period) = arma::randu<arma::vec>(
-                    //         model.seas.period, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
-                    // }
-                    // else
-                    // {
-                    param_filter.col(i).head(model.seas.period) = model.seas.val;
-                    // }
+                    if (prior_seas.infer)
+                    {
+                        param_filter.col(i).head(model.seas.period) = arma::randu<arma::vec>(
+                            model.seas.period, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
+                    }
+                    else
+                    {
+                        param_filter.col(i).head(model.seas.period) = model.seas.val;
+                    }
                 }
             }
 
