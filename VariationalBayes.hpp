@@ -312,42 +312,19 @@ namespace VB
         void update_grad(const arma::vec &dYJinv_dVecPar) // Checked. OK.
         {
             arma::vec oldEg2 = curEg2;
-
             curEg2 = (1. - learning_rate) * oldEg2 + learning_rate * arma::pow(dYJinv_dVecPar, 2.); // m x 1
-            try
-            {
-                bound_check<arma::vec>(curEg2, "curEg2");
-            }
-            catch (const std::exception &e)
-            {
-                oldEg2.t().print("\n oldEg2");
-                dYJinv_dVecPar.t().print("\ndYJinv_dVecPar");
-                curEg2.t().print("\n curEg2");
-
-                std::cerr << e.what() << '\n';
-                throw std::invalid_argument(e.what());
-            }
-
             rho = arma::sqrt(curEdelta2 + eps_step_size) / arma::sqrt(curEg2 + eps_step_size);
-
             par_change = rho % dYJinv_dVecPar;
-            try
-            {
-                bound_check<arma::vec>(par_change, "update_grad: par_change");
-            }
-            catch (const std::exception &e)
-            {
-                dYJinv_dVecPar.t().print("\ndYJinv_dVecPar");
-                rho.t().print("\n rho");
-                oldEg2.t().print("\n oldEg2");
-                std::cout << "\n learn rate = " << learning_rate << " eps = " << eps_step_size << std::endl;
-                throw std::invalid_argument(e.what());
-            }
 
             arma::vec oldEdelta2 = curEdelta2;
             curEdelta2 = (1. - learning_rate) * oldEdelta2 + learning_rate * arma::pow(par_change, 2.);
 
-            bound_check<arma::vec>(curEdelta2, "update_grad: curEdelta2");
+            if (DEBUG)
+            {
+                bound_check<arma::vec>(curEg2, "curEg2");
+                bound_check<arma::vec>(par_change, "update_grad: par_change");
+                bound_check<arma::vec>(curEdelta2, "update_grad: curEdelta2");
+            }
             return;
         }
 
@@ -485,7 +462,10 @@ namespace VB
                     if (!season_in_state)
                     {
                         arma::vec seas = eta.subvec(idx, idx + seasonal_period - 1);
-                        bound_check<arma::vec>(seas, "VB::Hybrid::eta2tilde: seas", false, true);
+                        if (DEBUG)
+                        {
+                            bound_check<arma::vec>(seas, "VB::Hybrid::eta2tilde: seas", false, true);
+                        }
                         eta_tilde.subvec(idx, idx + seasonal_period - 1) = arma::log(seas + EPS);
 
                         idx += seasonal_period;
@@ -546,7 +526,10 @@ namespace VB
                 } // switch param
             }
 
-            bound_check<arma::vec>(eta_tilde, "VB::Hybrid::eta2tilde: eta_tilde");
+            if (DEBUG)
+            {
+                bound_check<arma::vec>(eta_tilde, "VB::Hybrid::eta2tilde: eta_tilde");
+            }
             return eta_tilde;
         }
 
@@ -669,7 +652,10 @@ namespace VB
                 
             }
 
-            bound_check<arma::vec>(eta, "tilde2eta: eta");
+            if (DEBUG)
+            {
+                bound_check<arma::vec>(eta, "tilde2eta: eta");
+            }
             return eta;
         }
 
@@ -709,7 +695,10 @@ namespace VB
             double rdw = std::log(std::abs(res) + EPS) - std::log(std::abs(W) + EPS); // sum(w[t]^2) / W
             rdw = std::min(rdw, UPBND);
             rdw = std::exp(rdw);
-            bound_check(rdw, "dlogJoint_dWtilde: rdw");
+            if (DEBUG)
+            {
+                bound_check(rdw, "dlogJoint_dWtilde: rdw");
+            }
 
             double deriv;
             switch (dist_list[W_prior.name])
@@ -767,7 +756,10 @@ namespace VB
             }
             } // switch W prior type
 
-            bound_check(deriv, "dlogJoint_dWtilde: deriv");
+            if (DEBUG)
+            {
+                bound_check(deriv, "dlogJoint_dWtilde: deriv");
+            }
             return deriv;
         }
 
@@ -824,7 +816,10 @@ namespace VB
             }
             } // switch by W prior type
 
-            bound_check(logp, "logprior_Wtilde: logp");
+            if (DEBUG)
+            {
+                bound_check(logp, "logprior_Wtilde: logp");
+            }
 
             return logp;
         }
@@ -876,7 +871,10 @@ namespace VB
             logmu0 = log(mu0)
             */
             double logp = amu * std::log(bmu) - std::lgamma(amu) + amu * logmu0 - bmu * std::exp(logmu0);
-            bound_check(logp, "logprior_logmu0: logp");
+            if (DEBUG)
+            {
+                bound_check(logp, "logprior_logmu0: logp");
+            }
             return logp;
         }
 
@@ -888,7 +886,10 @@ namespace VB
             log(mu0) ~ N(0,sig2_mu0)
             */
             arma::vec logp = - logseas / sig2_mu0;
-            bound_check<arma::vec>(logp, "logprior_logseas: logp");
+            if (DEBUG)
+            {
+                bound_check<arma::vec>(logp, "logprior_logseas: logp");
+            }
             return logp;
         }
 

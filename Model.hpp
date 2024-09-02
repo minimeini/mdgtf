@@ -1000,7 +1000,10 @@ public:
         }
 
         double dloglik_deta = dloglik_dlam * dlam_deta;
-        bound_check(dloglik_deta, "Model::dloglik_deta: dloglik_deta");
+        if (DEBUG)
+        {
+            bound_check(dloglik_deta, "Model::dloglik_deta: dloglik_deta");
+        }
         return dloglik_deta;
     }
 
@@ -1047,7 +1050,10 @@ public:
             grad.at(t, 1) = dll_deta * deta_dpar2;
         }
 
-        bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+        if (DEBUG)
+        {
+            bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+        }
         arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
         return grad_out;
     }
@@ -1074,7 +1080,10 @@ public:
             grad.at(t, 1) = dll_deta * deta_dpar2;
         }
 
-        bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+        if (DEBUG)
+        {
+            bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+        }
         arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
         return grad_out;
     }
@@ -1188,7 +1197,10 @@ public:
         }
         
 
-        bound_check<arma::vec>(theta_next, "func_gt: theta_next");
+        if (DEBUG)
+        {
+            bound_check<arma::vec>(theta_next, "func_gt: theta_next");
+        }
         return theta_next;
     }
 
@@ -1370,7 +1382,10 @@ public:
             }
         }
 
-        bound_check(ft_cur, "func_ft: ft_cur");
+        if (DEBUG)
+        {
+            bound_check(ft_cur, "func_ft: ft_cur");
+        }
         return ft_cur;
     }
 
@@ -2010,7 +2025,10 @@ public:
             Fn.submat(t - 1, 0, t - 1, t - 1) = Fnt.t();
         }
 
-        bound_check<arma::mat>(Fn, "get_Fn: Fn");
+        if (DEBUG)
+        {
+            bound_check<arma::mat>(Fn, "get_Fn: Fn");
+        }
         return;
     }
 
@@ -2030,7 +2048,10 @@ public:
         }
 
         f0.at(0) = (f0.at(0) < EPS8) ? EPS8 : f0.at(0);
-        bound_check<arma::vec>(f0, "get_f0: f0");
+        if (DEBUG)
+        {
+            bound_check<arma::vec>(f0, "get_f0: f0");
+        }
         return;
     }
 
@@ -2049,7 +2070,10 @@ public:
             arma::vec seas_reg = seas.X.t() * seas.val; // (nT + 1) x 1
             eta = eta + seas_reg.tail(eta.n_elem);
         }
-        bound_check(eta, "func_eta_approx: eta");
+        if (DEBUG)
+        {
+            bound_check<arma::vec>(eta, "func_eta_approx: eta");
+        }
         return eta;
     }
 
@@ -2126,7 +2150,10 @@ public:
         }
         } // switch by observation distribution.
 
-        bound_check<arma::vec>(Vt, "func_Vt_approx: Vt", true, true);
+        if (DEBUG)
+        {
+            bound_check<arma::vec>(Vt, "func_Vt_approx: Vt", true, true);
+        }
         Vt.elem(arma::find(Vt < EPS8)).fill(EPS8);
         return Vt;
     }
@@ -2194,7 +2221,10 @@ public:
         }
         } // switch by observation distribution.
 
-        bound_check(Vt, "func_Vt_approx<double>: Vt", true, true);
+        if (DEBUG)
+        {
+            bound_check(Vt, "func_Vt_approx<double>: Vt", true, true);
+        }
         Vt = std::max(Vt, EPS);
         return Vt;
     }
@@ -2224,7 +2254,10 @@ public:
         }
         } // switch by link
 
-        bound_check(yhat, "func_yhat");
+        if (DEBUG)
+        {
+            bound_check(yhat, "func_yhat");
+        }
         return yhat;
     }
 

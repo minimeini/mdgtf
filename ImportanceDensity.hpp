@@ -147,8 +147,10 @@ static arma::vec qforecast(
                   { val -= logq_max; });
 
     arma::vec weights = arma::exp(logq);
-    bound_check<arma::vec>(weights, "qforecast");
-
+    if (DEBUG)
+    {
+        bound_check<arma::vec>(weights, "qforecast");
+    }
     return weights;
 } // func: imp_weights_forecast
 
@@ -222,17 +224,10 @@ static arma::vec qforecast(
                   { val -= logq_max; });
 
     arma::vec weights = arma::exp(logq);
-
-    try
+    if (DEBUG)
     {
-        bound_check<arma::vec>(weights, "imp_weights_forecast");
+        bound_check<arma::vec>(weights, "qforecast");
     }
-    catch (const std::exception &e)
-    {
-        logq.t().brief_print("\n logarithm of weights: ");
-        throw std::runtime_error(e.what());
-    }
-
     return weights;
 } // func: imp_weights_forecast
 
@@ -303,8 +298,11 @@ static arma::vec qforecast(
                   { val -= logq_max; });
 
     arma::vec weights = arma::exp(logq);
-    bound_check<arma::vec>(weights, "imp_weights_forecast");
 
+    if (DEBUG)
+    {
+        bound_check<arma::vec>(weights, "qforecast");
+    }
     return weights;
 } // func: imp_weights_forecast
 
@@ -382,8 +380,10 @@ static arma::vec qforecast(
                   { val -= logq_max; });
 
     arma::vec weights = arma::exp(logq);
-    bound_check<arma::vec>(weights, "imp_weights_forecast");
-
+    if (DEBUG)
+    {
+        bound_check<arma::vec>(weights, "qforecast");
+    }
     return weights;
 } // func: imp_weights_forecast
 
@@ -711,7 +711,10 @@ static arma::vec qbackcast(
     logq.for_each([&logq_max](arma::vec::elem_type &val)
                   { val -= logq_max; });
     arma::vec weights = arma::exp(logq);
-    bound_check<arma::vec>(weights, "imp_weights_forecast");
+    if (DEBUG)
+    {
+        bound_check<arma::vec>(weights, "qforecast");
+    }
     return weights;
 } // func: imp_weights_forecast (no unknown statics)
 

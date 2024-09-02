@@ -404,8 +404,10 @@ namespace SMC
             logq.for_each([&logq_max](arma::vec::elem_type &val)
                           { val -= logq_max; });
             arma::vec weights = arma::exp(logq);
-            bound_check<arma::vec>(weights, "imp_weights_forecast");
-
+            if (DEBUG)
+            {
+                bound_check<arma::vec>(weights, "imp_weights_backcast");
+            }
             return weights;
         } // func: imp_weights_backcast
 
@@ -447,7 +449,6 @@ namespace SMC
                 weights.for_each([&wmax](arma::vec::elem_type &val)
                                  { val -= wmax; });
                 weights = arma::exp(weights);
-                // bound_check<arma::vec>(weights, "SMC::SequentialMonteCarlo::get_smooth_index");
 
                 double wsum = arma::accu(weights);
                 if (wsum < EPS)
