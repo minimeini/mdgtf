@@ -101,6 +101,11 @@ public:
         double y = 0.;
         switch (obs_list[obs_dist])
         {
+        case AVAIL::Dist::gaussian:
+        {
+            y = R::rnorm(lambda, std::sqrt(par2));
+            break;
+        }
         case AVAIL::Dist::nbinomm:
         {
             // double prob_succ = par2 / (lambda + par2);
@@ -116,8 +121,6 @@ public:
             break;
         }
         }
-
-        bound_check(y, "static double sample: y", false, true);
         return y;
     }
 
@@ -185,6 +188,11 @@ public:
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         switch (obs_list[dobs.name])
         {
+        case AVAIL::Dist::gaussian:
+        {
+            deriv = (y - lambda) / dobs.par2;
+            break;
+        }
         case AVAIL::Dist::poisson:
         {
             deriv = y / lambda;

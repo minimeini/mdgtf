@@ -91,7 +91,7 @@ public:
         return c;
     }
 
-    double dmvnorm(const arma::vec &x, const arma::vec &mu, const arma::mat &Sigma, const bool &return_log = true)
+    static double dmvnorm(const arma::vec &x, const arma::vec &mu, const arma::mat &Sigma, const bool &return_log = true)
     {
         const double p = static_cast<double>(x.n_elem);
         double c = p * std::log(2. * arma::datum::pi);
