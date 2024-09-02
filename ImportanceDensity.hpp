@@ -71,7 +71,7 @@ static arma::vec qforecast(
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
     const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
-    const arma::mat &param,   // 4 x N, (mu0, rho, par1, par2)
+    const arma::mat &param,   // (period + 3) x N, (seasonal components, rho, par1, par2)
     const arma::vec &y,
     const bool &obs_update,
     const bool &lag_update,
@@ -87,24 +87,24 @@ static arma::vec qforecast(
         Model mod = model;
         if (obs_update)
         {
-            mod.dobs.par1 = param.at(0, i);
-            mod.dobs.par2 = param.at(1, i);
+            mod.seas.val = param.submat(0, i, mod.seas.period - 1, i);
+            mod.dobs.par2 = param.at(mod.seas.period, i);
         }
 
         if (lag_update)
         {
-            mod.dlag.par1 = param.at(2, i);
-            mod.dlag.par2 = param.at(3, i);
+            mod.dlag.par1 = param.at(mod.seas.period + 1, i);
+            mod.dlag.par2 = param.at(mod.seas.period + 2, i);
         }
 
-        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, model.seas.period, model.seas.in_state);
-        double ft_gtheta = StateSpace::func_ft(mod.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y);
-        double eta = param.at(0, i) + ft_gtheta;
-        double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.10)
+        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state);
+        double ft_gtheta = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y);
+        double eta = ft_gtheta;
+        double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, mod.dobs, model.flink); // (eq 3.11)
+            lambda, mod.dobs, mod.flink); // (eq 3.11)
 
         if (!full_rank)
         {
@@ -114,9 +114,9 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
             double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - param.at(0, i) - ft_tilde;                          // (eq 3.16)
+            double delta = yhat_new - ft_tilde; // (eq 3.16)
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
