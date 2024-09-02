@@ -408,20 +408,15 @@ Rcpp::List dgtf_infer(
 
 
     Rcpp::List out;
-    if (nforecast > 0 || forecast_error || fitted_error)
+    out["fit"] = output;
+    if (nforecast > 0)
     {
-        out["fit"] = output;
-        if (nforecast > 0) { out["pred"] = forecast; }
-        if (forecast_error || fitted_error)
-        {
-            out["error"] = error;
-        }
+        out["pred"] = forecast;
     }
-    else
+    if (forecast_error || fitted_error)
     {
-        out = output;
+        out["error"] = error;
     }
-
 
     return out;
 }
