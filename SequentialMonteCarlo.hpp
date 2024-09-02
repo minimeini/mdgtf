@@ -547,16 +547,6 @@ namespace SMC
             std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
             const bool full_rank = obs_list[model.dobs.name] == AVAIL::Dist::gaussian;
 
-            Theta = arma::zeros<arma::cube>(model.nP, N, nT + 1);
-            if (model.seas.period > 0 && model.seas.in_state)
-            {
-                // initialize seasonal components
-                for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
-                {
-                    Theta.slice(0).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(0, 10));
-                    Theta.slice(1).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(0, 10));
-                }
-            }
             weights_forward.set_size(y.n_elem, N);
             weights_forward.zeros();
             eff_forward.set_size(y.n_elem);
@@ -719,12 +709,6 @@ namespace SMC
             }
 
             const bool full_rank = false;
-
-            Theta = arma::zeros<arma::cube>(model.nP, N, nT + 1);
-            for (unsigned int i = 0; i < N; i++)
-            {
-                Theta.slice(0).col(i) = arma::randn<arma::vec>(model.nP);
-            }
 
             if (model.seas.period > 0 && prior_seas.infer)
             {
@@ -1414,6 +1398,21 @@ namespace SMC
             //     model, y, N, false, true,
             //     use_discount, discount_factor, verbose);
 
+            Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+            for (unsigned int i = 0; i < N; i++)
+            {
+                Theta.slice(0).col(i) = arma::randn<arma::vec>(model.nP);
+            }
+            if (model.seas.in_state && model.seas.period > 0)
+            {
+                for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
+                {
+                    Theta.slice(0).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
+                    Theta.slice(1).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
+                }
+            }
+
+
             log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, weights_forward, eff_forward, param_seas, Wt,
                 model, y, prior_seas, N, 
@@ -1833,6 +1832,20 @@ namespace SMC
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             // forward filter
+            Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+            for (unsigned int i = 0; i < N; i++)
+            {
+                Theta.slice(0).col(i) = arma::randn<arma::vec>(model.nP);
+            }
+            if (model.seas.in_state && model.seas.period > 0)
+            {
+                for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
+                {
+                    Theta.slice(0).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
+                    Theta.slice(1).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
+                }
+            }
+
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, weights_forward, eff_forward, Wt,

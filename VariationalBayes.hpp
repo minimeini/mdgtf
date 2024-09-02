@@ -1348,6 +1348,8 @@ namespace VB
                 {
                     // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
                     arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+                    Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
+                    Theta.slice(0).row(0).fill(psi.at(0)); // 1 x N
 
                     double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                         Theta, weights_forward, eff_forward, Wt,
