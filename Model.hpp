@@ -354,20 +354,21 @@ public:
         const arma::mat &psi_stored, // (nT + 1) x nsample
         const arma::vec &W_stored,   // nsample x 1
         const LagDist &dlag,
+        const Season &seas,
         const std::string &ftrans,
         const std::string &link_func = "identity",
         const std::string &gain_func = "softplus",
-        const double mu0 = 0.,
         const unsigned int &k = 1)
     {
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         unsigned int nsample = psi_stored.n_cols;
         unsigned int nT = y.n_elem - 1;
 
-
         arma::mat psi_all(nT + 1 + k, nsample, arma::fill::zeros);
         arma::mat yall(nT + 1 + k, nsample, arma::fill::zeros);
         arma::mat ft(nT + 1 + k, nsample, arma::fill::zeros);
+        Season seass = seas;
+        seass.X = Season::setX(nT + k, seass.period, seass.P);
 
         for (unsigned int i = 0; i < nsample; i++)
         {
@@ -408,7 +409,14 @@ public:
                 ft_vec.at(idx + 1) = TransFunc::func_ft(
                     idx + 1, yvec, ft_vec, hpsi_vec, dlag, ftrans);
 
-                double lambda = LinkFunc::ft2mu(ft_vec.at(idx + 1), link_func, mu0);
+                double eta = ft_vec.at(idx + 1);
+                if (seass.period > 0)
+                {
+                    eta += arma::as_scalar(seass.X.col(idx + 1).t() * seass.val);
+                }
+
+
+                double lambda = LinkFunc::ft2mu(eta, link_func);
                 yvec.at(idx + 1) = lambda;
             }
 
@@ -447,6 +455,8 @@ public:
         arma::mat psi_all(nT + 1 + k, nsample, arma::fill::zeros);
         arma::mat yall(nT + 1 + k, nsample, arma::fill::zeros);
         arma::mat ft(nT + 1 + k, nsample, arma::fill::zeros);
+        Season seas = model.seas;
+        seas.X = Season::setX(nT + k, seas.period, seas.P);
 
         for (unsigned int i = 0; i < nsample; i++)
         {
@@ -483,7 +493,13 @@ public:
                     idx + 1, yvec, ft_vec, hpsi_vec, 
                     model.dlag, model.ftrans);
 
-                double lambda = LinkFunc::ft2mu(ft_vec.at(idx + 1), model.flink, model.dobs.par1);
+                double eta = ft_vec.at(idx + 1);
+                if (seas.period > 0)
+                {
+                    eta += arma::as_scalar(seas.X.col(idx + 1).t() * seas.val);
+                }
+
+                double lambda = LinkFunc::ft2mu(eta, model.flink);
 
                 if (random_sample)
                 {
@@ -587,7 +603,13 @@ public:
 
                     ft_tmp.at(t + j) = TransFunc::func_ft(
                         t + j, ytmp, ft_tmp, hpsi_tmp, model.dlag, model.ftrans);
-                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp.at(t + j), model.flink, model.dobs.par1);
+
+                    double eta = ft_tmp.at(t + j);
+                    if (model.seas.period > 0)
+                    {
+                        eta += arma::as_scalar(model.seas.X.col(t + j).t() * model.seas.val);
+                    }
+                    ytmp.at(t + j) = LinkFunc::ft2mu(eta, model.flink);
 
                     // psi_cast.at(t, i, j - 1) = psi_tmp.at(t + j);
                     // ft_cast.at(t, i, j - 1) = ft_tmp.at(t + j);
@@ -729,9 +751,14 @@ public:
                 arma::vec ft_tmp = ft_vec;
                 ft_tmp.at(t + 1) = TransFunc::func_ft(
                     t + 1, y, ft_tmp, hpsi_tmp, model.dlag, model.ftrans);
+                double eta = ft_tmp.at(t + 1);
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t + 1).t() * model.seas.val);
+                }
                 // ft_cast.at(t + 1, i) = ft_tmp.at(t + 1);
 
-                ycast.at(t + 1, i) = LinkFunc::ft2mu(ft_tmp.at(t + 1), model.flink, model.dobs.par1);
+                ycast.at(t + 1, i) = LinkFunc::ft2mu(eta, model.flink);
                 y_err_cast.at(t + 1, i) = y.at(t + 1) - ycast.at(t + 1, i);
             }
 
@@ -818,8 +845,13 @@ public:
             {
                 ft.at(t) = TransFunc::func_ft(
                     t, y, ft, hpsi_tmp, model.dlag, model.ftrans);
+                double eta = ft.at(t);
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
 
-                yhat.at(t, i) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1);
+                yhat.at(t, i) = LinkFunc::ft2mu(eta, model.flink);
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
 
@@ -897,8 +929,13 @@ public:
             {
                 ft.at(t) = TransFunc::func_ft(
                     t, y, ft, hpsi_tmp, model.dlag, model.ftrans);
+                double eta = ft.at(t);
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
 
-                yhat.at(t, i) = LinkFunc::ft2mu(ft.at(t), model.flink, model.dobs.par1);
+                yhat.at(t, i) = LinkFunc::ft2mu(eta, model.flink);
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
 
@@ -1411,7 +1448,9 @@ public:
             yall.row(t).fill(y.at(t));
         }
 
-        double mu0 = model.dobs.par1;
+        Model mod = model;
+        mod.seas.X = Season::setX(nT + k, mod.seas.period, mod.seas.P);
+
         for (unsigned int i = 0; i < nsample; i ++)
         {
             double Wsqrt = std::sqrt(W_stored.at(i));
@@ -1420,22 +1459,23 @@ public:
             for (unsigned int t = 0; t < k; t ++)
             {
                 unsigned int idx = t + nT;
-                double ynow = yvec.at(idx);
+                double ynow = yvec.at(idx); // (nT + 1 + k) x 1
                 arma::vec theta_now = Theta_all.slice(idx).col(i);
-                arma::vec theta_next = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, theta_now, ynow, model.seas.period, model.seas.in_state);
+                arma::vec theta_next = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, theta_now, ynow, mod.seas.period, mod.seas.in_state);
                 if (Wsqrt > 0)
                 {
                     theta_next.at(0) += R::rnorm(0., Wsqrt);
                 }
                 // arma::vec theta_next = StateSpace::func_state_propagate(model, theta_now, ynow, Wsqrt, false);
-                double ft_next = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, idx + 1, theta_next, yvec);
-                double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
+                double ft_next = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, idx + 1, theta_next, yvec);
+                double lambda = LinkFunc::ft2mu(ft_next, mod.flink);
                 double ynext = 0.;
-                switch (obs_list[model.dobs.name])
+
+                switch (obs_list[mod.dobs.name])
                 {
                 case AVAIL::Dist::nbinomm:
                 {
-                    ynext = nbinomm::sample(lambda, model.dobs.par2);
+                    ynext = nbinomm::sample(lambda, mod.dobs.par2);
                     break;
                 }
                 case AVAIL::Dist::poisson:
@@ -1470,8 +1510,6 @@ public:
         
         arma::mat psi_pred = psi_qt.tail_rows(k);
         out["psi_pred"] = Rcpp::wrap(psi_pred);
-
-
         return out;
     } // func: forecast
 
@@ -1506,7 +1544,6 @@ public:
         arma::mat y_cov_cast(nT + 1, k, arma::fill::zeros); // (nT + 1) x k
         arma::mat y_width_cast = y_cov_cast;
 
-        double mu0 = model.dobs.par1;
         for (unsigned int t = tstart; t < tend; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1519,7 +1556,7 @@ public:
                 {
                     arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
                     double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + j, theta_next, ytmp);
-                    double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
+                    double lambda = LinkFunc::ft2mu(ft_next, model.flink);
                     ycast.at(t, i, j - 1) = lambda;
 
                     ytmp.at(t + j) = lambda;
@@ -1637,7 +1674,6 @@ public:
         arma::vec y_cover_cast(y.n_elem, arma::fill::zeros);
         arma::vec y_width_cast = y_cover_cast;
 
-        double mu0 = model.dobs.par1;
         for (unsigned int t = 1; t < nT; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1646,7 +1682,7 @@ public:
             {
                 arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t), model.seas.period, model.seas.in_state);
                 double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_next, y);
-                double lambda = LinkFunc::ft2mu(ft_next, model.flink, mu0);
+                double lambda = LinkFunc::ft2mu(ft_next, model.flink);
                 ycast.at(t + 1, i) = lambda;
 
                 y_err_cast.at(t + 1, i) = y.at(t + 1) - ycast.at(t + 1, i);
@@ -1719,8 +1755,6 @@ public:
         arma::mat residual(y.n_elem, nsample, arma::fill::zeros);
         arma::mat yhat(y.n_elem, nsample, arma::fill::zeros);
 
-        double mu0 = model.dobs.par1;
-
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1729,7 +1763,7 @@ public:
             {                
                 arma::vec th = theta.slice(t).col(i); // p x 1
                 double ft = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
-                double lambda = LinkFunc::ft2mu(ft, model.flink, mu0);
+                double lambda = LinkFunc::ft2mu(ft, model.flink);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }
@@ -1798,7 +1832,6 @@ public:
         arma::mat residual(y.n_elem, nsample, arma::fill::zeros);
         arma::mat yhat(y.n_elem, nsample, arma::fill::zeros);
 
-        double mu0 = model.dobs.par1;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
             Rcpp::checkUserInterrupt();
@@ -1807,7 +1840,7 @@ public:
             {
                 arma::vec th = theta.slice(t).col(i); // p x 1
                 double ft = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
-                double lambda = LinkFunc::ft2mu(ft, model.flink, mu0);
+                double lambda = LinkFunc::ft2mu(ft, model.flink);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
             }

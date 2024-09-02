@@ -330,7 +330,6 @@ Rcpp::List dgtf_infer(
 
         output = pl.get_output();
 
-
         if (nforecast > 0)
         {
             forecast = pl.forecast(model, y);
@@ -438,8 +437,8 @@ Rcpp::List dgtf_forecast(
 {
     Model model(model_settings);
     arma::mat ycast = Model::forecast(
-        y, psi, W_stored, model.dlag,
-        model.ftrans, model.flink, model.fgain, mu0, k); // k x nsample
+        y, psi, W_stored, model.dlag, model.seas,
+        model.ftrans, model.flink, model.fgain, k); // k x nsample
 
     Rcpp::List out;
     out["ycast_all"] = Rcpp::wrap(ycast);

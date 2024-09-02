@@ -90,19 +90,6 @@ namespace SMC
                 backward = Rcpp::as<bool>(settings["do_backward"]);
             }
 
-            prior_seas.init("gaussian", 0., 10.);
-            if (settings.containsElementNamed("seas"))
-            {
-                Rcpp::List par_opts = settings["seas"];
-                prior_seas.init(par_opts);
-            }
-
-            if (prior_seas.infer)
-            {
-                param_seas = arma::randu<arma::mat>(
-                    model.seas.period, N, 
-                    arma::distr_param(model.seas.lobnd, model.seas.hibnd));
-            }
 
             prior_W.init("invgamma", 1., 1.);
             if (settings.containsElementNamed("W"))
@@ -133,10 +120,6 @@ namespace SMC
             opts["discount_factor"] = 0.95;
             opts["do_smoothing"] = false;
             opts["do_backward"] = false;
-
-            Rcpp::List seas_opts;
-            seas_opts["infer"] = false;
-            opts["seas"] = seas_opts;
 
             return opts;
         }
@@ -935,9 +918,6 @@ namespace SMC
         arma::vec W_filter; // N x 1
         arma::vec Wt; // p x 1
 
-        Prior prior_seas;
-        arma::mat param_seas; // period x N, for liu and west filter or other types of non-PL sequential updates
-
         bool use_discount = false;
         double discount_factor = 0.95;
 
@@ -1428,19 +1408,12 @@ namespace SMC
                 }
             }
 
-
             log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
-                Theta, weights_forward, eff_forward, param_seas, Wt,
-                model, y, prior_seas, N, 
-                true, discount_factor, verbose);
+                Theta, weights_forward, eff_forward, Wt,
+                model, y, N, false, true, discount_factor, verbose);
 
             arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
             output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
-            if (prior_seas.infer)
-            {
-                output["seas"] = Rcpp::wrap(param_seas);
-            }
-
             output["eff_forward"] = Rcpp::wrap(eff_forward.t());
             output["log_marginal_likelihood"] = log_cond_marg;
 
@@ -1949,6 +1922,13 @@ namespace SMC
             param_filter.set_size(model.seas.period + 3, N);
 
             {
+                prior_seas.init("gaussian", 0., 10.);
+                if (opts.containsElementNamed("seas"))
+                {
+                    Rcpp::List par_opts = opts["seas"];
+                    prior_seas.init(par_opts);
+                }
+
                 aseas_forward.set_size(model.seas.period, N);
                 aseas_forward.fill(prior_seas.par1); // mean
                 bseas_forward.set_size(model.seas.period, model.seas.period, N);
@@ -1968,6 +1948,7 @@ namespace SMC
                     }
                 }
             }
+
 
             {
                 prior_rho.init("gaussiaN", 1., 1.);
@@ -2093,6 +2074,10 @@ namespace SMC
             par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
             par2_opts["prior_name"] = "invgamma";
             opts["par2"] = par2_opts;
+
+            Rcpp::List seas_opts;
+            seas_opts["infer"] = false;
+            opts["seas"] = seas_opts;
 
             return opts;
         }
@@ -2910,7 +2895,7 @@ namespace SMC
 
         arma::mat aseas_forward; // period x N, mean of normal
         arma::cube bseas_forward; // period x period x N, variance of normal
-
+        Prior prior_seas;
 
         Prior prior_rho;
         double rho_mh_sd = 1.;
