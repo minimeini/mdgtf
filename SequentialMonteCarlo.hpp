@@ -360,12 +360,12 @@ namespace SMC
                 }
                 if (infer_obs)
                 {
-                    model.dobs.par2 = param_filter.at(model.seas.period, i);
+                    model.dobs.par2 = std::exp(param_filter.at(model.seas.period, i));
                 }
                 if (infer_lag)
                 {
                     model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
-                    model.dlag.par2 = param_filter.at(model.seas.period + 2, i);
+                    model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
                 }
 
                 double ft_ut = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, u_cur, y);
@@ -1981,7 +1981,15 @@ namespace SMC
                         rho_mh_sd = Rcpp::as<double>(opts_tmp["mh_sd"]);
                     }
                 }
-                param_filter.row(model.seas.period).fill(model.dobs.par2);
+                
+                if (prior_rho.infer)
+                {
+                    param_filter.row(model.seas.period) = arma::randu<arma::rowvec>(param_filter.n_cols, arma::distr_param(0, 5));
+                }
+                else
+                {
+                    param_filter.row(model.seas.period).fill(std::log(model.dobs.par2));
+                }
             }
 
             obs_update = prior_seas.infer || prior_rho.infer;
@@ -2013,7 +2021,7 @@ namespace SMC
                         par2_mh_sd = Rcpp::as<double>(opts_tmp["mh_sd"]);
                     }
                 }
-                param_filter.row(model.seas.period + 2).fill(model.dlag.par2);
+                param_filter.row(model.seas.period + 2).fill(std::log(model.dlag.par2));
             }
 
             lag_update = prior_par1.infer || prior_par2.infer;
@@ -2119,6 +2127,27 @@ namespace SMC
             const bool full_rank = false;
             const double logN = std::log(static_cast<double>(N));
 
+            const double acoef = 0.5 * (3. * discount_factor - 1.) / discount_factor;
+            const double hcoef = 1. - acoef * acoef;
+            const unsigned int nelem = (int)prior_rho.infer + (int)prior_par1.infer + (int)prior_par2.infer;
+            std::vector<unsigned int> indices_c;
+            if (nelem > 0)
+            {
+                if (prior_rho.infer)
+                {
+                    indices_c.push_back(model.seas.period);
+                }
+                if (prior_par1.infer)
+                {
+                    indices_c.push_back(model.seas.period + 1);
+                }
+                if (prior_par2.infer)
+                {
+                    indices_c.push_back(model.seas.period + 2);
+                }
+            }
+            arma::uvec indices(indices_c);
+
             Theta = arma::randn<arma::cube>(model.nP, N, y.n_elem);
             weights_forward.set_size(y.n_elem, N);
             weights_forward.zeros();
@@ -2170,6 +2199,7 @@ namespace SMC
                 arma::uvec resample_idx = get_resample_index(tau);
 
                 Theta.slice(t) = Theta.slice(t).cols(resample_idx);
+                weights = weights.elem(resample_idx);
                 logq = logq.elem(resample_idx);
                 loc = loc.cols(resample_idx);
                 if (full_rank)
@@ -2199,11 +2229,77 @@ namespace SMC
                     bseas_forward = bseas_forward.slices(resample_idx); // s[t]
                 }
 
+                arma::vec param_mean;
+                arma::mat param_var, param_var_chol;
+                arma::mat par; // m x N
+                if (nelem > 0)
+                {
+                    weights /= arma::accu(weights);
+
+                    param_mean.set_size(nelem);
+                    param_mean.zeros();
+                    param_var.set_size(nelem, nelem);
+                    param_var.zeros();
+                    param_var_chol = param_var;
+
+                    par = param_filter.rows(indices); // m x N
+
+                    for (unsigned int i = 0; i < N; i++)
+                    {
+                        param_mean = param_mean + weights.at(i) * par.col(i);
+                    }
+
+                    for (unsigned int i = 0; i < N; i++)
+                    {
+                        arma::vec tdiff = par.col(i) - param_mean;
+                        param_var = param_var + weights.at(i) * tdiff * tdiff.t();
+                    }
+
+                    if (t == 0)
+                    {
+                        param_var.diag() += 0.1;
+                    }
+                    else
+                    {
+                        param_var.diag() += EPS8;
+                    }
+
+                    param_var = arma::symmatu(param_var);
+                    param_var_chol = arma::chol(param_var);
+                    param_var_chol.for_each([&hcoef](arma::mat::elem_type &val)
+                                            { val *= hcoef; });
+                    param_var.for_each([&hcoef](arma::mat::elem_type &val)
+                                       { val *= hcoef * hcoef; });
+                }
+
                 arma::vec logp(N, arma::fill::zeros);
 
                 // #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 for (unsigned int i = 0; i < N; i++)
                 {
+                    if (nelem > 0)
+                    {
+                        arma::vec param_pred = acoef * par.col(i) + (1. - acoef) * param_mean;
+                        arma::vec param_eps = arma::randn(nelem);
+                        arma::vec param_new = param_pred + param_var_chol.t() * param_eps;
+                        logq.at(i) += MVNorm::dmvnorm(param_new, param_pred, param_var, true);
+
+                        arma::vec tmp = param_filter.col(i);
+                        tmp(indices) = param_new;
+                        param_filter.col(i) = tmp;
+
+                        if (lag_update)
+                        {
+                            model.dlag.par1 = param_filter.at(model.seas.period + 1, i);           // mu
+                            model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i)); // sig2
+                        }
+
+                        if (prior_rho.infer)
+                        {
+                            model.dobs.par2 = std::exp(param_filter.at(model.seas.period, i)); // rho
+                        }
+                    }
+
                     arma::vec theta_new; // nP x 1
                     if (full_rank)
                     {
@@ -2257,17 +2353,11 @@ namespace SMC
                         model.derr.par1 = W_filter.at(i);
                     }
 
-                    if (lag_update)
-                    {
-                        model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
-                        model.dlag.par2 = param_filter.at(model.seas.period + 2, i);
-                    }
-
-                    if (obs_update)
+                    if (prior_seas.infer)
                     {
                         model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
-                        model.dobs.par2 = param_filter.at(model.seas.period, i);
                     }
+
                     double ft_new = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink); // ft_new from time t + 1, mu0_filter from time t (old).
 
@@ -2316,112 +2406,19 @@ namespace SMC
                             param_filter.submat(0, i, model.seas.period - 1, i) = seas_new;
                             logq.at(i) += MVNorm::dmvnorm(seas_new, aseas_forward.col(i), bseas_var_cur, true);
 
-                        } // inference of mu0
+                        } // inference of seasonal components
 
                         if (prior_seas.infer)
                         {
                             model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
                             ft_new = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
                         }
-                    } // mu0
-
-                    {
-                        if (!prior_rho.infer)
-                        {
-                            param_filter.at(model.seas.period, i) = model.dobs.par2;
-                        }
-                        else if (!filter_pass)
-                        {
-                            double rho_old = param_filter.at(model.seas.period, i);
-                            param_filter.at(model.seas.period, i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
-                            unsigned int cnt = 0;
-                            while (param_filter.at(model.seas.period, i) < 0 && cnt < max_iter)
-                            {
-                                param_filter.at(model.seas.period, i) = R::rnorm(rho_old, rho_mh_sd * rho_old);
-                                cnt++;
-                            }
-                            logq.at(i) += R::dnorm4(param_filter.at(model.seas.period, i), rho_old, rho_mh_sd * rho_old, 1);
-                        }
-
-                        if (prior_rho.infer)
-                        {
-                            model.dobs.par2 = param_filter.at(model.seas.period, i);
-                        }
-                    } // rho
-
-                    {
-                        if (!lag_update)
-                        {
-                            param_filter.at(model.seas.period + 1, i) = model.dlag.par1;
-                            param_filter.at(model.seas.period + 2, i) = model.dlag.par2;
-                        }
-                        else if (!filter_pass)
-                        {
-                            double par1_old = param_filter.at(model.seas.period + 1, i);
-                            param_filter.at(model.seas.period + 1, i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
-
-                            if (nonnegative_par1)
-                            {
-                                unsigned int cnt = 0;
-                                if (withinone_par1)
-                                {
-                                    while ((param_filter.at(model.seas.period + 1, i) < 0 || param_filter.at(model.seas.period + 1, i) > 1) && cnt < max_iter)
-                                    {
-                                        param_filter.at(model.seas.period + 1, i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
-                                        cnt++;
-                                    }
-                                }
-                                else
-                                {
-                                    while (param_filter.at(model.seas.period + 1, i) < 0 && cnt < max_iter)
-                                    {
-                                        param_filter.at(model.seas.period + 1, i) = R::rnorm(par1_old, par1_mh_sd * par1_old);
-                                        cnt++;
-                                    }
-                                }
-                            }
-
-                            logq.at(i) += R::dnorm4(param_filter.at(model.seas.period + 1, i), par1_old, par1_mh_sd * par1_old, 1);
-
-                            double par2_old = param_filter.at(model.seas.period + 2, i);
-                            param_filter.at(model.seas.period + 2, i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
-
-                            if (nonnegative_par2)
-                            {
-                                unsigned int cnt = 0;
-                                if (withinone_par2)
-                                {
-                                    while ((param_filter.at(model.seas.period + 2, i) < 0 || param_filter.at(model.seas.period + 2, i) > 1) && cnt < max_iter)
-                                    {
-                                        param_filter.at(model.seas.period + 2, i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
-                                        cnt++;
-                                    }
-                                }
-                                else
-                                {
-                                    while (param_filter.at(model.seas.period + 2, i) < 0 && cnt < max_iter)
-                                    {
-                                        param_filter.at(model.seas.period + 2, i) = R::rnorm(par2_old, par2_mh_sd * par2_old);
-                                        cnt++;
-                                    }
-                                }
-                            }
-
-                            logq.at(i) += R::dnorm4(param_filter.at(model.seas.period + 2, i), par2_old, par2_mh_sd * par2_old, 1);
-                        }
-
-                        if (lag_update)
-                        {
-                            model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
-                            model.dlag.par2 = param_filter.at(model.seas.period + 2, i);
-                            ft_new = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
-                        }
-                    } // lag distribution
+                    } // seasonal component
 
                     double lambda_new = LinkFunc::ft2mu(ft_new, model.dobs.name);
                     logp.at(i) = ObsDist::loglike(
                         y.at(t + 1), model.dobs.name, lambda_new, 
-                        param_filter.at(model.seas.period, i), true); // observation density
+                        model.dobs.par2, true); // observation density
                     logp.at(i) += R::dnorm4(theta_new.at(0), Theta.at(0, i, t), std::sqrt(W_filter.at(i)), true);
 
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_old;
@@ -2619,12 +2616,12 @@ namespace SMC
                     }
                     if (prior_rho.infer)
                     {
-                        model.dobs.par2 = param_backward.at(model.seas.period, i);
+                        model.dobs.par2 = std::exp(param_backward.at(model.seas.period, i));
                     }
                     if (lag_update)
                     {
                         model.dlag.par1 = param_backward.at(model.seas.period + 1, i);
-                        model.dlag.par2 = param_backward.at(model.seas.period + 2, i);
+                        model.dlag.par2 = std::exp(param_backward.at(model.seas.period + 2, i));
                     }
                     arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn<arma::vec>(model.nP);
                     if (full_rank)
@@ -2770,7 +2767,7 @@ namespace SMC
                     if (lag_update)
                     {
                         model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
-                        model.dlag.par2 = param_filter.at(model.seas.period + 2, i);
+                        model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
                         // unsigned int nlag = model.update_dlag(param_filter.at(0, i), param_filter.at(1, i), 30, false);
                     }
                     arma::vec gtheta_prev_fwd = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t_prev).col(i), y.at(t_prev), model.seas.period, model.seas.in_state);
@@ -2781,12 +2778,12 @@ namespace SMC
                     }
                     if (prior_rho.infer)
                     {
-                        model.dobs.par2 = param_backward.at(model.seas.period, i);
+                        model.dobs.par2 = std::exp(param_backward.at(model.seas.period, i));
                     }
                     if (lag_update)
                     {
                         model.dlag.par1 = param_backward.at(model.seas.period + 1, i);
-                        model.dlag.par2 = param_backward.at(model.seas.period + 2, i);
+                        model.dlag.par2 = std::exp(param_backward.at(model.seas.period + 2, i));
                         // unsigned int nlag = model.update_dlag(param_backward.at(0, i), param_backward.at(1, i), 30, false);
                     }
 
@@ -2845,7 +2842,7 @@ namespace SMC
                     lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp.at(i) += ObsDist::loglike(
                         y.at(t_cur), model.dobs.name, lambda, 
-                        param_backward.at(model.seas.period, i), true);
+                        model.dobs.par2, true);
 
                     arma::mat pmarg = arma::reshape(Prec_marg.col(i), model.nP, model.nP);
                     logp.at(i) -= MVNorm::dmvnorm2(Theta_backward.slice(t_next).col(i), mu_marg.col(i), pmarg, true);
