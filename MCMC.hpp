@@ -102,8 +102,8 @@ namespace MCMC
                     Theta_new.col(i) = theta_new;
 
                     double logp = R::dnorm4(theta_new.at(0), theta_cur.at(i), std::sqrt(Wt.at(0)), true);
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink, model.dobs.par1);
+                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                    double lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = std::exp(logp - logq.at(i));
                 }
@@ -154,7 +154,7 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double wt_old = wt.at(t);
-                arma::vec lam = model.wt2lambda(y, wt); // Checked. OK.
+                arma::vec lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val);
 
                 double logp_old = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
@@ -168,8 +168,8 @@ namespace MCMC
                 Metropolis-Hastings
                 */
                 approx_dlm.update_by_wt(y, wt);
-                arma::vec eta = approx_dlm.get_eta_approx(model.dobs.par1);               // nT x 1, f0, Fn and psi is updated
-                arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink, 0.); // nT x 1
+                arma::vec eta = approx_dlm.get_eta_approx(model.seas); // nT x 1, f0, Fn and psi is updated
+                arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink); // nT x 1
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink); // nT x 1
 
@@ -194,7 +194,7 @@ namespace MCMC
                 */
 
                 wt.at(t) = wt_new;
-                lam = model.wt2lambda(y, wt); // Checked. OK.
+                lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val); // Checked. OK.
 
                 double logp_new = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
@@ -272,62 +272,91 @@ namespace MCMC
             return;
         } // func update_W
 
-        static void update_mu0( // flat prior
-            double &mu0_accept,
+        static void update_seas( // flat prior
+            double &seas_accept,
             Model &model,
-            const arma::vec &y, // nobs x 1
+            const arma::vec &y, // (ntime + 1) x 1
             const arma::vec &hpsi,
+            const Prior &seas_prior,
             const double &mh_sd = 1.,
             const double &min_var = 0.1)
         {
-            // double mu0_old = mu0;
-            double mu0_old = model.dobs.par1;
+            std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+            arma::vec seas_old = model.seas.val; // period x 1
 
-            arma::vec Vt_hat(y.n_elem, arma::fill::zeros);
-            arma::vec lambda(y.n_elem, arma::fill::zeros);
-            arma::vec eta(y.n_elem, arma::fill::zeros);
+            arma::vec Vt_hat(y.n_elem, arma::fill::zeros); // (ntime + 1) x 1
+            arma::vec lambda(y.n_elem, arma::fill::zeros); // (ntime + 1) x 1
+            arma::vec eta(y.n_elem, arma::fill::zeros);    // (ntime + 1) x 1
 
             double logp_old = 0.;
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 eta.at(t) = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_old);
+                double ft = eta.at(t);
+                if (model.seas.period > 0)
+                {
+                    ft += arma::as_scalar(model.seas.X.col(t).t() * seas_old);
+                }
 
-                logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
-                // Vt_hat.at(t) = ApproxDisturbance::func_Vt_approx(lambda.at(t), model.dobs, model.flink);
+                lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
+                if (y.at(t) < EPS)
+                {
+                    lambda.at(t) = (lambda.at(t) < EPS) ? EPS : lambda.at(t);
+                }
+
+                // if (y.at(t) > 0)
+                // {
+                    logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+                // } 
             }
 
-            Vt_hat = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink);
+            Vt_hat = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink); // (ntime + 1) x 1
 
             arma::vec tmp = 1. / Vt_hat;
-            double mu0_prec = arma::accu(tmp);
-            double mu0_var = 1. / mu0_prec;
-            double mu0_sd = std::sqrt(mu0_var);
-            mu0_sd = std::max(mu0_sd, min_var);
-            mu0_sd *= mh_sd;
-            bound_check(mu0_sd, "MCMC::posterior::update_mu0: mu0_sd", true, true);
-
-            double mu0_new = R::rnorm(mu0_old, mu0_sd);
-
-            // logp_mu0 = logp_old;
-            if (mu0_new > -EPS) // non-negative
+            arma::mat seas_prec(model.seas.period, model.seas.period, arma::fill::zeros);
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                mu0_new = std::abs(mu0_new);
+                seas_prec = seas_prec + model.seas.X.col(t) * model.seas.X.col(t).t() * tmp.at(t);
+            }
+            seas_prec.diag() += 1. / seas_prior.par2;
+
+            arma::mat seas_prec_chol = arma::chol(arma::symmatu(seas_prec));
+            arma::mat seas_chol = arma::inv(arma::trimatu(seas_prec_chol));
+            arma::vec seas_new = seas_old + mh_sd * seas_chol * arma::randn(model.seas.period);
+
+
+            for (unsigned int t = 1; t < y.n_elem; t++)
+            {
+                double ft = eta.at(t);
+                if (model.seas.period > 0)
+                {
+                    ft += arma::as_scalar(model.seas.X.col(t).t() * seas_new);
+                }
+                lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
+                if (y.at(t) < EPS)
+                {
+                    lambda.at(t) = (lambda.at(t) < EPS) ? EPS : lambda.at(t);
+                }
+            }
+            bool lambda_in_range = lambda.elem(arma::find(y > 0)).min() > -EPS;
+
+            if (lambda_in_range || obs_list[model.dobs.name] == AVAIL::Dist::gaussian) // non-negative
+            {
                 double logp_new = 0.;
                 for (unsigned int t = 1; t < y.n_elem; t++)
                 {
-                    lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink, mu0_new);
-                    logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+                    // if (y.at(t) > 0)
+                    // {
+                        logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+                    // }
                 }
 
                 double logratio = std::min(0., logp_new - logp_old);
 
                 if (std::log(R::runif(0., 1.)) < logratio)
                 { // accept
-                    bound_check(mu0_new, "Posterior::update_mu0");
-                    model.dobs.par1 = mu0_new;
-                    mu0_accept += 1.;
-                    // logp_mu0 = logp_new;
+                    model.seas.val = seas_new;
+                    seas_accept += 1.;
                 }
             }
 
@@ -348,8 +377,11 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                lambda.at(t) = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
-
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
+                lambda.at(t) = LinkFunc::ft2mu(eta, model.flink);
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_old, true);
             }
 
@@ -414,7 +446,11 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
+                double lambda = LinkFunc::ft2mu(eta, model.flink);
                 loglik_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
             double logp_old = loglik_old;
@@ -486,7 +522,11 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
+                double lambda = LinkFunc::ft2mu(eta, model.flink);
                 loglik_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
             logp_new += loglik_new;
@@ -536,8 +576,11 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
-
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
+                double lambda = LinkFunc::ft2mu(eta, model.flink);
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
 
@@ -608,8 +651,11 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
-                double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
-
+                if (model.seas.period > 0)
+                {
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                }
+                double lambda = LinkFunc::ft2mu(eta, model.flink);
                 logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
             }
             logp_new += Prior::dprior(par1_new, par1_prior, true, true);
@@ -728,18 +774,18 @@ namespace MCMC
                 W_prior.init(Wopts);
             }
 
-            mu0_prior.init("gaussian", 0., 10.);
-            mu0_stored.set_size(nsample);
-            mu0_accept = 0.;
-            mu0_mh_sd = 1.;
-            if (opts.containsElementNamed("mu0"))
+            seas_prior.init("gaussian", 0., 10.);
+            seas_stored.set_size(model.seas.period, nsample);
+            seas_accept = 0.;
+            seas_mh_sd = 1.;
+            if (opts.containsElementNamed("seas"))
             {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["mu0"]);
-                mu0_prior.init(param_opts);
+                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["seas"]);
+                seas_prior.init(param_opts);
 
                 if (param_opts.containsElementNamed("mh_sd"))
                 {
-                    mu0_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
+                    seas_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
                 }
             }
 
@@ -797,9 +843,11 @@ namespace MCMC
             Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
             Wopts["prior_name"] = "invgamma";
 
-            Rcpp::List mu0_opts;
-            mu0_opts["infer"] = false;
-            mu0_opts["mh_sd"] = 1.;
+            Rcpp::List seas_opts;
+            seas_opts["infer"] = false;
+            seas_opts["mh_sd"] = 1.;
+            seas_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+            seas_opts["prior_name"] = "gaussian";
 
             Rcpp::List rho_opts;
             rho_opts["infer"] = false;
@@ -821,7 +869,7 @@ namespace MCMC
 
             Rcpp::List opts;
             opts["W"] = Wopts;
-            opts["mu0"] = mu0_opts;
+            opts["seas"] = seas_opts;
             opts["rho"] = rho_opts;
             opts["par1"] = par1_opts;
             opts["par2"] = par2_opts;
@@ -837,7 +885,7 @@ namespace MCMC
             opts["nsample"] = 100;
 
             opts["num_step_ahead_forecast"] = 0;
-            opts["num_eval_forecast_error"] = 10;
+            opts["num_eval_forecast_error"] = 0;
             opts["tstart_pct"] = 0.9;
 
             return opts;
@@ -862,9 +910,9 @@ namespace MCMC
             output["W"] = Rcpp::wrap(W_stored);
             output["W_accept"] = W_accept / ntotal;
 
-            output["infer_mu0"] = mu0_prior.infer;
-            output["mu0"] = Rcpp::wrap(mu0_stored);
-            output["mu0_accept"] = static_cast<double>(mu0_accept / ntotal);
+            output["infer_seas"] = seas_prior.infer;
+            output["seas"] = Rcpp::wrap(seas_stored);
+            output["seas_accept"] = static_cast<double>(seas_accept / ntotal);
 
             output["infer_rho"] = rho_prior.infer;
             output["rho"] = Rcpp::wrap(rho_stored);
@@ -910,6 +958,7 @@ namespace MCMC
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             const unsigned int nT = y.n_elem - 1;
+            model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
 
             wt = arma::randn(nT + 1) * 0.01;
             wt.at(0) = 0.;
@@ -976,9 +1025,9 @@ namespace MCMC
                     //     par1_prior, par2_prior, epsilon, L, m, max_lag);
                 }
 
-                if (mu0_prior.infer)
+                if (seas_prior.infer)
                 {
-                    Posterior::update_mu0(mu0_accept, model, y, hpsi, mu0_mh_sd);
+                    Posterior::update_seas(seas_accept, model, y, hpsi, seas_prior, seas_mh_sd);
                 }
 
                 if (rho_prior.infer)
@@ -1003,7 +1052,7 @@ namespace MCMC
                     // wt_stored.col(idx_run) = psi;
                     wt_stored.col(idx_run) = wt;
                     W_stored.at(idx_run) = model.derr.par1;
-                    mu0_stored.at(idx_run) = model.dobs.par1;
+                    seas_stored.col(idx_run) = model.seas.val;
                     rho_stored.at(idx_run) = model.dobs.par2;
                     par1_stored.at(idx_run) = model.dlag.par1;
                     par2_stored.at(idx_run) = model.dlag.par2;
@@ -1047,10 +1096,10 @@ namespace MCMC
         arma::vec wt_accept; // nsample x 1
         arma::mat wt_stored; // (nT + 1) x nsample
 
-        Prior mu0_prior;
-        arma::vec mu0_stored;
-        double mu0_accept = 0.;
-        double mu0_mh_sd = 1.;
+        Prior seas_prior;
+        arma::mat seas_stored; // period x nsample
+        double seas_accept = 0.;
+        double seas_mh_sd = 1.;
 
         Prior rho_prior;
         arma::vec rho_stored;

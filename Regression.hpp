@@ -76,7 +76,7 @@ public:
         {
             arma::vec init = Rcpp::as<arma::vec>(opts["init"]);
             nelem = (init.n_elem <= period) ? init.n_elem : period;
-            val.head(nelem) = init;
+            val.head(nelem) = init.head(nelem);
         }
 
         if (nelem < period)

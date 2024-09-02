@@ -944,7 +944,10 @@ public:
 
     arma::vec wt2lambda(
         const arma::vec &y, // (nT + 1) x 1
-        const arma::vec &wt) // (nT + 1) x 1, checked. ok.
+        const arma::vec &wt, // (nT + 1) x 1
+        const unsigned int &seasonal_period,
+        const arma::mat &X, // period x (nT + 1)
+        const arma::vec &seas) // period x 1, checked. ok.
     {
         arma::vec psi = arma::cumsum(wt);
         arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, fgain);
@@ -955,7 +958,11 @@ public:
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
             ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans);
-            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), flink, dobs.par1);
+            if (seasonal_period > 0)
+            {
+                ft.at(t) += arma::as_scalar(X.col(t).t() * seas);
+            }
+            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), flink);
         }
 
         return lambda;
@@ -2034,9 +2041,14 @@ public:
      * @param y (nT + 1) x 1, only use the past values before each t
      * @return arma::vec, (f[1], ..., f[nT])
      */
-    arma::vec get_eta_approx(const double &mu0 = 0.)
+    arma::vec get_eta_approx(const Season &seas)
     {
-        arma::vec eta = mu0 + f0 + Fn * wt.tail(nT); // nT x 1
+        arma::vec eta = f0 + Fn * wt.tail(nT); // nT x 1
+        if (seas.period > 0)
+        {
+            arma::vec seas_reg = seas.X.t() * seas.val; // (nT + 1) x 1
+            eta = eta + seas_reg.tail(eta.n_elem);
+        }
         bound_check(eta, "func_eta_approx: eta");
         return eta;
     }
@@ -2044,7 +2056,7 @@ public:
 
     void get_lambda_eta_approx(arma::vec &lambda, arma::vec &eta, Model &model, const arma::vec &y)
     {
-        eta = get_eta_approx(model.dobs.par1);
+        eta = get_eta_approx(model.seas);
         lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink, 0.);
         return;
     }
