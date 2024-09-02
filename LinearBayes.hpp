@@ -206,7 +206,8 @@ namespace LBA
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,      // y[0], y[1], ..., y[nT]
         const bool &fill_zero = LBA_FILL_ZERO,
-        const unsigned int &seasonal_period = 0)
+        const unsigned int &seasonal_period = 0,
+        const bool &season_in_state = false)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         arma::vec Ft(theta_cur.n_elem, arma::fill::zeros);
@@ -237,7 +238,7 @@ namespace LBA
             Ft.at(1) = 1.;
         }
 
-        if (seasonal_period > 0)
+        if (seasonal_period > 0 && season_in_state)
         {
             unsigned int nstate = theta_cur.n_elem - seasonal_period;
             Ft.at(nstate) = 1.;
@@ -269,8 +270,8 @@ namespace LBA
         const arma::mat &Rt,
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, t, at, yall, model.seasonal_period);
-        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seasonal_period);
+        mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
+        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seas.period, model.seas.in_state);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         bound_check(var_ft, "LBA::func_prior_ft: var_ft", true, true);
         return;
@@ -297,7 +298,6 @@ namespace LBA
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         double regressor = ft;
-        regressor += model.dobs.par1;
 
         switch (obs_list[model.dobs.name])
         {
@@ -419,7 +419,6 @@ namespace LBA
         }
         }
 
-        mean_ft -= model.dobs.par1;
 
         bound_check(mean_ft, "func_posterior_ft: mean_ft");
         bound_check(var_ft, "func_posterior_ft: var_ft");
@@ -529,14 +528,14 @@ namespace LBA
             _At.set_size(_nP);
             _At.zeros();
 
-            _Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seasonal_period); // set F[0]
-            _Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seasonal_period); // set G[0]
+            _Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seas.period, model.seas.in_state); // set F[0]
+            _Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
 
             _at.set_size(_nP, _nT + 1);
             _at.zeros();
-            if (model.seasonal_period > 0)
+            if (model.seas.period > 0 && model.seas.in_state)
             {
-                _at.submat(model.nP - model.seasonal_period, 0, model.nP - 1, 0) = arma::randu(model.seasonal_period, arma::distr_param(0, 10));
+                _at.submat(model.nP - model.seas.period, 0, model.nP - 1, 0) = arma::randu(model.seas.period, arma::distr_param(0, 10));
             }
             _mt = _at;
             _atilde_t = _at;
@@ -664,7 +663,7 @@ namespace LBA
 
         void filter_single_iter(const unsigned int &t)
         {
-            _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seasonal_period); // Checked. OK.
+            _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seas.period, _model.seas.in_state); // Checked. OK.
             func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
@@ -720,12 +719,13 @@ namespace LBA
             for (unsigned int t = tstart; t <= nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seasonal_period); // Checked. OK.
+                _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seas.period, _model.seas.in_state); // Checked. OK.
                 func_Gt(_Gt, _model, _mt.col(t-1), _y.at(t-1));
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
                     _use_discount, _discount_factor, 
                     _discount_type);
+
 
                 double ft_tmp = 0.;
                 double qt_tmp = 0.;
@@ -736,17 +736,21 @@ namespace LBA
                 _ft_prior_mean.at(t) = ft_tmp;
                 _ft_prior_var.at(t) = qt_tmp;
 
+
                 func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
                 _alpha_t.at(t) = _alphat;
                 _beta_t.at(t) = _betat;
 
+
                 _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
+
 
                 double ft_tmp2 = 0.;
                 double qt_tmp2 = 0.;
                 func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
                 _ft_post_mean.at(t) = ft_tmp2;
                 _ft_post_var.at(t) = qt_tmp2;
+
 
                 _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
                 _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
@@ -1023,7 +1027,7 @@ namespace LBA
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
-                        _model.ftrans, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), _model.seasonal_period);
+                        _model.ftrans, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), _model.seas.period, _model.seas.in_state);
                     func_Gt(Gt_cast, _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 
@@ -1069,14 +1073,14 @@ namespace LBA
                         _fill_zero
                     );
 
-                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink, _model.dobs.par1);
+                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink, 0.);
 
                     arma::vec ft_cast_tmp = ft_tmp + std::sqrt(qt_tmp) * arma::randn(nsample);
                     arma::vec lambda_cast_tmp(nsample);
                     for (unsigned int i = 0; i < nsample; i ++)
                     {
                         lambda_cast_tmp.at(i) = LinkFunc::ft2mu(
-                            ft_cast_tmp.at(i), _model.flink, _model.dobs.par1);
+                            ft_cast_tmp.at(i), _model.flink, 0.);
                     }
 
                     ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();
@@ -1295,14 +1299,17 @@ namespace LBA
             output["psi"] = Rcpp::wrap(psi);
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
-            output["mu0"] = _model.dobs.par1;
             output["nlag"] = _model.dlag.nL;
-            output["seasonal_period"] = _model.seasonal_period;
+            output["seasonal_period"] = _model.seas.period;
 
-            if (_model.seasonal_period > 0)
+            if (_model.seas.period > 0 && _model.seas.in_state)
             {
-                arma::mat seas = _atilde_t.tail_rows(_model.seasonal_period);
+                arma::mat seas = _atilde_t.tail_rows(_model.seas.period);
                 output["seasonality"] = Rcpp::wrap(seas);
+            }
+            else
+            {
+                output["seasonality"] = Rcpp::wrap(_model.seas.val.t());
             }
 
             if (DEBUG)

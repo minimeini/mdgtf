@@ -1359,7 +1359,7 @@ public:
             }
             else
             {
-                ft_cur += arma::as_scalar(seas.X.col(t) * seas.val);
+                ft_cur += arma::as_scalar(seas.X.col(t).t() * seas.val);
             }
         }
 

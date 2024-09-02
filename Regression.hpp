@@ -10,8 +10,9 @@ class Season
 public:
     bool in_state = false;
     unsigned int period = 1;
-    arma::vec val;
-    arma::mat X, P;
+    arma::vec val; // period x 1
+    arma::mat X; // period x (ntime + 1)
+    arma::mat P; // period x period
     double lobnd = 1.;
     double hibnd = 10.;
 

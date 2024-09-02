@@ -22,7 +22,8 @@ public:
     enum Transfer
     {
         sliding,
-        iterative
+        iterative,
+        degenerate // Only t(Fphi) * theta[t], {y[t]} is not involved
     };
     static const std::map<std::string, Transfer> trans_list;
     /**
@@ -65,7 +66,7 @@ public:
      *
      * @note Non-transfer function part, i.e., seasonal component is also added to F0.
      */
-    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0)
+    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::vec F0(nP, arma::fill::zeros);
@@ -74,7 +75,7 @@ public:
             F0.at(1) = 1.;
         }
 
-        if (seasonal_period > 0)
+        if (seasonal_period > 0 && season_in_state)
         {
             unsigned int nstate = nP - seasonal_period;
             F0.at(nstate) = 1.;
@@ -93,7 +94,7 @@ public:
      * 
      * @note Non-transfer function part, i.e., seasonal component is also added to G0.
      */
-    static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0)
+    static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
     {
         unsigned int nstate = nP - seasonal_period;
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
@@ -121,12 +122,12 @@ public:
             }
         }
 
-        if (seasonal_period == 1)
+        if (seasonal_period == 1 && season_in_state)
         {
             // first-order trend
             G0.at(nP - 1, nP - 1) = 1.;
         }
-        else if (seasonal_period > 1)
+        else if (seasonal_period > 1 && season_in_state)
         {
             // Seasonal permutation matrix
             G0.at(nP - 1, nstate) = 1.;
@@ -273,6 +274,10 @@ private:
         TRANS_MAP["iterative"] = Transfer::iterative;
         TRANS_MAP["iter"] = Transfer::iterative;
         TRANS_MAP["solow"] = Transfer::iterative;
+
+        TRANS_MAP["degenerate"] = Transfer::degenerate;
+        TRANS_MAP["constant"] = Transfer::degenerate;
+        TRANS_MAP["linear"] = Transfer::degenerate;
         return TRANS_MAP;
     }
 };

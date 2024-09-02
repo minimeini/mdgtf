@@ -9,20 +9,6 @@ using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr, BH)]]
 
-//' @export
-// [[Rcpp::export]]
-arma::vec dlognorm(const unsigned int &nlag, const double &mu, const double &sd2)
-{
-    return lognorm::dlognorm(nlag, mu, sd2);
-}
-
-
-//' @export
-// [[Rcpp::export]]
-arma::vec dnbinom(const unsigned int &nlag, const double &kappa, const double &r)
-{
-    return nbinom::dnbinom(nlag, kappa, r);
-}
 
 //' @export
 // [[Rcpp::export]]
@@ -145,32 +131,21 @@ Rcpp::List dgtf_model(
 Rcpp::List dgtf_simulate(
     const Rcpp::List &settings, 
     const unsigned int &ntime,
-    const double &y0 = 0.,
-    const Rcpp::Nullable<Rcpp::NumericVector> seasonal_bnd = R_NilValue)
+    const double &y0 = 0.)
 {
-    Rcpp::List output = settings;
     Model model(settings);
 
-    double seas_lobnd = 1.;
-    double seas_hibnd = 10.;
-    if (seasonal_bnd.isNotNull())
-    {
-        arma::vec seas_bnd = Rcpp::as<arma::vec>(seasonal_bnd);
-        seas_lobnd = seas_bnd.at(0);
-        seas_hibnd = seas_bnd.at(1);
-    }
-
     arma::vec psi, ft, lambda, y;
-    Model::simulate(y, lambda, ft, psi, model, ntime, y0, seas_lobnd, seas_hibnd);
+    arma::mat Theta;
+    Model::simulate(y, lambda, ft, Theta, psi, model, ntime, y0);
 
+    Rcpp::List output;
+    output["model"] = model.info();
     output["y"] = Rcpp::wrap(y.t());
+    output["nlag"] = model.dlag.nL;
     output["psi"] = Rcpp::wrap(psi.t());
     output["ft"] = Rcpp::wrap(ft.t());
     output["lambda"] = Rcpp::wrap(lambda.t());
-
-    output["seasonality"] = Rcpp::wrap(model.seas.t());
-    output["nlag"] = model.dlag.nL;
-
     return output;
 }
 
@@ -195,6 +170,7 @@ Rcpp::List dgtf_infer(
     Model model(model_settings);
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::string algo_name = tolower(method);
+    std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
     arma::vec y;
     if (add_y0)
@@ -207,8 +183,8 @@ Rcpp::List dgtf_infer(
     {
         y = y_in;
     }
-
     const unsigned int nT = y.n_elem - 1;
+    model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
 
     unsigned int nforecast = 0;
     if (method_settings.containsElementNamed("num_step_ahead_forecast"))
@@ -228,14 +204,14 @@ Rcpp::List dgtf_infer(
         LBA::LinearBayes linear_bayes(model, y);
         linear_bayes.init(method_settings);
 
+
         auto start = std::chrono::high_resolution_clock::now();
         linear_bayes.filter();
         linear_bayes.smoother();
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-        
+
         output = linear_bayes.get_output();
 
         if (forecast_error)
@@ -285,7 +261,6 @@ Rcpp::List dgtf_infer(
     case AVAIL::Algo::FFBS:
     {
         SMC::FFBS ffbs(model, method_settings);
-
         auto start = std::chrono::high_resolution_clock::now();
         ffbs.infer(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
@@ -304,6 +279,7 @@ Rcpp::List dgtf_infer(
             Rcpp::List tmp = ffbs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
+
         if (fitted_error)
         {
             Rcpp::List tmp = ffbs.fitted_error(model, y, loss_func);
