@@ -285,7 +285,10 @@ public:
     static double sample(const double &alpha, const double &beta)
     {
         double out = 1. / R::rgamma(alpha, 1. / beta);
-        bound_check(out, "InverseGamma::sample: out");
+        if (DEBUG)
+        {
+            bound_check(out, "InverseGamma::sample: out");
+        }
         return out;
     }
 
@@ -312,8 +315,10 @@ public:
             out = std::exp(out);
         }
 
-        bound_check(out, "InverseGamma::dinvgamma: out");
-
+        if (DEBUG)
+        {
+            bound_check(out, "InverseGamma::dinvgamma: out");
+        }
         return out;
     }
 };
@@ -440,8 +445,10 @@ public:
             out -= R::pgamma(lag - 1, alpha, 1./beta, true, false);
         }
 
-        bound_check(out, "Gamma::dgamma_discrete: out");
-
+        if (DEBUG)
+        {
+            bound_check(out, "Gamma::dgamma_discrete: out");
+        }
         return out;
     }
 
@@ -732,13 +739,16 @@ public:
         {
             throw std::invalid_argument("nbinomm::dlogp_dlambda: lambda and rho must be positive.");
         }
-        double c1 = yt / lambda;
+        double c1 = yt / (lambda + EPS);
         double nom = yt + par2;
         double denom = lambda + par2;
         double c2 = nom / denom;
 
         double output = c1 - c2;
-        bound_check(output, "nbinomm::dlogp_dlambda: output");
+        if (DEBUG)
+        {
+            bound_check(output, "nbinomm::dlogp_dlambda: output");
+        }
         return output;
     }
 
@@ -754,7 +764,10 @@ public:
             out *= par2;
         }
 
-        bound_check(out, "nbinomm::dlogp_dpar2: out");
+        if (DEBUG)
+        {
+            bound_check(out, "nbinomm::dlogp_dpar2: out");
+        }
         return out;
     }
 
