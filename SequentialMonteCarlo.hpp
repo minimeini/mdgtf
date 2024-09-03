@@ -699,7 +699,7 @@ namespace SMC
             const unsigned int nT = y.n_elem - 1;
             const double logN = std::log(static_cast<double>(N));
             const double acoef = 0.5 * (3. * discount_factor - 1.) / discount_factor;
-            const double hcoef = 1. - acoef * acoef;
+            const double hcoef = std::sqrt(1. - acoef * acoef);
 
             if (model.seas.in_state)
             {
@@ -2113,7 +2113,7 @@ namespace SMC
             const double logN = std::log(static_cast<double>(N));
 
             const double acoef = 0.5 * (3. * discount_factor - 1.) / discount_factor;
-            const double hcoef = 1. - acoef * acoef;
+            const double hcoef = std::sqrt(1. - acoef * acoef);
             const unsigned int nelem = (int)prior_rho.infer + (int)prior_par1.infer + (int)prior_par2.infer;
             std::vector<unsigned int> indices_c;
             if (nelem > 0)
