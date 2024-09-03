@@ -324,12 +324,13 @@ public:
                 ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
             }
 
+            double eta = ft.at(t);
             if (model.seas.period > 0)
             {
-                ft.at(t) += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
             }
             
-            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), model.flink, 0); // Checked. OK.
+            lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }
 
@@ -995,11 +996,12 @@ public:
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
             ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans);
+            double eta = ft.at(t);
             if (seasonal_period > 0)
             {
-                ft.at(t) += arma::as_scalar(X.col(t).t() * seas);
+                eta += arma::as_scalar(X.col(t).t() * seas);
             }
-            lambda.at(t) = LinkFunc::ft2mu(ft.at(t), flink);
+            lambda.at(t) = LinkFunc::ft2mu(eta, flink);
         }
 
         return lambda;
@@ -1131,12 +1133,18 @@ public:
         const arma::vec &hpsi, 
         const bool &jacobian = true)
     {
-        unsigned int nT = y.n_elem - 1;
         double out = 0.;
-        for (unsigned int t = 1; t <= nT; t ++)
+        arma::vec ft(y.n_elem, arma::fill::zeros);
+        for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-            double lambda = LinkFunc::ft2mu(eta, model.flink, model.dobs.par1);
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
+            // double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+            double eta = ft.at(t);
+            if (model.seas.period > 0)
+            {
+                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+            }
+            double lambda = LinkFunc::ft2mu(eta, model.flink);
             out += nbinomm::dlogp_dpar2(y.at(t), lambda, model.dobs.par2, jacobian);
         }
 

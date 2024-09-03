@@ -287,18 +287,21 @@ namespace MCMC
             arma::vec Vt_hat(y.n_elem, arma::fill::zeros); // (ntime + 1) x 1
             arma::vec lambda(y.n_elem, arma::fill::zeros); // (ntime + 1) x 1
             arma::vec eta(y.n_elem, arma::fill::zeros);    // (ntime + 1) x 1
+            arma::vec ft(y.n_elem, arma::fill::zeros); // (ntime + 1) x 1
 
             double logp_old = 0.;
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                eta.at(t) = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                double ft = eta.at(t);
+                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
+                // eta.at(t) = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                // double ft = eta.at(t);
+                eta.at(t) = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    ft += arma::as_scalar(model.seas.X.col(t).t() * seas_old);
+                    eta.at(t) += arma::as_scalar(model.seas.X.col(t).t() * seas_old);
                 }
 
-                lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
+                lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink);
                 if (y.at(t) < EPS)
                 {
                     lambda.at(t) = (lambda.at(t) < EPS) ? EPS : lambda.at(t);
@@ -327,12 +330,12 @@ namespace MCMC
 
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double ft = eta.at(t);
+                eta.at(t) = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    ft += arma::as_scalar(model.seas.X.col(t).t() * seas_new);
+                    eta.at(t) += arma::as_scalar(model.seas.X.col(t).t() * seas_new);
                 }
-                lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
+                lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink);
                 if (y.at(t) < EPS)
                 {
                     lambda.at(t) = (lambda.at(t) < EPS) ? EPS : lambda.at(t);
@@ -374,9 +377,12 @@ namespace MCMC
             double rho_old = model.dobs.par2;
             double logp_old = R::dgamma(rho_old, rho_prior.par1, 1. / rho_prior.par2, true);
             arma::vec lambda(y.n_elem, arma::fill::zeros);
+            arma::vec ft(y.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                // double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
+                double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
                     eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
@@ -439,13 +445,17 @@ namespace MCMC
             const unsigned int &max_lag = 30)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-            double par1_old = model.dlag.par1;
-            double par2_old = model.dlag.par2;
+            std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+            LagDist dlag_old = model.dlag;
 
             double loglik_old = 0.;
+            arma::vec ft(y.n_elem, arma::fill::zeros);
+
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                // double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag_old, model.ftrans);
+                double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
                     eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
@@ -456,12 +466,12 @@ namespace MCMC
             double logp_old = loglik_old;
 
             double logp_new = 0.;
-            double par1_new = par1_old;
+            double par1_new = dlag_old.par1;
             double logprior_par1_old = 0.;
             double logprior_par1_new = 0.;
             if (par1_prior.infer)
             {
-                logprior_par1_old = Prior::dprior(par1_old, par1_prior, true, false);
+                logprior_par1_old = Prior::dprior(dlag_old.par1, par1_prior, true, false);
                 logp_old += logprior_par1_old;
 
                 bool non_gaussian = !dist_list[par1_prior.name] == AVAIL::Dist::gaussian;
@@ -471,26 +481,26 @@ namespace MCMC
                     unsigned int cnt = 0;
                     while (!success && cnt < MAX_ITER)
                     {
-                        par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                        par1_new = R::rnorm(dlag_old.par1, par1_mh_sd * dlag_old.par1);
                         success = (par1_new > 0) ? true : false;
                         cnt++;
                     }
                 }
                 else // gaussian
                 {
-                    par1_new = R::rnorm(par1_old, par1_mh_sd * par1_old);
+                    par1_new = R::rnorm(dlag_old.par1, par1_mh_sd * dlag_old.par1);
                 }
 
                 logprior_par1_new = Prior::dprior(par1_new, par1_prior, true, false);
                 logp_new += logprior_par1_new;
             } // par1
 
-            double par2_new = par2_old;
+            double par2_new = dlag_old.par2;
             double logprior_par2_old = 0.;
             double logprior_par2_new = 0.;
             if (par2_prior.infer)
             {
-                logprior_par2_old = Prior::dprior(par2_old, par2_prior, true, false);
+                logprior_par2_old = Prior::dprior(dlag_old.par2, par2_prior, true, false);
                 logp_old += logprior_par2_old;
 
                 bool non_gaussian = !dist_list[par2_prior.name] == AVAIL::Dist::gaussian;
@@ -500,14 +510,14 @@ namespace MCMC
                     unsigned int cnt = 0;
                     while (!success && cnt < MAX_ITER)
                     {
-                        par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                        par2_new = R::rnorm(dlag_old.par2, par2_mh_sd * dlag_old.par2);
                         success = (par2_new > 0) ? true : false;
                         cnt++;
                     }
                 }
                 else // gaussian
                 {
-                    par2_new = R::rnorm(par2_old, par2_mh_sd * par2_old);
+                    par2_new = R::rnorm(dlag_old.par2, par2_mh_sd * dlag_old.par2);
                 }
 
                 logprior_par2_new = Prior::dprior(par2_new, par2_prior, true, false);
@@ -515,13 +525,20 @@ namespace MCMC
 
             } // par2
 
-            unsigned int nlag = LagDist::get_nlag(model.dlag.name, par1_new, par2_new, 0.99, max_lag);
-            arma::vec Fphi_new = LagDist::get_Fphi(nlag, model.dlag.name, par1_new, par2_new);
+            LagDist dlag_new(dlag_old.name, par1_new, par2_new, dlag_old.truncated);
+            if (trans_list[dlag_new.name] == TransFunc::Transfer::iterative)
+            {
+                dlag_new.truncated = true;
+                dlag_new.nL = y.n_elem - 1;
+                dlag_new.Fphi = LagDist::get_Fphi(dlag_new);
+            }
 
             double loglik_new = 0.;
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
+                // double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
+                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag_new, model.ftrans);
+                double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
                     eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
@@ -538,10 +555,7 @@ namespace MCMC
                 par1_accept += 1;
                 par2_accept += 1;
 
-                model.dlag.par1 = par1_new;
-                model.dlag.par2 = par2_new;
-                model.dlag.nL = LagDist::get_nlag(model.dlag);
-                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+                model.dlag = dlag_new;
                 model.nP = Model::get_nP(model.dlag);
             }
 
@@ -959,6 +973,15 @@ namespace MCMC
         {
             const unsigned int nT = y.n_elem - 1;
             model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
+
+            std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
+            if (!model.dlag.truncated && lag_list[model.dlag.name] == AVAIL::Dist::nbinomp)
+            {
+                // iterative transfer function
+                model.dlag.nL = nT;
+                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+                model.dlag.truncated = true;
+            }
 
             wt = arma::randn(nT + 1) * 0.01;
             wt.at(0) = 0.;
