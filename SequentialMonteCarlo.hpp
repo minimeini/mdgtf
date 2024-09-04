@@ -719,12 +719,14 @@ namespace SMC
 
             LBA::LinearBayes lba(use_discount, discount_factor);
             lba.filter(model, y);
-            for (unsigned int t = 0; t < y.n_elem; t++)
+            arma::vec Wt_discount(y.n_elem, arma::fill::zeros);
+            Wt_discount.at(0) = lba.Ct.at(0, 0, 0);
+            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                arma::mat Ct = 2. * lba.Ct.slice(t);
-                Ct.diag() += EPS;
-                arma::mat Ct_chol = arma::chol(Ct);
-                lba.Ct.slice(t) = Ct_chol;
+                LBA::func_Gt(Gt, model, lba.mt.col(t - 1), y.at(t - 1));
+                arma::mat Wt_hat = lba.Ct.slice(t) - Gt * lba.Ct.slice(t - 1) * Gt.t();
+                Wt_discount.at(t) = Wt_hat.at(0, 0);
             }
 
             for (unsigned int t = 0; t < nT; t++)
@@ -789,13 +791,27 @@ namespace SMC
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec eps = arma::randn(Theta_new.n_rows);
-                    arma::vec theta_new = lba.mt.col(t + 1) + lba.Ct.slice(t + 1).t() * eps;
-                    arma::mat Ct = lba.Ct.slice(t + 1).t() * lba.Ct.slice(t + 1);
-                    logq.at(i) += MVNorm::dmvnorm(theta_new, lba.mt.col(t + 1), Ct, true);
+                    arma::vec theta_new;
+                    if (full_rank)
+                    {
+                        arma::vec eps = arma::randn(Theta_new.n_rows);
+                        arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                        theta_new = prec_chol_inv.slice(i) * zt;                      // scaled
+
+                        logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
+                    }
+                    else
+                    {
+                        double eps = R::rnorm(0., std::sqrt(Wt_discount.at(t + 1)));
+                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt_discount.at(t + 1)), true); // sample from evolution distribution
+
+                        theta_new = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+                        theta_new.at(0) += eps;
+                    }
+
                     Theta_new.col(i) = theta_new;
 
-                    double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), std::sqrt(Wt.at(0)), true);
+                    double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), std::sqrt(Wt_discount.at(t + 1)), true);
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
@@ -1564,7 +1580,7 @@ namespace SMC
                 }
             }
 
-            log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
+            log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter_lba(
                 Theta, weights_forward, eff_forward, Wt,
                 model, y, N, false, true, 
                 use_discount, discount_factor, verbose);
