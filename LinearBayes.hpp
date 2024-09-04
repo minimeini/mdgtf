@@ -478,75 +478,14 @@ namespace LBA
     class LinearBayes
     {
     public:
-        const arma::mat &at;
-        const arma::cube &Rt;
-        const arma::mat &mt;
-        const arma::cube &Ct;
-        const arma::mat &atilde;
-        const arma::cube &Rtilde;
-        const arma::vec &alpha_t;
-        const arma::vec &beta_t;
-
         LinearBayes(
         const Model &model, 
-        const arma::vec &y, // (nT + 1) x 1
-        const double &W = 0.01,
         const double &discount_factor = 0.95,
         const bool &use_discount = false,
-        const double &theta_upbnd = 1.) : alpha_t(_alpha_t), beta_t(_beta_t), atilde(_atilde_t), Rtilde(_Rtilde_t), at(_at), Rt(_Rt), mt(_mt), Ct(_Ct)
+        const double &theta_upbnd = 1.)
         {
-            _W = W;
             _discount_factor = discount_factor;
             _use_discount = use_discount;
-
-            _nP = model.nP;
-            _nT = y.n_elem - 1;
-
-            double _ft = 0.;
-            // _ft_prior_mean = _ft;
-            // _ft_prior_var = _ft;
-            // _ft_post_mean = _ft;
-            // _ft_post_var = _ft;
-            _alphat = 0.01;
-            _betat = 0.01;
-
-            _psi_mean.set_size(_nT + 1);
-            _psi_mean.zeros();
-            _psi_var = _psi_mean;
-
-            _alpha_t = _psi_mean;
-            _beta_t = _psi_mean;
-            _alpha_t.at(0) = _alphat;
-            _beta_t.at(0) = _betat;
-
-            _ft_prior_mean = _psi_mean;
-            _ft_prior_var = _psi_mean;
-            _ft_post_mean = _psi_mean;
-            _ft_post_var = _psi_mean;
-
-
-            _At.set_size(_nP);
-            _At.zeros();
-
-            _Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seas.period, model.seas.in_state); // set F[0]
-            _Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
-
-            _at.set_size(_nP, _nT + 1);
-            _at.zeros();
-            if (model.seas.period > 0 && model.seas.in_state)
-            {
-                _at.submat(model.nP - model.seas.period, 0, model.nP - 1, 0) = arma::randu(model.seas.period, arma::distr_param(0, 10));
-            }
-            _mt = _at;
-            _atilde_t = _at;
-            // set m[0]
-
-            _Ct = arma::zeros<arma::cube>(_nP, _nP, _nT + 1);
-            _Ct.slice(0) = arma::eye<arma::mat>(_nP, _nP);
-            _Ct.for_each([&theta_upbnd](arma::cube::elem_type &val) { val *= theta_upbnd; });
-
-            _Rt = arma::zeros<arma::cube>(_nP, _nP, _nT + 1);
-            _Rtilde_t = _Rt;
             // set C[0]
             return;
         }
@@ -628,11 +567,10 @@ namespace LBA
             for (unsigned int i = 0; i < nelem; i++)
             {
                 Rcpp::checkUserInterrupt();
-
-                _W = grid.at(i);
+                Model mod = model;
+                mod.derr.par1 = grid.at(i);
                 stats.at(i, 0) = grid.at(i);
 
-                Model mod = model;
                 filter(mod, y);
                 double forecast_err = 0.;
                 double forecast_cover = 0.;
@@ -660,56 +598,83 @@ namespace LBA
             return stats;
         }
 
-        void filter_single_iter(const unsigned int &t, const arma::vec &y, const Model &model)
+        void filter_single_iter(
+            const unsigned int &t, 
+            const arma::vec &y, 
+            const Model &model, 
+            arma::vec &Ft, 
+            arma::mat &Gt)
         {
-            _at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, _mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
-            func_Gt(_Gt, model, _mt.col(t - 1), y.at(t - 1));
-            _Rt.slice(t) = func_Rt(
-                _Gt, _Ct.slice(t - 1), _W, 
+            at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
+            func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
+            Rt.slice(t) = func_Rt(
+                Gt, Ct.slice(t - 1), model.derr.par1, 
                 _use_discount, _discount_factor,
                 _discount_type);
 
             double ft_tmp = 0.;
             double qt_tmp = 0.;
             func_prior_ft(
-                ft_tmp, qt_tmp, _Ft,
+                ft_tmp, qt_tmp, Ft,
                 t, model, y,
-                _at.col(t), _Rt.slice(t), _fill_zero);
-            _ft_prior_mean.at(t) = ft_tmp;
-            _ft_prior_var.at(t) = qt_tmp;
+                at.col(t), Rt.slice(t), _fill_zero);
+            ft_prior_mean.at(t) = ft_tmp;
+            ft_prior_var.at(t) = qt_tmp;
 
-            func_alpha_beta(_alphat, _betat, model, ft_tmp, qt_tmp, y.at(t), true);
-            _alpha_t.at(t) = _alphat;
-            _beta_t.at(t) = _betat;
+            double alpha = 0.;
+            double beta = 0.;
+            func_alpha_beta(alpha, beta, model, ft_tmp, qt_tmp, y.at(t), true);
 
-            _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
+            arma::mat At = func_At(Rt.slice(t), Ft, qt_tmp);
 
             double ft_tmp2 = 0.;
             double qt_tmp2 = 0.;
-            func_posterior_ft(ft_tmp2, qt_tmp2, model, _alphat, _betat);
-            _ft_post_mean.at(t) = ft_tmp2;
-            _ft_post_var.at(t) = qt_tmp2;
+            func_posterior_ft(ft_tmp2, qt_tmp2, model, alpha, beta);
+            ft_post_mean.at(t) = ft_tmp2;
+            ft_post_var.at(t) = qt_tmp2;
 
-            _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
-            _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
+            mt.col(t) = func_mt(at.col(t), At, ft_tmp, ft_tmp2);
+            Ct.slice(t) = func_Ct(Rt.slice(t), At, qt_tmp, qt_tmp2);
         }
 
-
-        void filter(Model &model, const arma::vec &y)
+        void filter(Model &model, const arma::vec &y, const double &theta_upbnd = 1.)
         {
             const unsigned int nT = y.n_elem - 1;
+            arma::vec Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seas.period, model.seas.in_state);             // set F[0]
+            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
+
+            ft_prior_mean.set_size(nT + 1);
+            ft_prior_mean.zeros();
+            ft_prior_var = ft_prior_mean;
+            ft_post_mean = ft_prior_mean;
+            ft_post_var = ft_prior_mean;
+
+            at.set_size(model.nP, nT + 1);
+            at.zeros();
+            if (model.seas.period > 0 && model.seas.in_state)
+            {
+                at.submat(model.nP - model.seas.period, 0, model.nP - 1, 0) = arma::randu(model.seas.period, arma::distr_param(0, 10));
+            }
+            mt = at;
+            // set m[0]
+
+            Ct = arma::zeros<arma::cube>(model.nP, model.nP, nT + 1);
+            Ct.slice(0) = arma::eye<arma::mat>(model.nP, model.nP);
+            Ct.for_each([&theta_upbnd](arma::cube::elem_type &val)
+                         { val *= theta_upbnd; });
+
+            Rt = arma::zeros<arma::cube>(model.nP, model.nP, nT + 1);
+
             unsigned int tstart = 1;
             if (_do_reference_analysis && (model.dlag.nL < nT))
             {
-                filter_single_iter(1, y, model);
+                filter_single_iter(1, y, model, Ft, Gt);
                 for (unsigned int t = 2; t <= model.dlag.nL; t++)
                 {
-                    _at.col(t) = _at.col(1);
-                    _Rt.slice(t) = _Rt.slice(1);
-                    _mt.col(t) = _mt.col(1);
-                    _Ct.slice(t) = _Ct.slice(1);
-                    _alpha_t.at(t) = _alpha_t.at(1);
-                    _beta_t.at(t) = _beta_t.at(1);
+                    at.col(t) = at.col(1);
+                    Rt.slice(t) = Rt.slice(1);
+                    mt.col(t) = mt.col(1);
+                    Ct.slice(t) = Ct.slice(1);
                 }
                 tstart = model.dlag.nL + 1;
             }
@@ -718,10 +683,10 @@ namespace LBA
             for (unsigned int t = tstart; t <= nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, _mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
-                func_Gt(_Gt, model, _mt.col(t-1), y.at(t-1));
-                _Rt.slice(t) = func_Rt(
-                    _Gt, _Ct.slice(t - 1), _W, 
+                at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
+                func_Gt(Gt, model, mt.col(t-1), y.at(t-1));
+                Rt.slice(t) = func_Rt(
+                    Gt, Ct.slice(t - 1), model.derr.par1, 
                     _use_discount, _discount_factor, 
                     _discount_type);
 
@@ -729,30 +694,27 @@ namespace LBA
                 double ft_tmp = 0.;
                 double qt_tmp = 0.;
                 func_prior_ft(
-                    ft_tmp, qt_tmp, _Ft,
+                    ft_tmp, qt_tmp, Ft,
                     t, model, y,
-                    _at.col(t), _Rt.slice(t), _fill_zero);
-                _ft_prior_mean.at(t) = ft_tmp;
-                _ft_prior_var.at(t) = qt_tmp;
+                    at.col(t), Rt.slice(t), _fill_zero);
+                ft_prior_mean.at(t) = ft_tmp;
+                ft_prior_var.at(t) = qt_tmp;
 
+                double alpha = 0.;
+                double beta = 0.;
+                func_alpha_beta(alpha, beta, model, ft_tmp, qt_tmp, y.at(t), true);
 
-                func_alpha_beta(_alphat, _betat, model, ft_tmp, qt_tmp, y.at(t), true);
-                _alpha_t.at(t) = _alphat;
-                _beta_t.at(t) = _betat;
-
-
-                _At = func_At(_Rt.slice(t), _Ft, qt_tmp);
-
+                arma::mat At = func_At(Rt.slice(t), Ft, qt_tmp);
 
                 double ft_tmp2 = 0.;
                 double qt_tmp2 = 0.;
-                func_posterior_ft(ft_tmp2, qt_tmp2, model, _alphat, _betat);
-                _ft_post_mean.at(t) = ft_tmp2;
-                _ft_post_var.at(t) = qt_tmp2;
+                func_posterior_ft(ft_tmp2, qt_tmp2, model, alpha, beta);
+                ft_post_mean.at(t) = ft_tmp2;
+                ft_post_var.at(t) = qt_tmp2;
 
 
-                _mt.col(t) = func_mt(_at.col(t), _At, ft_tmp, ft_tmp2);
-                _Ct.slice(t) = func_Ct(_Rt.slice(t), _At, qt_tmp, qt_tmp2);
+                mt.col(t) = func_mt(at.col(t), At, ft_tmp, ft_tmp2);
+                Ct.slice(t) = func_Ct(Rt.slice(t), At, qt_tmp, qt_tmp2);
             }
 
             
@@ -763,88 +725,88 @@ namespace LBA
 
         void smoother(Model &model, const arma::vec &y, const bool &use_pseudo = false)
         {
+            const unsigned int nT = y.n_elem - 1;
+            arma::vec Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seas.period, model.seas.in_state);             // set F[0]
+            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
+
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
             bool is_iterative = trans_list[model.ftrans] == TransFunc::Transfer::iterative;
             std::map<std::string, DiscountType> discount_list = map_discount_type();
             bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
 
-            _atilde_t.col(_nT) = _mt.col(_nT);
-            _Rtilde_t.slice(_nT) = _Ct.slice(_nT);
+            atilde.set_size(model.nP, nT + 1);
+            atilde.zeros();
+            atilde.col(nT) = mt.col(nT);
 
-            _psi_mean.at(_nT) = _atilde_t.at(0, _nT);
-            _psi_var.at(_nT) = _Rtilde_t.at(0, 0, _nT);
+            Rtilde.set_size(model.nP, model.nP, nT + 1);
+            Rtilde.zeros();
+            Rtilde.slice(nT) = Ct.slice(nT);
 
-            for (unsigned int t = _nT; t > 0; t--)
+            for (unsigned int t = nT; t > 0; t--)
             {
                 if (!_use_discount)
                 {
-                    arma::mat Rtinv = inverse(_Rt.slice(t));
+                    arma::mat Rtinv = inverse(Rt.slice(t));
 
-                    func_Gt(_Gt, model, _mt.col(t - 1), y.at(t - 1));
-                    arma::mat Bt = (_Ct.slice(t - 1) * _Gt.t()) * Rtinv;
+                    func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
+                    arma::mat Bt = (Ct.slice(t - 1) * Gt.t()) * Rtinv;
 
-                    arma::vec diff_a = _atilde_t.col(t) - _at.col(t);
-                    arma::mat diff_R = _Rtilde_t.slice(t) - _Rt.slice(t);
+                    arma::vec diff_a = atilde.col(t) - at.col(t);
+                    arma::mat diff_R = Rtilde.slice(t) - Rt.slice(t);
 
                     arma::vec _atilde_right = Bt * diff_a;
-                    _atilde_t.col(t - 1) = _mt.col(t - 1) + _atilde_right;
+                    atilde.col(t - 1) = mt.col(t - 1) + _atilde_right;
 
                     arma::mat _Rtilde_right = (Bt * diff_R) * Bt.t();
-                    _Rtilde_t.slice(t - 1) = _Ct.slice(t - 1) + _Rtilde_right;
+                    Rtilde.slice(t - 1) = Ct.slice(t - 1) + _Rtilde_right;
                 }
                 else if (is_iterative || (use_pseudo && !is_first_elem_discount))
                 {
                     // use discount factor + iterative transFunc / sliding transFunc with pseudo inverse for Gt
-                    func_Gt(_Gt, model, _mt.col(t - 1), y.at(t - 1));
+                    func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
                     arma::mat _Gt_inv;
                     if (is_iterative)
                     {
                         /*
                         Gt is invertible but asymmetric for iterative transfer function.
                         */
-                        _Gt_inv = arma::inv(_Gt);
+                        _Gt_inv = arma::inv(Gt);
                     }
                     else
                     {
                         // Gt is not invertible for sliding transfer function, use pseudo inverse instead.
-                        _Gt_inv = arma::pinv(_Gt);
+                        _Gt_inv = arma::pinv(Gt);
                     }
 
-                    arma::vec _atilde_left = (1. - _discount_factor) * _mt.col(t - 1);
-                    arma::vec _atilde_right = _discount_factor * _Gt_inv * _atilde_t.col(t);
-                    _atilde_t.col(t - 1) = _atilde_left + _atilde_right;
+                    arma::vec _atilde_left = (1. - _discount_factor) * mt.col(t - 1);
+                    arma::vec _atilde_right = _discount_factor * _Gt_inv * atilde.col(t);
+                    atilde.col(t - 1) = _atilde_left + _atilde_right;
 
-                    arma::mat _Rtilde_left = (1. - _discount_factor) * _Ct.slice(t - 1);
+                    arma::mat _Rtilde_left = (1. - _discount_factor) * Ct.slice(t - 1);
 
                     double delta = _discount_factor;
-                    arma::mat _Rtilde_right = (_Gt_inv * _Rtilde_t.slice(t)) * _Gt_inv.t();
+                    arma::mat _Rtilde_right = (_Gt_inv * Rtilde.slice(t)) * _Gt_inv.t();
                     _Rtilde_right.for_each([&delta](arma::mat::elem_type &val)
                                            { val *= delta * delta; });
 
-                    _Rtilde_t.slice(t - 1) = _Rtilde_left + _Rtilde_right;
+                    Rtilde.slice(t - 1) = _Rtilde_left + _Rtilde_right;
                 }
                 else
                 {
                     // use discount factor + sliding transFunc and only consider psi[t], 1st elem of theta[t].
-                    _atilde_t.col(t - 1).zeros();
-                    _Rtilde_t.slice(t - 1).zeros();
+                    atilde.col(t - 1).zeros();
+                    Rtilde.slice(t - 1).zeros();
 
-                    double aleft = (1. - _discount_factor) * _mt.at(0, t - 1);
-                    double aright = _discount_factor * _atilde_t.at(0, t);
-                    _atilde_t.at(0, t - 1) = aleft + aright;
+                    double aleft = (1. - _discount_factor) * mt.at(0, t - 1);
+                    double aright = _discount_factor * atilde.at(0, t);
+                    atilde.at(0, t - 1) = aleft + aright;
                     
-                    double rleft = (1. - _discount_factor) * _Ct.at(0, 0, t - 1);
-                    double rright = std::pow(_discount_factor, 2.) * _Rtilde_t.at(0, 0, t);
-                    _Rtilde_t.at(0, 0, t - 1) = rleft + rright;
+                    double rleft = (1. - _discount_factor) * Ct.at(0, 0, t - 1);
+                    double rright = std::pow(_discount_factor, 2.) * Rtilde.at(0, 0, t);
+                    Rtilde.at(0, 0, t - 1) = rleft + rright;
                 }
 
-                _psi_mean.at(t - 1) = _atilde_t.at(0, t - 1);
-                _psi_var.at(t - 1) = _Rtilde_t.at(0, 0, t - 1);
             }
-
-
-            bound_check<arma::vec>(_psi_mean, "smoother: _psi_mean");
-            bound_check<arma::vec>(_psi_var, "smoother: _psi_var");
         }
 
 
@@ -864,7 +826,7 @@ namespace LBA
             arma::mat yhat_filter(nT + 1, nsample, arma::fill::zeros);
             for (unsigned int t = 1; t <= nT; t ++)
             {
-                arma::vec yhat = _ft_post_mean.at(t) + std::sqrt(_ft_post_var.at(t)) * arma::randn(nsample);
+                arma::vec yhat = ft_post_mean.at(t) + std::sqrt(ft_post_var.at(t)) * arma::randn(nsample);
                 arma::vec res = y.at(t) - yhat;
 
                 yhat_filter.row(t) = yhat.t();
@@ -911,11 +873,11 @@ namespace LBA
             /*
             Smoothing fitted distribution: (y[t] | D[nT]) = int (y[t] | theta[t]) (theta[t] | D[nT]) d theta[t], where (theta[t] | D[nT]) ~ (atilde[t], Rtilde[t])
             */
-            arma::vec psi_mean = arma::vectorise(_atilde_t.row(0)); // (nT + 1) x 1
-            arma::vec psi_var = arma::vectorise(_Rtilde_t.tube(0, 0)); // (nT + 1) x 1
+            arma::vec psi_var = arma::vectorise(Rtilde.tube(0, 0));
             psi_var.elem(arma::find(psi_var < EPS)).fill(EPS8);
             arma::vec psi_sd = arma::sqrt(psi_var); // (nT + 1) x 1
 
+            arma::vec psi_mean = arma::vectorise(atilde.row(0));
             arma::mat psi_sample(nT + 1, nsample, arma::fill::zeros);
             for (unsigned int i = 0; i < nsample; i ++)
             {
@@ -941,7 +903,7 @@ namespace LBA
             arma::mat yhat_filter(nT + 1, nsample, arma::fill::zeros);
             for (unsigned int t = 1; t <= nT; t++)
             {
-                arma::vec yhat = _ft_post_mean.at(t) + std::sqrt(_ft_post_var.at(t)) * arma::randn(nsample);
+                arma::vec yhat = ft_post_mean.at(t) + std::sqrt(ft_post_var.at(t)) * arma::randn(nsample);
                 arma::vec res = y.at(t) - yhat;
 
                 yhat_filter.row(t) = yhat.t();
@@ -1021,8 +983,8 @@ namespace LBA
             {
                 arma::vec ytmp = y;
 
-                at_cast.slice(0).col(t) = _mt.col(t);
-                Rt_cast.at(0).slice(t) = _Ct.slice(t);
+                at_cast.slice(0).col(t) = mt.col(t);
+                Rt_cast.at(0).slice(t) = Ct.slice(t);
 
                 arma::mat Wt_onestep(model.nP, model.nP, arma::fill::zeros);
                 for (unsigned int j = 1; j <= k; j ++)
@@ -1037,14 +999,14 @@ namespace LBA
                         if (j == 1)
                         {
                             arma::mat Rt_onestep = func_Rt(
-                                Gt_cast, Rt_cast.at(j - 1).slice(t), _W,
+                                Gt_cast, Rt_cast.at(j - 1).slice(t), model.derr.par1,
                                 _use_discount, _discount_factor,
                                 _discount_type);
                             
                             Rt_cast.at(j).slice(t) = Rt_onestep;
                             
                             Wt_onestep = Rt2Wt(
-                                Rt_onestep, _W, _use_discount,
+                                Rt_onestep, model.derr.par1, _use_discount,
                                 _discount_factor,
                                 _discount_type);
                         }
@@ -1057,7 +1019,7 @@ namespace LBA
                     else
                     {
                         Rt_cast.at(j).slice(t) = func_Rt(
-                            Gt_cast, Rt_cast.at(j - 1).slice(t), _W,
+                            Gt_cast, Rt_cast.at(j - 1).slice(t), model.derr.par1,
                             _use_discount, _discount_factor,
                             _discount_type);
                     }
@@ -1190,7 +1152,7 @@ namespace LBA
 
             for (unsigned int t = 2; t <= nT; t++)
             {
-                arma::vec ytmp = _ft_prior_mean.at(t) + std::sqrt(_ft_prior_var.at(t)) * arma::randn(nsample);
+                arma::vec ytmp = ft_prior_mean.at(t) + std::sqrt(ft_prior_var.at(t)) * arma::randn(nsample);
                 ycast.row(t) = ytmp.t();
 
                 double ymin = arma::min(ytmp);
@@ -1241,12 +1203,6 @@ namespace LBA
         void init(const Rcpp::List &opts_in)
         {
             Rcpp::List opts = opts_in;
-            _W = 0.01;
-            if (opts.containsElementNamed("W"))
-            {
-                _W = Rcpp::as<double>(opts["W"]);
-            }
-
             _use_discount = false;
             if (opts.containsElementNamed("use_discount"))
             {
@@ -1282,7 +1238,6 @@ namespace LBA
         {
             Rcpp::List opts;
 
-            opts["W"] = 0.01;
             opts["use_discount"] = false;
             opts["discount_type"] = "first_elem";
             opts["use_custom"] = false;
@@ -1297,8 +1252,8 @@ namespace LBA
         Rcpp::List get_output(const Model &model)
         {
             Rcpp::List output;
-            arma::mat psi = get_psi(_atilde_t, _Rtilde_t);
-            arma::mat psi_filter = get_psi(_mt, _Ct);
+            arma::mat psi = get_psi(atilde, Rtilde);
+            arma::mat psi_filter = get_psi(mt, Ct);
             output["psi"] = Rcpp::wrap(psi);
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
@@ -1307,7 +1262,7 @@ namespace LBA
 
             if (model.seas.period > 0 && model.seas.in_state)
             {
-                arma::mat seas = _atilde_t.tail_rows(model.seas.period);
+                arma::mat seas = atilde.tail_rows(model.seas.period);
                 output["seasonality"] = Rcpp::wrap(seas);
             }
             else
@@ -1317,32 +1272,14 @@ namespace LBA
 
             if (DEBUG)
             {
-                output["mt"] = Rcpp::wrap(_mt);
-                output["Ct"] = Rcpp::wrap(_Ct);
-                output["at"] = Rcpp::wrap(_at);
-                output["Rt"] = Rcpp::wrap(_Rt);
-                output["at_tilde"] = Rcpp::wrap(_atilde_t);
-                output["Rt_tilde"] = Rcpp::wrap(_Rtilde_t);
-
-                output["Gt"] = Rcpp::wrap(_Gt);
-                output["Ft"] = Rcpp::wrap(_Ft);
+                output["mt"] = Rcpp::wrap(mt);
+                output["Ct"] = Rcpp::wrap(Ct);
             }
 
             return output;
         }
 
-        arma::mat get_mt()
-        {
-            return _mt;
-        }
 
-        arma::cube get_Ct()
-        {
-            return _Ct;
-        }
-    
-    private:
-        double _W = 0.01;
         double _discount_factor = 0.95;
 
         bool _use_discount = false;
@@ -1350,22 +1287,12 @@ namespace LBA
         bool _do_reference_analysis = false;
         bool _fill_zero = LBA_FILL_ZERO;
 
-        arma::mat _mt, _at, _atilde_t; // nP x (nT + 1)
-        arma::cube _Ct, _Rt, _Rtilde_t; // nP x nP x (nT + 1)
-        unsigned int _nT, _nP;
-
-        arma::vec _psi_mean; // (nT + 1) x 1
-        arma::vec _psi_var; // (nT + 1) x 1
-        arma::vec _alpha_t, _beta_t; // (nT + 1) x 1
-        arma::vec _ft_prior_mean; // (nT + 1) x 1, one-step-ahead forecasting distribution of y
-        arma::vec _ft_prior_var;  // (nT + 1) x 1, one-step-ahead forecasting distribution of y
-        arma::vec _ft_post_mean;  // (nT + 1) x 1, fitted distribution based on filtering states
-        arma::vec _ft_post_var; // (nT + 1) x 1, fitted distribution based on filtering states
-
-        arma::vec _Ft, _At; // nP x 1
-        arma::mat _Gt; // nP x nP
-        double _alphat, _betat, _ft;
-        // , _ft_prior_mean, _ft_prior_var, _ft_post_mean, _ft_post_var;
+        arma::mat mt, at, atilde; // nP x (nT + 1)
+        arma::cube Ct, Rt, Rtilde; // nP x nP x (nT + 1)
+        arma::vec ft_prior_mean; // (nT + 1) x 1, one-step-ahead forecasting distribution of y
+        arma::vec ft_prior_var;  // (nT + 1) x 1, one-step-ahead forecasting distribution of y
+        arma::vec ft_post_mean;  // (nT + 1) x 1, fitted distribution based on filtering states
+        arma::vec ft_post_var; // (nT + 1) x 1, fitted distribution based on filtering states
     };
 }
 

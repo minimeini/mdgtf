@@ -206,7 +206,7 @@ Rcpp::List dgtf_infer(
         {
             y.clamp(0.01 / static_cast<double>(model.nP), y.max());
         }
-        LBA::LinearBayes linear_bayes(model, y);
+        LBA::LinearBayes linear_bayes(model);
         linear_bayes.init(method_settings);
 
 
@@ -569,7 +569,7 @@ arma::mat dgtf_tuning(
     {
     case AVAIL::Algo::LinearBayes:
     {
-        LBA::LinearBayes linear_bayes(model, y);
+        LBA::LinearBayes linear_bayes(model);
         linear_bayes.init(algo_opts);
 
         switch (tuning_param_list[tuning_param])
@@ -769,7 +769,7 @@ arma::mat dgtf_optimal_lag(
             {
             case AVAIL::Algo::LinearBayes:
             {
-                LBA::LinearBayes linear_bayes(model, y);
+                LBA::LinearBayes linear_bayes(model);
                 linear_bayes.init(algo_opts);
 
                 try
@@ -909,7 +909,7 @@ arma::mat dgtf_optimal_obs(
         {
         case AVAIL::Algo::LinearBayes:
         {
-            LBA::LinearBayes linear_bayes(model, y);
+            LBA::LinearBayes linear_bayes(model);
             linear_bayes.init(algo_opts);
 
             try
