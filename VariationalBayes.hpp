@@ -538,10 +538,12 @@ namespace VB
             const std::vector<std::string> &param_selected,
             const std::string &W_prior = "invgamma",
             const std::string &lag_par1_prior = "gaussian",
+            const std::string &lag_dist = "lognorm",
             const unsigned int &seasonal_period = 1,
             const bool &season_in_state = false)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+            std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
             std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
             arma::vec eta = eta_tilde;
@@ -639,6 +641,12 @@ namespace VB
                 {
                     val = std::min(val, UPBND);
                     eta.at(idx) = std::exp(val);
+
+                    if (lag_list[lag_dist] == AVAIL::Dist::nbinomp)
+                    {
+                        eta.at(idx) = std::ceil(eta.at(idx));
+                    }
+                    else
                     idx += 1;
                     break;
                 } // lag_par2
@@ -1450,7 +1458,10 @@ namespace VB
 
 
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                    eta = tilde2eta(eta_tilde, param_selected, W_prior.name, par1_prior.name, model.seas.period, model.seas.in_state);
+                    eta = tilde2eta(
+                        eta_tilde, param_selected, 
+                        W_prior.name, par1_prior.name, model.dlag.name, 
+                        model.seas.period, model.seas.in_state);
                     update_params(model, param_selected, eta);
 
                     if (W_prior.infer)
