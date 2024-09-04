@@ -674,43 +674,58 @@ namespace LBA
             return stats;
         }
 
-        void filter_single_iter(
-            const unsigned int &t, 
-            const arma::vec &y, 
+        static void filter_single_iter(
+            arma::vec &mt_new,
+            arma::mat &Ct_new,
+            arma::vec &at_new,
+            arma::mat &Rt_new,
+            arma::vec &Ft,
+            arma::mat &Gt,
+            double &ft_prior,
+            double &qt_prior,
+            double &ft_posterior,
+            double &qt_posterior,
+            const unsigned int &t,
+            const arma::vec &y,
             const Model &model, 
-            arma::vec &Ft, 
-            arma::mat &Gt)
+            const arma::vec &mt_old,
+            const arma::mat &Ct_old,
+            const bool &use_discount,
+            const double &discount_factor,
+            const std::string &discount_type)
         {
-            at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
-            func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
-            Rt.slice(t) = func_Rt(
-                Gt, Ct.slice(t - 1), model.derr.par1, 
+            at_new = StateSpace::func_gt(
+                model.ftrans, model.fgain, model.dlag, 
+                mt_old, y.at(t - 1), 
+                model.seas.period, model.seas.in_state); // Checked. OK.
+            
+            func_Gt(Gt, model, mt_old, y.at(t - 1));
+            Rt_new = func_Rt(
+                Gt, Ct_old, model.derr.par1, 
                 use_discount, discount_factor,
                 discount_type);
 
-            double ft_tmp = 0.;
-            double qt_tmp = 0.;
+            ft_prior = 0.;
+            qt_prior = 0.;
             func_prior_ft(
-                ft_tmp, qt_tmp, Ft,
+                ft_prior, qt_prior, Ft,
                 t, model, y,
-                at.col(t), Rt.slice(t), fill_zero);
-            ft_prior_mean.at(t) = ft_tmp;
-            ft_prior_var.at(t) = qt_tmp;
+                at_new, Rt_new, LBA_FILL_ZERO);
 
             double alpha = 0.;
             double beta = 0.;
-            func_alpha_beta(alpha, beta, model, ft_tmp, qt_tmp, y.at(t), true);
+            func_alpha_beta(alpha, beta, model, ft_prior, qt_prior, y.at(t), true);
 
-            arma::mat At = func_At(Rt.slice(t), Ft, qt_tmp);
+            arma::mat At = func_At(Rt_new, Ft, qt_prior);
 
-            double ft_tmp2 = 0.;
-            double qt_tmp2 = 0.;
-            func_posterior_ft(ft_tmp2, qt_tmp2, model, alpha, beta);
-            ft_post_mean.at(t) = ft_tmp2;
-            ft_post_var.at(t) = qt_tmp2;
+            ft_posterior = 0.;
+            qt_posterior = 0.;
+            func_posterior_ft(ft_posterior, qt_posterior, model, alpha, beta);
 
-            mt.col(t) = func_mt(at.col(t), At, ft_tmp, ft_tmp2);
-            Ct.slice(t) = func_Ct(Rt.slice(t), At, qt_tmp, qt_tmp2);
+            mt_new = func_mt(at_new, At, ft_prior, ft_posterior);
+            Ct_new = func_Ct(Rt_new, At, qt_prior, qt_posterior);
+
+            return;
         }
 
         void filter(Model &model, const arma::vec &y, const double &theta_upbnd = 1.)
@@ -744,53 +759,62 @@ namespace LBA
             unsigned int tstart = 1;
             if (do_reference_analysis && (model.dlag.nL < nT))
             {
-                filter_single_iter(1, y, model, Ft, Gt);
+                arma::vec mt_new, at_new;
+                arma::mat Ct_new, Rt_new;
+                double ft_prior, qt_prior, ft_posterior, qt_posterior;
+                filter_single_iter(
+                    mt_new, Ct_new, at_new, Rt_new, Ft, Gt,
+                    ft_prior, qt_prior, ft_posterior, qt_posterior,
+                    1, y, model, mt.col(0), Ct.slice(0), 
+                    use_discount, discount_factor, discount_type);
+
+                at.col(1) = at_new;
+                Rt.slice(1) = Rt_new;
+                mt.col(1) = mt_new;
+                Ct.slice(1) = Ct_new;
+
+                ft_prior_mean.at(1) = ft_prior;
+                ft_prior_var.at(1) = qt_prior;
+                ft_post_mean.at(1) = ft_posterior;
+                ft_post_var.at(1) = qt_posterior;
+
                 for (unsigned int t = 2; t <= model.dlag.nL; t++)
                 {
                     at.col(t) = at.col(1);
                     Rt.slice(t) = Rt.slice(1);
                     mt.col(t) = mt.col(1);
                     Ct.slice(t) = Ct.slice(1);
+
+                    ft_prior_mean.at(t) = ft_prior;
+                    ft_prior_var.at(t) = qt_prior;
+                    ft_post_mean.at(t) = ft_posterior;
+                    ft_post_var.at(t) = qt_posterior;
                 }
+
                 tstart = model.dlag.nL + 1;
             }
 
 
             for (unsigned int t = tstart; t <= nT; t++)
             {
-                // filter_single_iter(t);
-                at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
-                func_Gt(Gt, model, mt.col(t-1), y.at(t-1));
-                Rt.slice(t) = func_Rt(
-                    Gt, Ct.slice(t - 1), model.derr.par1, 
-                    use_discount, discount_factor, 
-                    discount_type);
+                arma::vec mt_new, at_new;
+                arma::mat Ct_new, Rt_new;
+                double ft_prior, qt_prior, ft_posterior, qt_posterior;
+                filter_single_iter(
+                    mt_new, Ct_new, at_new, Rt_new, Ft, Gt,
+                    ft_prior, qt_prior, ft_posterior, qt_posterior,
+                    t, y, model, mt.col(t-1), Ct.slice(t-1), 
+                    use_discount, discount_factor, discount_type);
 
+                at.col(t) = at_new;
+                Rt.slice(t) = Rt_new;
+                mt.col(t) = mt_new;
+                Ct.slice(t) = Ct_new;
 
-                double ft_tmp = 0.;
-                double qt_tmp = 0.;
-                func_prior_ft(
-                    ft_tmp, qt_tmp, Ft,
-                    t, model, y,
-                    at.col(t), Rt.slice(t), fill_zero);
-                ft_prior_mean.at(t) = ft_tmp;
-                ft_prior_var.at(t) = qt_tmp;
-
-                double alpha = 0.;
-                double beta = 0.;
-                func_alpha_beta(alpha, beta, model, ft_tmp, qt_tmp, y.at(t), true);
-
-                arma::mat At = func_At(Rt.slice(t), Ft, qt_tmp);
-
-                double ft_tmp2 = 0.;
-                double qt_tmp2 = 0.;
-                func_posterior_ft(ft_tmp2, qt_tmp2, model, alpha, beta);
-                ft_post_mean.at(t) = ft_tmp2;
-                ft_post_var.at(t) = qt_tmp2;
-
-
-                mt.col(t) = func_mt(at.col(t), At, ft_tmp, ft_tmp2);
-                Ct.slice(t) = func_Ct(Rt.slice(t), At, qt_tmp, qt_tmp2);
+                ft_prior_mean.at(t) = ft_prior;
+                ft_prior_var.at(t) = qt_prior;
+                ft_post_mean.at(t) = ft_posterior;
+                ft_post_var.at(t) = qt_posterior;
             }
 
             
