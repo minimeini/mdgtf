@@ -183,6 +183,7 @@ Rcpp::List dgtf_infer(
     {
         y = y_in;
     }
+
     const unsigned int nT = y.n_elem - 1;
     model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
 
@@ -201,27 +202,31 @@ Rcpp::List dgtf_infer(
     {
     case AVAIL::Algo::LinearBayes:
     {
+        if (LBA_FILL_ZERO)
+        {
+            y.clamp(0.01 / static_cast<double>(model.nP), y.max());
+        }
         LBA::LinearBayes linear_bayes(model, y);
         linear_bayes.init(method_settings);
 
 
         auto start = std::chrono::high_resolution_clock::now();
-        linear_bayes.filter();
-        linear_bayes.smoother();
+        linear_bayes.filter(model, y);
+        linear_bayes.smoother(model, y);
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
 
-        output = linear_bayes.get_output();
+        output = linear_bayes.get_output(model);
 
         if (forecast_error)
         {
-            Rcpp::List tmp = linear_bayes.forecast_error(1000, loss_func, k, tstart_forecast, tend_forecast);
+            Rcpp::List tmp = linear_bayes.forecast_error(model, y, 1000, loss_func, k, tstart_forecast, tend_forecast);
             error["forecast"] = tmp;
         }
         if (fitted_error)
         {
-            Rcpp::List tmp = linear_bayes.fitted_error(1000, loss_func);
+            Rcpp::List tmp = linear_bayes.fitted_error(model, y, 1000, loss_func);
             error["fitted"] = tmp;
         }
 
@@ -571,12 +576,12 @@ arma::mat dgtf_tuning(
         {
         case AVAIL::Param::discount_factor:
         {
-            stats = linear_bayes.optimal_discount_factor(from, to, delta, loss);
+            stats = linear_bayes.optimal_discount_factor(model, y, from, to, delta, loss);
             break;
         }
         case AVAIL::Param::W:
         {
-            stats = linear_bayes.optimal_W(param_grid, loss);
+            stats = linear_bayes.optimal_W(model, y, param_grid, loss);
             break;
         }
         default:
@@ -769,11 +774,11 @@ arma::mat dgtf_optimal_lag(
 
                 try
                 {
-                    linear_bayes.filter();
-                    linear_bayes.smoother();
+                    linear_bayes.filter(model, y);
+                    linear_bayes.smoother(model, y);
 
-                    linear_bayes.fitted_error(err_fit, 1000, loss);
-                    linear_bayes.forecast_error(err_forecast, cov_forecast, width_forecast, 1000, loss);
+                    linear_bayes.fitted_error(model, y, err_fit, 1000, loss);
+                    linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);
                 }
                 catch(...)
                 {
@@ -909,11 +914,11 @@ arma::mat dgtf_optimal_obs(
 
             try
             {
-                linear_bayes.filter();
-                linear_bayes.smoother();
+                linear_bayes.filter(model, y);
+                linear_bayes.smoother(model, y);
 
                 // linear_bayes.fitted_error(err_fit, 1000, loss);
-                linear_bayes.forecast_error(err_forecast, cov_forecast, width_forecast, 1000, loss);
+                linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);
             }
             catch (...)
             {

@@ -493,7 +493,7 @@ namespace LBA
         const double &W = 0.01,
         const double &discount_factor = 0.95,
         const bool &use_discount = false,
-        const double &theta_upbnd = 1.) : alpha_t(_alpha_t), beta_t(_beta_t), atilde(_atilde_t), Rtilde(_Rtilde_t), at(_at), Rt(_Rt), mt(_mt), Ct(_Ct), _model(model)
+        const double &theta_upbnd = 1.) : alpha_t(_alpha_t), beta_t(_beta_t), atilde(_atilde_t), Rtilde(_Rtilde_t), at(_at), Rt(_Rt), mt(_mt), Ct(_Ct)
         {
             _W = W;
             _discount_factor = discount_factor;
@@ -548,16 +548,12 @@ namespace LBA
             _Rt = arma::zeros<arma::cube>(_nP, _nP, _nT + 1);
             _Rtilde_t = _Rt;
             // set C[0]
-
-            _y.set_size(_nT + 1);
-            _y.zeros();
-            _y.tail(y.n_elem) = y; // (nT + 1) x 1;
-            _y.elem(arma::find(_y < EPS)).fill(0.01 / static_cast<double>(_nP));
-
             return;
         }
 
         arma::mat optimal_discount_factor(
+            const Model &model,
+            const arma::vec &y,
             const double &from, 
             const double &to, 
             const double &delta = 0.01,
@@ -586,12 +582,12 @@ namespace LBA
                 _discount_factor = delta_grid.at(i);
                 stats.at(i, 0) = delta_grid.at(i);
 
-
-                filter();
+                Model mod = model;
+                filter(mod, y);
                 double forecast_err = 0.;
                 double forecast_cover = 0.;
                 double forecast_width = 0.;
-                forecast_error(forecast_err, forecast_cover, forecast_width, 1000, loss);
+                forecast_error(mod, y, forecast_err, forecast_cover, forecast_width, 1000, loss);
                 stats.at(i, 1) = forecast_err;
 
                 // smoother();
@@ -619,6 +615,8 @@ namespace LBA
         }
 
         arma::mat optimal_W(
+            const Model &model, 
+            const arma::vec &y,
             const arma::vec &grid,
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
@@ -634,11 +632,12 @@ namespace LBA
                 _W = grid.at(i);
                 stats.at(i, 0) = grid.at(i);
 
-                filter();
+                Model mod = model;
+                filter(mod, y);
                 double forecast_err = 0.;
                 double forecast_cover = 0.;
                 double forecast_width = 0.;
-                forecast_error(forecast_err, forecast_cover, forecast_width, 1000, loss);
+                forecast_error(mod, y, forecast_err, forecast_cover, forecast_width, 1000, loss);
                 stats.at(i, 1) = forecast_err;
 
                 // smoother();
@@ -661,10 +660,10 @@ namespace LBA
             return stats;
         }
 
-        void filter_single_iter(const unsigned int &t)
+        void filter_single_iter(const unsigned int &t, const arma::vec &y, const Model &model)
         {
-            _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seas.period, _model.seas.in_state); // Checked. OK.
-            func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
+            _at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, _mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
+            func_Gt(_Gt, model, _mt.col(t - 1), y.at(t - 1));
             _Rt.slice(t) = func_Rt(
                 _Gt, _Ct.slice(t - 1), _W, 
                 _use_discount, _discount_factor,
@@ -674,12 +673,12 @@ namespace LBA
             double qt_tmp = 0.;
             func_prior_ft(
                 ft_tmp, qt_tmp, _Ft,
-                t, _model, _y,
+                t, model, y,
                 _at.col(t), _Rt.slice(t), _fill_zero);
             _ft_prior_mean.at(t) = ft_tmp;
             _ft_prior_var.at(t) = qt_tmp;
 
-            func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
+            func_alpha_beta(_alphat, _betat, model, ft_tmp, qt_tmp, y.at(t), true);
             _alpha_t.at(t) = _alphat;
             _beta_t.at(t) = _betat;
 
@@ -687,7 +686,7 @@ namespace LBA
 
             double ft_tmp2 = 0.;
             double qt_tmp2 = 0.;
-            func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+            func_posterior_ft(ft_tmp2, qt_tmp2, model, _alphat, _betat);
             _ft_post_mean.at(t) = ft_tmp2;
             _ft_post_var.at(t) = qt_tmp2;
 
@@ -696,14 +695,14 @@ namespace LBA
         }
 
 
-        void filter()
+        void filter(Model &model, const arma::vec &y)
         {
-            const unsigned int nT = _y.n_elem - 1;
+            const unsigned int nT = y.n_elem - 1;
             unsigned int tstart = 1;
-            if (_do_reference_analysis && (_model.dlag.nL < nT))
+            if (_do_reference_analysis && (model.dlag.nL < nT))
             {
-                filter_single_iter(1);
-                for (unsigned int t = 2; t <= _model.dlag.nL; t++)
+                filter_single_iter(1, y, model);
+                for (unsigned int t = 2; t <= model.dlag.nL; t++)
                 {
                     _at.col(t) = _at.col(1);
                     _Rt.slice(t) = _Rt.slice(1);
@@ -712,15 +711,15 @@ namespace LBA
                     _alpha_t.at(t) = _alpha_t.at(1);
                     _beta_t.at(t) = _beta_t.at(1);
                 }
-                tstart = _model.dlag.nL + 1;
+                tstart = model.dlag.nL + 1;
             }
 
 
             for (unsigned int t = tstart; t <= nT; t++)
             {
                 // filter_single_iter(t);
-                _at.col(t) = StateSpace::func_gt(_model.ftrans, _model.fgain, _model.dlag, _mt.col(t - 1), _y.at(t - 1), _model.seas.period, _model.seas.in_state); // Checked. OK.
-                func_Gt(_Gt, _model, _mt.col(t-1), _y.at(t-1));
+                _at.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, _mt.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // Checked. OK.
+                func_Gt(_Gt, model, _mt.col(t-1), y.at(t-1));
                 _Rt.slice(t) = func_Rt(
                     _Gt, _Ct.slice(t - 1), _W, 
                     _use_discount, _discount_factor, 
@@ -731,13 +730,13 @@ namespace LBA
                 double qt_tmp = 0.;
                 func_prior_ft(
                     ft_tmp, qt_tmp, _Ft,
-                    t, _model, _y,
+                    t, model, y,
                     _at.col(t), _Rt.slice(t), _fill_zero);
                 _ft_prior_mean.at(t) = ft_tmp;
                 _ft_prior_var.at(t) = qt_tmp;
 
 
-                func_alpha_beta(_alphat, _betat, _model, ft_tmp, qt_tmp, _y.at(t), true);
+                func_alpha_beta(_alphat, _betat, model, ft_tmp, qt_tmp, y.at(t), true);
                 _alpha_t.at(t) = _alphat;
                 _beta_t.at(t) = _betat;
 
@@ -747,7 +746,7 @@ namespace LBA
 
                 double ft_tmp2 = 0.;
                 double qt_tmp2 = 0.;
-                func_posterior_ft(ft_tmp2, qt_tmp2, _model, _alphat, _betat);
+                func_posterior_ft(ft_tmp2, qt_tmp2, model, _alphat, _betat);
                 _ft_post_mean.at(t) = ft_tmp2;
                 _ft_post_var.at(t) = qt_tmp2;
 
@@ -762,10 +761,10 @@ namespace LBA
         }
 
 
-        void smoother(const bool &use_pseudo = false)
+        void smoother(Model &model, const arma::vec &y, const bool &use_pseudo = false)
         {
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-            bool is_iterative = trans_list[_model.ftrans] == TransFunc::Transfer::iterative;
+            bool is_iterative = trans_list[model.ftrans] == TransFunc::Transfer::iterative;
             std::map<std::string, DiscountType> discount_list = map_discount_type();
             bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
 
@@ -781,7 +780,7 @@ namespace LBA
                 {
                     arma::mat Rtinv = inverse(_Rt.slice(t));
 
-                    func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
+                    func_Gt(_Gt, model, _mt.col(t - 1), y.at(t - 1));
                     arma::mat Bt = (_Ct.slice(t - 1) * _Gt.t()) * Rtinv;
 
                     arma::vec diff_a = _atilde_t.col(t) - _at.col(t);
@@ -796,7 +795,7 @@ namespace LBA
                 else if (is_iterative || (use_pseudo && !is_first_elem_discount))
                 {
                     // use discount factor + iterative transFunc / sliding transFunc with pseudo inverse for Gt
-                    func_Gt(_Gt, _model, _mt.col(t - 1), _y.at(t - 1));
+                    func_Gt(_Gt, model, _mt.col(t - 1), y.at(t - 1));
                     arma::mat _Gt_inv;
                     if (is_iterative)
                     {
@@ -854,9 +853,9 @@ namespace LBA
          * 
          * @return Rcpp::List 
          */
-        Rcpp::List fitted_error(const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
+        Rcpp::List fitted_error(const Model &model, const arma::vec &y, const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
         {
-            const unsigned int nT = _y.n_elem - 1;
+            const unsigned int nT = y.n_elem - 1;
             /*
             Filtering fitted distribution: (y[t] | D[t]) ~ (_ft_post_mean, _ft_post_var);
 
@@ -866,7 +865,7 @@ namespace LBA
             for (unsigned int t = 1; t <= nT; t ++)
             {
                 arma::vec yhat = _ft_post_mean.at(t) + std::sqrt(_ft_post_var.at(t)) * arma::randn(nsample);
-                arma::vec res = _y.at(t) - yhat;
+                arma::vec res = y.at(t) - yhat;
 
                 yhat_filter.row(t) = yhat.t();
                 res_filter.row(t) = res.t();
@@ -924,16 +923,16 @@ namespace LBA
                 psi_sample.col(i) = psi_tmp;
             }
 
-            Rcpp::List out_smooth = Model::fitted_error(psi_sample, _y, _model, loss_func);
+            Rcpp::List out_smooth = Model::fitted_error(psi_sample, y, model, loss_func);
             Rcpp::List out;
             out["filter"] = out_filter;
             out["smooth"] = out_smooth;
             return out;
         }
 
-        void fitted_error(double &y_loss_all, const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
+        void fitted_error(const Model &model, const arma::vec &y, double &y_loss_all, const unsigned int &nsample = 1000, const std::string &loss_func = "quadratic")
         {
-            const unsigned int nT = _y.n_elem - 1;
+            const unsigned int nT = y.n_elem - 1;
             /*
             Filtering fitted distribution: (y[t] | D[t]) ~ (_ft_post_mean, _ft_post_var);
 
@@ -943,7 +942,7 @@ namespace LBA
             for (unsigned int t = 1; t <= nT; t++)
             {
                 arma::vec yhat = _ft_post_mean.at(t) + std::sqrt(_ft_post_var.at(t)) * arma::randn(nsample);
-                arma::vec res = _y.at(t) - yhat;
+                arma::vec res = y.at(t) - yhat;
 
                 yhat_filter.row(t) = yhat.t();
                 res_filter.row(t) = res.t();
@@ -985,28 +984,30 @@ namespace LBA
          * @return Rcpp::List 
          */
         Rcpp::List forecast_error(
-            const unsigned int &nsample = 5000, 
+            const Model &model, 
+            const arma::vec &y,
+            const unsigned int &nsample = 5000,
             const std::string &loss_func = "quadratic",
             const unsigned int &k = 1,
             const Rcpp::Nullable<unsigned int> &start_time = R_NilValue,
             const Rcpp::Nullable<unsigned int> &end_time = R_NilValue)
         {
-            const unsigned int nT = _y.n_elem - 1;
+            const unsigned int nT = y.n_elem - 1;
             arma::cube ycast(nT + 1, nsample, k, arma::fill::zeros);
             arma::cube y_err_cast(nT + 1, nsample, k, arma::fill::zeros); // (nT+1) x nsample x k
             arma::mat y_cov_cast(nT + 1, k,arma::fill::zeros);            // (nT + 1) x k
             arma::mat y_width_cast = y_cov_cast;
 
-            arma::cube at_cast = arma::zeros<arma::cube>(_model.nP, nT + 1, k + 1);
+            arma::cube at_cast = arma::zeros<arma::cube>(model.nP, nT + 1, k + 1);
             arma::field<arma::cube> Rt_cast(k + 1);
-            arma::mat Gt_cast = TransFunc::init_Gt(_model.nP, _model.dlag, _model.ftrans);
+            arma::mat Gt_cast = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans);
 
             for (unsigned int j = 0; j <= k; j ++)
             {
-                Rt_cast.at(j) = arma::zeros<arma::cube>(_model.nP, _model.nP, nT + 1);
+                Rt_cast.at(j) = arma::zeros<arma::cube>(model.nP, model.nP, nT + 1);
             }
 
-            unsigned int tstart = std::max(k, _model.nP);
+            unsigned int tstart = std::max(k, model.nP);
             if (start_time.isNotNull()) {
                 tstart = Rcpp::as<unsigned int>(start_time);
             }
@@ -1018,17 +1019,17 @@ namespace LBA
 
             for (unsigned int t = tstart; t < tend; t ++)
             {
-                arma::vec ytmp = _y;
+                arma::vec ytmp = y;
 
                 at_cast.slice(0).col(t) = _mt.col(t);
                 Rt_cast.at(0).slice(t) = _Ct.slice(t);
 
-                arma::mat Wt_onestep(_model.nP, _model.nP, arma::fill::zeros);
+                arma::mat Wt_onestep(model.nP, model.nP, arma::fill::zeros);
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     at_cast.slice(j).col(t) = StateSpace::func_gt(
-                        _model.ftrans, _model.fgain, _model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), _model.seas.period, _model.seas.in_state);
-                    func_Gt(Gt_cast, _model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                        model.ftrans, model.fgain, model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
+                    func_Gt(Gt_cast, model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 
                     if (_use_discount)
@@ -1067,26 +1068,26 @@ namespace LBA
                     double qt_tmp = 0.;
                     func_prior_ft(
                         ft_tmp, qt_tmp, Ft_cast, 
-                        t + j, _model, ytmp, 
+                        t + j, model, ytmp, 
                         at_cast.slice(j).col(t),
                         Rt_cast.at(j).slice(t),
                         _fill_zero
                     );
 
-                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, _model.flink, 0.);
+                    ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, model.flink, 0.);
 
                     arma::vec ft_cast_tmp = ft_tmp + std::sqrt(qt_tmp) * arma::randn(nsample);
                     arma::vec lambda_cast_tmp(nsample);
                     for (unsigned int i = 0; i < nsample; i ++)
                     {
                         lambda_cast_tmp.at(i) = LinkFunc::ft2mu(
-                            ft_cast_tmp.at(i), _model.flink, 0.);
+                            ft_cast_tmp.at(i), model.flink, 0.);
                     }
 
                     ycast.slice(j - 1).row(t) = lambda_cast_tmp.t();
                     double ymin = arma::min(lambda_cast_tmp);
                     double ymax = arma::max(lambda_cast_tmp);
-                    double ytrue = _y.at(t + j);
+                    double ytrue = y.at(t + j);
 
                     y_err_cast.slice(j - 1).row(t) = ytrue - lambda_cast_tmp.t(); // nsample x 1
                     y_width_cast.at(t, j - 1) = std::abs(ymax - ymin);
@@ -1156,7 +1157,7 @@ namespace LBA
 
             out["y_cast"] = Rcpp::wrap(ycast_out);
             out["y_cast_all"] = Rcpp::wrap(ycast);
-            out["y"] = Rcpp::wrap(_y);
+            out["y"] = Rcpp::wrap(y);
             out["y_loss"] = Rcpp::wrap(y_loss);
             out["y_loss_all"] = Rcpp::wrap(y_loss_all);
             out["y_covered_all"] = Rcpp::wrap(y_covered_all);
@@ -1173,13 +1174,15 @@ namespace LBA
          * @param loss_func 
          */
         void forecast_error(
+            const Model &model, 
+            const arma::vec &y,
             double &y_loss_all,
             double &y_cover,
             double &y_width,
-            const unsigned int &nsample = 1000, 
+            const unsigned int &nsample = 1000,
             const std::string &loss_func = "quadratic")
         {
-            unsigned int nT = _y.n_elem - 1;
+            unsigned int nT = y.n_elem - 1;
             arma::mat ycast(nT + 1, nsample, arma::fill::zeros);
             arma::mat y_err_cast(nT + 1, nsample, arma::fill::zeros);
             arma::vec y_cover_cast(nT + 1, arma::fill::zeros);
@@ -1192,7 +1195,7 @@ namespace LBA
 
                 double ymin = arma::min(ytmp);
                 double ymax = arma::max(ytmp);
-                double ytrue = _y.at(t);
+                double ytrue = y.at(t);
 
                 y_width_cast.at(t) = std::abs(ymax - ymin);
                 y_cover_cast.at(t) = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
@@ -1291,7 +1294,7 @@ namespace LBA
             return opts;
         }
 
-        Rcpp::List get_output()
+        Rcpp::List get_output(const Model &model)
         {
             Rcpp::List output;
             arma::mat psi = get_psi(_atilde_t, _Rtilde_t);
@@ -1299,17 +1302,17 @@ namespace LBA
             output["psi"] = Rcpp::wrap(psi);
             output["psi_filter"] = Rcpp::wrap(psi_filter);
 
-            output["nlag"] = _model.dlag.nL;
-            output["seasonal_period"] = _model.seas.period;
+            output["nlag"] = model.dlag.nL;
+            output["seasonal_period"] = model.seas.period;
 
-            if (_model.seas.period > 0 && _model.seas.in_state)
+            if (model.seas.period > 0 && model.seas.in_state)
             {
-                arma::mat seas = _atilde_t.tail_rows(_model.seas.period);
+                arma::mat seas = _atilde_t.tail_rows(model.seas.period);
                 output["seasonality"] = Rcpp::wrap(seas);
             }
             else
             {
-                output["seasonality"] = Rcpp::wrap(_model.seas.val.t());
+                output["seasonality"] = Rcpp::wrap(model.seas.val.t());
             }
 
             if (DEBUG)
@@ -1339,9 +1342,6 @@ namespace LBA
         }
     
     private:
-        const Model &_model;
-        arma::vec _y;
-
         double _W = 0.01;
         double _discount_factor = 0.95;
 
