@@ -8,7 +8,9 @@
 #include <algorithm>
 // #include <chrono>
 #include <RcppArmadillo.h>
-#include <omp.h>
+#ifdef _OPENMP
+    #include <omp.h>
+#endif
 #include "Model.hpp"
 #include "ImportanceDensity.hpp"
 
@@ -602,7 +604,6 @@ namespace SMC
                     logq = logq.elem(resample_idx);
                 }
 
-
                 // if (use_discount)
                 // { // Use discount factor if W is not given
                 //     bool use_custom_val = (use_custom && t > 1) ? true : false;
@@ -616,7 +617,9 @@ namespace SMC
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::mat Theta_cur = Theta.slice(t); // nP x N
-                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #ifdef _OPENMP
+                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_new;
@@ -662,8 +665,8 @@ namespace SMC
                         Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
                         weights.ones();
                     }
-                        
                 }
+
 
                 log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
 
@@ -1649,7 +1652,9 @@ namespace SMC
                 arma::mat Theta_cur(model.nP, N, arma::fill::zeros);
                 arma::vec mu = mu_marginal.col(t);
                 arma::mat Prec = Prec_marginal.slice(t);
-                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #ifdef _OPENMP
+                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec theta_cur;
@@ -1733,7 +1738,9 @@ namespace SMC
                 arma::mat Theta_next = Theta_backward.slice(t + 1);
                 arma::vec mu = mu_marginal.col(t + 1);
                 arma::mat Prec = Prec_marginal.slice(t + 1);
-                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #ifdef _OPENMP
+                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
                     double logq = weights_forward.at(t - 1, i) + weights_backward.at(t + 1, i);

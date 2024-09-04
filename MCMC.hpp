@@ -621,7 +621,7 @@ namespace MCMC
             arma::vec grad_U = Model::dloglik_dpar(
                 Fphi_new, y, hpsi, nlag,
                 lag_dist, par1_old, par2_old,
-                model.dobs, model.flink);
+                model.dobs, model.seas, model.flink);
 
             grad_U.at(0) += Prior::dlogprior_dpar(par1_old, par1_prior, true);
             grad_U.at(0) *= -1.;
@@ -643,7 +643,7 @@ namespace MCMC
                 grad_U = Model::dloglik_dpar(
                     Fphi_new, y, hpsi, nlag,
                     lag_dist, par1_new, par2_new,
-                    model.dobs, model.flink);
+                    model.dobs, model.seas, model.flink);
                 grad_U.at(0) += Prior::dlogprior_dpar(par1_new, par1_prior, true);
                 grad_U.at(0) *= -1.;
                 grad_U.at(1) += Prior::dlogprior_dpar(par2_new, par2_prior, true);

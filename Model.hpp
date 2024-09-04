@@ -1047,7 +1047,7 @@ public:
     }
 
     /**
-     * @brief Parameter must be first mapped to real line.
+     * @brief This one is for HMC. Parameter must be first mapped to real line.
      * 
      * @param y 
      * @param eta 
@@ -1059,6 +1059,8 @@ public:
      * @param dobs 
      * @param link_func 
      * @return arma::vec 
+     * 
+     * @note For iterative transfer function, we must use its EXACT sliding form.
      */
     static arma::vec dloglik_dpar(
         arma::vec &Fphi,
@@ -1069,6 +1071,7 @@ public:
         const double &lag_par1,
         const double &lag_par2,
         const ObsDist &dobs,
+        const Season &seas,
         const std::string &link_func)
     {
         Fphi.clear();
@@ -1079,7 +1082,10 @@ public:
         for (unsigned int t = 1; t < y.n_elem; t ++)
         {
             double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
-            eta += dobs.par1;
+            if (seas.period > 0)
+            {
+                eta += arma::as_scalar(seas.X.col(t).t() * seas.val);
+            }
             double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
 
             double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
@@ -1097,23 +1103,40 @@ public:
         return grad_out;
     }
 
+    /**
+     * @brief This one is for HVA.
+     *
+     * @param y
+     * @param hpsi
+     * @param model
+     * @return arma::vec
+     *
+     * @note  Parameter must be first mapped to real line. For iterative transfer function, we must use its EXACT sliding form.
+     */
     static arma::vec dloglik_dpar(
         const arma::vec &y,
         const arma::vec &hpsi,
         const Model &model)
     {
-        unsigned int nlag = model.dlag.Fphi.n_elem;
-        arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, model.dlag.name, model.dlag.par1, model.dlag.par2);
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        LagDist dlag = model.dlag;
+        dlag.nL = (trans_list[model.ftrans] == TransFunc::Transfer::iterative) ? y.n_elem - 1 : dlag.nL;
+        dlag.Fphi = LagDist::get_Fphi(dlag);
+        arma::mat dFphi_grad = LagDist::get_Fphi_grad(dlag.nL, dlag.name, dlag.par1, dlag.par2);
 
         arma::mat grad(y.n_elem, 2, arma::fill::zeros);
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            double eta = TransFunc::transfer_sliding(t, nlag, y, model.dlag.Fphi, hpsi);
-            eta += model.dobs.par1;
+            double eta = TransFunc::transfer_sliding(t, dlag.nL, y, dlag.Fphi, hpsi);
+            if (model.seas.period > 0)
+            {
+                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+            }
             double dll_deta = dloglik_deta(eta, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
 
-            double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
-            double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
+            // For iterative transfer function, we must use its EXACT sliding form.
+            double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, y, dFphi_grad.col(0), hpsi);
+            double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, y, dFphi_grad.col(1), hpsi);
 
             grad.at(t, 0) = dll_deta * deta_dpar1;
             grad.at(t, 1) = dll_deta * deta_dpar2;
@@ -1218,6 +1241,7 @@ public:
             // theta_next = model.transfer.G0 * theta_cur;
             theta_next.at(0) = theta_cur.at(0);
             theta_next.subvec(1, nr) = theta_cur.subvec(0, nr - 1);
+
             break;
         }
         }

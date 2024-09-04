@@ -1342,6 +1342,8 @@ namespace VB
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
+                
+
                 switch (algo_list[state_sampler])
                 {
                 case AVAIL::Algo::SMC:
@@ -1354,9 +1356,9 @@ namespace VB
                     double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                         Theta, weights_forward, eff_forward, Wt,
                         model, y, N, true, false);
+
                     arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
                     psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
-
                     break;
                 }
                 case AVAIL::Algo::MCMC:
@@ -1378,7 +1380,9 @@ namespace VB
                     break;
                 }
                 }
+
                 
+
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
                 arma::vec ft = psi;
                 ft.at(0) = 0.;
@@ -1459,6 +1463,7 @@ namespace VB
                         approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
                     }
                 } // end update_static
+
 
                 if (saveiter || b == (ntotal - 1))
                 {

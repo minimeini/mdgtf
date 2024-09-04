@@ -196,13 +196,14 @@ public:
         const double &lag_par1, 
         const double &lag_par2, 
         const double &prob = 0.99,
-        const unsigned int &max_lag = 30)
+        const unsigned int &max_lag = 30,
+        const unsigned int &min_lag = MIN_LAG)
     {
         if (prob < 0 || prob > 1)
         {
             throw std::invalid_argument("LagDist::get_nlag: probability must in (0, 1).");
         }
-        double nlag_ = 1;
+        double nlag_ = (double)min_lag;
         std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
         switch (lag_list[lag_dist])
@@ -237,10 +238,13 @@ public:
         }
         }
 
-        bound_check(nlag_, "LagDist::update_nlag: nlag_");
+        if (DEBUG)
+        {
+            bound_check(nlag_, "LagDist::update_nlag: nlag_");
+        }
         unsigned int nlag = static_cast<unsigned int>(nlag_);
 
-        nlag = std::max(nlag, (unsigned int)1);
+        nlag = std::max(nlag, min_lag);
         nlag = std::min(nlag, max_lag);
         return nlag;
     }

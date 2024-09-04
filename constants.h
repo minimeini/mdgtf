@@ -3,19 +3,21 @@
 #define CONSTANTS_H
 
 #if !defined(ARMA_USE_BLAS)
-#define ARMA_USE_BLAS
+    #define ARMA_USE_BLAS
 #endif
 
 #if !defined(ARMA_USE_LAPACK)
-#define ARMA_USE_LAPACK
+    #define ARMA_USE_LAPACK
 #endif
 
 #if !defined(ARMA_64BIT_WORD)
-#define ARMA_64BIT_WORD
+    #define ARMA_64BIT_WORD
 #endif
 
-#if !defined(ARMA_USE_OPENMP)
-#define ARMA_USE_OPENMP
+#ifdef _OPENMP
+    #if !defined(ARMA_USE_OPENMP)
+        #define ARMA_USE_OPENMP
+    #endif
 #endif
 
 inline constexpr unsigned int NUM_THREADS = 8;
@@ -27,9 +29,10 @@ inline constexpr double LOG2PI = 1.837877;
 
 inline constexpr double covid_m = 4.7;
 inline constexpr double covid_s = 2.9;
+inline constexpr unsigned int MIN_LAG = 2;
+
 inline constexpr double LN_MU = 1.386262;
 inline constexpr double LN_SD2 = 0.3226017;
-
 inline constexpr double NB_KAPPA = 0.395;
 inline constexpr double NB_R = 6;
 

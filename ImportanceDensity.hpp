@@ -7,7 +7,9 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include <omp.h>
+#ifdef _OPENMP
+    #include <omp.h>
+#endif
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 
@@ -81,7 +83,9 @@ static arma::vec qforecast(
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
-    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         Model mod = model;
@@ -170,7 +174,9 @@ static arma::vec qforecast(
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
-    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         arma::vec gtheta_old_i = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
@@ -245,7 +251,9 @@ static arma::vec qforecast(
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
-    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         arma::vec gtheta_old_i = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
@@ -322,7 +330,9 @@ static arma::vec qforecast(
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
-    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         Model mod = model;
