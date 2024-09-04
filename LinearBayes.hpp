@@ -478,6 +478,19 @@ namespace LBA
     class LinearBayes
     {
     public:
+        LinearBayes(
+            const bool &use_discount_factor = false, 
+            const double &discount_factor_value = 0.95)
+        {
+            discount_factor = discount_factor_value;
+            use_discount = use_discount_factor;
+
+            discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
+            do_reference_analysis = false;
+            fill_zero = LBA_FILL_ZERO;
+            return;
+        }
+
         LinearBayes(const Rcpp::List &opts)
         {
             init(opts);
@@ -769,9 +782,9 @@ namespace LBA
                     use_discount, discount_factor, discount_type);
 
                 at.col(1) = at_new;
-                Rt.slice(1) = Rt_new;
+                Rt.slice(1) = arma::symmatu(Rt_new);
                 mt.col(1) = mt_new;
-                Ct.slice(1) = Ct_new;
+                Ct.slice(1) = arma::symmatu(Ct_new);
 
                 ft_prior_mean.at(1) = ft_prior;
                 ft_prior_var.at(1) = qt_prior;
@@ -807,9 +820,9 @@ namespace LBA
                     use_discount, discount_factor, discount_type);
 
                 at.col(t) = at_new;
-                Rt.slice(t) = Rt_new;
+                Rt.slice(t) = arma::symmatu(Rt_new);
                 mt.col(t) = mt_new;
-                Ct.slice(t) = Ct_new;
+                Ct.slice(t) = arma::symmatu(Ct_new);
 
                 ft_prior_mean.at(t) = ft_prior;
                 ft_prior_var.at(t) = qt_prior;
