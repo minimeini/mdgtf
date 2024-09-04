@@ -556,7 +556,7 @@ namespace MCMC
                 par2_accept += 1;
 
                 model.dlag = dlag_new;
-                model.nP = Model::get_nP(model.dlag);
+                model.nP = Model::get_nP(model.dlag, model.seas.period, model.seas.in_state);
             }
 
             return;
