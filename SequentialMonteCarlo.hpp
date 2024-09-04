@@ -194,7 +194,7 @@ namespace SMC
 
 
         static double discount_W(
-            const arma::mat &Theta_now,
+            const arma::mat &Theta_now, // p x N
             const double &discount_factor = 0.95)
         {
             double W;
@@ -213,7 +213,7 @@ namespace SMC
             W *= 1. / discount_factor - 1.;
 
             #ifdef DGTF_DO_BOUND_CHECK
-            bound_check(W, "SequentialMonteCarlo::discount_W");
+            bound_check(W, "SequentialMonteCarlo::discount_W", true, true);
             #endif
             return W;
         }
@@ -561,7 +561,7 @@ namespace SMC
             eff_forward.set_size(y.n_elem);
             eff_forward.zeros();
 
-            arma::vec weights(N, arma::fill::zeros);
+            arma::vec weights(N, arma::fill::ones);
             double log_cond_marginal = 0.;
 
             for (unsigned int t = 0; t < nT; t++)
@@ -610,12 +610,13 @@ namespace SMC
                     }
 
                     logq = logq.elem(resample_idx);
+                    weights = weights.elem(resample_idx);
                 }
 
-                if (use_discount)
-                { // Use discount factor if W is not given
-                    Wt.at(0) = SequentialMonteCarlo::discount_W(Theta.slice(t), discount_factor);
-                }
+                // if (use_discount)
+                // { // Use discount factor if W is not given
+                //     Wt.at(0) = SequentialMonteCarlo::discount_W(Theta.slice(t), discount_factor);
+                // }
 
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
@@ -1416,7 +1417,8 @@ namespace SMC
 
             log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, weights_forward, eff_forward, Wt,
-                model, y, N, false, true, discount_factor, verbose);
+                model, y, N, false, true, 
+                use_discount, discount_factor, verbose);
 
             arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
             output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
