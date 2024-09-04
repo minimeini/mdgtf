@@ -445,10 +445,10 @@ public:
             out -= R::pgamma(lag - 1, alpha, 1./beta, true, false);
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(out, "Gamma::dgamma_discrete: out");
-        }
+        #endif
+        
         return out;
     }
 
@@ -552,7 +552,10 @@ public:
     static double dlogp_dlambda(const double &lambda, const double &yt)
     {
         double output = (yt / lambda) - 1.;
-        bound_check(output, "Poisson::dlogp_dlambda: output");
+        if (DEBUG)
+        {
+            bound_check(output, "Poisson::dlogp_dlambda: output");
+        }
         return output;
     }
 
@@ -853,31 +856,6 @@ public:
         return static_cast<int>(val);
     }
 
-        /**
-         * @brief P.M.F of negative-binomial distribution.
-         * [Checked. OK.]
-         *
-         * @param nL
-         * @return arma::vec
-         */
-        arma::vec dnbinom(const unsigned int &nL)
-    {
-        if (nL < 1)
-        {
-            throw std::invalid_argument("Number of lags, nL, must be positive.");
-        }
-
-        arma::vec output(nL, arma::fill::zeros);
-        double c3 = std::pow(1. - par1, par2);
-
-        for (unsigned int d = 0; d < nL; d++)
-        {
-            output.at(d) = dnbinom(static_cast<double>(d), par1, par2, c3);
-        }
-
-        bound_check<arma::vec>(output, "dnbinom", false, true);
-        return output;
-    }
 
     /**
      * @brief P.M.F of negative-binomial distribution.
@@ -917,8 +895,10 @@ public:
 
             output.at(d) = dnbinom(static_cast<double>(d), kappa, r, c3);
         }
-
-        bound_check<arma::vec>(output, "dnbinom", false, true);
+        if (DEBUG)
+        {
+            bound_check<arma::vec>(output, "dnbinom", false, true);
+        }
         return output;
     }
 
@@ -977,7 +957,10 @@ public:
         c2 = - r * kappa;
         double dlag_dkappa = (c2 + c1) * c3;
         double out = dlag_dkappa * dkappa_dlogit;
-        bound_check(out, "nbinom::dlag_dlogitkappa: out");
+        if (DEBUG)
+        {
+            bound_check(out, "nbinom::dlag_dlogitkappa: out");
+        }
         return out;
     }
 
@@ -1011,7 +994,10 @@ public:
             coef.at(k) = -c1 * c2; // coef[0]=-c(r,1)(-kappa)^1, ..., coef[_r-1]=-c(r,r)(-kappa)^r
         }
 
-        bound_check<arma::vec>(coef, "nbinom::iter_coef: coef");
+        if (DEBUG)
+        {
+            bound_check<arma::vec>(coef, "nbinom::iter_coef: coef");
+        }
         return coef;
     }
 
@@ -1195,17 +1181,10 @@ public:
 
         arma::vec out = {dlag_dmu, dlag_dlogsig2};
 
-        try
+        if (DEBUG)
         {
             bound_check<arma::vec>(out, "lognorm::dlag_dpar: out");
         }
-        catch(const std::exception& e)
-        {
-            std::cout << "\n mu = " << mu << ", sd2 = " << sd2 << ", lag = " << lag;
-            throw std::runtime_error(e.what());
-        }
-        
-        
         return out;
     }
 
@@ -1246,7 +1225,11 @@ private:
         {
             output -= plognorm(lag - 1., mu, sd2);
         }
-        bound_check(output, "dlognorm0", false, true);
+        
+        if (DEBUG)
+        {
+            bound_check(output, "dlognorm0", false, true);
+        }
         return output;
     }
 

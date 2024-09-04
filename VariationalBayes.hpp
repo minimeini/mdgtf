@@ -644,7 +644,7 @@ namespace VB
 
                     if (lag_list[lag_dist] == AVAIL::Dist::nbinomp)
                     {
-                        eta.at(idx) = std::ceil(eta.at(idx));
+                        eta.at(idx) = std::max(std::ceil(eta.at(idx)), 1.);
                     }
                     else
                     idx += 1;

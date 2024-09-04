@@ -20,6 +20,11 @@
     #endif
 #endif
 
+#if !defined(DGTF_DO_BOUND_CHECK)
+    #define DGTF_DO_BOUND_CHECK
+#endif
+
+
 inline constexpr unsigned int NUM_THREADS = 8;
 
 inline constexpr double EPS = 2.220446e-16;
