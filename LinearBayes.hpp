@@ -478,16 +478,92 @@ namespace LBA
     class LinearBayes
     {
     public:
-        LinearBayes(
-        const Model &model, 
-        const double &discount_factor = 0.95,
-        const bool &use_discount = false,
-        const double &theta_upbnd = 1.)
+        LinearBayes(const Rcpp::List &opts)
         {
-            _discount_factor = discount_factor;
-            _use_discount = use_discount;
-            // set C[0]
+            init(opts);
             return;
+        }
+
+        void init(const Rcpp::List &opts_in)
+        {
+            Rcpp::List opts = opts_in;
+            use_discount = false;
+            if (opts.containsElementNamed("use_discount"))
+            {
+                use_discount = Rcpp::as<bool>(opts["use_discount"]);
+            }
+
+            discount_factor = 0.95;
+            if (opts.containsElementNamed("custom_discount_factor"))
+            {
+                discount_factor = Rcpp::as<double>(opts["custom_discount_factor"]);
+            }
+
+            do_reference_analysis = false;
+            if (opts.containsElementNamed("do_reference_analysis"))
+            {
+                do_reference_analysis = Rcpp::as<bool>(opts["do_reference_analysis"]);
+            }
+
+            fill_zero = LBA_FILL_ZERO;
+            if (opts.containsElementNamed("fill_zero"))
+            {
+                fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
+            }
+
+            discount_type = "first_elem";
+            if (opts.containsElementNamed("discount_type"))
+            {
+                discount_type = Rcpp::as<std::string>(opts["discount_type"]);
+            }
+        }
+
+        static Rcpp::List default_settings()
+        {
+            Rcpp::List opts;
+
+            opts["use_discount"] = false;
+            opts["discount_type"] = "first_elem";
+            opts["use_custom"] = false;
+            opts["custom_discount_factor"] = 0.95;
+            opts["do_smoothing"] = true;
+            opts["do_reference_analysis"] = false;
+            opts["fill_zero"] = LBA_FILL_ZERO;
+
+            return opts;
+        }
+
+        Rcpp::List get_output(const Model &model)
+        {
+            Rcpp::List output;
+            arma::mat psi = get_psi(atilde, Rtilde);
+            arma::mat psi_filter = get_psi(mt, Ct);
+            output["psi"] = Rcpp::wrap(psi);
+            output["psi_filter"] = Rcpp::wrap(psi_filter);
+
+            output["nlag"] = model.dlag.nL;
+            output["seasonal_period"] = model.seas.period;
+
+            if (model.seas.period > 0 && model.seas.in_state)
+            {
+                arma::mat seas = atilde.tail_rows(model.seas.period);
+                output["seasonality"] = Rcpp::wrap(seas);
+            }
+            else
+            {
+                output["seasonality"] = Rcpp::wrap(model.seas.val.t());
+            }
+
+            #ifdef DGTF_DETAILED_OUTPUT
+            output["mt"] = Rcpp::wrap(mt);
+            output["Ct"] = Rcpp::wrap(Ct);
+            output["at"] = Rcpp::wrap(at);
+            output["Rt"] = Rcpp::wrap(Rt);
+            output["atilde"] = Rcpp::wrap(atilde);
+            output["Rtilde"] = Rcpp::wrap(Rtilde);
+            #endif
+
+            return output;
         }
 
         arma::mat optimal_discount_factor(
@@ -499,10 +575,10 @@ namespace LBA
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
         {
-            bool use_discount_old = _use_discount;
-            _use_discount = true;
+            bool use_discount_old = use_discount;
+            use_discount = true;
 
-            double discount_old = _discount_factor;
+            double discount_old = discount_factor;
 
 
             if (to > 1 || from < 0)
@@ -518,7 +594,7 @@ namespace LBA
             {
                 Rcpp::checkUserInterrupt();
 
-                _discount_factor = delta_grid.at(i);
+                discount_factor = delta_grid.at(i);
                 stats.at(i, 0) = delta_grid.at(i);
 
                 Model mod = model;
@@ -547,8 +623,8 @@ namespace LBA
                 Rcpp::Rcout << std::endl;
             }
 
-            _use_discount = use_discount_old;
-            _discount_factor = discount_old;
+            use_discount = use_discount_old;
+            discount_factor = discount_old;
 
             return stats;
         }
@@ -560,7 +636,7 @@ namespace LBA
             const std::string &loss = "quadratic",
             const bool &verbose = VERBOSE)
         {
-            _use_discount = false;
+            use_discount = false;
             unsigned int nelem = grid.n_elem;
             arma::mat stats(nelem, 4, arma::fill::zeros);
 
@@ -609,15 +685,15 @@ namespace LBA
             func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
             Rt.slice(t) = func_Rt(
                 Gt, Ct.slice(t - 1), model.derr.par1, 
-                _use_discount, _discount_factor,
-                _discount_type);
+                use_discount, discount_factor,
+                discount_type);
 
             double ft_tmp = 0.;
             double qt_tmp = 0.;
             func_prior_ft(
                 ft_tmp, qt_tmp, Ft,
                 t, model, y,
-                at.col(t), Rt.slice(t), _fill_zero);
+                at.col(t), Rt.slice(t), fill_zero);
             ft_prior_mean.at(t) = ft_tmp;
             ft_prior_var.at(t) = qt_tmp;
 
@@ -666,7 +742,7 @@ namespace LBA
             Rt = arma::zeros<arma::cube>(model.nP, model.nP, nT + 1);
 
             unsigned int tstart = 1;
-            if (_do_reference_analysis && (model.dlag.nL < nT))
+            if (do_reference_analysis && (model.dlag.nL < nT))
             {
                 filter_single_iter(1, y, model, Ft, Gt);
                 for (unsigned int t = 2; t <= model.dlag.nL; t++)
@@ -687,8 +763,8 @@ namespace LBA
                 func_Gt(Gt, model, mt.col(t-1), y.at(t-1));
                 Rt.slice(t) = func_Rt(
                     Gt, Ct.slice(t - 1), model.derr.par1, 
-                    _use_discount, _discount_factor, 
-                    _discount_type);
+                    use_discount, discount_factor, 
+                    discount_type);
 
 
                 double ft_tmp = 0.;
@@ -696,7 +772,7 @@ namespace LBA
                 func_prior_ft(
                     ft_tmp, qt_tmp, Ft,
                     t, model, y,
-                    at.col(t), Rt.slice(t), _fill_zero);
+                    at.col(t), Rt.slice(t), fill_zero);
                 ft_prior_mean.at(t) = ft_tmp;
                 ft_prior_var.at(t) = qt_tmp;
 
@@ -732,7 +808,7 @@ namespace LBA
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
             bool is_iterative = trans_list[model.ftrans] == TransFunc::Transfer::iterative;
             std::map<std::string, DiscountType> discount_list = map_discount_type();
-            bool is_first_elem_discount = discount_list[_discount_type] == DiscountType::first_elem;
+            bool is_first_elem_discount = discount_list[discount_type] == DiscountType::first_elem;
 
             atilde.set_size(model.nP, nT + 1);
             atilde.zeros();
@@ -744,7 +820,7 @@ namespace LBA
 
             for (unsigned int t = nT; t > 0; t--)
             {
-                if (!_use_discount)
+                if (!use_discount)
                 {
                     arma::mat Rtinv = inverse(Rt.slice(t));
 
@@ -754,42 +830,42 @@ namespace LBA
                     arma::vec diff_a = atilde.col(t) - at.col(t);
                     arma::mat diff_R = Rtilde.slice(t) - Rt.slice(t);
 
-                    arma::vec _atilde_right = Bt * diff_a;
-                    atilde.col(t - 1) = mt.col(t - 1) + _atilde_right;
+                    arma::vec atilde_right = Bt * diff_a;
+                    atilde.col(t - 1) = mt.col(t - 1) + atilde_right;
 
-                    arma::mat _Rtilde_right = (Bt * diff_R) * Bt.t();
-                    Rtilde.slice(t - 1) = Ct.slice(t - 1) + _Rtilde_right;
+                    arma::mat Rtilde_right = (Bt * diff_R) * Bt.t();
+                    Rtilde.slice(t - 1) = Ct.slice(t - 1) + Rtilde_right;
                 }
                 else if (is_iterative || (use_pseudo && !is_first_elem_discount))
                 {
                     // use discount factor + iterative transFunc / sliding transFunc with pseudo inverse for Gt
                     func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
-                    arma::mat _Gt_inv;
+                    arma::mat Gt_inv;
                     if (is_iterative)
                     {
                         /*
                         Gt is invertible but asymmetric for iterative transfer function.
                         */
-                        _Gt_inv = arma::inv(Gt);
+                        Gt_inv = arma::inv(Gt);
                     }
                     else
                     {
                         // Gt is not invertible for sliding transfer function, use pseudo inverse instead.
-                        _Gt_inv = arma::pinv(Gt);
+                        Gt_inv = arma::pinv(Gt);
                     }
 
-                    arma::vec _atilde_left = (1. - _discount_factor) * mt.col(t - 1);
-                    arma::vec _atilde_right = _discount_factor * _Gt_inv * atilde.col(t);
-                    atilde.col(t - 1) = _atilde_left + _atilde_right;
+                    arma::vec atilde_left = (1. - discount_factor) * mt.col(t - 1);
+                    arma::vec atilde_right = discount_factor * Gt_inv * atilde.col(t);
+                    atilde.col(t - 1) = atilde_left + atilde_right;
 
-                    arma::mat _Rtilde_left = (1. - _discount_factor) * Ct.slice(t - 1);
+                    arma::mat Rtilde_left = (1. - discount_factor) * Ct.slice(t - 1);
 
-                    double delta = _discount_factor;
-                    arma::mat _Rtilde_right = (_Gt_inv * Rtilde.slice(t)) * _Gt_inv.t();
-                    _Rtilde_right.for_each([&delta](arma::mat::elem_type &val)
+                    double delta = discount_factor;
+                    arma::mat Rtilde_right = (Gt_inv * Rtilde.slice(t)) * Gt_inv.t();
+                    Rtilde_right.for_each([&delta](arma::mat::elem_type &val)
                                            { val *= delta * delta; });
 
-                    Rtilde.slice(t - 1) = _Rtilde_left + _Rtilde_right;
+                    Rtilde.slice(t - 1) = Rtilde_left + Rtilde_right;
                 }
                 else
                 {
@@ -797,12 +873,12 @@ namespace LBA
                     atilde.col(t - 1).zeros();
                     Rtilde.slice(t - 1).zeros();
 
-                    double aleft = (1. - _discount_factor) * mt.at(0, t - 1);
-                    double aright = _discount_factor * atilde.at(0, t);
+                    double aleft = (1. - discount_factor) * mt.at(0, t - 1);
+                    double aright = discount_factor * atilde.at(0, t);
                     atilde.at(0, t - 1) = aleft + aright;
                     
-                    double rleft = (1. - _discount_factor) * Ct.at(0, 0, t - 1);
-                    double rright = std::pow(_discount_factor, 2.) * Rtilde.at(0, 0, t);
+                    double rleft = (1. - discount_factor) * Ct.at(0, 0, t - 1);
+                    double rright = std::pow(discount_factor, 2.) * Rtilde.at(0, 0, t);
                     Rtilde.at(0, 0, t - 1) = rleft + rright;
                 }
 
@@ -994,21 +1070,21 @@ namespace LBA
                     func_Gt(Gt_cast, model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 
-                    if (_use_discount)
+                    if (use_discount)
                     {
                         if (j == 1)
                         {
                             arma::mat Rt_onestep = func_Rt(
                                 Gt_cast, Rt_cast.at(j - 1).slice(t), model.derr.par1,
-                                _use_discount, _discount_factor,
-                                _discount_type);
+                                use_discount, discount_factor,
+                                discount_type);
                             
                             Rt_cast.at(j).slice(t) = Rt_onestep;
                             
                             Wt_onestep = Rt2Wt(
-                                Rt_onestep, model.derr.par1, _use_discount,
-                                _discount_factor,
-                                _discount_type);
+                                Rt_onestep, model.derr.par1, use_discount,
+                                discount_factor,
+                                discount_type);
                         }
                         else
                         {
@@ -1020,8 +1096,8 @@ namespace LBA
                     {
                         Rt_cast.at(j).slice(t) = func_Rt(
                             Gt_cast, Rt_cast.at(j - 1).slice(t), model.derr.par1,
-                            _use_discount, _discount_factor,
-                            _discount_type);
+                            use_discount, discount_factor,
+                            discount_type);
                     }
                     
                     
@@ -1033,7 +1109,7 @@ namespace LBA
                         t + j, model, ytmp, 
                         at_cast.slice(j).col(t),
                         Rt_cast.at(j).slice(t),
-                        _fill_zero
+                        fill_zero
                     );
 
                     ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, model.flink, 0.);
@@ -1200,95 +1276,20 @@ namespace LBA
         
 
 
-        void init(const Rcpp::List &opts_in)
-        {
-            Rcpp::List opts = opts_in;
-            _use_discount = false;
-            if (opts.containsElementNamed("use_discount"))
-            {
-                _use_discount = Rcpp::as<bool>(opts["use_discount"]);
-            }
+        
 
-            _discount_factor = 0.95;
-            if (opts.containsElementNamed("custom_discount_factor"))
-            {
-                _discount_factor = Rcpp::as<double>(opts["custom_discount_factor"]);
-            }
-
-            _do_reference_analysis = false;
-            if (opts.containsElementNamed("do_reference_analysis"))
-            {
-                _do_reference_analysis = Rcpp::as<bool>(opts["do_reference_analysis"]);
-            }
-
-            _fill_zero = LBA_FILL_ZERO;
-            if (opts.containsElementNamed("fill_zero"))
-            {
-                _fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
-            }
-
-            _discount_type = "first_elem";
-            if (opts.containsElementNamed("discount_type"))
-            {
-                _discount_type = Rcpp::as<std::string>(opts["discount_type"]);
-            }
-        }
-
-        static Rcpp::List default_settings()
-        {
-            Rcpp::List opts;
-
-            opts["use_discount"] = false;
-            opts["discount_type"] = "first_elem";
-            opts["use_custom"] = false;
-            opts["custom_discount_factor"] = 0.95;
-            opts["do_smoothing"] =  true;
-            opts["do_reference_analysis"] = false;
-            opts["fill_zero"] = LBA_FILL_ZERO;
-
-            return opts;
-        }
-
-        Rcpp::List get_output(const Model &model)
-        {
-            Rcpp::List output;
-            arma::mat psi = get_psi(atilde, Rtilde);
-            arma::mat psi_filter = get_psi(mt, Ct);
-            output["psi"] = Rcpp::wrap(psi);
-            output["psi_filter"] = Rcpp::wrap(psi_filter);
-
-            output["nlag"] = model.dlag.nL;
-            output["seasonal_period"] = model.seas.period;
-
-            if (model.seas.period > 0 && model.seas.in_state)
-            {
-                arma::mat seas = atilde.tail_rows(model.seas.period);
-                output["seasonality"] = Rcpp::wrap(seas);
-            }
-            else
-            {
-                output["seasonality"] = Rcpp::wrap(model.seas.val.t());
-            }
-
-            if (DEBUG)
-            {
-                output["mt"] = Rcpp::wrap(mt);
-                output["Ct"] = Rcpp::wrap(Ct);
-            }
-
-            return output;
-        }
-
-
-        double _discount_factor = 0.95;
-
-        bool _use_discount = false;
-        std::string _discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
-        bool _do_reference_analysis = false;
-        bool _fill_zero = LBA_FILL_ZERO;
-
-        arma::mat mt, at, atilde; // nP x (nT + 1)
+        arma::mat mt, at, atilde;  // nP x (nT + 1)
         arma::cube Ct, Rt, Rtilde; // nP x nP x (nT + 1)
+
+    
+    private:
+        double discount_factor = 0.95;
+        bool use_discount = false;
+        std::string discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
+        bool do_reference_analysis = false;
+        bool fill_zero = LBA_FILL_ZERO;
+
+        
         arma::vec ft_prior_mean; // (nT + 1) x 1, one-step-ahead forecasting distribution of y
         arma::vec ft_prior_var;  // (nT + 1) x 1, one-step-ahead forecasting distribution of y
         arma::vec ft_post_mean;  // (nT + 1) x 1, fitted distribution based on filtering states
