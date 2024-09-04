@@ -157,6 +157,8 @@ private:
         map["gaussian"] = Dist::gaussian;
         map["normal"] = Dist::gaussian;
 
+        map["beta"] = Dist::beta;
+
         map["constant"] = Dist::constant;
 
         return map;
@@ -428,6 +430,14 @@ public:
         return out;
     }
 
+    /**
+     * @brief The derivative of the logarithm of the prior (before mapped to the real line. i.e. `logpi(gamma)`) w.r.t to the parameter, can be either mapped to the real line (`dlogpi(gamma) / dtilde(gamma)`) or not (`dlogpi(gamma) / dgamma`).
+     *
+     * @param val i.e. `gamma` (before mapped to the real line)
+     * @param prior
+     * @param jacobian Return `dlogpi(gamma) / dtilde(gamma)` if set to true; otherwise return `dlogpi(gamma) / dgamma`.
+     * @return double
+     */
     static double dlogprior_dpar(const double &val, const Dist &prior, const double &jacobian = true)
     {
         std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
@@ -463,6 +473,20 @@ public:
                 out = (prior.par1 - 1.) / val;
                 out -= prior.par2;
             }
+            break;
+        }
+        case AVAIL::Dist::beta:
+        {
+            if (jacobian)
+            {
+                out = prior.par1 - (prior.par1 + prior.par2) * val;
+            }
+            else
+            {
+                out = (prior.par1 - 1) * (1. - val);
+                out -= (prior.par2 - 1) * val;
+            }
+
             break;
         }
         default: // uniform or other types
