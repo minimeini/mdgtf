@@ -183,7 +183,10 @@ namespace SMC
                 } // switch by initial distribution
 
                 par_init.at(i) = val;
+
+                #ifdef DGTF_DO_BOUND_CHECK
                 bound_check<arma::vec>(par_init, "draw_param_init:: par_init");
+                #endif
             }
 
             return par_init;
@@ -209,7 +212,9 @@ namespace SMC
             // Wsqrt = std::sqrt(Wt.at(t));
             W *= 1. / discount_factor - 1.;
 
+            #ifdef DGTF_DO_BOUND_CHECK
             bound_check(W, "SequentialMonteCarlo::discount_W");
+            #endif
             return W;
         }
 
@@ -221,7 +226,9 @@ namespace SMC
             nom = std::pow(nom, 2.);
             double ess = nom / denom;
 
+            #ifdef DGTF_DO_BOUND_CHECK
             bound_check(ess, "effective_sample_size: ess (nom = " + std::to_string(nom) + ", denom = " + std::to_string(denom) + ")");
+            #endif
 
             return ess;
         }
@@ -405,10 +412,11 @@ namespace SMC
             logq.for_each([&logq_max](arma::vec::elem_type &val)
                           { val -= logq_max; });
             arma::vec weights = arma::exp(logq);
-            if (DEBUG)
-            {
-                bound_check<arma::vec>(weights, "imp_weights_backcast");
-            }
+
+            #ifdef DGTF_DO_BOUND_CHECK
+            bound_check<arma::vec>(weights, "imp_weights_backcast");
+            #endif
+
             return weights;
         } // func: imp_weights_backcast
 
@@ -604,15 +612,10 @@ namespace SMC
                     logq = logq.elem(resample_idx);
                 }
 
-                // if (use_discount)
-                // { // Use discount factor if W is not given
-                //     bool use_custom_val = (use_custom && t > 1) ? true : false;
-                //     Wt.at(0) = SequentialMonteCarlo::discount_W(
-                //         Theta.slice(t),
-                //         custom_discount_factor,
-                //         use_custom_val,
-                //         default_discount_factor);
-                // }
+                if (use_discount)
+                { // Use discount factor if W is not given
+                    Wt.at(0) = SequentialMonteCarlo::discount_W(Theta.slice(t), discount_factor);
+                }
 
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
@@ -2416,7 +2419,9 @@ namespace SMC
                     weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + logw_old;
                 } // loop over i, index of particles; end of propagation
 
+                #ifdef DGTF_DO_BOUND_CHECK
                 bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t));
+                #endif
 
                 log_cond_marginal.at(t + 1) = std::log(arma::accu(weights) + EPS) - logN;
 
