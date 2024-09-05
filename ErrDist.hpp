@@ -13,8 +13,8 @@
  *
  * @param par1 W
  * @param par2 w[0] the initial value of the error sequence
- * @param wt (nT + 1), vector of normal errors.
- * @param psi (nT + 1), vector of random walk, i.e., cumulative errors.
+ * @param var nP x nP, variance-covariance matrix, only used if `full_rank = true`
+ * @param full_rank should we use full rank `var` (true) or univariate `par1` (false) as variance.
  *
  * @code{.cpp}
  * arma::vec psi = arma::cumsum(wt)
@@ -24,12 +24,20 @@
 class ErrDist : public Dist
 {
 public:
+    bool full_rank = false;
+    arma::mat var; // nP x nP variance matrix, only used if `full_rank = true`
+
     ErrDist()
     {
         init_default();
         return;
     }
 
+    ErrDist(const Rcpp::List &opts, const unsigned int &nP)
+    {
+        init(opts, nP);
+        return;
+    }
 
     ErrDist(
         const std::string &err_dist,
@@ -40,6 +48,10 @@ public:
         name = err_dist;
         par1 = par1_in;
         par2 = par2_in;
+
+        var.set_size(1, 1);
+        var.at(0, 0) = par1;
+        full_rank = false;
     }
 
 
@@ -48,9 +60,75 @@ public:
         name = "gaussian";
         par1 = 0.01;  // W
         par2 = 0.0; // w[0]
+
+        var.set_size(1, 1);
+        var.at(0, 0) = par1;
+        full_rank = false;
+
         return;
     }
 
+    void init(const Rcpp::List &err_opts, const unsigned int &nP)
+    {
+        full_rank = false;
+        if (err_opts.containsElementNamed("full_rank"))
+        {
+            full_rank = Rcpp::as<bool>(err_opts["full_rank"]);
+        }
+
+        arma::mat var_tmp(1, 1);
+        var_tmp.at(0, 0) = 0.01;
+        if (err_opts.containsElementNamed("var"))
+        {
+            var_tmp.clear();
+            var_tmp = Rcpp::as<arma::mat>(err_opts["var"]);
+        }
+
+        if (!full_rank)
+        {
+            par1 = var_tmp.at(0, 0);
+        }
+        else if (var_tmp.n_elem == 1)
+        {
+            var = arma::eye<arma::mat>(nP, nP);
+            par1 = var_tmp.at(0, 0);
+            var.diag() *= par1;
+
+        }
+        else
+        {
+            unsigned int nrow = std::min(nP, var_tmp.n_rows);
+            unsigned int ncol = std::min(nP, var_tmp.n_cols);
+            var = arma::eye<arma::mat>(nP, nP);
+            var.submat(0, 0, nrow - 1, ncol - 1) = var_tmp;
+            var = arma::symmatu(var);
+
+            if (!var.is_sympd())
+            {
+                throw std::invalid_argument("ErrDist: variance-covariance matrix must be sympd.");
+            }
+        }
+
+        par2 = 0.;
+        if (err_opts.containsElementNamed("w0"))
+        {
+            par2 = Rcpp::as<double>(err_opts["w0"]);
+        }
+
+        return;
+    }
+
+    static Rcpp::List default_settings()
+    {
+        Rcpp::List err_opts;
+        err_opts["name"] = "gaussian";
+        err_opts["par1"] = 0.01;
+        err_opts["par2"] = 0.;
+        err_opts["var"] = 0.01;
+        err_opts["full_rank"] = false;
+
+        return err_opts;
+    }
 
     /**
      * @brief Diagonal variance-covariance matrix Wt at t = 0 (i.e. initial value)
@@ -99,40 +177,37 @@ public:
         double W = derr.par1;
         double w0 = derr.par2;
 
-        if (WAKEMON_MAKE_FATAL > 0)
+        switch (err_list[derr.name])
         {
-            switch (err_list[derr.name])
+        case AVAIL::Dist::gaussian:
+        {
+            double Wsd = std::sqrt(W);
+            wt.randn();
+            wt.for_each([&Wsd](arma::vec::elem_type &val)
+                        { val *= Wsd; });
+            wt.at(0) = w0;
+            break;
+        }
+        case AVAIL::Dist::constant:
+        {
+            wt.zeros();
+            if (wt_init.isNull())
             {
-            case AVAIL::Dist::gaussian:
+                throw std::invalid_argument("Constant states undefined.");
+            }
+            else
             {
-                double Wsd = std::sqrt(W);
-                wt.randn();
-                wt.for_each([&Wsd](arma::vec::elem_type &val)
-                            { val *= Wsd; });
-                wt.at(0) = w0;
-                break;
+                arma::vec _wt_init = Rcpp::as<arma::vec>(wt_init);
+                unsigned int nelem = std::min(_wt_init.n_elem, wt.n_elem);
+                wt.head(nelem) = _wt_init;
             }
-            case AVAIL::Dist::constant:
-            {
-                wt.zeros();
-                if (wt_init.isNull())
-                {
-                    throw std::invalid_argument("Constant states undefined.");
-                }
-                else
-                {
-                    arma::vec _wt_init = Rcpp::as<arma::vec>(wt_init);
-                    unsigned int nelem = std::min(_wt_init.n_elem, wt.n_elem);
-                    wt.head(nelem) = _wt_init;
-                }
-                break;
-            }
-            default:
-            {
-                throw std::invalid_argument("Undefined.");
-                break;
-            }
-            }
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument("Undefined.");
+            break;
+        }
         }
 
         arma::vec output = wt;
@@ -153,7 +228,6 @@ private:
 
         ERR_MAP["gaussian"] = AVAIL::Dist::gaussian;
         ERR_MAP["normal"] = AVAIL::Dist::gaussian;
-
         ERR_MAP["constant"] = AVAIL::Dist::constant;
         return ERR_MAP;
     }
