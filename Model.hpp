@@ -73,8 +73,11 @@ public:
         init_model(model_settings);
 
         Rcpp::List param_settings = settings["param"];
-        Rcpp::NumericVector lag_param, obs_param, err_param;
-        init_param(obs_param, lag_param, err_param, dlag.truncated, param_settings);
+        Rcpp::NumericVector lag_param, obs_param; //, err_param;
+        init_param(obs_param, lag_param, dlag.truncated, param_settings);
+        dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
+        dobs.par1 = obs_param[0];
+        dobs.par2 = obs_param[1];
 
         if (settings.containsElementNamed("season"))
         {
@@ -86,14 +89,19 @@ public:
             seas.init_default();
         }
 
-        dobs.par1 = obs_param[0];
-        dobs.par2 = obs_param[1];
-
-        derr.par1 = err_param[0];
-        derr.par2 = err_param[1];
-
-        dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
         nP = get_nP(dlag, seas.period, seas.in_state);
+
+        // err_param = Rcpp::NumericVector::create(0.01, 0.);
+        // if (param_settings.containsElementNamed("err"))
+        // {
+        //     err_param = Rcpp::as<Rcpp::NumericVector>(param_settings["err"]);
+        // }
+        if (param_settings.containsElementNamed("err"))
+        {
+            Rcpp::List err_opts = Rcpp::as<Rcpp::List>(param_settings["err"]);
+            derr.init(err_opts, nP);
+        }
+
         return;
     }
 
@@ -151,7 +159,6 @@ public:
     static void init_param(
         Rcpp::NumericVector &obs,
         Rcpp::NumericVector &lag,
-        Rcpp::NumericVector &err,
         bool &truncated,
         const Rcpp::List &param_settings)
     {
@@ -167,12 +174,6 @@ public:
         if (param.containsElementNamed("lag"))
         {
             lag = Rcpp::as<Rcpp::NumericVector>(param["lag"]);
-        }
-
-        err = Rcpp::NumericVector::create(0.01, 0.);
-        if (param.containsElementNamed("err"))
-        {
-            err = Rcpp::as<Rcpp::NumericVector>(param["err"]);
         }
     }
 
@@ -216,7 +217,8 @@ public:
         Rcpp::List param_settings;
         param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
         param_settings["lag"] = Rcpp::NumericVector::create(1.4, 0.3);
-        param_settings["err"] = Rcpp::NumericVector::create(0.01, 0.);
+        // param_settings["err"] = Rcpp::NumericVector::create(0.01, 0.);
+        param_settings["err"] = ErrDist::default_settings();
 
         Rcpp::List settings;
         settings["model"] = model_settings;
@@ -1381,7 +1383,8 @@ public:
         arma::vec &psi, // (ntime + 1) x 1
         Model &model,
         const unsigned int &ntime,
-        const double &y0)
+        const double &y0,
+        const bool &full_rank = false)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
         if (!model.dlag.truncated)
