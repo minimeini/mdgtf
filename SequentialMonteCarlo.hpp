@@ -693,7 +693,7 @@ namespace SMC
             arma::cube &Theta, // p x N x (nT + 1)
             arma::mat &weights_forward, // (nT + 1) x N
             arma::vec &eff_forward, // (nT + 1) x 1
-            arma::vec &Wt, // p x 1
+            arma::vec &Wt_discount, // (nT + 1) x 1
             Model &model,
             const arma::vec &y, // (nT + 1) x 1
             const unsigned int &N = 1000,
@@ -719,14 +719,16 @@ namespace SMC
 
             LBA::LinearBayes lba(use_discount, discount_factor);
             lba.filter(model, y);
-            arma::vec Wt_discount(y.n_elem, arma::fill::zeros);
-            Wt_discount.at(0) = lba.Ct.at(0, 0, 0);
+            Wt_discount.set_size(y.n_elem);
+            Wt_discount.ones();
+            Wt_discount.at(0) = std::sqrt(lba.Ct.at(0, 0, 0) + EPS8);
             arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 LBA::func_Gt(Gt, model, lba.mt.col(t - 1), y.at(t - 1));
-                arma::mat Wt_hat = lba.Ct.slice(t) - Gt * lba.Ct.slice(t - 1) * Gt.t();
-                Wt_discount.at(t) = Wt_hat.at(0, 0);
+                arma::mat Pt = Gt * lba.Ct.slice(t - 1) * Gt.t();
+                arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
+                Wt_discount.at(t) = std::sqrt(Wt_hat.at(0, 0) + EPS8);
             }
 
             for (unsigned int t = 0; t < nT; t++)
@@ -740,6 +742,9 @@ namespace SMC
                     prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
                 }
 
+                
+                arma::vec Wt(model.nP, arma::fill::zeros);
+                Wt.at(0) = Wt_discount.at(t) * Wt_discount.at(t);
                 tau = qforecast(
                     loc, prec_chol_inv, logq,     // sufficient statistics
                     model, t + 1, Theta.slice(t), // theta needs to be resampled
@@ -747,7 +752,6 @@ namespace SMC
 
                 tau = weights % tau;
                 weights_forward.row(t) = logq.t();
-                
 
                 if (t > 0)
                 {
@@ -802,8 +806,8 @@ namespace SMC
                     }
                     else
                     {
-                        double eps = R::rnorm(0., std::sqrt(Wt_discount.at(t + 1)));
-                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(Wt_discount.at(t + 1)), true); // sample from evolution distribution
+                        double eps = R::rnorm(0., Wt_discount.at(t + 1));
+                        // logq.at(i) += R::dnorm4(eps, 0., Wt_discount.at(t + 1), true); // sample from evolution distribution
 
                         theta_new = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
                         theta_new.at(0) += eps;
@@ -811,7 +815,8 @@ namespace SMC
 
                     Theta_new.col(i) = theta_new;
 
-                    double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), std::sqrt(Wt_discount.at(t + 1)), true);
+                    // double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_discount.at(t + 1), true);
+                    double logp = 0.;
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
@@ -1521,7 +1526,8 @@ namespace SMC
             {
                 Rcpp::checkUserInterrupt();
 
-                double Wsd = std::sqrt(Wt.at(0));
+                // Resampling density for theta[t-1] is: p(theta[t] | theta[t-1], W[t]).
+                double Wsd = std::sqrt(Wt.at(t));
                 arma::vec Wsqrt(M);
                 Wsqrt.fill(Wsd);
 
@@ -1554,6 +1560,9 @@ namespace SMC
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             const unsigned int ntime = y.n_elem - 1;
+            Wt.clear();
+            Wt.set_size(y.n_elem);
+            Wt.ones();
 
             // forward_filter(model, verbose);
             std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;

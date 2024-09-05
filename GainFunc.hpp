@@ -68,7 +68,7 @@ public:
         break;
         case AVAIL::Func::softplus:
         {
-            hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
+            hpsi.clamp(hpsi.min(), UPBND);
             T hpsi_tmp = arma::exp(hpsi);
             hpsi = arma::log(1. + hpsi_tmp);
         }
@@ -80,7 +80,7 @@ public:
         break;
         }
 
-        bound_check<T>(hpsi, "psi2hpsi");
+        bound_check<T>(hpsi, "psi2hpsi<T>");
 
         return hpsi;
     }
@@ -122,7 +122,7 @@ public:
         break;
         }
 
-        bound_check(hpsi, "psi2hpsi");
+        bound_check(hpsi, "psi2hpsi<double>");
         return hpsi;
     }
 
@@ -164,7 +164,7 @@ public:
         break;
         }
 
-        bound_check(hpsi, "hpsi2psi");
+        bound_check(hpsi, "hpsi2psi<double>");
         return hpsi;
     }
 
