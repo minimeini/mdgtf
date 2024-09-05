@@ -137,7 +137,7 @@ Rcpp::List dgtf_simulate(
 
     arma::vec psi, ft, lambda, y;
     arma::mat Theta;
-    Model::simulate(y, lambda, ft, Theta, psi, model, ntime, y0);
+    StateSpace::simulate(y, lambda, ft, Theta, psi, model, ntime, y0);
 
     Rcpp::List output;
     output["model"] = model.info();

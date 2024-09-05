@@ -301,7 +301,7 @@ public:
             // int tlen = t - nlag + 1;
             // unsigned int tstart = (tlen < 0) ? 0 : (unsigned int)tlen;
             ft.at(t) = func_ft(t, y, ft, hpsi, dlag, ftrans);
-            Theta.col(t) = psi2theta(t, psi, ft, y, ftrans, dlag);
+            Theta.col(t) = psi2theta(t, psi, ft, y, ftrans, dlag, true);
 
             // if (trans_list[ftrans] == Transfer::sliding)
             // {
@@ -323,11 +323,12 @@ public:
      * @brief Return `theta[t]`
      *
      * @param t the time index of theta to be returned
-     * @param psi needs `(psi[0],psi[1],..,psi[t],..)` for sliding or `(psi[0],psi[1],...,psi[t+1],...)` for iterative; if using psi[0:t] for iterative, the first element will be filled with psi[t] instead of psi[t+1].
+     * @param psi needs `(psi[0],psi[1],..,psi[t],..)` for sliding or `(psi[0],psi[1],...,psi[t+1],...)` for iterative with `retrospective = true`; if `retrospective = false` when using iterative, the first element will be filled with psi[t] instead of psi[t+1].
      * @param ft needs `(f[0],f[1],...,f[t])`
      * @param y (nT + 1) x 1
      * @param ftrans
      * @param dlag dimension of theta is `dlag.nL` for sliding or `dlag.par2 + 1` for iterative
+     * @param retrospective should theta[t] use the future psi[t+1] at time t?
      * @return arma::vec
      */
     static arma::vec psi2theta(
@@ -336,7 +337,8 @@ public:
         const arma::vec &ft, // at least(f[0],f[1],..,f[t])
         const arma::vec &y,   // (nT + 1) x 1
         const std::string &ftrans,
-        const LagDist &dlag)
+        const LagDist &dlag,
+        const bool &retrospective = true)
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         unsigned int nlag, nP;
@@ -361,7 +363,7 @@ public:
             }
             else
             {
-                if (psi.n_elem > 1)
+                if (retrospective)
                 {
                     theta.at(0) = psi.at(1);
                 }
@@ -382,7 +384,7 @@ public:
             }
             else
             {
-                if (psi.n_elem > t+1)
+                if (retrospective)
                 {
                     theta.at(0) = psi.at(t + 1);
                 }

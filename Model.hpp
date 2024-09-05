@@ -253,92 +253,6 @@ public:
 
 
     /**
-     * @brief Simulation via transfer function form
-     * 
-     * @param psi 
-     * @param nlag 
-     * @param y0 
-     * @param gain_func 
-     * @param lag_dist 
-     * @param link_func 
-     * @param obs_dist 
-     * @param lag_param 
-     * @param obs_param 
-     * @return arma::vec 
-     */
-    static void simulate(
-        arma::vec &y, 
-        arma::vec &lambda,
-        arma::vec &ft,
-        arma::mat &Theta,
-        arma::vec &psi, // (ntime + 1) x 1
-        Model &model,
-        const unsigned int &ntime,
-        const double &y0 = 0.)
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
-        if (!model.dlag.truncated)
-        {
-            model.dlag.nL = ntime;
-        }
-        model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
-        arma::mat Gmat = TransFunc::init_Gt(
-            model.nP, model.dlag, model.ftrans, 
-            model.seas.period, model.seas.in_state);
-        
-        if (model.seas.period > 0)
-        {
-            model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
-        }
-
-        arma::vec hpsi;
-        if (obs_list[model.dobs.name] == AVAIL::Dist::gaussian)
-        {
-            Theta.set_size(model.nP, ntime + 1);
-            Theta.zeros();
-            Theta.col(0) = arma::randu(model.nP);
-        }
-        else
-        {
-            psi = ErrDist::sample(model.derr, ntime, true);
-            hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain); // Checked. OK.
-        }
-
-        y.set_size(ntime + 1);
-        y.zeros();
-        y.at(0) = y0;
-        lambda = y;
-        ft = y;
-
-        for (unsigned int t = 1; t < (ntime + 1); t++)
-        {
-            if (obs_list[model.dobs.name] == AVAIL::Dist::gaussian)
-            {
-                arma::vec eps = arma::randn(model.nP) * std::sqrt(model.derr.par1);
-                Theta.col(t) = Gmat * Theta.col(t - 1) + eps;
-                ft.at(t) = arma::as_scalar(model.dlag.Fphi.t() * Theta.col(t));
-            }
-            else
-            {
-                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
-            }
-
-            double eta = ft.at(t);
-            if (model.seas.period > 0)
-            {
-                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
-            }
-            
-            lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.
-            y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
-        }
-
-        return; // Checked. OK.
-    }
-
-
-    /**
      * @brief Forecasting using the transfer function form.
      * 
      * @param y 
@@ -1459,6 +1373,78 @@ public:
         return ft_cur;
     }
 
+    static void simulate(
+        arma::vec &y,
+        arma::vec &lambda,
+        arma::vec &ft,
+        arma::mat &Theta,
+        arma::vec &psi, // (ntime + 1) x 1
+        Model &model,
+        const unsigned int &ntime,
+        const double &y0)
+    {
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        if (!model.dlag.truncated)
+        {
+            model.dlag.nL = ntime;
+        }
+        model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+        arma::mat Gmat = TransFunc::init_Gt(
+            model.nP, model.dlag, model.ftrans,
+            model.seas.period, model.seas.in_state);
+
+        if (model.seas.period > 0)
+        {
+            model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
+        }
+        Season seas;
+
+        Theta.set_size(model.nP, ntime + 1);
+        Theta.zeros();
+
+        y.set_size(ntime + 1);
+        y.zeros();
+        y.at(0) = y0;
+        lambda = y;
+        ft = y;
+
+        psi = ErrDist::sample(model.derr, ntime, true);
+        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
+        {
+            Theta.at(0, 0) = psi.at(1);
+        }
+
+        for (unsigned int t = 1; t < (ntime + 1); t++)
+        {
+            Theta.col(t) = StateSpace::func_gt(
+                model.ftrans, model.fgain, model.dlag,
+                Theta.col(t - 1), y.at(t - 1), 0, false);
+
+            if (trans_list[model.ftrans] == TransFunc::Transfer::iterative && (t < ntime))
+            {
+                Theta.at(0, t) = psi.at(t + 1);
+            }
+            else
+            {
+                Theta.at(0, t) = psi.at(t);
+            }
+
+            ft.at(t) = StateSpace::func_ft(
+                model.ftrans, model.fgain, model.dlag,
+                seas, t, Theta.col(t), y);
+
+            double eta = ft.at(t);
+            if (model.seas.period > 0)
+            {
+                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+            }
+
+            lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.
+            y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
+        }
+
+        return; // Checked. OK.
+    }
 
     static Rcpp::List forecast(
         const arma::vec &y, // (nT + 1)
@@ -2337,6 +2323,7 @@ private:
     arma::vec Fphi;
     arma::vec wt, psi, hpsi, dhpsi;
 };
+
 
 
 #endif

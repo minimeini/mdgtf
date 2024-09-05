@@ -9,7 +9,7 @@ class Season
 {
 public:
     bool in_state = false;
-    unsigned int period = 1;
+    unsigned int period = 0;
     arma::vec val; // period x 1
     arma::mat X; // period x (ntime + 1)
     arma::mat P; // period x period
@@ -31,14 +31,7 @@ public:
     void init_default()
     {
         in_state = false;
-        period = 1;
-        lobnd = 1.;
-        hibnd = 10.;
-
-        val.set_size(period);
-        val.at(0) = 1.;
-        P.set_size(period, period);
-        P.at(0, 0) = 1.;
+        period = 0;
     }
 
     void init(const Rcpp::List &settings)
