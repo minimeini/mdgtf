@@ -23,6 +23,7 @@ public:
     {
         sliding,
         iterative,
+        none,
         degenerate // Only t(Fphi) * theta[t], {y[t]} is not involved
     };
     static const std::map<std::string, Transfer> trans_list;
@@ -260,6 +261,72 @@ public:
         }
 
         return ft_now;
+    }
+
+
+    static arma::mat psi2theta(
+        const arma::vec &psi, // (nT + 1)
+        const arma::vec &y, // (nT + 1) x 1
+        const std::string &ftrans,
+        const std::string &fgain,
+        const LagDist &dlag,
+        const unsigned int &nP_in = 0)
+    {
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
+        unsigned int ntime, nlag, nP;
+        if (trans_list[ftrans] == Transfer::iterative)
+        {
+            ntime = psi.n_elem - 1;
+            nlag = (unsigned int)dlag.par2;
+            nP = nlag + 1;
+            if ((nP_in > 0) && (nlag != nP_in - 1))
+            {   
+                throw std::invalid_argument("psi2theta: Wrong dimension of theta.");
+            }
+        }
+        else
+        {
+            if (nP_in == 0)
+            {
+                throw std::invalid_argument("psi2theta: Wrong dimension of theta.");
+            }
+            ntime = psi.n_elem;
+            nP = nP_in;
+            nlag = nP;
+        }
+
+        arma::mat Theta(nP, ntime, arma::fill::zeros);
+        if (trans_list[ftrans] == Transfer::sliding)
+        {
+            Theta.at(0, 0) = psi.at(0);
+        }
+        else
+        {
+            Theta.at(0, 0) = psi.at(1);
+        }
+
+        arma::vec ft(ntime, arma::fill::zeros);
+        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, fgain);
+        for (unsigned int t = 1; t < ntime; t++)
+        {
+            int tlen = t - nlag + 1;
+            unsigned int tstart = (tlen < 0) ? 0 : (unsigned int)tlen;
+            ft.at(t) = func_ft(t, y, ft, hpsi, dlag, ftrans);
+
+            if (trans_list[ftrans] == Transfer::sliding)
+            {
+                arma::vec psi_sub = arma::reverse(psi.subvec(tstart, t));
+                Theta.submat(0, t, psi_sub.n_elem - 1, t) = psi_sub;
+            }
+            else
+            {
+                Theta.at(0, t) = psi.at(t + 1);
+                arma::vec ft_sub = arma::reverse(ft.subvec(tstart, t));
+                Theta.submat(1, t, ft_sub.n_elem, t) = ft_sub;
+            }
+        }
+
+        return Theta;
     }
 
 private:
