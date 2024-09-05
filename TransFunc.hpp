@@ -301,7 +301,7 @@ public:
             // int tlen = t - nlag + 1;
             // unsigned int tstart = (tlen < 0) ? 0 : (unsigned int)tlen;
             ft.at(t) = func_ft(t, y, ft, hpsi, dlag, ftrans);
-            Theta.col(t) = psi2theta(t, psi, ft, y, ftrans, fgain, dlag);
+            Theta.col(t) = psi2theta(t, psi, ft, y, ftrans, dlag);
 
             // if (trans_list[ftrans] == Transfer::sliding)
             // {
@@ -319,18 +319,16 @@ public:
         return Theta;
     }
 
-
     /**
      * @brief Return `theta[t]`
-     * 
+     *
      * @param t the time index of theta to be returned
-     * @param psi needs `(psi[0],psi[1],..,psi[t],..)` for sliding or `(psi[0],psi[1],...,psi[t+1],...)` for iterative
+     * @param psi needs `(psi[0],psi[1],..,psi[t],..)` for sliding or `(psi[0],psi[1],...,psi[t+1],...)` for iterative; if using psi[0:t] for iterative, the first element will be filled with psi[t] instead of psi[t+1].
      * @param ft needs `(f[0],f[1],...,f[t])`
      * @param y (nT + 1) x 1
-     * @param ftrans 
-     * @param fgain 
+     * @param ftrans
      * @param dlag dimension of theta is `dlag.nL` for sliding or `dlag.par2 + 1` for iterative
-     * @return arma::vec 
+     * @return arma::vec
      */
     static arma::vec psi2theta(
         const unsigned int &t,
@@ -338,20 +336,17 @@ public:
         const arma::vec &ft, // at least(f[0],f[1],..,f[t])
         const arma::vec &y,   // (nT + 1) x 1
         const std::string &ftrans,
-        const std::string &fgain,
         const LagDist &dlag)
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
-        unsigned int ntime, nlag, nP;
+        unsigned int nlag, nP;
         if (trans_list[ftrans] == Transfer::iterative)
         {
-            ntime = psi.n_elem - 1;
             nlag = (unsigned int)dlag.par2;
             nP = nlag + 1;
         }
         else
         {
-            ntime = psi.n_elem;
             nlag = dlag.nL;
             nP = nlag;
             
@@ -366,21 +361,20 @@ public:
             }
             else
             {
-                theta.at(0) = psi.at(1);
+                if (psi.n_elem > 1)
+                {
+                    theta.at(0) = psi.at(1);
+                }
+                else
+                {
+                    theta.at(0) = psi.at(0);
+                }
             }
         }
         else
         {
             int tlen = t - nlag + 1;
             unsigned int tstart = (tlen < 0) ? 0 : (unsigned int)tlen;
-            // arma::vec ft(t + 1, arma::fill::zeros); // f[0], f[1], ..., f[t]
-            // arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, fgain);
-
-            // for (unsigned int i = 1; i <= t; i++)
-            // {
-            //     ft.at(i) = func_ft(i, y, ft, hpsi, dlag, ftrans);
-            // }
-
             if (trans_list[ftrans] == Transfer::sliding)
             {
                 arma::vec psi_sub = arma::reverse(psi.subvec(tstart, t));
@@ -388,7 +382,14 @@ public:
             }
             else
             {
-                theta.at(0) = psi.at(t + 1);
+                if (psi.n_elem > t+1)
+                {
+                    theta.at(0) = psi.at(t + 1);
+                }
+                else
+                {
+                    theta.at(0) = psi.at(t);
+                }
                 arma::vec ft_sub = arma::reverse(ft.subvec(tstart, t));
                 theta.subvec(1, ft_sub.n_elem) = ft_sub;
             }
