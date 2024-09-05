@@ -83,15 +83,11 @@ public:
             var_tmp.clear();
             var_tmp = Rcpp::as<arma::mat>(err_opts["var"]);
         }
+        par1 = var_tmp.at(0, 0);
 
-        if (!full_rank)
-        {
-            par1 = var_tmp.at(0, 0);
-        }
-        else if (var_tmp.n_elem == 1)
+        if (full_rank && (var_tmp.n_elem == 1))
         {
             var = arma::eye<arma::mat>(nP, nP);
-            par1 = var_tmp.at(0, 0);
             var.diag() *= par1;
 
         }
