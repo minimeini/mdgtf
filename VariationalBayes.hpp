@@ -853,23 +853,6 @@ namespace VB
         }
 
 
-        static double logprior_mu0tilde(
-            const double &logmu0, // evolution variance conditional on V
-            const double &amu,
-            const double &bmu)
-        {
-
-            /*
-            mu0 ~ Gamma(aw=shape, bw=rate)
-            logmu0 = log(mu0)
-            */
-            double logp = amu * std::log(bmu) - std::lgamma(amu) + amu * logmu0 - bmu * std::exp(logmu0);
-            #ifdef DGTF_DO_BOUND_CHECK
-                bound_check(logp, "logprior_logmu0: logp");
-            #endif
-            return logp;
-        }
-
         static arma::vec logprior_logseas(
             const arma::vec &logseas, // evolution variance conditional on V
             const double &sig2_mu0 = 10.)
