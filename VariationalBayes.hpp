@@ -25,7 +25,6 @@ namespace VB
         unsigned int nburnin = 1000;
         unsigned int ntotal = 3001;
         unsigned int nforecast = 0;
-        double tstart_pct = 0.9;
 
         unsigned int N = 500; // number of SMC particles
 
@@ -81,12 +80,6 @@ namespace VB
                 nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
             }
 
-            tstart_pct = 0.9;
-            if (opts.containsElementNamed("tstart_pct"))
-            {
-                tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
-            }
-
             state_sampler = "smc";
             if (opts.containsElementNamed("state_sampler"))
             {
@@ -98,7 +91,7 @@ namespace VB
 
             W_stored.set_size(nsample);
             W_stored.zeros();
-            W_prior.init("invgamma", 0.01, 0.01);
+            W_prior.init("invgamma", 1., 1.);
             W_prior.infer = true;
             if (opts.containsElementNamed("W"))
             {
@@ -139,7 +132,7 @@ namespace VB
             }
 
             par1_stored.set_size(nsample);
-            par1_prior.init("invgamma", 1., 1.);
+            par1_prior.init("gaussian", 0., 1.);
             if (opts.containsElementNamed("par1"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
@@ -177,38 +170,35 @@ namespace VB
             Rcpp::List W_opts;
             W_opts["infer"] = true;
             W_opts["prior_name"] = "invgamma";
-            W_opts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
+            W_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
 
             Rcpp::List seas_opts;
             seas_opts["infer"] = false;
             seas_opts["prior_name"] = "gaussian";
-            seas_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+            seas_opts["prior_param"] = Rcpp::NumericVector::create(1., 10.);
 
             Rcpp::List rho_opts;
             rho_opts["infer"] = false;
-            rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            rho_opts["prior_name"] = "gamma";
+            rho_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
+            rho_opts["prior_name"] = "invgamma";
 
             Rcpp::List par1_opts;
             par1_opts["infer"] = false;
-            par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            par1_opts["prior_name"] = "gamma";
+            par1_opts["prior_param"] = Rcpp::NumericVector::create(0., 1.);
+            par1_opts["prior_name"] = "gaussian";
 
             Rcpp::List par2_opts;
             par2_opts["infer"] = false;
-            par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            par2_opts["prior_name"] = "gamma";
+            par2_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
+            par2_opts["prior_name"] = "invgamma";
 
             Rcpp::List opts;
             opts["nsample"] = 1000;
             opts["nthin"] = 1;
             opts["nburnin"] = 1000;
             opts["state_sampler"] = "smc";
-
             opts["num_particle"] = 100;
             opts["num_step_ahead_forecast"] = 0;
-            opts["num_eval_forecast_error"] = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
-            opts["tstart_pct"] = 0.9;
 
             opts["W"] = W_opts;
             opts["seas"] = seas_opts;
