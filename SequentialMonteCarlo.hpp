@@ -653,10 +653,6 @@ namespace SMC
                     weights = weights.elem(resample_idx);
                 }
 
-                // if (use_discount)
-                // { // Use discount factor if W is not given
-                //     Wt.at(0) = SequentialMonteCarlo::discount_W(Theta.slice(t), discount_factor);
-                // }
 
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
@@ -822,10 +818,6 @@ namespace SMC
                     weights = weights.elem(resample_idx);
                 }
 
-                // if (use_discount)
-                // { // Use discount factor if W is not given
-                //     Wt.at(0) = SequentialMonteCarlo::discount_W(Theta.slice(t), discount_factor);
-                // }
 
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
@@ -1268,13 +1260,6 @@ namespace SMC
             for (unsigned int t = 0; t < nT; t++)
             {
                 Rcpp::checkUserInterrupt();
-
-                if (use_discount)
-                { // Use discount factor if W is not given
-                    Wt.at(0) = SequentialMonteCarlo::discount_W(
-                        Theta.slice(t + B - 1),
-                        discount_factor);
-                }
 
                 double Wsqrt = std::sqrt(Wt.at(0) + EPS);
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
