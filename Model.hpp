@@ -955,10 +955,9 @@ public:
         }
 
         double dloglik_deta = dloglik_dlam * dlam_deta;
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(dloglik_deta, "Model::dloglik_deta: dloglik_deta");
-        }
+        #endif
         return dloglik_deta;
     }
 
@@ -1011,10 +1010,9 @@ public:
             grad.at(t, 1) = dll_deta * deta_dpar2;
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
-        }
+        #endif
         arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
         return grad_out;
     }
@@ -1058,10 +1056,9 @@ public:
             grad.at(t, 1) = dll_deta * deta_dpar2;
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
-        }
+        #endif
         arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
         return grad_out;
     }
@@ -1182,10 +1179,9 @@ public:
         }
         
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(theta_next, "func_gt: theta_next");
-        }
+        #endif
         return theta_next;
     }
 
@@ -1368,10 +1364,9 @@ public:
             }
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(ft_cur, "func_ft: ft_cur");
-        }
+        #endif
         return ft_cur;
     }
 
@@ -2057,25 +2052,15 @@ public:
         const arma::vec &y     // (nT + 1) X 1, y[0], y[1], ..., y[nT], only use the past values before t
         )
     {
+        arma::vec phi = Fphi.subvec(1, t);
+        // t x 1, phi[1], ..., phi[nlag], phi[nlag + 1], ..., phi[t]
+        //      = phi[1], ..., phi[nlag],       0,       ..., 0 (at time t)
+        arma::vec yt = y.subvec(0, t - 1);        // y[0], y[1], ..., y[t-1]
+        arma::vec dhpsi_tmp = dhpsi.subvec(1, t); // t x 1, h'(psi[1]), ..., h'(psi[t])
 
-        arma::vec increment_row;
-        try
-        {
-            arma::vec phi = Fphi.subvec(1, t);
-            // t x 1, phi[1], ..., phi[nlag], phi[nlag + 1], ..., phi[t]
-            //      = phi[1], ..., phi[nlag],       0,       ..., 0 (at time t)
-            arma::vec yt = y.subvec(0, t - 1);        // y[0], y[1], ..., y[t-1]
-            arma::vec dhpsi_tmp = dhpsi.subvec(1, t); // t x 1, h'(psi[1]), ..., h'(psi[t])
+        arma::vec increment_row = arma::reverse(yt % dhpsi_tmp); // t x 1
+        increment_row = increment_row % phi;
 
-            increment_row = arma::reverse(yt % dhpsi_tmp); // t x 1
-            increment_row = increment_row % phi;
-        }
-        catch(const std::exception& e)
-        {
-            std::cout << "\n t = " << t << ", Fphi len = " << Fphi.n_elem << ", y len = " << y.n_elem << ", dhpsi len = " << dhpsi.n_elem;
-            throw std::runtime_error(e.what());
-        }
-        
         return increment_row;
     }
 
@@ -2093,10 +2078,9 @@ public:
             Fn.submat(t - 1, 0, t - 1, t - 1) = Fnt.t();
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::mat>(Fn, "get_Fn: Fn");
-        }
+        #endif
         return;
     }
 
@@ -2116,10 +2100,9 @@ public:
         }
 
         f0.at(0) = (f0.at(0) < EPS8) ? EPS8 : f0.at(0);
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(f0, "get_f0: f0");
-        }
+        #endif
         return;
     }
 
@@ -2138,10 +2121,10 @@ public:
             arma::vec seas_reg = seas.X.t() * seas.val; // (nT + 1) x 1
             eta = eta + seas_reg.tail(eta.n_elem);
         }
-        if (DEBUG)
-        {
+
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(eta, "func_eta_approx: eta");
-        }
+        #endif
         return eta;
     }
 
@@ -2218,11 +2201,10 @@ public:
         }
         } // switch by observation distribution.
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(Vt, "func_Vt_approx: Vt", true, true);
-        }
-        Vt.elem(arma::find(Vt < EPS8)).fill(EPS8);
+        #endif
+        Vt.clamp(EPS8, Vt.max());
         return Vt;
     }
 
@@ -2289,10 +2271,9 @@ public:
         }
         } // switch by observation distribution.
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(Vt, "func_Vt_approx<double>: Vt", true, true);
-        }
+        #endif
         Vt = std::max(Vt, EPS);
         return Vt;
     }
@@ -2322,10 +2303,9 @@ public:
         }
         } // switch by link
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(yhat, "func_yhat");
-        }
+        #endif
         return yhat;
     }
 
