@@ -314,21 +314,24 @@ static arma::vec qforecast(
     return weights;
 } // func: imp_weights_forecast
 
-static arma::vec qforecast(
+
+static arma::vec qforecast_vec(
     arma::mat &loc,            // p x N
     arma::cube &Prec_chol_inv, // p x p x N
     arma::vec &logq,           // N x 1
     Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::mat &param_filter, // (period + 3) x N
-    const arma::vec &Wt,        // p x 1, {W[t-1]} samples of latent variance
+    const arma::mat &Wt,        // p x p, {W[t-1]} samples of latent variance
     const arma::vec &y,         // y[t]
-    const bool &infer_seas = false,
-    const bool &full_rank = false)
+    const bool &infer_seas = false)
 {
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
+    arma::mat Wt_chol = arma::chol(arma::symmatu(Wt));
+    arma::mat Wt_chol_inv = arma::inv(arma::trimatu(Wt_chol));
+    arma::mat Wt_inv = Wt_chol_inv * Wt_chol_inv.t();
+    double ldetW = arma::log_det_sympd(Wt);
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
@@ -336,54 +339,36 @@ static arma::vec qforecast(
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
         Model mod = model;
-        if (infer_seas)
-        {
-            mod.seas.val = param_filter.submat(0, i, mod.seas.period - 1, i);
-        }
 
-        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state);           // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y);                                            // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
-
         double Vt = ApproxDisturbance::func_Vt_approx(
             lambda, mod.dobs, mod.flink); // (eq 3.11)
 
-        if (!full_rank)
-        {
-            // loc.col(i) = gtheta_old_i;
-            logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
+        arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
+        arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + Wt_inv; // nP x nP
+        Prec_i.diag() += EPS; // (eq 3.21)
+        arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right chol of the precision
+        arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left chol of the variance
+        double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
+        Prec_chol_inv.slice(i) = Rchol_inv;
 
-        } // One-step-ahead predictive density
-        else
-        {
-            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
-            double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - mod.dobs.par1 - ft_tilde;                          // (eq 3.16)
+        double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
+        double delta = yhat_new - ft_tilde; // (eq 3.16)
+        loc.col(i) = Ft_gtheta * (delta / Vt) + Wt_inv * gtheta_old_i; // (eq 3.20)
 
-            arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
-            Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / Wt.at(0);                           // (eq 3.21)
-            arma::mat Rchol = arma::chol(arma::symmatu(Prec_i));        // Right cholesky of the precision
-            arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));      // Left cholesky of the variance
-            double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
-            Prec_chol_inv.slice(i) = Rchol_inv;
+        double ldetV = std::log(std::abs(Vt) + EPS);
 
-            loc.col(i) = Ft_gtheta * (delta / Vt);         // nP x 1, location, mean mu = Sigma * loc
-            loc.at(0, i) += gtheta_old_i.at(0) / Wt.at(0); // location
+        double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
+        loglik += delta * delta / Vt;
+        loglik += arma::as_scalar(gtheta_old_i.t() * Wt_inv * gtheta_old_i);
+        loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
+        loglik *= -0.5; // (eq 3.24 - 3.25)
 
-            double ldetV = std::log(std::abs(Vt) + EPS);
-            double ldetW = std::log(std::abs(Wt.at(0)) + EPS);
-
-            double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
-            loglik += delta * delta / Vt;
-            loglik += std::pow(gtheta_old_i.at(0), 2.) / Wt.at(0);
-            loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
-            loglik *= -0.5; // (eq 3.24 - 3.25)
-
-            logq.at(i) += loglik;
-        } // one-step-ahead predictive density
+        logq.at(i) += loglik;
     }
 
     double logq_max = logq.max();

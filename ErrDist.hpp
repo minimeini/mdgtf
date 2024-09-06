@@ -120,7 +120,10 @@ public:
         err_opts["name"] = "gaussian";
         err_opts["par1"] = 0.01;
         err_opts["par2"] = 0.;
-        err_opts["var"] = 0.01;
+
+        arma::mat var(1, 1);
+        var.at(0, 0) = 0.01;
+        err_opts["var"] = var;
         err_opts["full_rank"] = false;
 
         return err_opts;

@@ -144,6 +144,7 @@ Rcpp::List dgtf_simulate(
     output["y"] = Rcpp::wrap(y.t());
     output["nlag"] = model.dlag.nL;
     output["psi"] = Rcpp::wrap(psi.t());
+    output["Theta"] = Rcpp::wrap(Theta);
     output["ft"] = Rcpp::wrap(ft.t());
     output["lambda"] = Rcpp::wrap(lambda.t());
     return output;

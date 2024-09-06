@@ -1419,17 +1419,30 @@ public:
 
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
+            unsigned int psi_idx;
+            if (trans_list[model.ftrans] == TransFunc::Transfer::iterative && (t < ntime))
+            {
+                psi_idx = t + 1;
+            }
+            else
+            {
+                psi_idx = t;
+            }
+
             Theta.col(t) = StateSpace::func_gt(
                 model.ftrans, model.fgain, model.dlag,
                 Theta.col(t - 1), y.at(t - 1), 0, false);
 
-            if (trans_list[model.ftrans] == TransFunc::Transfer::iterative && (t < ntime))
+            if (!model.derr.full_rank)
             {
-                Theta.at(0, t) = psi.at(t + 1);
+                Theta.at(0, t) = psi.at(psi_idx);
             }
             else
             {
-                Theta.at(0, t) = psi.at(t);
+                arma::vec eps = arma::randn<arma::vec>(Theta.n_rows);
+                arma::mat var_chol = arma::chol(model.derr.var);
+                Theta.col(t) = Theta.col(t) + var_chol.t() * eps;
+                psi.at(psi_idx) = Theta.at(0, t);
             }
 
             ft.at(t) = StateSpace::func_ft(

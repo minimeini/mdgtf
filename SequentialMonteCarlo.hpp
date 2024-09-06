@@ -435,7 +435,7 @@ namespace SMC
             return indices;
         }
 
-            static arma::uvec get_smooth_index(
+        static arma::uvec get_smooth_index(
             const arma::rowvec &psi_smooth_now,  // 1 x M, Theta_smooth.slice(t).row(0)
             const arma::rowvec &psi_filter_prev, // 1 x N, Theta.slice(t - 1).row(0)
             const arma::vec &Wsqrt)              // M x 1
@@ -452,6 +452,44 @@ namespace SMC
                 for (unsigned int j = 0; j < N; j++)
                 {
                     weights.at(j) = R::dnorm(psi_filter_prev.at(j), psi_smooth_now.at(i), Wsqrt.at(i), true);
+                }
+
+                double wmax = weights.max();
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
+                weights = arma::exp(weights);
+
+                double wsum = arma::accu(weights);
+                if (wsum < EPS)
+                {
+                    weights.ones();
+                    wsum = static_cast<double>(N);
+                }
+                weights /= wsum;
+
+                smooth_idx.at(i) = sample(N, weights, true); // draw one sample only
+            }
+
+            return smooth_idx;
+        }
+
+        static arma::uvec get_smooth_index(
+            const arma::mat &theta_now,  // p x M, Theta_smooth.slice(t).row(0)
+            const arma::mat &theta_prev, // p x N, Theta.slice(t - 1).row(0)
+            const arma::mat &Wt_now) // p x p
+        {
+            unsigned int M = theta_now.n_cols;
+            unsigned int N = theta_prev.n_cols;
+
+            arma::uvec smooth_idx = arma::regspace<arma::uvec>(0, 1, M - 1);
+            for (unsigned int i = 0; i < M; i++) // loop over M smoothed particles at time t.
+            {
+                // arma::vec diff = (psi_now.at(i) - psi_old) / Wsqrt.at(i); // N x 1
+                // weights = - 0.5 * arma::pow(diff, 2.);
+                arma::vec weights(N, arma::fill::zeros);
+                for (unsigned int j = 0; j < N; j++)
+                {
+                    weights.at(j) = MVNorm::dmvnorm(theta_now.col(i), theta_prev.col(j), Wt_now, true);
                 }
 
                 double wmax = weights.max();
@@ -817,6 +855,150 @@ namespace SMC
 
                     // double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_discount.at(t + 1), true);
                     double logp = 0.;
+                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                    double lambda = LinkFunc::ft2mu(ft, model.flink);
+                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    weights.at(i) = logp - logq.at(i);
+                }
+
+                double wmax = weights.max();
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
+                weights = arma::exp(weights);
+
+                Theta.slice(t + 1) = Theta_new;
+
+                if (final_resample_by_weights)
+                {
+                    eff_forward.at(t + 1) = effective_sample_size(weights);
+                    if (eff_forward.at(t + 1) < 0.95 * N || t >= nT - 1)
+                    {
+                        arma::uvec resample_idx = get_resample_index(weights);
+                        Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
+                        weights.ones();
+                    }
+                }
+
+
+                log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
+
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rForwawrd Filtering: " << t + 1 << "/" << nT;
+                }
+            }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+
+            return log_cond_marginal;
+        }
+
+
+        static double auxiliary_filter_lba_vec(
+            arma::cube &Theta, // p x N x (nT + 1)
+            arma::mat &weights_forward, // (nT + 1) x N
+            arma::vec &eff_forward, // (nT + 1) x 1
+            arma::cube &Wt_discount, // nP x nP x (nT + 1)
+            Model &model,
+            const arma::vec &y, // (nT + 1) x 1
+            const unsigned int &N = 1000,
+            const bool &initial_resample_all = false,
+            const bool &final_resample_by_weights = false,
+            const bool &use_discount = false,
+            const double &discount_factor = 0.95,
+            const bool &verbose = false)
+        {
+            const unsigned int nT = y.n_elem - 1;
+            const double logN = std::log(static_cast<double>(N));
+
+            std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+
+            weights_forward.set_size(y.n_elem, N);
+            weights_forward.zeros();
+            eff_forward.set_size(y.n_elem);
+            eff_forward.zeros();
+
+            arma::vec weights(N, arma::fill::ones);
+            double log_cond_marginal = 0.;
+
+            arma::cube Wt_chol = Wt_discount;
+            LBA::LinearBayes lba(use_discount, discount_factor);
+            lba.filter(model, y);
+            Wt_discount.slice(0) = arma::symmatu(lba.Ct.slice(0));
+            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
+            for (unsigned int t = 1; t < y.n_elem; t++)
+            {
+                LBA::func_Gt(Gt, model, lba.mt.col(t - 1), y.at(t - 1));
+                arma::mat Pt = Gt * lba.Ct.slice(t - 1) * Gt.t();
+                arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
+                Wt_hat.diag() += EPS8;
+                Wt_discount.slice(t) = arma::symmatu(Wt_hat);
+                Wt_chol.slice(t) = arma::chol(Wt_discount.slice(t));
+            }
+
+            for (unsigned int t = 0; t < nT; t++)
+            {
+                arma::vec logq(N, arma::fill::zeros);
+                arma::vec tau = logq;
+                arma::mat loc(model.nP, N, arma::fill::zeros);
+                arma::cube prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
+
+                tau = qforecast_vec(
+                    loc, prec_chol_inv, logq,     // sufficient statistics
+                    model, t + 1, Theta.slice(t), // theta needs to be resampled
+                    Wt_discount.slice(t + 1), y);
+
+                tau = weights % tau;
+                weights_forward.row(t) = logq.t();
+
+                if (t > 0)
+                {
+                    arma::uvec resample_idx = get_resample_index(tau);
+                    if (initial_resample_all)
+                    {
+                        for (unsigned int k = 0; k <= t; k++)
+                        {
+                            Theta.slice(k) = Theta.slice(k).cols(resample_idx);
+                            arma::vec wtmp = arma::vectorise(weights_forward.row(k));
+                            weights_forward.row(k) = wtmp.elem(resample_idx).t();
+                        }
+                    }
+                    else
+                    {
+                        Theta.slice(t) = Theta.slice(t).cols(resample_idx);
+                        arma::vec wtmp = arma::vectorise(weights_forward.row(t));
+                        weights_forward.row(t) = wtmp.elem(resample_idx).t();
+                    }
+
+                    loc = loc.cols(resample_idx);
+                    prec_chol_inv = prec_chol_inv.slices(resample_idx);
+
+                    logq = logq.elem(resample_idx);
+                    weights = weights.elem(resample_idx);
+                }
+
+                // Propagate
+                arma::mat Theta_new(model.nP, N, arma::fill::zeros);
+                arma::mat Theta_cur = Theta.slice(t); // nP x N
+                #ifdef _OPENMP
+                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #endif
+                for (unsigned int i = 0; i < N; i++)
+                {
+                    arma::vec eps = arma::randn(Theta_new.n_rows);
+                    // arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
+                    // arma::vec theta_new = prec_chol_inv.slice(i) * zt; // scaled
+                    // logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
+                    // double logp = MVNorm::dmvnorm(theta_new, Theta_cur.col(i), Wt_discount.slice(t + 1), true);
+
+                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t + 1), model.seas.period, model.seas.in_state);
+                    arma::vec theta_new = gtheta + Wt_chol.slice(t + 1).t() * eps;
+                    double logp = 0.;
+
+                    Theta_new.col(i) = theta_new;                    
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
@@ -1557,12 +1739,57 @@ namespace SMC
             return;
         }
 
+        void smoother_lba_vec(
+            Model &model, 
+            const arma::vec &y, // (nT + 1) x 1
+            const arma::cube &Wt, // p x p x (nT + 1)
+            const bool &verbose = VERBOSE)
+        {
+            const unsigned int nT = y.n_elem - 1;
+            arma::uvec idx = sample(N, M, weights, true, true); // M x 1
+            arma::mat theta_last = Theta.slice(nT);             // p x N
+            arma::mat theta_sub = theta_last.cols(idx);         // p x M
+
+            Theta_smooth = arma::zeros<arma::cube>(model.nP, M, nT + B);
+            Theta_smooth.slice(nT) = theta_sub;
+
+            for (unsigned int t = nT; t > 0; t--)
+            {
+                Rcpp::checkUserInterrupt();
+
+                // Resampling density for theta[t-1] is: p(theta[t] | theta[t-1], W[t]).
+                arma::rowvec psi_smooth_now = Theta_smooth.slice(t).row(0);                       // 1 x M
+                arma::rowvec psi_filter_prev = Theta.slice(t - 1).row(0);                         // 1 x N
+                arma::uvec smooth_idx = get_smooth_index(
+                    Theta_smooth.slice(t), Theta.slice(t-1), Wt.slice(t)); // M x 1
+
+                arma::mat theta_next = Theta.slice(t - 1);
+                theta_next = theta_next.cols(smooth_idx); // p x M
+                Theta_smooth.slice(t - 1) = theta_next;
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rSmoothing: " << y.n_elem - t << "/" << nT;
+                }
+            }
+
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+
+            arma::mat psi = Theta_smooth.row_as_mat(0);
+            output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+            return;
+        }
+
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             const unsigned int ntime = y.n_elem - 1;
-            Wt.clear();
-            Wt.set_size(y.n_elem);
-            Wt.ones();
+            // Wt.clear();
+            // Wt.set_size(y.n_elem);
+            // Wt.ones();
+
+            arma::cube Wt_discount = arma::zeros<arma::cube>(model.nP, model.nP, y.n_elem);
 
             // forward_filter(model, verbose);
             std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
@@ -1580,6 +1807,7 @@ namespace SMC
             {
                 Theta.slice(0).col(i) = arma::randn<arma::vec>(model.nP);
             }
+
             if (model.seas.in_state && model.seas.period > 0)
             {
                 for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
@@ -1589,10 +1817,10 @@ namespace SMC
                 }
             }
 
-            log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter_lba(
-                Theta, weights_forward, eff_forward, Wt,
+            log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter_lba_vec(
+                Theta, weights_forward, eff_forward, Wt_discount,
                 model, y, N, false, true, 
-                use_discount, discount_factor, verbose);
+                true, discount_factor, verbose);
 
             arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
             output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
@@ -1601,7 +1829,7 @@ namespace SMC
 
             if (smoothing)
             {
-                smoother(model, y, verbose);
+                smoother_lba_vec(model, y, Wt_discount, verbose);
             }
 
             return;
