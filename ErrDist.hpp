@@ -87,14 +87,12 @@ public:
 
         if (full_rank && (var_tmp.n_elem == 1))
         {
-            // full rank with same diagonal variances
             var = arma::eye<arma::mat>(nP, nP);
             var.diag() *= par1;
 
         }
-        else if (full_rank)
+        else
         {
-            // full rank with full variance-covariance matrix
             unsigned int nrow = std::min(nP, var_tmp.n_rows);
             unsigned int ncol = std::min(nP, var_tmp.n_cols);
             var = arma::eye<arma::mat>(nP, nP);
@@ -105,12 +103,6 @@ public:
             {
                 throw std::invalid_argument("ErrDist: variance-covariance matrix must be sympd.");
             }
-        }
-        else
-        {
-            // not full rank with scalar variance
-            var = arma::zeros<arma::mat>(nP, nP);
-            var.at(0, 0) = par1;
         }
 
         par2 = 0.;
