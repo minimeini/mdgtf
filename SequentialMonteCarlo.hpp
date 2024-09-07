@@ -574,6 +574,93 @@ namespace SMC
         }
 
 
+        static double auxiliary_filter0(
+            arma::cube &Theta, // p x N x (nT + 1)
+            Model &model,
+            const arma::vec &y, // (nT + 1) x 1
+            const unsigned int &N = 1000,
+            const bool &initial_resample_all = false,
+            const bool &final_resample_by_weights = false)
+        {
+            const unsigned int nT = y.n_elem - 1;
+            const double logN = std::log(static_cast<double>(N));
+            const double Wsqrt = std::sqrt(std::abs(model.derr.par1) + EPS);
+            arma::vec weights(N, arma::fill::ones);
+            double log_cond_marginal = 0.;
+
+            for (unsigned int t = 0; t < nT; t++)
+            {
+                arma::vec logq(N, arma::fill::zeros);
+                arma::vec tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
+
+                tau = weights % tau;
+                if (t > 0)
+                {
+                    arma::uvec resample_idx = get_resample_index(tau);
+                    if (initial_resample_all)
+                    {
+                        for (unsigned int k = 0; k <= t; k++)
+                        {
+                            Theta.slice(k) = Theta.slice(k).cols(resample_idx);
+                        }
+                    }
+                    else
+                    {
+                        Theta.slice(t) = Theta.slice(t).cols(resample_idx);
+                    }
+
+                    logq = logq.elem(resample_idx);
+                    weights = weights.elem(resample_idx);
+                }
+
+
+                // Propagate
+                arma::mat Theta_new(model.nP, N, arma::fill::zeros);
+                arma::mat Theta_cur = Theta.slice(t); // nP x N
+                #ifdef _OPENMP
+                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #endif
+                for (unsigned int i = 0; i < N; i++)
+                {
+                    double eps = R::rnorm(0., Wsqrt);
+                    logq.at(i) += R::dnorm4(eps, 0., Wsqrt, true); // sample from evolution distribution
+
+                    arma::vec theta_new = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+                    theta_new.at(0) += eps;
+                    Theta_new.col(i) = theta_new;
+
+                    double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wsqrt, true);
+                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                    double lambda = LinkFunc::ft2mu(ft, model.flink);
+                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    weights.at(i) = logp - logq.at(i);
+                }
+
+                Theta.slice(t + 1) = Theta_new;
+
+                double wmax = weights.max();
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
+                weights = arma::exp(weights);
+                if (final_resample_by_weights || t >= nT - 1)
+                {
+                    double eff = effective_sample_size(weights);
+                    if (eff < 0.95 * N)
+                    {
+                        arma::uvec resample_idx = get_resample_index(weights);
+                        Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
+                        weights.ones();
+                    }
+                }
+
+
+                log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
+            }
+
+            return log_cond_marginal;
+        }
+
+
         static double auxiliary_filter(
             arma::cube &Theta, // p x N x (nT + 1)
             arma::mat &weights_forward, // (nT + 1) x N

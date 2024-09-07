@@ -13,57 +13,45 @@
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 
-// static arma::vec qlikelihood(
-//     const unsigned int &t_next,  // (t + 1)
-//     const arma::mat &Theta_next, // p x N
-//     const arma::vec &y,
-//     const Model &model)
-// {
-//     unsigned int N = Theta_next.n_cols;
-//     arma::vec weights(N, arma::fill::zeros);
-//     double mu0 = 0.;
+static arma::vec qforecast0(
+    arma::vec &logq,           // N x 1
+    const Model &model,
+    const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
+    const arma::mat &Theta_old, // p x N, {theta[t-1]}
+    const arma::vec &y)
+{
+    const double y_old = y.at(t_new - 1);
+    const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
 
-//     for (unsigned int i = 0; i < N; i++)
-//     {
-//         arma::vec theta_next = Theta_next.col(i);
-//         double ft = StateSpace::func_ft(model, t_next, theta_next, y); // use y[t], ..., y[t + 1 - nelem]
-//         double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0);       // conditional mean of the observations
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
+    for (unsigned int i = 0; i < Theta_old.n_cols; i++)
+    {
+        arma::vec gtheta_old_i = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        double eta = ft_gtheta;
+        double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.10)
+        lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
-//         weights.at(i) = ObsDist::loglike(
-//             y.at(t_next),
-//             model.dobs.name,
-//             lambda, model.dobs.par2,
-//             false);
-//     }
+        double Vt = ApproxDisturbance::func_Vt_approx(
+            lambda, model.dobs, model.flink); // (eq 3.11)
 
-//     return weights;
-// }
+        logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
+    }
 
-// static arma::vec qlikelihood(
-//     const unsigned int &t_next,  // (t + 1)
-//     const arma::mat &Theta_next, // p x N
-//     const arma::vec &mu0,        // N x 1
-//     const arma::vec &yall,
-//     const Model &model)
-// {
-//     unsigned int N = Theta_next.n_cols;
-//     arma::vec weights(N, arma::fill::zeros);
+    double logq_max = logq.max();
+    logq.for_each([&logq_max](arma::vec::elem_type &val)
+                  { val -= logq_max; });
 
-//     for (unsigned int i = 0; i < N; i++)
-//     {
-//         arma::vec theta_next = Theta_next.col(i);
-//         double ft = StateSpace::func_ft(model, t_next, theta_next, yall); // use y[t], ..., y[t + 1 - nelem]
-//         double lambda = LinkFunc::ft2mu(ft, model.flink.name, mu0.at(i)); // conditional mean of the observations
+    arma::vec weights = arma::exp(logq);
 
-//         weights.at(i) = ObsDist::loglike(
-//             yall.at(t_next),
-//             model.dobs.name,
-//             lambda, model.dobs.par2,
-//             false);
-//     }
+    #ifdef DGTF_DO_BOUND_CHECK
+        bound_check<arma::vec>(weights, "qforecast");
+    #endif
+    return weights;
+} // func: imp_weights_forecast
 
-//     return weights;
-// }
 
 static arma::vec qforecast(
     arma::mat &loc,            // p x N
@@ -313,6 +301,9 @@ static arma::vec qforecast(
     }
     return weights;
 } // func: imp_weights_forecast
+
+
+
 
 
 static arma::vec qforecast_vec(

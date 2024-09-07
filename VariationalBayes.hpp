@@ -1298,9 +1298,6 @@ namespace VB
             psi_stored.set_size(psi.n_elem, nsample);
             psi_stored.zeros();
 
-            arma::vec eff_forward(y.n_elem, arma::fill::zeros);
-            arma::mat weights_forward(y.n_elem, N);
-
             ApproxDisturbance approx_dlm(nT, model.fgain);
             Prior w0_prior("gaussian", 0., model.derr.par1, true);
             if (algo_list[state_sampler] == AVAIL::Algo::MCMC)
@@ -1308,15 +1305,10 @@ namespace VB
                 approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
             }
 
-            arma::vec Wt(model.nP, arma::fill::zeros);
-            Wt.at(0) = model.derr.par1;
-
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
-
-                
 
                 switch (algo_list[state_sampler])
                 {
@@ -1327,9 +1319,8 @@ namespace VB
                     Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
                     Theta.slice(0).row(0).fill(psi.at(0)); // 1 x N
 
-                    double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
-                        Theta, weights_forward, eff_forward, Wt,
-                        model, y, N, true, false);
+                    double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
+                        Theta, model, y, N, true, false);
 
                     arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
                     psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
@@ -1354,8 +1345,6 @@ namespace VB
                     break;
                 }
                 }
-
-                
 
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
                 arma::vec ft = psi;
@@ -1429,11 +1418,6 @@ namespace VB
                         W_prior.name, par1_prior.name, model.dlag.name, 
                         model.seas.period, model.seas.in_state);
                     update_params(model, param_selected, eta);
-
-                    if (W_prior.infer)
-                    {
-                        Wt.at(0) = model.derr.par1;
-                    }
 
                     if ((par1_prior.infer || par2_prior.infer) && (algo_list[state_sampler] == AVAIL::Algo::MCMC))
                     {
