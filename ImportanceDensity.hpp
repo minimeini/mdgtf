@@ -320,11 +320,12 @@ static void prior_forward(
     arma::mat &mu,     // nP x (nT + 1)
     arma::cube &prec,  // nP x nP x (nT + 1)
     const Model &model,
-    const arma::vec &y   // (nT + 1) x 1
+    const arma::vec &y,   // (nT + 1) x 1
+    const arma::cube &Wt, // p x p x (nT + 1), only initialized if using discount factor
+    const bool &use_discount = false
 )
 {
     const unsigned int nT = y.n_elem - 1;
-
     arma::mat sig = arma::eye<arma::mat>(model.nP, model.nP) * 2.;
     prec.slice(0) = arma::eye<arma::mat>(model.nP, model.nP) * 0.5;
 
@@ -334,8 +335,15 @@ static void prior_forward(
         mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state);
         LBA::func_Gt(Gt, model, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t();
-        sig.at(0, 0) += model.derr.par1;
         sig.diag() += EPS;
+        if (use_discount)
+        {
+            sig = sig + Wt.slice(t);
+        }
+        else
+        {
+            sig.at(0, 0) += model.derr.par1;
+        }
 
         prec.slice(t) = inverse(sig);
     }
@@ -366,7 +374,7 @@ static void backward_kernel(
     arma::mat Uprec_cur = K;
     arma::mat Urchol_cur = K;
 
-    if (trans_list[model.ftrans] == TransFunc::sliding)
+    if (trans_list[model.ftrans] == TransFunc::sliding && !model.derr.full_rank)
     {
         for (unsigned int i = 0; i < nstate - 1; i++)
         {
@@ -426,8 +434,7 @@ static arma::vec qbackcast(
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
     const arma::mat &vt,         // nP x (nT + 1), v[t], mean of artificial prior for theta[t_cur]
     const arma::cube &Vt_inv,        // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
-    const arma::vec &y,
-    const bool &full_rank = false
+    const arma::vec &y
 )
 {
     std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -440,7 +447,7 @@ static arma::vec qbackcast(
     arma::mat Uprec_cur = K_cur;
     double ldetU = 0.;
 
-    if (trans_list[model.ftrans] == TransFunc::Transfer::sliding || full_rank)
+    if (trans_list[model.ftrans] == TransFunc::Transfer::sliding || model.derr.full_rank)
     {
         backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, y);
     }
@@ -449,7 +456,7 @@ static arma::vec qbackcast(
     for (unsigned int i = 0; i < N; i++)
     {
         arma::vec u_cur;
-        if (trans_list[model.ftrans] == TransFunc::Transfer::sliding || full_rank)
+        if (trans_list[model.ftrans] == TransFunc::Transfer::sliding || model.derr.full_rank)
         {
             u_cur = K_cur * Theta_next.col(i) + r_cur;
         }
@@ -482,7 +489,7 @@ static arma::vec qbackcast(
             lambda, model.dobs, model.flink); // (eq 3.59)
         Vtilde = std::abs(Vtilde) + EPS;
 
-        if (!full_rank)
+        if (!model.derr.full_rank)
         {
             // No information from data, degenerates to the backward evolution
             loc.col(i) = u_cur;
