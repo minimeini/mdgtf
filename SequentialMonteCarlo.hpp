@@ -830,6 +830,8 @@ namespace SMC
                 {
                     Wt_chol.at(0, 0) = std::sqrt(Wt.at(0, 0, t + 1));
                     model.derr.par1 = Wt.at(0, 0, t + 1);
+                    model.derr.var.at(0, 0) = Wt.at(0, 0, t + 1);
+
                     tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
                 }
 
@@ -883,126 +885,6 @@ namespace SMC
                     theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink);
-                    double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
-                    weights.at(i) = logp - logq.at(i);
-                }
-
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
-
-                Theta.slice(t + 1) = Theta_new;
-
-                if (final_resample_by_weights)
-                {
-                    eff_forward.at(t + 1) = effective_sample_size(weights);
-                    if (eff_forward.at(t + 1) < 0.95 * N || t >= nT - 1)
-                    {
-                        arma::uvec resample_idx = get_resample_index(weights);
-                        Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
-                        weights.ones();
-                    }
-                }
-
-
-                log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
-
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rForwawrd Filtering: " << t + 1 << "/" << nT;
-                }
-            }
-
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
-
-            return log_cond_marginal;
-        }
-
-
-        static double auxiliary_filter_lba_vec(
-            arma::cube &Theta, // p x N x (nT + 1)
-            arma::mat &weights_forward, // (nT + 1) x N
-            arma::vec &eff_forward, // (nT + 1) x 1
-            arma::cube &Wt, // nP x nP x (nT + 1)
-            Model &model,
-            const arma::vec &y, // (nT + 1) x 1
-            const unsigned int &N = 1000,
-            const bool &initial_resample_all = false,
-            const bool &final_resample_by_weights = false,
-            const bool &use_discount = false,
-            const double &discount_factor = 0.95,
-            const bool &verbose = false)
-        {
-            const unsigned int nT = y.n_elem - 1;
-            const double logN = std::log(static_cast<double>(N));
-
-            weights_forward.set_size(y.n_elem, N);
-            weights_forward.zeros();
-            eff_forward.set_size(y.n_elem);
-            eff_forward.zeros();
-
-            arma::vec weights(N, arma::fill::ones);
-            double log_cond_marginal = 0.;
-
-            for (unsigned int t = 0; t < nT; t++)
-            {
-                model.derr.var = Wt.slice(t + 1);
-                arma::mat Wt_chol = arma::chol(Wt.slice(t + 1));
-
-                arma::vec logq(N, arma::fill::zeros);
-                arma::vec tau = logq;
-                arma::mat loc(model.nP, N, arma::fill::zeros);
-                arma::cube prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
-
-                tau = qforecast_vec(
-                    loc, prec_chol_inv, logq,     // sufficient statistics
-                    model, t + 1, Theta.slice(t), y);
-
-                tau = weights % tau;
-                weights_forward.row(t) = logq.t();
-
-                if (t > 0)
-                {
-                    arma::uvec resample_idx = get_resample_index(tau);
-                    if (initial_resample_all)
-                    {
-                        for (unsigned int k = 0; k <= t; k++)
-                        {
-                            Theta.slice(k) = Theta.slice(k).cols(resample_idx);
-                            arma::vec wtmp = arma::vectorise(weights_forward.row(k));
-                            weights_forward.row(k) = wtmp.elem(resample_idx).t();
-                        }
-                    }
-                    else
-                    {
-                        Theta.slice(t) = Theta.slice(t).cols(resample_idx);
-                        arma::vec wtmp = arma::vectorise(weights_forward.row(t));
-                        weights_forward.row(t) = wtmp.elem(resample_idx).t();
-                    }
-
-                    logq = logq.elem(resample_idx);
-                    weights = weights.elem(resample_idx);
-                }
-
-                // Propagate
-                arma::mat Theta_new(model.nP, N, arma::fill::zeros);
-                arma::mat Theta_cur = Theta.slice(t); // nP x N
-                #ifdef _OPENMP
-                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
-                #endif
-                for (unsigned int i = 0; i < N; i++)
-                {
-                    arma::vec eps = arma::randn(Theta_new.n_rows);
-                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t + 1), model.seas.period, model.seas.in_state);
-                    arma::vec theta_new = gtheta + Wt_chol.t() * eps;
-
-                    Theta_new.col(i) = theta_new;                    
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
@@ -1631,7 +1513,7 @@ namespace SMC
             arma::mat weights_forward(y.n_elem, N, arma::fill::zeros);
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             double log_cond_marg = 0.;
-            log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter_lba_vec(
+            log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter_lba(
                 Theta, weights_forward, eff_forward, Wt,
                 model, y, N, false, true, 
                 true, discount_factor, verbose);
