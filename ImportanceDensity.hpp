@@ -60,7 +60,7 @@ static arma::vec qforecast(
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::vec &W_old,     // N x 1, {W[t-1]} samples of latent variance
+    const arma::vec &W,     // N x 1, {W[t-1]} samples of latent variance
     const arma::mat &param,   // (period + 3) x N, (seasonal components, rho, par1, par2)
     const arma::vec &y,
     const bool &obs_update,
@@ -112,21 +112,21 @@ static arma::vec qforecast(
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / W_old.at(i);                   // (eq 3.21)
+            Prec_i.at(0, 0) += 1. / W.at(i);                   // (eq 3.21)
             arma::mat Rchol = arma::chol(arma::symmatu(Prec_i));   // Right cholesky of the precision
             arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.;
             Prec_chol_inv.slice(i) = Rchol_inv;
 
             loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1
-            loc.at(0, i) += gtheta_old_i.at(0) / W_old.at(i);
+            loc.at(0, i) += gtheta_old_i.at(0) / W.at(i);
 
             double ldetV = std::log(std::abs(Vt) + EPS);
-            double ldetW = std::log(std::abs(W_old.at(i)) + EPS);
+            double ldetW = std::log(std::abs(W.at(i)) + EPS);
 
             double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
             loglik += delta * delta / Vt;
-            loglik += std::pow(gtheta_old_i.at(0), 2.) / W_old.at(i);
+            loglik += std::pow(gtheta_old_i.at(0), 2.) / W.at(i);
             loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
             loglik *= -0.5; // (eq 3.24 - 3.25)
 
@@ -155,7 +155,7 @@ static arma::vec qforecast(
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::mat &Wt,        // p x N, {W[t-1]} samples of latent variance
+    const arma::vec &W,        // N x 1, {W[t-1]} samples of latent variance
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
@@ -190,7 +190,7 @@ static arma::vec qforecast(
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / Wt.at(0, i); // (eq 3.21)
+            Prec_i.at(0, 0) += 1. / W.at(i); // (eq 3.21)
             arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
             arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
             Prec_chol_inv.slice(i) = Rchol_inv;
@@ -198,14 +198,14 @@ static arma::vec qforecast(
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
 
             loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1, location, mean mu = Sigma * loc
-            loc.at(0, i) += gtheta_old_i.at(0) / Wt.at(0, i); // location
+            loc.at(0, i) += gtheta_old_i.at(0) / W.at(i); // location
 
             double ldetV = std::log(std::abs(Vt) + EPS);
-            double ldetW = std::log(std::abs(Wt.at(0, i)) + EPS);
+            double ldetW = std::log(std::abs(W.at(i)) + EPS);
 
             double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
             loglik += delta * delta / Vt;
-            loglik += std::pow(gtheta_old_i.at(0), 2.) / Wt.at(0, i);
+            loglik += std::pow(gtheta_old_i.at(0), 2.) / W.at(i);
             loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
             loglik *= -0.5; // (eq 3.24 - 3.25)
 
@@ -232,7 +232,7 @@ static arma::vec qforecast(
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::vec &Wt,        // p x 1, {W[t-1]} samples of latent variance
+    const arma::mat &W,        // p x p, {W[t-1]} samples of latent variance
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
@@ -267,21 +267,21 @@ static arma::vec qforecast(
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / Wt.at(0); // (eq 3.21)
+            Prec_i.at(0, 0) += 1. / W.at(0, 0); // (eq 3.21)
             arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
             arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
             Prec_chol_inv.slice(i) = Rchol_inv;
 
             loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1, location, mean mu = Sigma * loc
-            loc.at(0, i) += gtheta_old_i.at(0) / Wt.at(0); // location
+            loc.at(0, i) += gtheta_old_i.at(0) / W.at(0, 0); // location
 
             double ldetV = std::log(std::abs(Vt) + EPS);
-            double ldetW = std::log(std::abs(Wt.at(0)) + EPS);
+            double ldetW = std::log(std::abs(W.at(0, 0)) + EPS);
 
             double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
             loglik += delta * delta / Vt;
-            loglik += std::pow(gtheta_old_i.at(0), 2.) / Wt.at(0);
+            loglik += std::pow(gtheta_old_i.at(0), 2.) / W.at(0, 0);
             loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
             loglik *= -0.5; // (eq 3.24 - 3.25)
 
@@ -313,16 +313,16 @@ static arma::vec qforecast_vec(
     Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::mat &Wt,        // p x p, {W[t-1]} samples of latent variance
+    const arma::mat &W,        // p x p, {W[t-1]} samples of latent variance
     const arma::vec &y,         // y[t]
     const bool &infer_seas = false)
 {
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
-    arma::mat Wt_chol = arma::chol(arma::symmatu(Wt));
-    arma::mat Wt_chol_inv = arma::inv(arma::trimatu(Wt_chol));
-    arma::mat Wt_inv = Wt_chol_inv * Wt_chol_inv.t();
-    double ldetW = arma::log_det_sympd(Wt);
+    arma::mat W_chol = arma::chol(arma::symmatu(W));
+    arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
+    arma::mat W_inv = W_chol_inv * W_chol_inv.t();
+    double ldetW = arma::log_det_sympd(W);
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
@@ -340,7 +340,7 @@ static arma::vec qforecast_vec(
             lambda, mod.dobs, mod.flink); // (eq 3.11)
 
         arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
-        arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + Wt_inv; // nP x nP
+        arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + W_inv; // nP x nP
         Prec_i.diag() += EPS; // (eq 3.21)
         arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right chol of the precision
         arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left chol of the variance
@@ -349,13 +349,13 @@ static arma::vec qforecast_vec(
 
         double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
         double delta = yhat_new - ft_tilde; // (eq 3.16)
-        loc.col(i) = Ft_gtheta * (delta / Vt) + Wt_inv * gtheta_old_i; // (eq 3.20)
+        loc.col(i) = Ft_gtheta * (delta / Vt) + W_inv * gtheta_old_i; // (eq 3.20)
 
         double ldetV = std::log(std::abs(Vt) + EPS);
 
         double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
         loglik += delta * delta / Vt;
-        loglik += arma::as_scalar(gtheta_old_i.t() * Wt_inv * gtheta_old_i);
+        loglik += arma::as_scalar(gtheta_old_i.t() * W_inv * gtheta_old_i);
         loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
         loglik *= -0.5; // (eq 3.24 - 3.25)
 
@@ -423,7 +423,7 @@ static void prior_forward(
     arma::mat &mu,     // nP x (nT + 1)
     arma::cube &prec,  // nP x nP x (nT + 1)
     const Model &model,
-    const arma::vec &Wt, // nP x 1
+    const arma::mat &W, // nP x nP
     const arma::vec &y   // (nT + 1) x 1
 )
 {
@@ -438,7 +438,7 @@ static void prior_forward(
         mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state);
         LBA::func_Gt(Gt, model, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t();
-        sig.at(0, 0) += Wt.at(0);
+        sig.at(0, 0) += W.at(0, 0);
         sig.diag() += EPS;
 
         prec.slice(t) = inverse(sig);
@@ -446,79 +446,6 @@ static void prior_forward(
 
     return;
 }
-
-// /**
-//  * @brief Construct artifical priors (for backward filtering) via forward iterations.
-//  *
-//  */
-// static void prior_forward2(
-//     arma::mat &v,     // nP x (nT + 1)
-//     arma::cube &Vinv, // nP x nP x (nT + 1)
-//     arma::cube &VGt,  // nP x nP x (nT + 1)
-//     arma::cube &Uinv, // nP x nP x (nT + 1)
-//     arma::vec &ldetU, // (nT + 1) x 1
-//     arma::vec &cnst_prior, // (nT + 1) x 1
-//     const Model &model,
-//     const arma::vec &Wt, // nP x 1
-//     const arma::vec &y   // (nT + 1) x 1
-// )
-// {
-//     std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
-//     const unsigned int nP = Wt.n_elem;
-//     const double p_ = static_cast<double>(nP);
-//     const unsigned int nT = y.n_elem - 1;
-
-//     arma::mat V = arma::eye<arma::mat>(nP, nP) * 2.;
-//     Vinv.slice(0) = arma::eye<arma::mat>(nP, nP) * 0.5;
-
-//     cnst_prior.for_each([&p_](arma::vec::elem_type &c)
-//                         { -0.5 * p_ *LOG2PI; });
-
-//     for (unsigned int t = 1; t <= nT; t++)
-//     {
-//         cnst_prior.at(t - 1) -= 0.5 * arma::log_det_sympd(V);
-//         cnst_prior.at(t - 1) -= 0.5 * arma::as_scalar(v.col(t - 1).t() * Vinv.slice(t - 1) * v.col(t - 1));
-
-//         v.col(t) = StateSpace::func_gt(model, v.col(t - 1), y.at(t - 1));
-//         arma::mat Gt = LBA::func_Gt(model, v.col(t - 1), y.at(t - 1));
-
-//         VGt.slice(t - 1) = V * Gt.t();
-//         arma::mat U = V;
-
-//         V = Gt * V * Gt.t();
-//         V.at(0, 0) += Wt.at(0);
-//         V.diag() += EPS;
-
-//         arma::mat sig_chol = arma::chol(arma::symmatu(V)); // V = R.t() * R
-//         arma::mat sig_chol_inv = arma::inv(arma::trimatu(sig_chol));
-//         Vinv.slice(t) = sig_chol_inv * sig_chol_inv.t(); // Vinv = R.i() * R.i().t()
-
-//         arma::mat K(nP, nP, arma::fill::zeros);
-//         if (trans_list[model.transfer.name] == AVAIL::sliding)
-//         {
-//             for (unsigned int i = 0; i < nP; i ++)
-//             {
-//                 K.at(i, i + 1) = 1.;
-//             }
-//             K.at(nP - 1, nP - 1) = 1.;
-
-//             U.zeros();
-//             Uinv.at(nP - 1, nP - 1, t - 1) = 1. / Wt.at(0);
-//             ldetU.at(t - 1) = std::log(Wt.at(0));
-//         }
-//         else
-//         {
-//             K = VGt.slice(t - 1) * Vinv.slice(t);
-//             U = U - K * V * K.t();
-//             sig_chol = arma::chol(arma::symmatu(U));
-//             sig_chol_inv = arma::inv(arma::trimatu(sig_chol));
-//             Uinv.slice(t - 1) = sig_chol_inv * sig_chol_inv.t();
-//             ldetU.at(t - 1) = 2. * arma::accu(arma::log(sig_chol_inv.diag()));
-//         }
-//         }
-
-//     return;
-// }
 
 
 
@@ -531,7 +458,7 @@ static void backward_kernel(
     const unsigned int &t_cur,
     const arma::mat &vt,  // nP x (nT + 1)
     const arma::cube &Vt_inv, // nP x nP x (nT + 1)
-    const arma::vec &Wt,
+    const arma::mat &W, // p x p
     const arma::vec &y)
 {
     unsigned int nstate = model.nP;
@@ -567,10 +494,10 @@ static void backward_kernel(
             }
         }
 
-        U_cur.at(nstate - 1, nstate - 1) = Wt.at(0);
-        Uprec_cur.at(nstate - 1, nstate - 1) = 1. / Wt.at(0);
-        Urchol_cur.at(nstate - 1, nstate - 1) = std::sqrt(Wt.at(0));
-        ldetU = std::log(Wt.at(0));
+        U_cur.at(nstate - 1, nstate - 1) = W.at(0, 0);
+        Uprec_cur.at(nstate - 1, nstate - 1) = 1. / W.at(0, 0);
+        Urchol_cur.at(nstate - 1, nstate - 1) = std::sqrt(W.at(0, 0));
+        ldetU = std::log(W.at(0, 0));
     }
     else
     {
@@ -604,7 +531,7 @@ static arma::vec qbackcast(
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
     const arma::mat &vt,         // nP x (nT + 1), v[t], mean of artificial prior for theta[t_cur]
     const arma::cube &Vt_inv,        // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
-    const arma::vec &Wt, // p x 1
+    const arma::mat &W, // p x p
     const arma::vec &y,
     const bool &full_rank = false
 )
@@ -621,7 +548,7 @@ static arma::vec qbackcast(
 
     if (trans_list[model.ftrans] == TransFunc::Transfer::sliding || full_rank)
     {
-        backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, Wt, y);
+        backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, W, y);
     }
 
     // #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
