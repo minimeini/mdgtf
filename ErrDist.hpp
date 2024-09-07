@@ -137,31 +137,6 @@ public:
         return err_opts;
     }
 
-    /**
-     * @brief Diagonal variance-covariance matrix Wt at t = 0 (i.e. initial value)
-     * 
-     * @param nP dimension of Wt
-     * @param diagonals optional.
-     * @return arma::mat, Wt (nP x nP)
-     */
-    static arma::mat init_Wt(
-        const unsigned int &nP,
-        const Rcpp::Nullable<Rcpp::NumericVector> diagonals = R_NilValue
-    )
-    {
-        arma::mat Wt(nP, nP, arma::fill::zeros);
-        if (diagonals.isNotNull())
-        {
-            arma::vec diags = Rcpp::as<arma::vec>(diagonals);
-            unsigned int niter = (diags.n_elem < nP) ? diags.n_elem : nP;
-            for (unsigned int i = 0; i < niter; i++)
-            {
-                Wt.at(i, i) = diags.at(i);
-            }
-        }
-
-        return Wt;
-    }
 
     /**
      * @brief Draw samples from the random-walk process, return either white noise w[t] or the cumulative error psi[t].

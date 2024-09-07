@@ -313,16 +313,15 @@ static arma::vec qforecast_vec(
     Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::mat &W,        // p x p, {W[t-1]} samples of latent variance
     const arma::vec &y,         // y[t]
     const bool &infer_seas = false)
 {
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
-    arma::mat W_chol = arma::chol(arma::symmatu(W));
+    arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
     arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
     arma::mat W_inv = W_chol_inv * W_chol_inv.t();
-    double ldetW = arma::log_det_sympd(W);
+    double ldetW = arma::log_det_sympd(model.derr.var);
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
