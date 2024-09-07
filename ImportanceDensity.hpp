@@ -237,6 +237,20 @@ static arma::vec qforecast(
 {
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
+    arma::mat W_inv(model.nP, model.nP, arma::fill::zeros);
+    double ldetW = 0.;
+    if (model.derr.full_rank)
+    {
+        arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
+        arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
+        W_inv = W_chol_inv * W_chol_inv.t();
+        ldetW = arma::log_det_sympd(model.derr.var);
+    }
+    else
+    {
+        W_inv.at(0, 0) = 1. / model.derr.par1;
+        ldetW = std::log(std::abs(model.derr.par1) + EPS);
+    }
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
@@ -261,26 +275,22 @@ static arma::vec qforecast(
         else
         {
             arma::vec Ft_gtheta = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
-            double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - model.dobs.par1 - ft_tilde; // (eq 3.16)
-
-            arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
+            arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + W_inv; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / model.derr.par1; // (eq 3.21)
+            
             arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
             arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
             Prec_chol_inv.slice(i) = Rchol_inv;
 
-            loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1, location, mean mu = Sigma * loc
-            loc.at(0, i) += gtheta_old_i.at(0) / model.derr.par1; // location
+            double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
+            double delta = yhat_new - model.dobs.par1 - ft_tilde; // (eq 3.16)
+            loc.col(i) = Ft_gtheta * (delta / Vt) + W_inv * gtheta_old_i; // (eq 3.20)
 
             double ldetV = std::log(std::abs(Vt) + EPS);
-            double ldetW = std::log(std::abs(model.derr.par1) + EPS);
-
             double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
             loglik += delta * delta / Vt;
-            loglik += std::pow(gtheta_old_i.at(0), 2.) / model.derr.par1;
+            loglik += arma::as_scalar(gtheta_old_i.t() * W_inv * gtheta_old_i);
             loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
             loglik *= -0.5; // (eq 3.24 - 3.25)
 
@@ -294,125 +304,14 @@ static arma::vec qforecast(
 
     arma::vec weights = arma::exp(logq);
 
-    if (DEBUG)
-    {
+    #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(weights, "qforecast");
-    }
-    return weights;
-} // func: imp_weights_forecast
-
-
-
-
-
-static arma::vec qforecast_vec(
-    arma::mat &loc,            // p x N
-    arma::cube &Prec_chol_inv, // p x p x N
-    arma::vec &logq,           // N x 1
-    Model &model,
-    const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
-    const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::vec &y,         // y[t]
-    const bool &infer_seas = false)
-{
-    const double y_old = y.at(t_new - 1);
-    const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
-    arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
-    arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
-    arma::mat W_inv = W_chol_inv * W_chol_inv.t();
-    double ldetW = arma::log_det_sympd(model.derr.var);
-
-    #ifdef _OPENMP
-        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
-    for (unsigned int i = 0; i < Theta_old.n_cols; i++)
-    {
-        Model mod = model;
-
-        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
-        double eta = ft_gtheta;
-        double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
-        lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
-        double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, mod.dobs, mod.flink); // (eq 3.11)
-
-        arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
-        arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + W_inv; // nP x nP
-        Prec_i.diag() += EPS; // (eq 3.21)
-        arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right chol of the precision
-        arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left chol of the variance
-        double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
-        Prec_chol_inv.slice(i) = Rchol_inv;
-
-        double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-        double delta = yhat_new - ft_tilde; // (eq 3.16)
-        loc.col(i) = Ft_gtheta * (delta / Vt) + W_inv * gtheta_old_i; // (eq 3.20)
-
-        double ldetV = std::log(std::abs(Vt) + EPS);
-
-        double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
-        loglik += delta * delta / Vt;
-        loglik += arma::as_scalar(gtheta_old_i.t() * W_inv * gtheta_old_i);
-        loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
-        loglik *= -0.5; // (eq 3.24 - 3.25)
-
-        logq.at(i) += loglik;
-    }
-
-    double logq_max = logq.max();
-    logq.for_each([&logq_max](arma::vec::elem_type &val)
-                  { val -= logq_max; });
-
-    arma::vec weights = arma::exp(logq);
-    if (DEBUG)
-    {
-        bound_check<arma::vec>(weights, "qforecast");
-    }
     return weights;
-} // func: imp_weights_forecast
+} // func: qforecast
 
-/**
- * @brief Resampling distribution for normal DLM.
- * 
- * @return arma::vec 
- */
-static arma::vec qforecast_normal(
-    const Model &model,
-    const unsigned int &t_new,   // for y[t] to be predicted
-    const arma::mat &Theta_old,  // p x N, theta[t-1]
-    const arma::mat &param,      // (sig2, tau2, seasonal component) x N, results from t - 1
-    const arma::vec &y,          // (nT + 1) x 1
-    const arma::mat &seas) // nseas x (nT + 1)
-{
-    // model.nP == model.nL: number of latent states excluding static parameters with dynamic models
-    // seasonal_period: for seasonal component
-    arma::vec Fphi = LagDist::get_Fphi(model.nP, model.dlag.name, model.dlag.par1, model.dlag.par2);
-    double FtF = arma::as_scalar(Fphi.t() * Fphi);
-    arma::mat Gmat(model.nP, model.nP, arma::fill::zeros);
-    Gmat.at(0, 0) = 1.;
-    for (unsigned int i = 1; i < model.nP; i++)
-    {
-        Gmat.at(i, i - 1) = 1.;
-    }
 
-    arma::vec logq(Theta_old.n_cols, arma::fill::zeros);
-    for (unsigned int i = 0; i < Theta_old.n_cols; i++)
-    {
-        arma::vec gtheta = Gmat * Theta_old.col(i);
-        double yseas = arma::as_scalar(seas.col(t_new).t() * param.submat(2, i, param.n_rows - 1, i));
-        double ymean = arma::as_scalar(yseas + Fphi.t() * gtheta);
-        double yvar = std::exp(param.at(1, i)) * FtF + std::exp(param.at(0, i));
-        double ysd = std::sqrt(yvar);
-        logq.at(i) = R::dnorm4(y.at(t_new), ymean, ysd, true);
-    }
 
-    double logq_max = logq.max();
-    logq.for_each([&logq_max](arma::vec::elem_type &val)
-                  { val -= logq_max; });
-
-    return logq;
-}
 
 /**
  * @todo Is there a more efficient way to construct artificial priors?

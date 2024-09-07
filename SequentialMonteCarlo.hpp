@@ -818,9 +818,7 @@ namespace SMC
 
                     arma::mat loc(model.nP, N, arma::fill::zeros);
                     arma::cube prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
-                    tau = qforecast_vec(
-                        loc, prec_chol_inv, logq,     // sufficient statistics
-                        model, t + 1, Theta.slice(t), y);
+                    tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), y);
                 }
                 else
                 {
