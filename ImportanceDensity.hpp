@@ -153,23 +153,30 @@ static arma::vec qforecast(
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::vec &y)
+    const arma::vec &y, // (nT + 1) x 1
+    const bool &update_W = false,
+    const bool &update_obs = false,
+    const bool &update_lag = false)
 {
     const double y_old = y.at(t_new - 1);
-    const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
+    const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink);
+
     arma::mat W_inv(model.nP, model.nP, arma::fill::zeros);
     double ldetW = 0.;
-    if (model.derr.full_rank)
+    if (!update_W)
     {
-        arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
-        arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
-        W_inv = W_chol_inv * W_chol_inv.t();
-        ldetW = arma::log_det_sympd(model.derr.var);
-    }
-    else
-    {
-        W_inv.at(0, 0) = 1. / model.derr.par1;
-        ldetW = std::log(std::abs(model.derr.par1) + EPS);
+        if (model.derr.full_rank)
+        {
+            arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
+            arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
+            W_inv = W_chol_inv * W_chol_inv.t();
+            ldetW = arma::log_det_sympd(model.derr.var);
+        }
+        else
+        {
+            W_inv.at(0, 0) = 1. / model.derr.par1;
+            ldetW = std::log(std::abs(model.derr.par1) + EPS);
+        }
     }
 
     #ifdef _OPENMP
@@ -177,16 +184,17 @@ static arma::vec qforecast(
     #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        Model mod = model;
+        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state); // gt(theta[t-1, i])
+        double ft_gtheta = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = ft_gtheta;
-        double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.10)
+        double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
-            lambda, model.dobs, model.flink); // (eq 3.11)
+            lambda, mod.dobs, mod.flink); // (eq 3.11)
 
-        if (!model.derr.full_rank)
+        if (!mod.derr.full_rank)
         {
             // loc.col(i) = gtheta_old_i;
             logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
@@ -194,7 +202,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + W_inv; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
             
@@ -203,8 +211,7 @@ static arma::vec qforecast(
             double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.; // ldetSigma = - ldetPrec
             Prec_chol_inv.slice(i) = prec_chol_inv;
 
-            double ft_tilde = ft_gtheta - arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.8)
-            double delta = yhat_new - model.dobs.par1 - ft_tilde; // (eq 3.16)
+            double delta = yhat_new - ft_gtheta + arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.16)
             loc.col(i) = Ft_gtheta * (delta / Vt) + W_inv * gtheta_old_i; // (eq 3.20)
 
             double ldetV = std::log(std::abs(Vt) + EPS);
