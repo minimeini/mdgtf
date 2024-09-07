@@ -1618,11 +1618,7 @@ namespace SMC
 
 
             Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-            for (unsigned int i = 0; i < N; i++)
-            {
-                Theta.slice(0).col(i) = arma::randn<arma::vec>(model.nP);
-            }
-
+            Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
             if (model.seas.in_state && model.seas.period > 0)
             {
                 for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
