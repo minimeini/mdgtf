@@ -270,7 +270,6 @@ Rcpp::List dgtf_infer(
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-
         output = ffbs.get_output();
 
         if (nforecast > 0)

@@ -651,9 +651,6 @@ namespace SMC
             const unsigned int nT = y.n_elem - 1;
             const double logN = std::log(static_cast<double>(N));
 
-            std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
-            const bool full_rank = obs_list[model.dobs.name] == AVAIL::Dist::gaussian;
-
             weights_forward.set_size(y.n_elem, N);
             weights_forward.zeros();
             eff_forward.set_size(y.n_elem);
@@ -683,27 +680,32 @@ namespace SMC
                 arma::vec tau = logq;
                 arma::mat loc;            // (model.nP, N, arma::fill::zeros);
                 arma::cube prec_chol_inv; // nP x nP x N
-                if (full_rank)
+
+                if (use_discount)
                 {
-                    if (use_discount)
+                    // Update Wt
+                    if (model.derr.full_rank)
                     {
                         Wt_chol = arma::chol(Wt.slice(t + 1));
                         model.derr.var = Wt.slice(t + 1);
                     }
+                    else
+                    {
+                        Wt_chol.at(0, 0) = std::sqrt(Wt.at(0, 0, t + 1));
+                        model.derr.par1 = Wt.at(0, 0, t + 1);
+                        model.derr.var.at(0, 0) = Wt.at(0, 0, t + 1);
+                    }
+                }
 
+
+                if (model.derr.full_rank)
+                {
                     loc = arma::zeros<arma::mat>(model.nP, N);
                     prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
                     tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), y);
                 }
                 else
                 {
-                    if (use_discount)
-                    {
-                        Wt_chol.at(0, 0) = std::sqrt(Wt.at(0, 0, t + 1));
-                        model.derr.par1 = Wt.at(0, 0, t + 1);
-                        model.derr.var.at(0, 0) = Wt.at(0, 0, t + 1);
-                    }
-
                     tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
                 }
 
@@ -730,7 +732,7 @@ namespace SMC
                         weights_forward.row(t) = wtmp.elem(resample_idx).t();
                     }
 
-                    if (full_rank)
+                    if (model.derr.full_rank)
                     {
                         loc = loc.cols(resample_idx);
                         prec_chol_inv = prec_chol_inv.slices(resample_idx);
@@ -751,6 +753,7 @@ namespace SMC
                 {
                     arma::vec eps(model.nP, arma::fill::zeros);
                     arma::vec theta_new;
+                    double logp = 0.;
                     if (!use_discount && model.derr.full_rank)
                     {
                         arma::vec eps = arma::randn(Theta_new.n_rows);
@@ -758,38 +761,28 @@ namespace SMC
                         theta_new = prec_chol_inv.slice(i) * zt;                      // scaled
 
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
-                    }
-                    else if (model.derr.full_rank)
-                    {
-                        // full rank and use discount
-                        eps = Wt_chol.t() * arma::randn(Theta_new.n_rows);
-                        arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
-                        theta_new = gtheta + eps;
+                        logp += MVNorm::dmvnorm(theta_new, Theta_cur.col(i), model.derr.var, true);
                     }
                     else
                     {
-                        eps.at(0) = R::rnorm(0., Wt_chol.at(0, 0));
+                        // not full rank or full rank with discount
+                        eps = Wt_chol.t() * arma::randn(Theta_new.n_rows);
                         arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
                         theta_new = gtheta + eps;
 
                         if (!use_discount)
                         {
+                            // not full rank and not use discount
                             logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true); // sample from 
+                            logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
                         }
                     }
+
                     Theta_new.col(i) = theta_new;
 
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
-                    double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
-                    if (!use_discount && !model.derr.full_rank)
-                    {
-                        logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
-                    }
-                    else if (!use_discount)
-                    {
-                        logp += MVNorm::dmvnorm(theta_new, Theta_cur.col(i), model.derr.var, true);
-                    }
+                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = logp - logq.at(i);
                 }
 
@@ -1143,7 +1136,14 @@ namespace SMC
         Rcpp::List forecast(const Model &model, const arma::vec &y)
         {
             arma::vec Wtmp(N, arma::fill::zeros);
-            Wtmp.fill(Wt.at(0, 0, y.n_elem - 1));
+            if (use_discount)
+            {
+                Wtmp.fill(Wt.at(0, 0, y.n_elem - 1));
+            }
+            else
+            {
+                Wtmp.fill(model.derr.par1);
+            }
 
             Rcpp::List out;
             if (smoothing)
@@ -1267,19 +1267,37 @@ namespace SMC
                 Rcpp::checkUserInterrupt();
 
                 // Resampling density for theta[t-1] is: p(theta[t] | theta[t-1], W[t]).
-                double Wsd = std::sqrt(Wt.at(0, 0, t));
-                arma::vec Wsqrt(M);
-                Wsqrt.fill(Wsd);
-
                 arma::rowvec psi_smooth_now = Theta_smooth.slice(t).row(0);                       // 1 x M
                 arma::rowvec psi_filter_prev = Theta.slice(t - 1).row(0);                         // 1 x N
-                arma::uvec smooth_idx = get_smooth_index(psi_smooth_now, psi_filter_prev, Wsqrt); // M x 1
+                arma::uvec smooth_idx;
+                if (model.derr.full_rank)
+                {
+                    if (use_discount)
+                    {
+                        smooth_idx = get_smooth_index(Theta_smooth.slice(t), Theta.slice(t-1), Wt.slice(t));
+                    }
+                    else
+                    {
+                        smooth_idx = get_smooth_index(Theta_smooth.slice(t), Theta.slice(t-1), model.derr.var);
+                    }
+                }
+                else
+                {
+                    arma::vec Wsqrt(M);
+                    if (use_discount)
+                    {
+                        Wsqrt.fill(std::sqrt(Wt.at(0, 0, t)));
+                    }
+                    else
+                    {
+                        Wsqrt.fill(std::sqrt(model.derr.par1));
+                    }
+                    smooth_idx = get_smooth_index(psi_smooth_now, psi_filter_prev, Wsqrt); // M x 1
+                }
 
                 arma::mat theta_next = Theta.slice(t - 1);
                 theta_next = theta_next.cols(smooth_idx); // p x M
-
                 Theta_smooth.slice(t - 1) = theta_next;
-                // psi_smooth.row(t - 1) = theta_next.row(0); // 1 x M
 
                 if (verbose)
                 {
@@ -1297,48 +1315,6 @@ namespace SMC
             return;
         }
 
-        void smoother_lba_vec(
-            Model &model, 
-            const arma::vec &y, // (nT + 1) x 1
-            const arma::cube &Wt, // p x p x (nT + 1)
-            const bool &verbose = VERBOSE)
-        {
-            const unsigned int nT = y.n_elem - 1;
-            arma::uvec idx = sample(N, M, weights, true, true); // M x 1
-            arma::mat theta_last = Theta.slice(nT);             // p x N
-            arma::mat theta_sub = theta_last.cols(idx);         // p x M
-
-            Theta_smooth = arma::zeros<arma::cube>(model.nP, M, nT + B);
-            Theta_smooth.slice(nT) = theta_sub;
-
-            for (unsigned int t = nT; t > 0; t--)
-            {
-                Rcpp::checkUserInterrupt();
-
-                // Resampling density for theta[t-1] is: p(theta[t] | theta[t-1], W[t]).
-                arma::rowvec psi_smooth_now = Theta_smooth.slice(t).row(0);                       // 1 x M
-                arma::rowvec psi_filter_prev = Theta.slice(t - 1).row(0);                         // 1 x N
-                arma::uvec smooth_idx = get_smooth_index(
-                    Theta_smooth.slice(t), Theta.slice(t-1), Wt.slice(t)); // M x 1
-
-                arma::mat theta_next = Theta.slice(t - 1);
-                theta_next = theta_next.cols(smooth_idx); // p x M
-                Theta_smooth.slice(t - 1) = theta_next;
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rSmoothing: " << y.n_elem - t << "/" << nT;
-                }
-            }
-
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
-
-            arma::mat psi = Theta_smooth.row_as_mat(0);
-            output["psi"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
-            return;
-        }
 
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
@@ -1396,7 +1372,7 @@ namespace SMC
             log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, weights_forward, eff_forward, Wt,
                 model, y, N, false, true, 
-                true, discount_factor, verbose);
+                use_discount, discount_factor, verbose);
 
             arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
             output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
@@ -1405,7 +1381,7 @@ namespace SMC
 
             if (smoothing)
             {
-                smoother_lba_vec(model, y, Wt, verbose);
+                smoother(model, y, verbose);
             }
 
             return;
