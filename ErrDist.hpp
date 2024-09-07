@@ -91,7 +91,7 @@ public:
             var.diag() *= par1;
 
         }
-        else
+        else if (full_rank)
         {
             unsigned int nrow = std::min(nP, var_tmp.n_rows);
             unsigned int ncol = std::min(nP, var_tmp.n_cols);
@@ -103,6 +103,11 @@ public:
             {
                 throw std::invalid_argument("ErrDist: variance-covariance matrix must be sympd.");
             }
+        }
+        else
+        {
+            var = arma::zeros<arma::mat>(nP, nP);
+            var.at(0, 0) = par1;
         }
 
         par2 = 0.;
