@@ -232,7 +232,6 @@ static arma::vec qforecast(
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
-    const arma::mat &W,        // p x p, {W[t-1]} samples of latent variance
     const arma::vec &y,         // y[t]
     const bool &full_rank = false)
 {
@@ -267,21 +266,21 @@ static arma::vec qforecast(
 
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
-            Prec_i.at(0, 0) += 1. / W.at(0, 0); // (eq 3.21)
+            Prec_i.at(0, 0) += 1. / model.derr.par1; // (eq 3.21)
             arma::mat Rchol = arma::chol(arma::symmatu(Prec_i)); // Right cholesky of the precision
             arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol)); // Left cholesky of the variance
             double ldetPrec = arma::accu(arma::log(Rchol.diag())) * 2.; // ldetSigma = - ldetPrec
             Prec_chol_inv.slice(i) = Rchol_inv;
 
             loc.col(i) = Ft_gtheta * (delta / Vt); // nP x 1, location, mean mu = Sigma * loc
-            loc.at(0, i) += gtheta_old_i.at(0) / W.at(0, 0); // location
+            loc.at(0, i) += gtheta_old_i.at(0) / model.derr.par1; // location
 
             double ldetV = std::log(std::abs(Vt) + EPS);
-            double ldetW = std::log(std::abs(W.at(0, 0)) + EPS);
+            double ldetW = std::log(std::abs(model.derr.par1) + EPS);
 
             double loglik = LOG2PI + ldetV + ldetW + ldetPrec; // (eq 3.24)
             loglik += delta * delta / Vt;
-            loglik += std::pow(gtheta_old_i.at(0), 2.) / W.at(0, 0);
+            loglik += std::pow(gtheta_old_i.at(0), 2.) / model.derr.par1;
             loglik -= arma::as_scalar(loc.col(i).t() * Rchol_inv * Rchol_inv.t() * loc.col(i));
             loglik *= -0.5; // (eq 3.24 - 3.25)
 
@@ -422,7 +421,6 @@ static void prior_forward(
     arma::mat &mu,     // nP x (nT + 1)
     arma::cube &prec,  // nP x nP x (nT + 1)
     const Model &model,
-    const arma::mat &W, // nP x nP
     const arma::vec &y   // (nT + 1) x 1
 )
 {
@@ -437,7 +435,7 @@ static void prior_forward(
         mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state);
         LBA::func_Gt(Gt, model, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t();
-        sig.at(0, 0) += W.at(0, 0);
+        sig.at(0, 0) += model.derr.par1;
         sig.diag() += EPS;
 
         prec.slice(t) = inverse(sig);
@@ -457,7 +455,6 @@ static void backward_kernel(
     const unsigned int &t_cur,
     const arma::mat &vt,  // nP x (nT + 1)
     const arma::cube &Vt_inv, // nP x nP x (nT + 1)
-    const arma::mat &W, // p x p
     const arma::vec &y)
 {
     unsigned int nstate = model.nP;
@@ -493,10 +490,10 @@ static void backward_kernel(
             }
         }
 
-        U_cur.at(nstate - 1, nstate - 1) = W.at(0, 0);
-        Uprec_cur.at(nstate - 1, nstate - 1) = 1. / W.at(0, 0);
-        Urchol_cur.at(nstate - 1, nstate - 1) = std::sqrt(W.at(0, 0));
-        ldetU = std::log(W.at(0, 0));
+        U_cur.at(nstate - 1, nstate - 1) = model.derr.par1;
+        Uprec_cur.at(nstate - 1, nstate - 1) = 1. / model.derr.par1;
+        Urchol_cur.at(nstate - 1, nstate - 1) = std::sqrt(model.derr.par1);
+        ldetU = std::log(model.derr.par1);
     }
     else
     {
@@ -530,7 +527,6 @@ static arma::vec qbackcast(
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
     const arma::mat &vt,         // nP x (nT + 1), v[t], mean of artificial prior for theta[t_cur]
     const arma::cube &Vt_inv,        // nP x nP * (nT + 1), V[t], variance of artificial prior for theta[t_cur]
-    const arma::mat &W, // p x p
     const arma::vec &y,
     const bool &full_rank = false
 )
@@ -547,7 +543,7 @@ static arma::vec qbackcast(
 
     if (trans_list[model.ftrans] == TransFunc::Transfer::sliding || full_rank)
     {
-        backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, W, y);
+        backward_kernel(K_cur, r_cur, Uprec_cur, ldetU, model, t_cur, vt, Vt_inv, y);
     }
 
     // #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
