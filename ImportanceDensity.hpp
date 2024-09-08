@@ -568,4 +568,119 @@ static arma::vec qbackcast(
     return weights;
 } // qbackcast
 
+static arma::vec qbackcast(
+    arma::mat &loc,            // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::cube &Prec_chol_inv, // p x p x N, left chol of the variance of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::mat &ut, // p x N
+    arma::cube &Uprec, // p x p x N
+    arma::vec &logq, // N x 1
+    const Model &model,
+    const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
+    const arma::mat &Theta_next, // p x N, {theta[t+1]}
+    const arma::mat &Theta_cur,  // p x N, theta[t]
+    const arma::vec &W,   // N x 1, samples of latent variance
+    const arma::mat &param, // (period + 3) x N, {seasonal components, rho, par1, par2} samples of baseline
+    const arma::mat &vt_cur,     // nP x N, v[t]
+    const arma::mat &vt_next,    // nP x N, v[t+1]
+    const arma::mat &Vprec_cur,  // (nP^2) x N, inv(V[t])
+    const arma::vec &y,
+    const bool &infer_W = false,
+    const bool &infer_seas = false,
+    const bool &infer_rho = false,
+    const bool &infer_lag = false)
+{
+    const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
+    const unsigned int N = Theta_next.n_cols;
+
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
+    for (unsigned int i = 0; i < N; i++)
+    {
+        Model mod = model;
+
+        if (infer_seas)
+        {
+            mod.seas.val = param.submat(0, i, mod.seas.period - 1, i);
+        }
+
+        if (infer_rho)
+        {
+            mod.dobs.par2 = std::exp(param.at(mod.seas.period, i));
+        }
+
+        if (infer_lag)
+        {
+            mod.dlag.par1 = param.at(mod.seas.period + 1, i); // only for lognormal lag
+            mod.dlag.par2 = std::exp(param.at(mod.seas.period + 2, i));
+        }
+
+        if (infer_W)
+        {
+            mod.derr.par1 = W.at(i);
+            mod.derr.var.at(0, 0) = W.at(i);
+        }
+
+        arma::mat Vprec = arma::reshape(Vprec_cur.col(i), mod.nP, mod.nP);
+        arma::vec r_cur(mod.nP, arma::fill::zeros);
+        arma::mat K_cur(mod.nP, mod.nP, arma::fill::zeros);
+        arma::mat Uprec_cur = K_cur;
+        double ldetU = 0.;
+        backward_kernel(
+            K_cur, r_cur, Uprec_cur, ldetU, mod, t_cur,
+            vt_cur.col(i), vt_next.col(i), Vprec, Theta_cur.col(i), y);
+
+        ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
+        Uprec.slice(i) = Uprec_cur;
+
+        double ft_ut = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_cur, ut.col(i), y);
+        double eta = ft_ut;
+        double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.58)
+        double Vtilde = ApproxDisturbance::func_Vt_approx(
+            lambda, mod.dobs, mod.flink); // (eq 3.59)
+        Vtilde = std::abs(Vtilde) + EPS;
+
+        if (!mod.derr.full_rank)
+        {
+            // No information from data, degenerates to the backward evolution
+            loc.col(i) = ut.col(i);
+            logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
+        } // one-step backcasting
+        else
+        {
+            arma::vec F_cur = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
+            arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
+            Prec.diag() += EPS;
+
+            arma::mat prec_chol = arma::chol(arma::symmatu(Prec));
+            arma::mat prec_chol_inv = arma::inv(arma::trimatu(prec_chol));
+            double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.;
+            Prec_chol_inv.slice(i) = prec_chol_inv;
+
+            double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * ut.col(i));
+            loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * ut.col(i);
+
+            double ldetV = std::log(Vtilde);
+            double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
+            logq_pred += delta * delta / Vtilde;
+            logq_pred += arma::as_scalar(ut.col(i).t() * Uprec_cur * ut.col(i));
+            logq_pred -= arma::as_scalar(loc.col(i).t() * prec_chol_inv * prec_chol_inv.t() * loc.col(i));
+            logq_pred *= -0.5;
+
+            logq.at(i) += logq_pred;
+        }
+    }
+
+    double logq_max = logq.max();
+    logq.for_each([&logq_max](arma::vec::elem_type &val)
+                  { val -= logq_max; });
+    arma::vec weights = arma::exp(logq);
+
+    #ifdef DGTF_DO_BOUND_CHECK
+        bound_check<arma::vec>(weights, "qbackcast");
+    #endif
+    return weights;
+} // qbackcast
+
+
 #endif

@@ -207,130 +207,6 @@ namespace SMC
         }
 
 
-
-        /**
-         * @brief At time t, importance weights of forward filtering particles z[t-1] = (theta[t-1], W[t-1], mu0[t-1]), based on conditional predictive distribution y[t] | z[t-1], y[1:t-1].
-         *
-         * @param model
-         * @param t_new Index of the time that is being predicted. The following inputs come from time t_old = t-1.
-         * @param Theta p x N, { theta[t-1, i], i = 1, ..., N }, samples of latent states at t-1
-         * @param W N x 1, { W[t-1, i], i = 1, ..., N }, samples of latent variance at t-1
-         * @param mu0 N x 1, { mu0[t-1, i], i = 1, ..., N }, samples of baseline at t-1
-         * @param mt_old p x N, m[t-1]. Assume no static parameters involved in ft.
-         * @param yhat y[t] after transformation.
-         * @return arma::vec
-         */
-        static arma::vec imp_weights_backcast(
-            arma::mat &loc, // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
-            arma::cube &Sigma_chol, // p x p x N,
-            arma::mat &ut,
-            arma::cube &Uprec,
-            arma::vec &logq,        // N x 1
-            Model &model,
-            const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
-            const arma::mat &Theta_next, // p x N, {theta[t+1]}
-            const arma::mat &Theta_cur, // p x N
-            const arma::vec &W,   // N x 1, {inv(W[T])} samples of latent variance
-            const arma::mat &param_filter, // (period + 3) x N, {seasonal components, rho, par1, par2} samples of baseline
-            const arma::cube &vt,        // nP x (nT + 1) x N, v[t]
-            const arma::cube &Vt_inv,        // nP*nP x (nT + 1) x N, inv(V[t])
-            const arma::vec &y,
-            const bool &infer_seas = false,
-            const bool &infer_obs = false,
-            const bool &infer_lag = false
-        )
-        {
-            double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
-            unsigned int N = Theta_next.n_cols;
-
-            loc.set_size(model.nP, N);
-            loc.zeros();
-            Sigma_chol = arma::zeros<arma::cube>(model.nP, model.nP, N);
-
-            for (unsigned int i = 0; i < N; i++)
-            {
-                if (infer_seas)
-                {
-                    model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
-                }
-                if (infer_obs)
-                {
-                    model.dobs.par2 = std::exp(param_filter.at(model.seas.period, i));
-                }
-                if (infer_lag)
-                {
-                    model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
-                    model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
-                }
-
-                arma::vec v_cur = vt.slice(i).col(t_cur);
-                arma::vec Vtmp = Vt_inv.slice(i).col(t_cur);
-                arma::mat Vprec_cur = arma::reshape(Vtmp, model.nP, model.nP);
-                arma::vec v_next = vt.slice(i).col(t_cur + 1);
-
-                arma::vec r_cur(model.nP, arma::fill::zeros);
-                arma::mat K_cur(model.nP, model.nP, arma::fill::zeros); // evolution matrix
-                arma::mat Uprec_cur = K_cur;
-                arma::mat Urchol_cur = K_cur;
-                double ldetU = 0.;
-                backward_kernel(
-                    K_cur, r_cur, Uprec_cur, ldetU, model, t_cur,
-                    v_cur, v_next, Vprec_cur, Theta_cur.col(i), y);
-                ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
-                Uprec.slice(i) = Uprec_cur;
-
-                double ft_ut = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, ut.col(i), y);
-                double eta = ft_ut;
-                double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.58)
-                double Vtilde = ApproxDisturbance::func_Vt_approx(
-                    lambda, model.dobs, model.flink); // (eq 3.59)
-                Vtilde = std::abs(Vtilde) + EPS;
-
-                if (!model.derr.full_rank)
-                {
-                    // No information from data, degenerates to the backward evolution
-                    loc.col(i) = ut.col(i);
-                    logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
-                } // one-step backcasting
-                else
-                {
-                    arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
-                    arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde + Uprec_cur);
-                    Prec.diag() += EPS;
-
-                    arma::mat prec_chol = arma::chol(arma::symmatu(Prec));
-                    arma::mat prec_chol_inv = arma::inv(arma::trimatu(prec_chol));
-                    double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.;
-                    Sigma_chol.slice(i) = prec_chol_inv;
-
-                    double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * ut.col(i));
-                    loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * ut.col(i);
-
-                    double ldetV = std::log(Vtilde);
-                    double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
-                    logq_pred += delta * delta / Vtilde;
-                    logq_pred += arma::as_scalar(ut.col(i).t() * Uprec_cur * ut.col(i));
-                    logq_pred -= arma::as_scalar(loc.col(i).t() * prec_chol_inv * prec_chol_inv.t() * loc.col(i));
-                    logq_pred *= -0.5;
-
-                    logq.at(i) += logq_pred;
-                }
-            } // loop over particles
-
-            double logq_max = logq.max();
-            logq.for_each([&logq_max](arma::vec::elem_type &val)
-                          { val -= logq_max; });
-            arma::vec weights = arma::exp(logq);
-
-
-            #ifdef DGTF_DO_BOUND_CHECK
-            bound_check<arma::vec>(weights, "imp_weights_backcast");
-            #endif
-
-            return weights;
-        } // func: imp_weights_backcast
-
-
         static arma::uvec get_resample_index(const arma::vec &weights)
         {
             unsigned int N = weights.n_elem;
@@ -2522,16 +2398,25 @@ namespace SMC
                  */
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::mat mu;                // nP x N
-                arma::cube Sigma_chol; // nP x nP x N
+                arma::mat mu(model.nP, N, arma::fill::zeros);// nP x N
+                arma::cube Sigma_chol = arma::zeros<arma::cube>(model.nP, model.nP, N);
                 arma::mat ut(model.nP, N, arma::fill::zeros);
-                arma::cube Uprec = arma::zeros<arma::cube>(model.nP, model.nP, N);
+                arma::cube Uprec = Sigma_chol;
 
-                arma::vec tau = imp_weights_backcast(
+                // arma::vec tau = imp_weights_backcast(
+                //     mu, Sigma_chol, ut, Uprec, logq, model, t_cur, 
+                //     Theta_next, Theta_backward.slice(t_cur),
+                //     W_backward, param_backward, mu_marginal, Prec_marginal, y,
+                //     prior_W.infer, prior_seas.infer, prior_rho.infer, lag_update);
+                arma::mat vt_cur = mu_marginal.col_as_mat(t_cur);
+                arma::mat vt_next = mu_marginal.col_as_mat(t_next);
+                arma::mat Vprec_cur = Prec_marginal.col_as_mat(t_cur);
+
+                arma::vec tau = qbackcast(
                     mu, Sigma_chol, ut, Uprec, logq, model, t_cur, 
                     Theta_next, Theta_backward.slice(t_cur),
-                    W_backward, param_backward, mu_marginal, Prec_marginal, y,
-                    prior_seas.infer, prior_rho.infer, lag_update);
+                    W_backward, param_backward, vt_cur, vt_next, Vprec_cur, y,
+                    prior_W.infer, prior_seas.infer, prior_rho.infer, lag_update);
 
                 tau = tau % weights;
                 if (t < y.n_elem - 2)
