@@ -269,8 +269,9 @@ static void backward_kernel(
     double &ldetU,
     const Model &model,
     const unsigned int &t_cur,
-    const arma::mat &vt,  // nP x (nT + 1)
-    const arma::cube &Vt_inv, // nP x nP x (nT + 1)
+    const arma::vec &vt,  // nP x 1, v[t]
+    const arma::vec &vt_next, // nP x 1, v[t + 1]
+    const arma::mat &Vt_inv, // nP x nP, inv(V[t])
     const arma::vec &theta_hat, // p x p, point of theta[t] for taylor expansion
     const arma::vec &y)
 {
@@ -309,18 +310,18 @@ static void backward_kernel(
         Uinv.zeros();
         Uinv.at(nstate - 1, nstate - 1) = 1. / model.derr.par1;
         ldetU = std::log(model.derr.par1);
-        r = vt.col(t_cur) - K * vt.col(t_cur + 1);
+        r = vt - K * vt_next;
     }
     else if (model.derr.full_rank)
     {
         arma::mat G_next = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-        LBA::func_Gt(G_next, model, vt.col(t_cur), y.at(t_cur));
+        LBA::func_Gt(G_next, model, vt, y.at(t_cur));
 
         arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
         arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
         arma::mat W_inv = W_chol_inv * W_chol_inv.t();
 
-        Uinv = Vt_inv.slice(t_cur) + G_next.t() * W_inv * G_next; // inv(U[t])
+        Uinv = Vt_inv + G_next.t() * W_inv * G_next; // inv(U[t])
         Uinv.diag() += EPS;
         arma::mat U_inv_chol = arma::chol(arma::symmatu(Uinv));
         arma::mat U_chol = arma::inv(arma::trimatu(U_inv_chol));
@@ -334,7 +335,7 @@ static void backward_kernel(
             theta_hat, y.at(t_cur), 
             model.seas.period, model.seas.in_state);
         arma::vec ht = ghat - G_next * theta_hat;
-        r = U * (Vt_inv.slice(t_cur) * vt.col(t_cur) - G_next.t() * W_inv * ht);
+        r = U * (Vt_inv * vt - G_next.t() * W_inv * ht);
     }
     else
     {

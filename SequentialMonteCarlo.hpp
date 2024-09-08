@@ -1671,8 +1671,8 @@ namespace SMC
                 arma::mat Uprec_cur = K_cur;
                 double ldetU = 0.;
                 backward_kernel(
-                    K_cur, r_cur, Uprec_cur, ldetU, 
-                    model, t, mu_marginal, Prec_marginal, mt.col(t), y);
+                    K_cur, r_cur, Uprec_cur, ldetU, model, t, 
+                    mu_marginal.col(t), mu_marginal.col(t + 1), Prec_marginal.slice(t), mt.col(t), y);
                 
                 arma::vec tau = qbackcast(
                     loc, prec_chol_inv, logq,
