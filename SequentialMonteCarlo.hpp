@@ -228,6 +228,7 @@ namespace SMC
             Model &model,
             const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
             const arma::mat &Theta_next, // p x N, {theta[t+1]}
+            const arma::mat &Theta_cur, // p x N
             const arma::vec &W,   // N x 1, {inv(W[T])} samples of latent variance
             const arma::mat &param_filter, // (period + 3) x N, {seasonal components, rho, par1, par2} samples of baseline
             const arma::cube &vt,        // nP x (nT + 1) x N, v[t]
@@ -262,6 +263,7 @@ namespace SMC
                 arma::vec v_cur = vt.slice(i).col(t_cur);
                 arma::vec Vtmp = Vt.slice(i).col(t_cur);
                 arma::mat V_cur = arma::reshape(Vtmp, model.nP, model.nP);
+                arma::mat Vprec_cur = inverse(V_cur);
 
                 arma::vec v_next = vt.slice(i).col(t_next);
                 Vtmp = Vt.slice(i).col(t_next);
@@ -272,51 +274,12 @@ namespace SMC
 
                 arma::vec r_cur(model.nP, arma::fill::zeros);
                 arma::mat K_cur(model.nP, model.nP, arma::fill::zeros); // evolution matrix
-                arma::mat U_cur = K_cur;                                        // mean of conditional backward evolution
                 arma::mat Uprec_cur = K_cur;
                 arma::mat Urchol_cur = K_cur;
                 double ldetU = 0.;
-
-                if (trans_list[model.ftrans] == TransFunc::Transfer::sliding)
-                {
-                    for (unsigned int i = 0; i < nstate - 1; i++)
-                    {
-                        K_cur.at(i, i + 1) = 1.;
-                    }
-                    K_cur.at(nstate - 1, nstate - 1) = 1.;
-
-                    if (model.seas.in_state)
-                    {
-                        if (model.seas.period == 1)
-                        {
-                            K_cur.at(model.nP - 1, model.nP - 1) = 1.;
-                        }
-                        else if (model.seas.period > 1)
-                        {
-                            K_cur.at(nstate, model.nP - 1) = 1.;
-                            for (unsigned int i = nstate + 1; i < model.nP; i++)
-                            {
-                                K_cur.at(i, i - 1) = 1.;
-                            }
-                        }
-                    }
-
-                    U_cur.at(nstate - 1, nstate - 1) = W.at(i);
-                    Uprec_cur.at(nstate - 1, nstate - 1) = 1. / W.at(i);
-                    Urchol_cur.at(nstate - 1, nstate - 1) = std::sqrt(W.at(i));
-                    ldetU = std::log(W.at(i));
-                }
-                else
-                {
-                    K_cur = V_cur * G_next.t() * Vprec_next;
-                    U_cur = V_cur - V_cur * G_next.t() * Vprec_next * G_next * V_cur;
-                    U_cur = arma::symmatu(U_cur);
-                    Urchol_cur = arma::chol(arma::symmatu(U_cur));
-                    arma::mat Urchol_inv = arma::inv(arma::trimatu(Urchol_cur));
-                    Uprec_cur = Urchol_inv * Urchol_inv.t();
-                    ldetU = arma::log_det_sympd(U_cur);
-                }
-                r_cur = v_cur - K_cur * v_next;
+                backward_kernel(
+                    K_cur, r_cur, Uprec_cur, ldetU, model, t_cur,
+                    v_cur, v_next, Vprec_cur, Theta_cur.col(i), y);
                 arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
 
                 if (infer_seas)
@@ -2247,10 +2210,11 @@ namespace SMC
                 yhat.at(t) = LinkFunc::mu2ft(y.at(t), model.flink, 0.);
             }
 
+            
+
             for (unsigned int t = 0; t < nT; t++)
             {
                 Rcpp::checkUserInterrupt();
-
                 bool print_time = (t == nT - 2);
                 bool burnin = (t <= std::min(0.1 * nT, 20.)) ? true : false;
 
@@ -2348,6 +2312,7 @@ namespace SMC
                     param_var.for_each([&hcoef](arma::mat::elem_type &val)
                                        { val *= hcoef * hcoef; });
                 }
+
 
                 arma::vec logp(N, arma::fill::zeros);
 
@@ -2645,7 +2610,7 @@ namespace SMC
 
                 arma::vec tau = imp_weights_backcast(
                     mu, Prec, Sigma_chol, logq,
-                    model, t_cur, Theta_next,
+                    model, t_cur, Theta_next, Theta_backward.slice(t_cur),
                     W_backward, param_backward, mu_marginal, Sigma_marginal, y, full_rank);
 
                 tau = tau % weights;

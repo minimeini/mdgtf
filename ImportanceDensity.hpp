@@ -249,17 +249,18 @@ static void prior_forward(
 
 
 /**
- * @brief theta[t] ~ N( r[t] + K[t]theta[t+1], U[t] )
+ * @brief Calculate matrices for the backward kernel: `theta[t] ~ N( r[t] + K[t]theta[t+1], U[t] )`.
  * 
- * @param K p x p, K[t], transition matrix bring theta[t+1] to theta[t] (slope of the backward kernel).
- * @param r p x 1, r[t], the intercept of the backward kernel.
- * @param Uinv  p x p, inv(U[t]), precision matrix of the backward kernel.
- * @param ldetU scalar, log determinant of U[t]
+ * @return K p x p, `K[t]`, transition matrix bring `theta[t+1]` to `theta[t]` (slope of the backward kernel).
+ * @return r p x 1, `r[t]`, the intercept of the backward kernel.
+ * @return Uinv  p x p, `inv(U[t])`, precision matrix of the backward kernel.
+ * @return ldetU scalar, log determinant of `U[t]`
+ * 
  * @param model 
- * @param t_cur Time index of theta[t]
- * @param vt p x 1, v[t], mean of the artificial normal prior for theta[t]
- * @param Vt_inv p x p, inv(V[t]), precision matrix of the artificial normal prior for theta[t]
- * @param theta_hat p x p, point of theta[t] for taylor expansion
+ * @param t_cur Time index of `theta[t]`
+ * @param vt p x 1, `v[t]`, mean of the artificial normal prior for `theta[t]`
+ * @param Vt_inv p x p, `inv(V[t])`, precision matrix of the artificial normal prior for `theta[t]`
+ * @param theta_hat p x p, point of `theta[t]` for taylor expansion
  * @param y (nT + 1) x 1
  */
 static void backward_kernel(
