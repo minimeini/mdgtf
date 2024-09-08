@@ -80,8 +80,9 @@ public:
         break;
         }
 
-        bound_check<T>(hpsi, "psi2hpsi<T>");
-
+        #ifdef DGTF_DO_BOUND_CHECK
+            bound_check<T>(hpsi, "psi2hpsi<T>");
+        #endif
         return hpsi;
     }
 
@@ -122,7 +123,9 @@ public:
         break;
         }
 
-        bound_check(hpsi, "psi2hpsi<double>");
+        #ifdef DGTF_DO_BOUND_CHECK
+            bound_check(hpsi, "psi2hpsi<double>");
+        #endif
         return hpsi;
     }
 
@@ -164,7 +167,9 @@ public:
         break;
         }
 
-        bound_check(hpsi, "hpsi2psi<double>");
+        #ifdef DGTF_DO_BOUND_CHECK
+            bound_check(hpsi, "hpsi2psi<double>");
+        #endif
         return hpsi;
     }
 
@@ -214,8 +219,9 @@ public:
         break;
         }
 
-        bound_check<T>(dhpsi, "psi2dhpsi");
-
+        #ifdef DGTF_DO_BOUND_CHECK
+            bound_check<T>(dhpsi, "psi2dhpsi<T>");
+        #endif
         return dhpsi;
     }
 
@@ -258,7 +264,9 @@ public:
         break;
         }
 
-        bound_check(dhpsi, "psi2dhpsi");
+        #ifdef DGTF_DO_BOUND_CHECK
+            bound_check(dhpsi, "psi2dhpsi<double>");
+        #endif
         return dhpsi;
     }
 
