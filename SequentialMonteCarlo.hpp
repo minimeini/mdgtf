@@ -702,7 +702,9 @@ namespace SMC
                 {
                     loc = arma::zeros<arma::mat>(model.nP, N);
                     prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
-                    tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), y);
+                    arma::mat param;
+                    arma::vec W;
+                    tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), W, param, y);
                 }
                 else
                 {
@@ -2267,10 +2269,8 @@ namespace SMC
 
                 arma::vec tau = qforecast(
                     loc, prec_chol_inv, logq,
-                    model, t + 1,
-                    Theta.slice(t),
-                    W_filter, param_filter, y, 
-                    obs_update, lag_update, full_rank);
+                    model, t + 1, Theta.slice(t), W_filter, param_filter, y, 
+                    prior_W.infer, obs_update, lag_update, use_discount, discount_factor);
 
                 tau = tau % weights;
                 arma::uvec resample_idx = get_resample_index(tau);
