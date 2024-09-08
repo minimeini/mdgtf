@@ -1809,7 +1809,7 @@ namespace SMC
             param_filter.set_size(model.seas.period + 3, N);
 
             {
-                prior_seas.init("gaussian", 0., 10.);
+                prior_seas.init("gaussian", 1., 10.);
                 if (opts.containsElementNamed("seas"))
                 {
                     Rcpp::List par_opts = opts["seas"];
@@ -1838,7 +1838,7 @@ namespace SMC
 
 
             {
-                prior_rho.init("gaussiaN", 1., 1.);
+                prior_rho.init("invgamma", 1., 1.);
                 if (opts.containsElementNamed("rho"))
                 {
                     Rcpp::List opts_tmp = Rcpp::as<Rcpp::List>(opts["rho"]);
@@ -1858,7 +1858,7 @@ namespace SMC
             obs_update = prior_seas.infer || prior_rho.infer;
 
             {
-                prior_par1.init("gamma", 0.1, 0.1);
+                prior_par1.init("gaussian", 0, 1.);
                 if (opts.containsElementNamed("par1"))
                 {
                     Rcpp::List opts_tmp = Rcpp::as<Rcpp::List>(opts["par1"]);
@@ -1868,7 +1868,7 @@ namespace SMC
             }
 
             {
-                prior_par2.init("gamma", 0.1, 0.1);
+                prior_par2.init("invgamma", 1, 1);
                 if (opts.containsElementNamed("par2"))
                 {
                     Rcpp::List opts_tmp = Rcpp::as<Rcpp::List>(opts["par2"]);
