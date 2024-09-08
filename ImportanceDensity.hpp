@@ -347,8 +347,8 @@ static void backward_kernel(
 }
 
 static arma::vec qbackcast(
-    arma::mat &loc,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
-    arma::cube &Prec_chol_inv,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::mat &loc, // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::cube &Prec_chol_inv, // p x p x N, left chol of the variance of theta[t_cur] | y[t_cur:nT], theta[t_next], W
     arma::mat &ut,
     arma::cube &Uprec,
     arma::vec &logq,        // N x 1
