@@ -349,14 +349,16 @@ static void backward_kernel(
 static arma::vec qbackcast(
     arma::mat &loc,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
     arma::cube &Prec_chol_inv,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+    arma::mat &ut,
+    arma::cube &Uprec,
     arma::vec &logq,        // N x 1
-    const Model &model,
+    Model &model,
     const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
-    const arma::vec &r_cur, // p x 1, r[t]
-    const arma::mat &K_cur, // p x p, K[t]
-    const arma::mat &Uprec_cur, // p x p, inv(U[t])
-    const double &ldetU,
+    const arma::mat &Theta_cur, // p x N, theta[t]
+    const arma::vec &vt_cur,
+    const arma::vec &vt_next,
+    const arma::mat &Vprec_cur, // p x p
     const arma::vec &y
 )
 {
@@ -364,14 +366,25 @@ static arma::vec qbackcast(
     double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
     unsigned int N = Theta_next.n_cols;
     unsigned int t_next = t_cur + 1;
+    
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < N; i++)
     {
-        arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
-        double ft_ut = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, u_cur, y);
+        arma::vec r_cur(model.nP, arma::fill::zeros);
+        arma::mat K_cur(model.nP, model.nP, arma::fill::zeros);
+        arma::mat Uprec_cur = K_cur;
+        double ldetU = 0.;
+        backward_kernel(
+            K_cur, r_cur, Uprec_cur, ldetU, model, t_cur,
+            vt_cur, vt_next, Vprec_cur, Theta_cur.col(i), y);
+
+        ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
+        Uprec.slice(i) = Uprec_cur;
+
+        double ft_ut = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, ut.col(i), y);
         double eta = ft_ut;
         double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.58)
         double Vtilde = ApproxDisturbance::func_Vt_approx(
@@ -381,12 +394,12 @@ static arma::vec qbackcast(
         if (!model.derr.full_rank)
         {
             // No information from data, degenerates to the backward evolution
-            loc.col(i) = u_cur;
+            loc.col(i) = ut.col(i);
             logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, u_cur, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
+            arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 
@@ -395,13 +408,13 @@ static arma::vec qbackcast(
             double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.;
             Prec_chol_inv.slice(i) = prec_chol_inv;
 
-            double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * u_cur);
-            loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
+            double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * ut.col(i));
+            loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * ut.col(i);
 
             double ldetV = std::log(Vtilde);
             double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
             logq_pred += delta * delta / Vtilde;
-            logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
+            logq_pred += arma::as_scalar(ut.col(i).t() * Uprec_cur * ut.col(i));
             logq_pred -= arma::as_scalar(loc.col(i).t() * prec_chol_inv * prec_chol_inv.t() * loc.col(i));
             logq_pred *= -0.5;
 

@@ -1596,13 +1596,7 @@ namespace SMC
                     theta, mu_marginal.col(y.n_elem - 1), Prec_marginal.slice(y.n_elem - 1), true);
             }
 
-            arma::mat mt(model.nP, y.n_elem, arma::fill::zeros);
-            if (model.derr.full_rank)
-            {
-                LBA::LinearBayes lba(use_discount, discount_factor);
-                lba.filter(model, y);
-                mt = lba.mt;
-            }
+            
 
             for (unsigned int t = y.n_elem - 2; t > 0; t--)
             {
@@ -1629,18 +1623,12 @@ namespace SMC
                     }
                 }
 
-                arma::vec r_cur(model.nP, arma::fill::zeros);
-                arma::mat K_cur(model.nP, model.nP, arma::fill::zeros);
-                arma::mat Uprec_cur = K_cur;
-                double ldetU = 0.;
-                backward_kernel(
-                    K_cur, r_cur, Uprec_cur, ldetU, model, t, 
-                    mu_marginal.col(t), mu_marginal.col(t + 1), Prec_marginal.slice(t), mt.col(t), y);
-                
+                arma::mat ut(model.nP, N, arma::fill::zeros);
+                arma::cube Uprec = arma::zeros<arma::cube>(model.nP, model.nP, N);
                 arma::vec tau = qbackcast(
-                    loc, prec_chol_inv, logq,
-                    model, t, Theta_backward.slice(t + 1),
-                    r_cur, K_cur, Uprec_cur, ldetU, y);
+                    loc, prec_chol_inv, ut, Uprec, logq,
+                    model, t, Theta_backward.slice(t + 1), Theta_backward.slice(t),
+                    mu_marginal.col(t), mu_marginal.col(t + 1), Prec_marginal.slice(t), y);
                 tau = tau % weights;
 
                 if (t < y.n_elem - 2)
@@ -1653,6 +1641,9 @@ namespace SMC
                     {
                         loc = loc.cols(resample_idx);
                         prec_chol_inv = prec_chol_inv.slices(resample_idx);
+
+                        ut = ut.cols(resample_idx);
+                        Uprec = Uprec.slices(resample_idx);
                     }
 
                     log_marg = log_marg.elem(resample_idx);
@@ -1683,8 +1674,7 @@ namespace SMC
                         theta_cur = prec_chol_inv.slice(i) * zt;
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
 
-                        arma::vec ut = r_cur + K_cur * Theta_next.col(i);
-                        logp += MVNorm::dmvnorm2(theta_cur, ut, Uprec_cur, true);
+                        logp += MVNorm::dmvnorm2(theta_cur, ut.col(i), Uprec.slice(i), true);
                     }
                     else
                     {
