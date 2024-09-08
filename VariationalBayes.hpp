@@ -25,8 +25,10 @@ namespace VB
         unsigned int nburnin = 1000;
         unsigned int ntotal = 3001;
         unsigned int nforecast = 0;
-
         unsigned int N = 500; // number of SMC particles
+
+        bool use_discount = false;
+        double discount_factor = 0.95;
 
         bool update_static = true;
         unsigned int m = 1; // number of unknown static parameters
@@ -84,6 +86,18 @@ namespace VB
             if (opts.containsElementNamed("state_sampler"))
             {
                 state_sampler = Rcpp::as<std::string>(opts["state_sampler"]);
+            }
+
+            use_discount = false;
+            if (opts.containsElementNamed("use_discount"))
+            {
+                use_discount = Rcpp::as<bool>(opts["use_discount"]);
+            }
+
+            discount_factor = 0.95;
+            if (opts.containsElementNamed("discount_factor"))
+            {
+                discount_factor = Rcpp::as<bool>(opts["discount_factor"]);
             }
 
             param_selected.clear();
@@ -199,6 +213,8 @@ namespace VB
             opts["state_sampler"] = "smc";
             opts["num_particle"] = 100;
             opts["num_step_ahead_forecast"] = 0;
+            opts["use_discount"] = false;
+            opts["discount_factor"] = 0.95;
 
             opts["W"] = W_opts;
             opts["seas"] = seas_opts;
@@ -1277,11 +1293,6 @@ namespace VB
             return stats;
         }
 
-        // void forecast_error(double &err, const Model &model, const std::string &loss_func = "quadratic")
-        // {
-        //     Model::forecast_error(err, psi_stored, y, model, loss_func);
-        //     return;
-        // }
 
        
         void infer(
@@ -1320,7 +1331,7 @@ namespace VB
                     Theta.slice(0).row(0).fill(psi.at(0)); // 1 x N
 
                     double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                        Theta, model, y, N, true, false);
+                        Theta, model, y, N, true, false, use_discount, discount_factor);
 
                     arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
                     psi = arma::mean(psi_all.head_rows(y.n_elem), 1);

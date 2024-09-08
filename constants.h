@@ -24,9 +24,9 @@
     #define DGTF_DO_BOUND_CHECK
 #endif
 
-// #if !defined(DGTF_DETAILED_OUTPUT)
-//     #define DGTF_DETAILED_OUTPUT
-// #endif
+#if !defined(DGTF_DETAILED_OUTPUT)
+    #define DGTF_DETAILED_OUTPUT
+#endif
 
 
 inline constexpr unsigned int NUM_THREADS = 8;

@@ -342,18 +342,71 @@ namespace SMC
             const arma::vec &y, // (nT + 1) x 1
             const unsigned int &N = 1000,
             const bool &initial_resample_all = false,
-            const bool &final_resample_by_weights = false)
+            const bool &final_resample_by_weights = false,
+            const bool &use_discount = false,
+            const double &discount_factor = 0.95)
         {
             const unsigned int nT = y.n_elem - 1;
             const double logN = std::log(static_cast<double>(N));
-            const double Wsqrt = std::sqrt(std::abs(model.derr.par1) + EPS);
             arma::vec weights(N, arma::fill::ones);
             double log_cond_marginal = 0.;
 
+            arma::cube Wt;
+            if (use_discount)
+            {
+                LBA::LinearBayes lba(use_discount, discount_factor);
+                lba.filter(model, y);
+                Wt = lba.get_Wt(model, y, discount_factor);
+            }
+
+            arma::mat Wt_chol(model.nP, model.nP, arma::fill::zeros);
+            if (!use_discount)
+            {
+                if (model.derr.full_rank)
+                {
+                    Wt_chol = arma::chol(model.derr.var);
+                }
+                else
+                {
+                    Wt_chol.at(0, 0) = std::sqrt(model.derr.par1);
+                }
+            }
+
+            Theta.slice(0) = arma::randn<arma::mat>(Theta.n_rows, Theta.n_cols);
+
             for (unsigned int t = 0; t < nT; t++)
             {
+                if (use_discount)
+                {
+                    // Update Wt
+                    if (model.derr.full_rank)
+                    {
+                        Wt_chol = arma::chol(Wt.slice(t + 1));
+                        model.derr.var = Wt.slice(t + 1);
+                    }
+                    else
+                    {
+                        Wt_chol.at(0, 0) = std::sqrt(Wt.at(0, 0, t + 1));
+                        model.derr.par1 = Wt.at(0, 0, t + 1);
+                        model.derr.var.at(0, 0) = Wt.at(0, 0, t + 1);
+                    }
+                }
+
+
                 arma::vec logq(N, arma::fill::zeros);
                 arma::vec tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
+                if (model.derr.full_rank && use_discount)
+                {
+                    arma::vec loc = arma::zeros<arma::mat>(model.nP, N);
+                    arma::cube prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
+                    arma::mat param;
+                    arma::vec W;
+                    tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), W, param, y);
+                }
+                else
+                {
+                    tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
+                }
 
                 tau = weights % tau;
                 if (t > 0)
@@ -384,17 +437,21 @@ namespace SMC
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    double eps = R::rnorm(0., Wsqrt);
-                    logq.at(i) += R::dnorm4(eps, 0., Wsqrt, true); // sample from evolution distribution
-
-                    arma::vec theta_new = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
-                    theta_new.at(0) += eps;
+                    arma::vec eps = Wt_chol.t() * arma::randn(model.nP);
+                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
-                    double logp = R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wsqrt, true);
                     double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
-                    logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+
+                    if (!use_discount)
+                    {
+                        logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
+                        logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
+                    }
+
                     weights.at(i) = logp - logq.at(i);
                 }
 
@@ -564,7 +621,7 @@ namespace SMC
                         if (!use_discount)
                         {
                             // not full rank and not use discount
-                            logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true); // sample from 
+                            logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
                             logp += R::dnorm4(theta_new.at(0), gtheta.at(0), Wt_chol.at(0, 0), true);
                         }
                     }
@@ -584,10 +641,10 @@ namespace SMC
 
                 Theta.slice(t + 1) = Theta_new;
 
-                if (final_resample_by_weights)
+                if (final_resample_by_weights || t >= nT - 1)
                 {
                     eff_forward.at(t + 1) = effective_sample_size(weights);
-                    if (eff_forward.at(t + 1) < 0.95 * N || t >= nT - 1)
+                    if (eff_forward.at(t + 1) < 0.95 * N)
                     {
                         arma::uvec resample_idx = get_resample_index(weights);
                         Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
@@ -827,35 +884,7 @@ namespace SMC
             {
                 LBA::LinearBayes lba(use_discount, discount_factor);
                 lba.filter(model, y);
-                arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-
-                Wt = arma::zeros<arma::cube>(model.nP, model.nP, y.n_elem);
-
-                if (model.derr.full_rank)
-                {
-                    Wt.slice(0) = arma::symmatu(lba.Ct.slice(0));
-                }
-                else
-                {
-                    Wt.at(0, 0, 0) = std::abs(lba.Ct.at(0, 0, 0)) + EPS;
-                }
-
-                for (unsigned int t = 1; t < y.n_elem; t++)
-                {
-                    LBA::func_Gt(Gt, model, lba.mt.col(t - 1), y.at(t - 1));
-                    arma::mat Pt = Gt * lba.Ct.slice(t - 1) * Gt.t();
-                    arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
-                    Wt_hat.diag() += EPS8;
-
-                    if (model.derr.full_rank)
-                    {
-                        Wt.slice(t) = arma::symmatu(Wt_hat);
-                    }
-                    else
-                    {
-                        Wt.at(0, 0, t) = Wt_hat.at(0, 0);
-                    }   
-                }
+                Wt = lba.get_Wt(model, y, discount_factor);
             }
             else
             {
@@ -1181,35 +1210,7 @@ namespace SMC
             {
                 LBA::LinearBayes lba(use_discount, discount_factor);
                 lba.filter(model, y);
-                arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-
-                Wt = arma::zeros<arma::cube>(model.nP, model.nP, y.n_elem);
-
-                if (model.derr.full_rank)
-                {
-                    Wt.slice(0) = arma::symmatu(lba.Ct.slice(0));
-                }
-                else
-                {
-                    Wt.at(0, 0, 0) = std::abs(lba.Ct.at(0, 0, 0)) + EPS;
-                }
-
-                for (unsigned int t = 1; t < y.n_elem; t++)
-                {
-                    LBA::func_Gt(Gt, model, lba.mt.col(t - 1), y.at(t - 1));
-                    arma::mat Pt = Gt * lba.Ct.slice(t - 1) * Gt.t();
-                    arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
-                    Wt_hat.diag() += EPS8;
-
-                    if (model.derr.full_rank)
-                    {
-                        Wt.slice(t) = arma::symmatu(Wt_hat);
-                    }
-                    else
-                    {
-                        Wt.at(0, 0, t) = Wt_hat.at(0, 0);
-                    }   
-                }
+                Wt = lba.get_Wt(model, y, discount_factor);
             }
 
 
@@ -1700,35 +1701,7 @@ namespace SMC
             {
                 LBA::LinearBayes lba(use_discount, discount_factor);
                 lba.filter(model, y);
-                arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-
-                Wt = arma::zeros<arma::cube>(model.nP, model.nP, y.n_elem);
-
-                if (model.derr.full_rank)
-                {
-                    Wt.slice(0) = arma::symmatu(lba.Ct.slice(0));
-                }
-                else
-                {
-                    Wt.at(0, 0, 0) = std::abs(lba.Ct.at(0, 0, 0)) + EPS;
-                }
-
-                for (unsigned int t = 1; t < y.n_elem; t++)
-                {
-                    LBA::func_Gt(Gt, model, lba.mt.col(t - 1), y.at(t - 1));
-                    arma::mat Pt = Gt * lba.Ct.slice(t - 1) * Gt.t();
-                    arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
-                    Wt_hat.diag() += EPS8;
-
-                    if (model.derr.full_rank)
-                    {
-                        Wt.slice(t) = arma::symmatu(Wt_hat);
-                    }
-                    else
-                    {
-                        Wt.at(0, 0, t) = Wt_hat.at(0, 0);
-                    }   
-                }
+                Wt = lba.get_Wt(model, y, discount_factor);
             }
 
             // forward filter
