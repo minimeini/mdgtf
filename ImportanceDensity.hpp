@@ -362,9 +362,8 @@ static arma::vec qbackcast(
     const arma::vec &y
 )
 {
-    std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-    double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
-    unsigned int N = Theta_next.n_cols;
+    const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
+    const unsigned int N = Theta_next.n_cols;
     
 
     #ifdef _OPENMP

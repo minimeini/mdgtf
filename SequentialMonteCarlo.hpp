@@ -239,16 +239,9 @@ namespace SMC
             const bool &infer_lag = false
         )
         {
-            std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
             double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
-
-            unsigned int nstate = model.nP;
-            if (model.seas.in_state)
-            {
-                nstate -= model.seas.period;
-            }
             unsigned int N = Theta_next.n_cols;
-            unsigned int t_next = t_cur + 1;
+
             loc.set_size(model.nP, N);
             loc.zeros();
             Sigma_chol = arma::zeros<arma::cube>(model.nP, model.nP, N);
@@ -259,11 +252,7 @@ namespace SMC
                 arma::vec Vtmp = Vt.slice(i).col(t_cur);
                 arma::mat V_cur = arma::reshape(Vtmp, model.nP, model.nP);
                 arma::mat Vprec_cur = inverse(V_cur);
-
-                arma::vec v_next = vt.slice(i).col(t_next);
-                Vtmp = Vt.slice(i).col(t_next);
-                arma::mat V_next = arma::reshape(Vtmp, model.nP, model.nP);
-                arma::mat Vprec_next = inverse(V_next);
+                arma::vec v_next = vt.slice(i).col(t_cur + 1);
 
                 arma::vec r_cur(model.nP, arma::fill::zeros);
                 arma::mat K_cur(model.nP, model.nP, arma::fill::zeros); // evolution matrix
