@@ -579,6 +579,43 @@ namespace LBA
             return output;
         }
 
+
+        arma::cube get_Wt(const Model &model, const arma::vec &y, const double &discount_factor)
+        {
+            arma::cube Wt = arma::zeros<arma::cube>(model.nP, model.nP, y.n_elem);
+            arma::mat Gt = TransFunc::init_Gt(
+                model.nP, model.dlag, model.ftrans,
+                model.seas.period, model.seas.in_state);
+
+            if (model.derr.full_rank)
+            {
+                Wt.slice(0) = arma::symmatu(Ct.slice(0));
+            }
+            else
+            {
+                Wt.at(0, 0, 0) = std::abs(Ct.at(0, 0, 0)) + EPS;
+            }
+
+            for (unsigned int t = 1; t < y.n_elem; t++)
+            {
+                LBA::func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
+                arma::mat Pt = Gt * Ct.slice(t - 1) * Gt.t();
+                arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
+                Wt_hat.diag() += EPS8;
+
+                if (model.derr.full_rank)
+                {
+                    Wt.slice(t) = arma::symmatu(Wt_hat);
+                }
+                else
+                {
+                    Wt.at(0, 0, t) = std::abs(Wt_hat.at(0, 0)) + EPS;
+                }
+            }
+
+            return Wt;
+        }
+
         arma::mat optimal_discount_factor(
             const Model &model,
             const arma::vec &y,
