@@ -248,6 +248,20 @@ namespace SMC
 
             for (unsigned int i = 0; i < N; i++)
             {
+                if (infer_seas)
+                {
+                    model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
+                }
+                if (infer_obs)
+                {
+                    model.dobs.par2 = std::exp(param_filter.at(model.seas.period, i));
+                }
+                if (infer_lag)
+                {
+                    model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
+                    model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
+                }
+
                 arma::vec v_cur = vt.slice(i).col(t_cur);
                 arma::vec Vtmp = Vt.slice(i).col(t_cur);
                 arma::mat V_cur = arma::reshape(Vtmp, model.nP, model.nP);
@@ -264,30 +278,14 @@ namespace SMC
                     v_cur, v_next, Vprec_cur, Theta_cur.col(i), y);
                 arma::vec u_cur = K_cur * Theta_next.col(i) + r_cur;
 
-                if (infer_seas)
-                {
-                    model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
-                }
-                if (infer_obs)
-                {
-                    model.dobs.par2 = std::exp(param_filter.at(model.seas.period, i));
-                }
-                if (infer_lag)
-                {
-                    model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
-                    model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
-                }
-
                 double ft_ut = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, u_cur, y);
                 double eta = ft_ut;
                 double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.58)
                 double Vtilde = ApproxDisturbance::func_Vt_approx(
                     lambda, model.dobs, model.flink); // (eq 3.59)
                 Vtilde = std::abs(Vtilde) + EPS;
-                double ldetV = std::log(Vtilde);
 
-
-                if (!full_rank)
+                if (!model.derr.full_rank)
                 {
                     // No information from data, degenerates to the backward evolution
                     loc.col(i) = u_cur;
@@ -296,22 +294,18 @@ namespace SMC
                 else
                 {
                     arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, u_cur, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
-                    double delta = yhat_cur - eta;
-                    delta += arma::as_scalar(F_cur.t() * u_cur);
-                    arma::mat FFt_norm = arma::symmatu(F_cur * F_cur.t() / Vtilde);
-
-                    arma::mat Prec = arma::symmatu(FFt_norm + Uprec_cur);
+                    arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde + Uprec_cur);
                     Prec.diag() += EPS;
-                    double ldetPrec;
-                    ldetPrec = arma::log_det_sympd(Prec);
 
                     arma::mat prec_chol = arma::chol(arma::symmatu(Prec));
                     arma::mat prec_chol_inv = arma::inv(arma::trimatu(prec_chol));
-                    arma::mat Sig = prec_chol_inv * prec_chol_inv.t();
+                    double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.;
                     Sigma_chol.slice(i) = prec_chol_inv;
 
+                    double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * u_cur);
                     loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
 
+                    double ldetV = std::log(Vtilde);
                     double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
                     logq_pred += delta * delta / Vtilde;
                     logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
