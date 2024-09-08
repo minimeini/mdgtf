@@ -13,6 +13,17 @@
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 
+
+/**
+ * @brief State only
+ * 
+ * @param logq 
+ * @param model 
+ * @param t_new 
+ * @param Theta_old 
+ * @param y 
+ * @return arma::vec 
+ */
 static arma::vec qforecast0(
     arma::vec &logq,           // N x 1
     const Model &model,
@@ -54,7 +65,25 @@ static arma::vec qforecast0(
 
 
 
-
+/**
+ * @brief State and static parameters
+ * 
+ * @param loc 
+ * @param Prec_chol_inv 
+ * @param logq 
+ * @param model 
+ * @param t_new 
+ * @param Theta_old 
+ * @param W 
+ * @param param 
+ * @param y 
+ * @param update_W 
+ * @param update_obs 
+ * @param update_lag 
+ * @param use_discount 
+ * @param discount_factor 
+ * @return arma::vec 
+ */
 static arma::vec qforecast(
     arma::mat &loc,            // p x N
     arma::cube &Prec_chol_inv, // p x p x N
@@ -241,6 +270,114 @@ static void prior_forward(
         }
 
         prec.slice(t) = inverse(sig);
+    }
+
+    return;
+}
+
+
+
+static void prior_forward(
+    arma::cube &mu_stored,     // nP x (nT + 1) x N
+    arma::cube &prec_stored,  // (nP*nP) x (nT + 1) x N
+    arma::vec &log_marg,
+    Model &model,
+    const arma::mat &Theta, // p x N, theta[nT]
+    const arma::vec &W, // N x 1
+    const arma::mat &param,
+    const arma::vec &y,   // (nT + 1) x 1
+    const arma::cube &Wt, // p x p x (nT + 1), only initialized if using discount factor
+    const bool &use_discount = false,
+    const bool &update_W = false,
+    const bool &update_seas = false,
+    const bool &update_rho = false,
+    const bool &update_lag = false
+)
+{
+    const unsigned int N = Theta.n_cols;
+    const unsigned int nT = y.n_elem - 1;
+
+    mu_stored = arma::zeros<arma::cube>(model.nP, y.n_elem, N);
+    prec_stored = arma::zeros<arma::cube>(model.nP * model.nP, y.n_elem, N);
+    log_marg.set_size(N);
+
+    #ifdef _OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
+    for (unsigned int i = 0; i < N; i++)
+    {
+        if (update_seas)
+        {
+            model.seas.val = param.submat(0, i, model.seas.period - 1, i);
+        }
+
+        if (update_rho)
+        {
+            model.dobs.par2 = std::exp(param.at(model.seas.period, i));
+        }
+
+        if (update_lag)
+        {
+            model.dlag.par1 = param.at(model.seas.period + 1, i);
+            model.dlag.par2 = std::exp(param.at(model.seas.period + 2, i));
+        }
+
+        if (update_W)
+        {
+            model.derr.par1 = W.at(i);
+            model.derr.var.at(0, 0) = W.at(i);
+        }
+
+        arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
+        arma::vec mu(model.nP, arma::fill::zeros);
+        arma::mat sig(model.nP, model.nP, arma::fill::eye);
+        arma::mat prec = sig;
+
+        sig.diag().fill(0.5); // precision
+        prec_stored.slice(i).col(0) = sig.as_col();
+        mu_stored.slice(i).col(0) = mu;
+        
+        sig.diag().fill(2.); // variance
+
+        for (unsigned int t = 1; t < y.n_elem; t++)
+        {
+            if (use_discount && !update_W)
+            {
+                if (model.derr.full_rank)
+                {
+                    model.derr.var = Wt.slice(t);
+                }
+                else
+                {
+                    model.derr.par1 = Wt.at(0, 0, t);
+                    model.derr.var.at(0, 0) = Wt.at(0, 0, t);
+                }
+            }
+
+            LBA::func_Gt(Gt, model, mu, y.at(t - 1));
+            mu = StateSpace::func_gt(
+                model.ftrans, model.fgain, model.dlag, mu, y.at(t - 1),
+                model.seas.period, model.seas.in_state);
+            mu_stored.slice(i).col(t) = mu;
+
+            sig = arma::symmatu(Gt * sig * Gt.t());
+            sig.diag() += EPS;
+            if (model.derr.full_rank)
+            {
+                sig = arma::symmatu(sig + model.derr.var);
+            }
+            else
+            {
+                sig.at(0, 0) += model.derr.par1;
+            }
+
+            arma::mat sig_chol = arma::chol(sig);
+            arma::mat sig_chol_inv = arma::inv(arma::trimatu(sig_chol));
+            prec = sig_chol_inv * sig_chol_inv.t();
+            prec_stored.slice(i).col(t) = prec.as_col();
+        }
+
+        log_marg.at(i) = MVNorm::dmvnorm2(Theta.col(i), mu, prec, true);
     }
 
     return;

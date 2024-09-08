@@ -233,7 +233,7 @@ namespace SMC
             const arma::vec &W,   // N x 1, {inv(W[T])} samples of latent variance
             const arma::mat &param_filter, // (period + 3) x N, {seasonal components, rho, par1, par2} samples of baseline
             const arma::cube &vt,        // nP x (nT + 1) x N, v[t]
-            const arma::cube &Vt,        // nP*nP x (nT + 1) x N, V[t]
+            const arma::cube &Vt_inv,        // nP*nP x (nT + 1) x N, inv(V[t])
             const arma::vec &y,
             const bool &infer_seas = false,
             const bool &infer_obs = false,
@@ -264,9 +264,8 @@ namespace SMC
                 }
 
                 arma::vec v_cur = vt.slice(i).col(t_cur);
-                arma::vec Vtmp = Vt.slice(i).col(t_cur);
-                arma::mat V_cur = arma::reshape(Vtmp, model.nP, model.nP);
-                arma::mat Vprec_cur = inverse(V_cur);
+                arma::vec Vtmp = Vt_inv.slice(i).col(t_cur);
+                arma::mat Vprec_cur = arma::reshape(Vtmp, model.nP, model.nP);
                 arma::vec v_next = vt.slice(i).col(t_cur + 1);
 
                 arma::vec r_cur(model.nP, arma::fill::zeros);
@@ -2435,7 +2434,7 @@ namespace SMC
                 weights = arma::exp(weights);
 
                 #ifdef DGTF_DO_BOUND_CHECK
-                bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t));
+                bound_check<arma::vec>(weights, "PL::forward_filter: propagation weights at t = " + std::to_string(t), true, true);
                 #endif
 
                 log_cond_marginal.at(t + 1) = std::log(arma::accu(weights) + EPS) - logN;
@@ -2494,7 +2493,7 @@ namespace SMC
             const bool full_rank = false;
             arma::vec eff_backward(y.n_elem, arma::fill::zeros);
             weights.ones();
-            forward_filter(model, y, VERBOSE);
+            // forward_filter(model, y, VERBOSE);
 
             Theta_backward = Theta;
             W_backward = W_filter;
@@ -2502,87 +2501,12 @@ namespace SMC
             weights_backward = weights_forward;
 
             // mu0_filter.fill(model.dobs.par1); // N x 1
-
-            arma::mat Sig_init(model.nP, model.nP, arma::fill::eye);
-            Sig_init.diag().fill(2.);
-            arma::mat Prec_init = Sig_init;
-            Prec_init.diag() = 1. / Sig_init.diag();
-
-            mu_marginal = arma::zeros<arma::cube>(model.nP, y.n_elem, N);
-            Sigma_marginal = arma::zeros<arma::cube>(model.nP * model.nP, y.n_elem, N);
-            Prec_marginal = Sigma_marginal;
-            for (unsigned int i = 0; i < N; i++)
-            {
-                Sigma_marginal.slice(i).col(0) = Sig_init.as_col(); // np^{2} x 1
-                Prec_marginal.slice(i).col(0) = Prec_init.as_col();
-            }
-
-            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-
-            for (unsigned int t = 1; t < y.n_elem; t++)
-            {
-                Rcpp::checkUserInterrupt();
-
-                for (unsigned int i = 0; i < N; i++)
-                {
-                    if (prior_W.infer)
-                    {
-                        model.derr.par1 = W_backward.at(i);
-                    }
-                    if (prior_seas.infer)
-                    {
-                        model.seas.val = param_backward.submat(0, i, model.seas.period - 1, i);
-                    }
-                    if (prior_rho.infer)
-                    {
-                        model.dobs.par2 = std::exp(param_backward.at(model.seas.period, i));
-                    }
-                    if (lag_update)
-                    {
-                        model.dlag.par1 = param_backward.at(model.seas.period + 1, i);
-                        model.dlag.par2 = std::exp(param_backward.at(model.seas.period + 2, i));
-                    }
-
-                    mu_marginal.slice(i).col(t) = StateSpace::func_gt(
-                        model.ftrans, model.fgain, model.dlag, 
-                        mu_marginal.slice(i).col(t - 1), y.at(t - 1), 
-                        model.seas.period, model.seas.in_state);
-
-                    LBA::func_Gt(Gt, model, mu_marginal.slice(i).col(t - 1), y.at(t - 1));
-                    arma::mat Vt = arma::reshape(Sigma_marginal.slice(i).col(t - 1), model.nP, model.nP);
-                    arma::mat Sig = Gt * Vt * Gt.t();
-                    Sig.diag() += EPS;
-                    if (!model.derr.full_rank)
-                    {
-                        Sig.at(0, 0) += model.derr.par1;
-                    }
-                    else
-                    {
-                        Sig = Sig + model.derr.var;
-                    }
-
-                    arma::mat Prec = inverse(Sig);
-
-                    Sigma_marginal.slice(i).col(t) = Sig.as_col();
-                    Prec_marginal.slice(i).col(t) = Prec.as_col();
-                }
-
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rArtificial marginal: " << t << "/" << nT;
-                }
-            }
-            Rcpp::Rcout << std::endl;
-
             arma::vec log_marg(N, arma::fill::zeros);
-            for (unsigned int i = 0; i < N; i++)
-            {
-                arma::vec theta = Theta_backward.slice(nT).col(i);
-                arma::mat Prec = arma::reshape(Prec_marginal.slice(i).col(nT), model.nP, model.nP);
-                log_marg.at(i) = MVNorm::dmvnorm2(
-                    theta, mu_marginal.slice(i).col(nT), Prec, true);
-            }
-
+            arma::cube Wt;
+            prior_forward(
+                mu_marginal, Prec_marginal, log_marg, model, 
+                Theta_backward.slice(nT), W_backward, param_backward, y, Wt, 
+                false, prior_W.infer, prior_seas.infer, prior_rho.infer, lag_update);
 
             for (unsigned int t = nT - 1; t > 0; t--)
             {
@@ -2606,35 +2530,38 @@ namespace SMC
                 arma::vec tau = imp_weights_backcast(
                     mu, Sigma_chol, ut, Uprec, logq, model, t_cur, 
                     Theta_next, Theta_backward.slice(t_cur),
-                    W_backward, param_backward, mu_marginal, Sigma_marginal, y,
+                    W_backward, param_backward, mu_marginal, Prec_marginal, y,
                     prior_seas.infer, prior_rho.infer, lag_update);
 
                 tau = tau % weights;
-                arma::uvec resample_idx = get_resample_index(tau);
-
-                Theta_next = Theta_next.cols(resample_idx); // theta[t]
-                Theta_backward.slice(t_next) = Theta_next;
-
-                mu = mu.cols(resample_idx);
-                Sigma_chol = Sigma_chol.slices(resample_idx);
-                ut = ut.cols(resample_idx);
-                Uprec = Uprec.slices(resample_idx);
-
-                log_marg = log_marg.elem(resample_idx);
-                logq = logq.elem(resample_idx);
-                tau = tau.elem(resample_idx);
-
-                weights_backward.row(t_next) = logq.t();
-                eff_backward.at(t_cur) = effective_sample_size(tau);
-
-                if (prior_W.infer)
+                if (t < y.n_elem - 2)
                 {
-                    W_backward = W_backward.elem(resample_idx);
-                }
-                param_backward = param_backward.cols(resample_idx);
+                    arma::uvec resample_idx = get_resample_index(tau);
 
-                mu_marginal = mu_marginal.slices(resample_idx);
-                Sigma_marginal = Sigma_marginal.slices(resample_idx);
+                    Theta_next = Theta_next.cols(resample_idx); // theta[t]
+                    Theta_backward.slice(t_next) = Theta_next;
+
+                    mu = mu.cols(resample_idx);
+                    Sigma_chol = Sigma_chol.slices(resample_idx);
+                    ut = ut.cols(resample_idx);
+                    Uprec = Uprec.slices(resample_idx);
+
+                    log_marg = log_marg.elem(resample_idx);
+                    logq = logq.elem(resample_idx);
+                    tau = tau.elem(resample_idx);
+
+                    if (prior_W.infer)
+                    {
+                        W_backward = W_backward.elem(resample_idx);
+                    }
+                    param_backward = param_backward.cols(resample_idx);
+
+                    mu_marginal = mu_marginal.slices(resample_idx);
+                    Prec_marginal = Prec_marginal.slices(resample_idx);
+                }
+
+                eff_backward.at(t_cur) = effective_sample_size(tau);
+                weights_backward.row(t_next) = logq.t();
 
 
                 // NEED TO CHANGE PROPAGATE STEP
@@ -2646,6 +2573,7 @@ namespace SMC
                     if (prior_W.infer)
                     {
                         model.derr.par1 = W_backward.at(i);
+                        model.derr.var.at(0, 0) = W_backward.at(i);
                     }
                     if (prior_seas.infer)
                     {
@@ -2703,7 +2631,9 @@ namespace SMC
                 weights.for_each([&wmax](arma::vec::elem_type &val)
                                  { val -= wmax; });
                 weights = arma::exp(weights);
-                // weights_prop_backward.row(t_cur) = weights.t();
+                #ifdef DGTF_DO_BOUND_CHECK
+                bound_check<arma::vec>(weights, "PL::backward_filter: propagation weights at t = " + std::to_string(t), true, true);
+                #endif
 
                 if (verbose)
                 {
@@ -2880,8 +2810,16 @@ namespace SMC
                     arma::mat pmarg = arma::reshape(Prec_marg.col(i), model.nP, model.nP);
                     logp.at(i) -= MVNorm::dmvnorm2(Theta_backward.slice(t_next).col(i), mu_marg.col(i), pmarg, true);
 
-                    weights.at(i) = std::exp(logp.at(i) - logq.at(i)); // + log_forward + log_backward;
+                    weights.at(i) = logp.at(i) - logq.at(i); // + log_forward + log_backward;
                 } // loop over particle i
+
+                double wmax = weights.max();
+                weights.for_each([&wmax](arma::vec::elem_type &val)
+                                 { val -= wmax; });
+                weights = arma::exp(weights);
+                #ifdef DGTF_DO_BOUND_CHECK
+                bound_check<arma::vec>(weights, "PL::two_filter_smoother: propagation weights at t = " + std::to_string(t), true, true);
+                #endif
 
                 arma::uvec resample_idx = get_resample_index(weights);
                 Theta_smooth.slice(t_cur) = Theta_cur.cols(resample_idx);
@@ -2925,7 +2863,6 @@ namespace SMC
         bool lag_update = false;
 
         arma::cube mu_marginal;    // nP x (nT + 1) x N
-        arma::cube Sigma_marginal; // nP^2 x (nT + 1) x N
         arma::cube Prec_marginal;  // nP^2 x (nT + 1) x N
 
         arma::mat weights_forward;  // (nT + 1) x N
