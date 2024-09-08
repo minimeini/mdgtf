@@ -221,8 +221,7 @@ namespace SMC
          * @return arma::vec
          */
         static arma::vec imp_weights_backcast(
-            arma::mat &mu,          // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
-            arma::cube &Prec,       // p x p x N, precision of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
+            arma::mat &loc, // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
             arma::cube &Sigma_chol, // p x p x N, right cholesky of the variance of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
             arma::vec &logq,        // N x 1
             Model &model,
@@ -250,13 +249,9 @@ namespace SMC
             }
             unsigned int N = Theta_next.n_cols;
             unsigned int t_next = t_cur + 1;
-            mu.set_size(model.nP, N);
-            mu.zeros();
-
-            arma::mat G_next = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-
-            Prec = arma::zeros<arma::cube>(model.nP, model.nP, N);
-            Sigma_chol = Prec;
+            loc.set_size(model.nP, N);
+            loc.zeros();
+            Sigma_chol = arma::zeros<arma::cube>(model.nP, model.nP, N);
 
             for (unsigned int i = 0; i < N; i++)
             {
@@ -269,8 +264,6 @@ namespace SMC
                 Vtmp = Vt.slice(i).col(t_next);
                 arma::mat V_next = arma::reshape(Vtmp, model.nP, model.nP);
                 arma::mat Vprec_next = inverse(V_next);
-
-                LBA::func_Gt(G_next, model, v_cur, y.at(t_cur));
 
                 arma::vec r_cur(model.nP, arma::fill::zeros);
                 arma::mat K_cur(model.nP, model.nP, arma::fill::zeros); // evolution matrix
@@ -308,10 +301,7 @@ namespace SMC
                 if (!full_rank)
                 {
                     // No information from data, degenerates to the backward evolution
-                    mu.col(i) = u_cur;
-                    Prec.slice(i) = Uprec_cur;
-                    Sigma_chol.slice(i) = Urchol_cur;
-
+                    loc.col(i) = u_cur;
                     logq.at(i) = R::dnorm4(yhat_cur, eta, std::sqrt(Vtilde), true);
                 } // one-step backcasting
                 else
@@ -321,23 +311,22 @@ namespace SMC
                     delta += arma::as_scalar(F_cur.t() * u_cur);
                     arma::mat FFt_norm = arma::symmatu(F_cur * F_cur.t() / Vtilde);
 
-                    Prec.slice(i) = arma::symmatu(FFt_norm + Uprec_cur);
-                    Prec.slice(i).diag() += EPS;
+                    arma::mat Prec = arma::symmatu(FFt_norm + Uprec_cur);
+                    Prec.diag() += EPS;
                     double ldetPrec;
-                    ldetPrec = arma::log_det_sympd(Prec.slice(i));
+                    ldetPrec = arma::log_det_sympd(Prec);
 
-                    arma::mat Rchol = arma::chol(arma::symmatu(Prec.slice(i)));
-                    arma::mat Rchol_inv = arma::inv(arma::trimatu(Rchol));
-                    arma::mat Sig = Rchol_inv * Rchol_inv.t();
-                    Sigma_chol.slice(i) = Rchol;
+                    arma::mat prec_chol = arma::chol(arma::symmatu(Prec));
+                    arma::mat prec_chol_inv = arma::inv(arma::trimatu(prec_chol));
+                    arma::mat Sig = prec_chol_inv * prec_chol_inv.t();
+                    Sigma_chol.slice(i) = prec_chol_inv;
 
-                    arma::vec mu_tmp = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
-                    mu.col(i) = Sig * mu_tmp;
+                    loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * u_cur;
 
                     double logq_pred = LOG2PI + ldetV + ldetU + ldetPrec; // (eq 3.63)
                     logq_pred += delta * delta / Vtilde;
                     logq_pred += arma::as_scalar(u_cur.t() * Uprec_cur * u_cur);
-                    logq_pred -= arma::as_scalar(mu.col(i).t() * Prec.slice(i) * mu.col(i));
+                    logq_pred -= arma::as_scalar(loc.col(i).t() * prec_chol_inv * prec_chol_inv.t() * loc.col(i));
                     logq_pred *= -0.5;
 
                     logq.at(i) += logq_pred;
@@ -1596,7 +1585,6 @@ namespace SMC
                     theta, mu_marginal.col(y.n_elem - 1), Prec_marginal.slice(y.n_elem - 1), true);
             }
 
-            
 
             for (unsigned int t = y.n_elem - 2; t > 0; t--)
             {
@@ -2596,11 +2584,11 @@ namespace SMC
 
                 arma::vec logq(N, arma::fill::zeros);
                 arma::mat mu;                // nP x N
-                arma::cube Prec, Sigma_chol; // nP x nP x N
+                arma::cube Sigma_chol; // nP x nP x N
 
                 arma::vec tau = imp_weights_backcast(
-                    mu, Prec, Sigma_chol, logq,
-                    model, t_cur, Theta_next, Theta_backward.slice(t_cur),
+                    mu, Sigma_chol, logq, model, t_cur, 
+                    Theta_next, Theta_backward.slice(t_cur),
                     W_backward, param_backward, mu_marginal, Sigma_marginal, y, full_rank);
 
                 tau = tau % weights;
@@ -2610,7 +2598,6 @@ namespace SMC
                 Theta_backward.slice(t_next) = Theta_next;
 
                 mu = mu.cols(resample_idx);
-                Prec = Prec.slices(resample_idx);
                 Sigma_chol = Sigma_chol.slices(resample_idx);
 
                 log_marg = log_marg.elem(resample_idx);
@@ -2653,11 +2640,13 @@ namespace SMC
                         model.dlag.par1 = param_backward.at(model.seas.period + 1, i);
                         model.dlag.par2 = std::exp(param_backward.at(model.seas.period + 2, i));
                     }
-                    arma::vec theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn<arma::vec>(model.nP);
+                    arma::vec theta_cur;
                     if (full_rank)
                     {
-                        theta_cur = mu.col(i) + Sigma_chol.slice(i).t() * arma::randn<arma::vec>(model.nP);
-                        logq.at(i) += MVNorm::dmvnorm2(theta_cur, mu.col(i), Prec.slice(i), true);
+                        arma::vec eps = arma::randn(Theta_cur.n_rows);
+                        arma::vec zt = Sigma_chol.slice(i).t() * mu.col(i) + eps; // shifted
+                        theta_cur = Sigma_chol.slice(i) * zt;
+                        logq.at(i) += MVNorm::dmvnorm0(zt, mu.col(i), Sigma_chol.slice(i), true);
                     }
                     else
                     {
