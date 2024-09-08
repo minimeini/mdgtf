@@ -166,30 +166,6 @@ namespace SMC
         }
 
 
-        static double discount_W(
-            const arma::mat &Theta_now, // p x N
-            const double &discount_factor = 0.95)
-        {
-            double W;
-            arma::rowvec psi = Theta_now.row(0);
-            double var_psi = arma::var(psi);
-
-            if (var_psi > EPS)
-            {
-                W = var_psi;
-            }
-            else
-            {
-                W = 1.;
-            }
-            // Wsqrt = std::sqrt(Wt.at(t));
-            W *= 1. / discount_factor - 1.;
-
-            #ifdef DGTF_DO_BOUND_CHECK
-            bound_check(W, "SequentialMonteCarlo::discount_W", true, true);
-            #endif
-            return W;
-        }
 
         static double effective_sample_size(const arma::vec &weights)
         {
@@ -2209,8 +2185,8 @@ namespace SMC
                     {
                         // If burnin = true with prior_W.infer = true, we generate samples from the discount factor approach
                         // If use_discount = true, we assume W is changing dynamically and be accounted for with a discount factor.
-                        wtmp = SequentialMonteCarlo::discount_W(
-                            Theta.slice(t), discount_factor);
+                        wtmp = 0.01;
+                        wtmp = ( 1. / discount_factor - 1.) * arma::var(arma::vectorise(Theta.slice(t+1).row(0)));
                     } // else, we have prior_W.infer = false && use_discount = false. In this case we assume the prior value as the "true" value of W.
 
                     if (prior_W.infer && !filter_pass)
