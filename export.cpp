@@ -439,6 +439,8 @@ Rcpp::List dgtf_forecast(
 )
 {
     Model model(model_settings);
+    model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
+    
     arma::mat ycast = Model::forecast(
         y, psi, W_stored, model.dlag, model.seas,
         model.ftrans, model.flink, model.fgain, k); // k x nsample
@@ -551,6 +553,7 @@ arma::mat dgtf_tuning(
 )
 {
     Model model(model_opts);
+    model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
 
     arma::vec param_grid;
     if (!grid.isNull())
@@ -712,6 +715,7 @@ arma::mat dgtf_optimal_lag(
     arma::mat stats(npar1 * npar2, 7, arma::fill::zeros);
 
     Model model(model_opts);
+    model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
 
 
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
@@ -885,6 +889,7 @@ arma::mat dgtf_optimal_obs(
 
     arma::mat stats(npar, 3);
     Model model(model_opts);
+    model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
 
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
 
