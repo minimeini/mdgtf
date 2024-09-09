@@ -109,33 +109,15 @@ namespace LBA
 
         if (use_discount)
         {
-            switch (discount_list[tolower(discount_type)])
+            if (discount_list[tolower(discount_type)] == DiscountType::first_elem)
             {
-            case DiscountType::first_elem:
-            {
-                /*
-                The discounted Rt is invertible for iterative transfer function (almost guaranteed) and hopefully invertible for sliding transfer function.
-
-                 */
                 Rt.at(0, 0) /= delta_discount;
-                break;
             }
-            case DiscountType::all_elems:
+            else
             {
-                // A unknown but general W[t] (could have non-zero off-diagonal values) with discount factor
-                /*
-                The discounted Rt is not invertible for sliding transfer function.
-                */
                 Rt.for_each([&delta_discount](arma::mat::elem_type &val)
                             { val /= delta_discount; });
-                break;
             }
-            default:
-            {
-                throw std::invalid_argument("Unspecified discounting scheme.");
-            }
-            }
-            
         }
         else
         {
@@ -866,9 +848,7 @@ namespace LBA
                 ft_post_mean.at(t) = ft_posterior;
                 ft_post_var.at(t) = qt_posterior;
             }
-
             
-
             return;
         }
 

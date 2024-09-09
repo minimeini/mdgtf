@@ -97,7 +97,7 @@ namespace VB
             discount_factor = 0.95;
             if (opts.containsElementNamed("discount_factor"))
             {
-                discount_factor = Rcpp::as<bool>(opts["discount_factor"]);
+                discount_factor = Rcpp::as<double>(opts["discount_factor"]);
             }
 
             param_selected.clear();

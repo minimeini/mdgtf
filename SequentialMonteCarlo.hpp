@@ -357,6 +357,7 @@ namespace SMC
                 LBA::LinearBayes lba(use_discount, discount_factor);
                 lba.filter(model, y);
                 Wt = lba.get_Wt(model, y, discount_factor);
+                
             }
 
             arma::mat Wt_chol(model.nP, model.nP, arma::fill::zeros);
