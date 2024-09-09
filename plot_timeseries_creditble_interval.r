@@ -249,6 +249,7 @@ plot_output <- function(
     save_figures = FALSE,
     tag = NULL,
     opath = NULL,
+    plot_forecast = FALSE,
     plot_figures = TRUE,
     return_figures = FALSE,
     height = 10.1,
@@ -485,7 +486,7 @@ plot_output <- function(
       } # error-fitted-yhat
     }
 
-    if ("forecast" %in% names(out_list$error)) {
+    if ("forecast" %in% names(out_list$error) & plot_forecast) {
       kstep_forecast_err <- length(c(out_list$error$forecast$y_loss_all))
 
       forecast <- vector("list", length = kstep_forecast_err)

@@ -749,7 +749,7 @@ namespace SMC
                 discount_factor = grid.at(i);
                 stats.at(i, 0) = discount_factor;
 
-                infer(model, y);
+                infer(model, y, false);
                 arma::cube theta_tmp = Theta.tail_slices(nT + 1);
 
                 double err_forecast = 0.;
@@ -794,7 +794,7 @@ namespace SMC
                 model.derr.par1 = grid.at(i);
                 stats.at(i, 0) = model.derr.par1;
 
-                infer(model, y);
+                infer(model, y, false);
                 arma::cube theta_tmp = Theta.tail_slices(y.n_elem);
 
                 double err_forecast = 0.;
@@ -848,7 +848,7 @@ namespace SMC
                 Theta_smooth.clear();
                 Theta_smooth = Theta;
 
-                infer(model, y);
+                infer(model, y, false);
                 arma::cube theta_tmp = Theta.tail_slices(nT + 1);
 
                 double err_forecast = 0.;
