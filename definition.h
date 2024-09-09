@@ -60,6 +60,7 @@ public:
         num_backward,
         learning_rate,
         step_size,
+        k,
         mh_sd,
         lag_par1,
         lag_par2
@@ -209,6 +210,8 @@ private:
         std::map<std::string, Param> maps;
         maps["W"] = Param::W;
         maps["w"] = Param::W;
+
+        maps["k"] = Param::k;
 
         maps["discount_factor"] = Param::discount_factor;
         maps["discountfactor"] = Param::discount_factor;

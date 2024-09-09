@@ -9,7 +9,6 @@ using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr, BH)]]
 
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::NumericVector lognorm2serial(const double &mu, const double &sd2)
@@ -36,7 +35,7 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     {
     case AVAIL::Algo::LinearBayes:
     {
-        opts =  LBA::LinearBayes::default_settings();
+        opts = LBA::LinearBayes::default_settings();
         break;
     }
     case AVAIL::Algo::MCS:
@@ -122,14 +121,10 @@ Rcpp::List dgtf_model(
     return settings;
 }
 
-
-
-
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::List dgtf_simulate(
-    const Rcpp::List &settings, 
+    const Rcpp::List &settings,
     const unsigned int &ntime,
     const double &y0 = 0.)
 {
@@ -150,11 +145,10 @@ Rcpp::List dgtf_simulate(
     return output;
 }
 
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::List dgtf_infer(
-    const Rcpp::List &model_settings, 
+    const Rcpp::List &model_settings,
     const arma::vec &y_in,
     const std::string &method,
     const Rcpp::List &method_settings,
@@ -193,7 +187,6 @@ Rcpp::List dgtf_infer(
     {
         nforecast = Rcpp::as<unsigned int>(method_settings["num_step_ahead_forecast"]);
     }
-
 
     Rcpp::List output, forecast, error;
     arma::mat psi(nT + 1, 3);
@@ -349,8 +342,6 @@ Rcpp::List dgtf_infer(
             error["fitted"] = tmp;
         }
 
-
-
         break;
     } // case particle learning
     case AVAIL::Algo::MCMC:
@@ -406,8 +397,7 @@ Rcpp::List dgtf_infer(
         throw std::invalid_argument("Unknown algorithm " + algo_name);
         break;
     }
-    }// switch by algorithm
-
+    } // switch by algorithm
 
     Rcpp::List out;
     out["fit"] = output;
@@ -423,24 +413,22 @@ Rcpp::List dgtf_infer(
     return out;
 }
 
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::List dgtf_forecast(
     const Rcpp::List &model_settings,
-    const arma::vec &y, // (nT + 1) x 1
+    const arma::vec &y,   // (nT + 1) x 1
     const arma::mat &psi, // (nT + 1) x nsample
     const arma::vec &W_stored,
     const double &mu0 = 0.,
     const Rcpp::Nullable<Rcpp::NumericVector> &ycast_true = R_NilValue, // k x 1
     const std::string &loss_func = "quadratic",
     const unsigned int &k = 1, // k-step-ahead forecasting,
-    const bool &verbose = false
-)
+    const bool &verbose = false)
 {
     Model model(model_settings);
     model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
-    
+
     arma::mat ycast = Model::forecast(
         y, psi, W_stored, model.dlag, model.seas,
         model.ftrans, model.flink, model.fgain, k); // k x nsample
@@ -448,7 +436,6 @@ Rcpp::List dgtf_forecast(
     Rcpp::List out;
     out["ycast_all"] = Rcpp::wrap(ycast);
 
-    
     if (ycast_true.isNotNull())
     {
         arma::vec y_loss(k, arma::fill::zeros);
@@ -457,11 +444,10 @@ Rcpp::List dgtf_forecast(
 
         arma::mat ycast_err = ycast;
         arma::vec ycast_true_arma = Rcpp::as<arma::vec>(ycast_true);
-        ycast_err.each_col([&ycast_true_arma](arma::vec &col) {
-            col = arma::abs(col - ycast_true_arma);
-        });
+        ycast_err.each_col([&ycast_true_arma](arma::vec &col)
+                           { col = arma::abs(col - ycast_true_arma); });
 
-        for (unsigned int j = 0; j < k; j ++)
+        for (unsigned int j = 0; j < k; j++)
         {
             arma::rowvec ysamples = ycast.row(j);
             double ymin = ysamples.min();
@@ -501,9 +487,6 @@ Rcpp::List dgtf_forecast(
     return out;
 }
 
-
-
-
 //' @export
 // [[Rcpp::export]]
 arma::vec dgtf_evaluate(
@@ -516,42 +499,39 @@ arma::vec dgtf_evaluate(
     return evaluate(yest, ytrue, loss_func, eval_covarage_width, eval_covarage_pct);
 }
 
-// //' @export
-// // [[Rcpp::export]]
-// Rcpp::List dgtf_post_predictive_check(
-//     const Rcpp::List &model_settings,
-//     const arma::vec &y,   // (nT + 1) x 1
-//     const std::string &method, 
-//     const Rcpp::List &method_settings,
-//     const std::string &loss_func = "quadratic",
-//     const unsigned int &k = 1)
-// {
-//     Model model(model_settings);
-//     Rcpp::List forecast = Model::forecast_error(psi, y, model, loss_func, k);
-//     Rcpp::List fitted = Model::fitted_error(psi, y, model, loss_func);
-
-//     Rcpp::List out;
-//     out["forecast"] = forecast;
-//     out["fitted"] = fitted;
-
-//     return out;
-// }
 
 //' @export
 // [[Rcpp::export]]
 arma::mat dgtf_tuning(
     const Rcpp::List &model_opts,
-    const arma::vec &y,
+    const arma::vec &y_in,
     const std::string &algo_name,
     const Rcpp::List &algo_opts,
-    const std::string &tuning_param,
-    const double &from = 0.,
-    const double &to = 0.,
-    const double &delta = 0.,
+    const std::string &param_name,
+    const double &from = 0.7,
+    const double &to = 0.99,
+    const double &delta = 0.01,
     const Rcpp::Nullable<Rcpp::NumericVector> &grid = R_NilValue,
-    const std::string &loss = "quadratic"
-)
+    const std::string &loss = "quadratic",
+    const bool &add_y0 = false,
+    const bool &verbose = true)
 {
+    std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
+    std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+    std::map<std::string, AVAIL::Param> param_list = AVAIL::tuning_param_list;
+
+    arma::vec y;
+    if (add_y0)
+    {
+        y.set_size(y_in.n_elem + 1);
+        y.at(0) = 0.;
+        y.tail(y_in.n_elem) = y_in;
+    }
+    else
+    {
+        y = y_in;
+    }
+
     Model model(model_opts);
     model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
 
@@ -560,141 +540,167 @@ arma::mat dgtf_tuning(
     {
         param_grid = Rcpp::as<arma::vec>(grid);
     }
-
-    std::map<std::string, AVAIL::Param> tuning_param_list = AVAIL::tuning_param_list;
-    std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
-
-    arma::mat stats;
-
-    switch (algo_list[algo_name])
+    else
     {
-    case AVAIL::Algo::LinearBayes:
-    {
-        LBA::LinearBayes linear_bayes(algo_opts);
-
-        switch (tuning_param_list[tuning_param])
-        {
-        case AVAIL::Param::discount_factor:
-        {
-            stats = linear_bayes.optimal_discount_factor(model, y, from, to, delta, loss);
-            break;
-        }
-        case AVAIL::Param::W:
-        {
-            stats = linear_bayes.optimal_W(model, y, param_grid, loss);
-            break;
-        }
-        default:
-        {
-            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
-        }
-        } // switch by tuning parameter
-        
-
-        break;
-    } // case Linear Bayes
-    case AVAIL::Algo::MCS:
-    {
-        SMC::MCS mcs(model, algo_opts);
-
-        switch (tuning_param_list[tuning_param])
-        {
-        case AVAIL::Param::discount_factor:
-        {
-            stats = mcs.optimal_discount_factor(model, y, from, to, delta, loss);
-            break;
-        }
-        case AVAIL::Param::W:
-        {
-            stats = mcs.optimal_W(model, param_grid, loss);
-            break;
-        }
-        case AVAIL::Param::num_backward:
-        {
-            stats = mcs.optimal_num_backward(model, y, from, to, delta, loss);
-            break;
-        }
-        default:
-        {
-            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
-        }
-        } // switch by tuning parameter
-
-        break;
-    } // case MCS
-    case AVAIL::Algo::FFBS:
-    {
-        SMC::FFBS ffbs(model, algo_opts);
-        switch (tuning_param_list[tuning_param])
-        {
-        case AVAIL::Param::discount_factor:
-        {
-            stats = ffbs.optimal_discount_factor(model, y, from, to, delta, loss);
-            break;
-        }
-        case AVAIL::Param::W:
-        {
-            stats = ffbs.optimal_W(model, y, param_grid, loss);
-            break;
-        }
-        default:
-        {
-            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
-        }
-        } // switch by tuning parameter
-
-        break;
-    } // case FFBS
-    case AVAIL::Algo::ParticleLearning:
-    {
-        SMC::PL pl(model, algo_opts);
-        break;
-    } // case particle learning
-    case AVAIL::Algo::MCMC:
-    {
-        MCMC::Disturbance mcmc(model, algo_opts);        
-        break;
+        param_grid = arma::regspace<arma::vec>(from, delta, to);
     }
-    case AVAIL::Algo::HybridVariation:
+
+    arma::mat stats(param_grid.n_elem, 4, arma::fill::zeros);
+    for (unsigned int i = 0; i < param_grid.n_elem; i++)
     {
-        VB::Hybrid hva(model, algo_opts);
-        hva.infer(model, y);
+        Rcpp::checkUserInterrupt();
 
-        switch (tuning_param_list[tuning_param])
-        {
-        case AVAIL::Param::learning_rate:
-        {
-            stats = hva.optimal_learning_rate(model, y, from, to, delta, loss);
-            break;
-        }
-        case AVAIL::Param::step_size:
-        {
-            stats = hva.optimal_step_size(model, param_grid, loss);
-            break;
-        }
-        case AVAIL::Param::num_backward:
-        {
-            stats = hva.optimal_num_backward(model, y, from, to, delta, loss);
-            break;
-        }
-        default:
-        {
-            throw std::invalid_argument(algo_name + " doesn't have tuning parameter " + tuning_param);
-        }
-        } // switch by tuning parameter
+        Rcpp::List algo = algo_opts;
+        algo["do_smoothing"] = false;
 
-        break;
+        if (param_list[param_name] == AVAIL::Param::discount_factor)
+        {
+            algo["use_discount"] = true;
+            algo["discount_factor"] = param_grid.at(i);
+        }
+        else if (param_list[param_name] == AVAIL::Param::W)
+        {
+            model.derr.par1 = param_grid.at(i);
+            model.derr.var.at(0, 0) = param_grid.at(i);
+            algo["use_discount"] = false;
+        }
+        else if (param_list[param_name] == AVAIL::Param::num_backward)
+        {
+            algo["num_backward"] = param_grid.at(i);
+        }
+        else if (param_list[param_name] == AVAIL::Param::step_size)
+        {
+            algo["learning_rate"] = param_grid.at(i);
+        }
+        else if (param_list[param_name] == AVAIL::Param::learning_rate)
+        {
+            algo["eps_step_size"] = param_grid.at(i);
+        }
+        else if (param_list[param_name] == AVAIL::Param::k)
+        {
+            algo["k"] = param_grid.at(i);
+        }
+        else
+        {
+            throw std::invalid_argument("Unknown tuning parameter " + param_name + ".");
+        }
+
+
+        stats.at(i, 0) = param_grid.at(i);
+        double err_forecast = 0.;
+        double cov_forecast = 0.;
+        double width_forecast = 0.;
+
+        bool success = false;
+        try
+        {
+            switch (algo_list[algo_name])
+            {
+            case AVAIL::Algo::LinearBayes:
+            {
+                if (LBA_FILL_ZERO)
+                {
+                    y.clamp(0.01 / static_cast<double>(model.nP), y.max());
+                }
+                LBA::LinearBayes linear_bayes(algo);
+                linear_bayes.filter(model, y);
+                linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);
+                break;
+            }
+            case AVAIL::Algo::MCS:
+            {
+                SMC::MCS mcs(model, algo);
+                mcs.infer(model, y, false);
+                arma::cube theta_tmp = mcs.Theta.tail_slices(y.n_elem);
+                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
+                break;
+            }
+            case AVAIL::Algo::FFBS:
+            {
+                SMC::FFBS ffbs(model, algo);
+                ffbs.infer(model, y, false);
+                arma::cube theta_tmp = ffbs.Theta.tail_slices(y.n_elem);
+                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
+                break;
+            }
+            case AVAIL::Algo::TFS:
+            {
+                SMC::TFS tfs(model, algo);
+                tfs.infer(model, y, false);
+                arma::cube theta_tmp = tfs.Theta.tail_slices(y.n_elem);
+                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
+                break;
+            }
+            case AVAIL::Algo::ParticleLearning:
+            {
+                if (param_list[param_name] == AVAIL::Param::W)
+                {
+                    Rcpp::List W_opts;
+                    if (algo.containsElementNamed("W"))
+                    {
+                        Rcpp::List W_opts = Rcpp::as<Rcpp::List>(algo["W"]);
+                    }
+                    W_opts["infer"] = false;
+                    algo["W"] = W_opts;
+                }
+                SMC::PL pl(model, algo);
+                pl.infer(model, y, false);
+                arma::cube theta_tmp = pl.Theta.tail_slices(y.n_elem);
+                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
+                break;
+            }
+            case AVAIL::Algo::HybridVariation:
+            {
+                Rcpp::List W_opts;
+                if (algo.containsElementNamed("W"))
+                {
+                    Rcpp::List W_opts = Rcpp::as<Rcpp::List>(algo["W"]);
+                }
+                W_opts["infer"] = false;
+                algo["W"] = W_opts;
+
+                VB::Hybrid hvb(model, algo);
+                hvb.infer(model, y, false);
+                Model::forecast_error(err_forecast, cov_forecast, width_forecast, hvb.psi_stored, y, model, loss, false);
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument("Unknown algorithm: " + algo_name + ".");
+            }
+            }
+
+            success = true;
+        }
+        catch (const std::exception &e)
+        {
+            success = false;
+            std::cerr << std::endl;
+            std::cerr << e.what() << ' - failed at delta = ' << param_grid.at(i) << std::endl;
+        }
+
+        if (success)
+        {
+            stats.at(i, 1) = err_forecast;
+            stats.at(i, 2) = cov_forecast;
+            stats.at(i, 3) = width_forecast;
+        }
+
+        if (verbose)
+        {
+            Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << param_grid.n_elem;
+        }
     }
-    default:
+
+    if (verbose)
     {
-        throw std::invalid_argument("Unknown algorithm " + algo_name);
-        break;
+        Rcpp::Rcout << std::endl;
     }
-    } // switch by algorithm
-
 
     return stats;
 }
+
+
 
 //' @export
 // [[Rcpp::export]]
@@ -705,8 +711,7 @@ arma::mat dgtf_optimal_lag(
     const Rcpp::List &algo_opts,
     const arma::vec &par1_grid,
     const arma::vec &par2_grid,
-    const std::string &loss = "quadratic"
-)
+    const std::string &loss = "quadratic")
 {
     unsigned int npar1 = par1_grid.n_elem;
     unsigned int npar2 = par2_grid.n_elem;
@@ -717,21 +722,19 @@ arma::mat dgtf_optimal_lag(
     Model model(model_opts);
     model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
 
-
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
 
     unsigned int idx = 0;
 
-    for (unsigned int i = 0; i < npar1; i ++)
+    for (unsigned int i = 0; i < npar1; i++)
     {
         Rcpp::checkUserInterrupt();
-        
+
         double par1 = par1_grid.at(i);
         model.dlag.par1 = par1;
-        
 
-        for (unsigned int j = 0; j < npar2; j ++)
+        for (unsigned int j = 0; j < npar2; j++)
         {
             Rcpp::checkUserInterrupt();
 
@@ -780,13 +783,11 @@ arma::mat dgtf_optimal_lag(
                     linear_bayes.fitted_error(model, y, err_fit, 1000, loss);
                     linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);
                 }
-                catch(...)
+                catch (...)
                 {
                     err_fit = NA_REAL;
                     err_forecast = NA_REAL;
                 }
-                
-                
 
                 break;
             } // case Linear Bayes
@@ -800,7 +801,7 @@ arma::mat dgtf_optimal_lag(
                     mcs.fitted_error(err_fit, model, y, loss);
                     mcs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
                 }
-                catch(...)
+                catch (...)
                 {
                     err_fit = NA_REAL;
                     err_forecast = NA_REAL;
@@ -811,7 +812,7 @@ arma::mat dgtf_optimal_lag(
             {
                 SMC::FFBS ffbs(model, algo_opts);
                 ffbs.infer(model, y);
-                
+
                 ffbs.fitted_error(err_fit, model, y, loss);
                 ffbs.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
@@ -821,7 +822,7 @@ arma::mat dgtf_optimal_lag(
             {
                 SMC::PL pl(model, algo_opts);
                 pl.infer(model, y);
-                
+
                 pl.fitted_error(err_fit, model, y, loss);
                 pl.forecast_error(err_forecast, cov_forecast, width_forecast, model, y, loss);
 
@@ -831,7 +832,7 @@ arma::mat dgtf_optimal_lag(
             {
                 MCMC::Disturbance mcmc(model, algo_opts);
                 mcmc.infer(model, y);
-                
+
                 mcmc.fitted_error(err_fit, model, loss);
                 // mcmc.forecast_error(err_forecast, model, loss);
                 break;
@@ -847,7 +848,7 @@ arma::mat dgtf_optimal_lag(
                     hvb.fitted_error(err_fit, model, loss);
                     // hvb.forecast_error(err_forecast, model, loss);
                 }
-                catch(...)
+                catch (...)
                 {
                     err_fit = NA_REAL;
                     err_forecast = NA_REAL;
@@ -989,10 +990,9 @@ arma::mat dgtf_optimal_obs(
 
         Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << npar;
 
-    }     // loop over par1
+    } // loop over par1
 
     Rcpp::Rcout << std::endl;
 
     return stats;
 }
-

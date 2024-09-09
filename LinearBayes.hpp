@@ -489,9 +489,9 @@ namespace LBA
             }
 
             discount_factor = 0.95;
-            if (opts.containsElementNamed("custom_discount_factor"))
+            if (opts.containsElementNamed("discount_factor"))
             {
-                discount_factor = Rcpp::as<double>(opts["custom_discount_factor"]);
+                discount_factor = Rcpp::as<double>(opts["discount_factor"]);
             }
 
             do_reference_analysis = false;
@@ -519,8 +519,7 @@ namespace LBA
 
             opts["use_discount"] = false;
             opts["discount_type"] = "first_elem";
-            opts["use_custom"] = false;
-            opts["custom_discount_factor"] = 0.95;
+            opts["discount_factor"] = 0.95;
             opts["do_smoothing"] = true;
             opts["do_reference_analysis"] = false;
             opts["fill_zero"] = LBA_FILL_ZERO;
@@ -597,114 +596,7 @@ namespace LBA
 
             return Wt;
         }
-
-        arma::mat optimal_discount_factor(
-            const Model &model,
-            const arma::vec &y,
-            const double &from, 
-            const double &to, 
-            const double &delta = 0.01,
-            const std::string &loss = "quadratic",
-            const bool &verbose = VERBOSE)
-        {
-            bool use_discount_old = use_discount;
-            use_discount = true;
-
-            double discount_old = discount_factor;
-
-
-            if (to > 1 || from < 0)
-            {
-                throw std::invalid_argument("Discount factor range is (0, 1)");
-            }
-            arma::vec delta_grid = arma::regspace(from, delta, to);
-            unsigned int nelem = delta_grid.n_elem;
-            arma::mat stats(nelem, 4, arma::fill::zeros);
-
-
-            for (unsigned int i = 0; i < nelem; i ++)
-            {
-                Rcpp::checkUserInterrupt();
-
-                discount_factor = delta_grid.at(i);
-                stats.at(i, 0) = delta_grid.at(i);
-
-                Model mod = model;
-                filter(mod, y);
-                double forecast_err = 0.;
-                double forecast_cover = 0.;
-                double forecast_width = 0.;
-                forecast_error(mod, y, forecast_err, forecast_cover, forecast_width, 1000, loss);
-                stats.at(i, 1) = forecast_err;
-
-                // smoother();
-
-                // double fit_err = 0.;
-                // fitted_error(fit_err, 1000, loss);
-                stats.at(i, 2) = forecast_cover;
-                stats.at(i, 3) = forecast_width;
-
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
-                }
-            }
-
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
-
-            use_discount = use_discount_old;
-            discount_factor = discount_old;
-
-            return stats;
-        }
-
-        arma::mat optimal_W(
-            const Model &model, 
-            const arma::vec &y,
-            const arma::vec &grid,
-            const std::string &loss = "quadratic",
-            const bool &verbose = VERBOSE)
-        {
-            use_discount = false;
-            unsigned int nelem = grid.n_elem;
-            arma::mat stats(nelem, 4, arma::fill::zeros);
-
-            for (unsigned int i = 0; i < nelem; i++)
-            {
-                Rcpp::checkUserInterrupt();
-                Model mod = model;
-                mod.derr.par1 = grid.at(i);
-                stats.at(i, 0) = grid.at(i);
-
-                filter(mod, y);
-                double forecast_err = 0.;
-                double forecast_cover = 0.;
-                double forecast_width = 0.;
-                forecast_error(mod, y, forecast_err, forecast_cover, forecast_width, 1000, loss);
-                stats.at(i, 1) = forecast_err;
-
-                // smoother();
-                // double fit_err = 0.;
-                // fitted_error(fit_err, 1000, loss);
-                stats.at(i, 2) = forecast_cover;
-                stats.at(i, 3) = forecast_width;
-
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nelem;
-                }
-            }
-
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
-
-            return stats;
-        }
+        
 
         static void filter_single_iter(
             arma::vec &mt_new,
