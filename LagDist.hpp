@@ -83,7 +83,7 @@ public:
         return;
     }
 
-    void update_param(const double &par1_new, const double &par2_new, const bool &update_num_lag = true, const unsigned int &max_lag = 30)
+    void update_param(const double &par1_new, const double &par2_new, const bool &update_num_lag = true, const unsigned int &max_lag = 50)
     {
         par1 = par1_new;
         par2 = par2_new;
@@ -195,8 +195,8 @@ public:
         const std::string &lag_dist, 
         const double &lag_par1, 
         const double &lag_par2, 
-        const double &prob = 0.99,
-        const unsigned int &max_lag = 30,
+        const double &prob = 0.995,
+        const unsigned int &max_lag = 50,
         const unsigned int &min_lag = MIN_LAG)
     {
         if (prob < 0 || prob > 1)

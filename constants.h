@@ -20,16 +20,16 @@
     #endif
 #endif
 
-#if !defined(DGTF_DO_BOUND_CHECK)
-    #define DGTF_DO_BOUND_CHECK
-#endif
+// #if !defined(DGTF_DO_BOUND_CHECK)
+//     #define DGTF_DO_BOUND_CHECK
+// #endif
 
-#if !defined(DGTF_DETAILED_OUTPUT)
-    #define DGTF_DETAILED_OUTPUT
-#endif
+// #if !defined(DGTF_DETAILED_OUTPUT)
+//     #define DGTF_DETAILED_OUTPUT
+// #endif
 
 
-inline constexpr unsigned int NUM_THREADS = 8;
+inline constexpr unsigned int NUM_THREADS = 16;
 
 inline constexpr double EPS = 2.220446e-16;
 inline constexpr double EPS8 = 1.e-8;

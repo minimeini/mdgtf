@@ -23,6 +23,31 @@ Rcpp::NumericVector serial2lognorm(const double &m, const double &s2)
     return lognorm::serial2lognorm(m, s2);
 }
 
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::NumericVector dnbinom0(
+        const unsigned int &nL,
+        const double &kappa,
+        const double &r)
+{
+    return Rcpp::wrap(nbinom::dnbinom(nL, kappa, r));
+}
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::NumericVector dlognorm0(
+        const unsigned int &nL,
+        const double &mu,
+        const double &sd2)
+{
+    return Rcpp::wrap(lognorm::dlognorm(nL, mu, sd2));
+}
+
+
+
+
 //' @export
 // [[Rcpp::export]]
 Rcpp::List dgtf_default_algo_settings(const std::string &method)

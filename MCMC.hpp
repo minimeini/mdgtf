@@ -320,7 +320,7 @@ namespace MCMC
             const Prior &par2_prior,
             const double &par1_mh_sd = 0.1,
             const double &par2_mh_sd = 0.1,
-            const unsigned int &max_lag = 30)
+            const unsigned int &max_lag = 50)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -452,7 +452,7 @@ namespace MCMC
             const double &epsilon = 0.01,
             const unsigned int &L = 10,
             const Rcpp::NumericVector &m = Rcpp::NumericVector::create(1., 1.),
-            const unsigned int &max_lag = 30)
+            const unsigned int &max_lag = 50)
         {
             std::string lag_dist = model.dlag.name;
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
@@ -608,7 +608,7 @@ namespace MCMC
                 m = Rcpp::as<Rcpp::NumericVector>(opts["m"]);
             }
 
-            max_lag = 30;
+            max_lag = 50;
             if (opts.containsElementNamed("max_lag"))
             {
                 max_lag = Rcpp::as<unsigned int>(opts["max_lag"]);
@@ -769,7 +769,7 @@ namespace MCMC
             opts["epsilon"] = 0.01;
             opts["L"] = 10;
             opts["m"] = Rcpp::NumericVector::create(1., 1.);
-            opts["max_lag"] = 30;
+            opts["max_lag"] = 50;
 
             opts["mh_sd"] = 0.1;
             opts["nburnin"] = 100;
@@ -990,7 +990,7 @@ namespace MCMC
         unsigned int nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
         double tstart_pct = 0.9;
 
-        unsigned int max_lag = 30;
+        unsigned int max_lag = 50;
 
         Prior w0_prior;
         arma::vec wt;
