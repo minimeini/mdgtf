@@ -158,7 +158,7 @@ Rcpp::List dgtf_posterior_predictive(
             for (unsigned int j = 0; j < nrep; j++)
             {
                 yhat.at(t, i, j) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
-                res.at(t, i, j) = std::abs(yhat.at(t, i, j) - y.at(i));
+                res.at(t, i, j) = std::abs(yhat.at(t, i, j) - y.at(t));
             }
 
             p.increment(); 
