@@ -158,7 +158,7 @@ Rcpp::List dgtf_posterior_predictive(
             for (unsigned int j = 0; j < nrep; j++)
             {
                 yhat.at(t, i, j) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
-                res.at(t, i, j) = std::abs(yhat.at(t, i, j) = y.at(i));
+                res.at(t, i, j) = std::abs(yhat.at(t, i, j) - y.at(i));
             }
 
             p.increment(); 
@@ -180,9 +180,9 @@ Rcpp::List dgtf_posterior_predictive(
 
     double rmse = std::sqrt(arma::mean(arma::mean(arma::pow(res2, 2))));
     double mae = arma::mean(arma::mean(res2));
-    output["res"] = Rcpp::wrap(res2);
-    output["rmse"] = rmse;
-    output["mae"] = mae;
+    output2["res"] = Rcpp::wrap(res2);
+    output2["rmse"] = rmse;
+    output2["mae"] = mae;
 
     return output2;
 }
