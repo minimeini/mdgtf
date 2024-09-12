@@ -126,6 +126,7 @@ Rcpp::List dgtf_posterior_predictive(
     }
 
     arma::cube yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
+    arma::cube res = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     Progress p(nsample*ntime, true);
     #ifdef _OPENMP
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
@@ -157,6 +158,7 @@ Rcpp::List dgtf_posterior_predictive(
             for (unsigned int j = 0; j < nrep; j++)
             {
                 yhat.at(t, i, j) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
+                res.at(t, i, j) = std::abs(yhat.at(t, i, j) = y.at(i));
             }
 
             p.increment(); 
@@ -172,6 +174,15 @@ Rcpp::List dgtf_posterior_predictive(
     arma::vec prob = {0.025, 0.5, 0.975};
     arma::mat yqt = arma::quantile(yhat2, prob, 1);
     output2["yest"] = Rcpp::wrap(yqt);
+
+    arma::cube rtmp = res.reshape(ntime + 1, nsample * nrep, 1);
+    arma::mat res2 = rtmp.slice(0); // (ntime + 1) x (nsample * nrep)
+
+    double rmse = std::sqrt(arma::mean(arma::mean(arma::pow(res2, 2))));
+    double mae = arma::mean(arma::mean(res2));
+    output["res"] = Rcpp::wrap(res2);
+    output["rmse"] = rmse;
+    output["mae"] = mae;
 
     return output2;
 }
