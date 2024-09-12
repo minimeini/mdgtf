@@ -739,6 +739,17 @@ public:
         return;
     }
 
+
+    /**
+     * @brief Posterior predictive residuals.
+     * 
+     * @param psi 
+     * @param y 
+     * @param model 
+     * @param loss_func 
+     * @param verbose 
+     * @return Rcpp::List 
+     */
     static Rcpp::List fitted_error(
         const arma::mat &psi, // (nT + 1) x nsample
         const arma::vec &y,      // (nT + 1) x 1

@@ -5,9 +5,12 @@
 #include "MCMC.hpp"
 #include "VariationalBayes.hpp"
 
+#include <progress.hpp>
+#include <progress_bar.hpp>
+
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo,nloptr, BH)]]
+// [[Rcpp::depends(RcppArmadillo,nloptr, BH, RcppProgress)]]
 
 //' @export
 // [[Rcpp::export]]
@@ -47,6 +50,131 @@ Rcpp::NumericVector dlognorm0(
 
 
 
+//' @export
+// [[Rcpp::export]]
+Rcpp::List dgtf_posterior_predictive(
+    const Rcpp::List &output, 
+    const Rcpp::List &model_opts, 
+    const arma::vec &y, 
+    const unsigned int &nrep = 100)
+{
+    const unsigned int ntime = y.n_elem - 1;
+    Model model(model_opts);
+    model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
+
+    arma::mat psi_stored;
+    if (output.containsElementNamed("psi_stored"))
+    {
+        psi_stored = Rcpp::as<arma::mat>(output["psi_stored"]);
+    }
+    else if (output.containsElementNamed("psi"))
+    {
+        psi_stored = Rcpp::as<arma::mat>(output["psi"]);
+    }
+    else if (output.containsElementNamed("psi_filter"))
+    {
+        psi_stored = Rcpp::as<arma::mat>(output["psi_filter"]);
+    }
+    else
+    {
+        throw std::invalid_argument("No state samples.");
+    }
+
+    const unsigned int nsample = psi_stored.n_cols;
+
+    arma::vec W_stored(nsample);
+    W_stored.fill(model.derr.par1);
+    if (output.containsElementNamed("W"))
+    {
+        W_stored = Rcpp::as<arma::vec>(output["W"]);
+    }
+
+    arma::vec rho_stored(nsample);
+    rho_stored.fill(model.dobs.par2);
+    if (output.containsElementNamed("rho"))
+    {
+        rho_stored = Rcpp::as<arma::vec>(output["rho"]);
+    }
+
+
+    arma::vec par1_stored(nsample);
+    par1_stored.fill(model.dlag.par1);
+    if (output.containsElementNamed("par1"))
+    {
+        par1_stored = Rcpp::as<arma::vec>(output["par1"]);
+    }
+
+
+    arma::vec par2_stored(nsample);
+    par2_stored.fill(model.dlag.par2);
+    if (output.containsElementNamed("par2"))
+    {
+        par2_stored = Rcpp::as<arma::vec>(output["par2"]);
+    }
+
+    arma::mat seas_stored(model.seas.period, nsample, arma::fill::zeros);
+    if (output.containsElementNamed("seas"))
+    {
+        seas_stored = Rcpp::as<arma::mat>(output["seas"]);
+    }
+    else
+    {
+        for (unsigned int i = 0; i < nsample; i++)
+        {
+            seas_stored.col(i) = model.seas.val;
+        }
+    }
+
+    arma::cube yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
+    Progress p(nsample*ntime, true);
+    #ifdef _OPENMP
+    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
+    for (unsigned int i = 0; i < nsample; i++)
+    {
+        arma::vec ft(ntime + 1, arma::fill::zeros);
+        arma::vec psi = psi_stored.col(i);
+        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+
+        Model mod = model;
+        mod.dobs.par2 = rho_stored.at(i);
+        mod.derr.par1 = W_stored.at(i);
+        mod.dlag.par1 = par1_stored.at(i);
+        mod.dlag.par2 = par2_stored.at(i);
+        mod.seas.val = seas_stored.col(i);
+
+        for (unsigned int t = 1; t <= ntime; t++)
+        {
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, mod.dlag, mod.ftrans);
+            double eta = ft.at(t);
+            if (mod.seas.period > 0)
+            {
+                eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
+            }
+
+            double lambda = LinkFunc::ft2mu(eta, model.flink);
+
+            for (unsigned int j = 0; j < nrep; j++)
+            {
+                yhat.at(t, i, j) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
+            }
+
+            p.increment(); 
+        }
+    }
+
+    arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
+    arma::mat yhat2 = ytmp.slice(0);
+
+    Rcpp::List output2;
+    output2["yhat"] = Rcpp::wrap(yhat2);
+
+    arma::vec prob = {0.025, 0.5, 0.975};
+    arma::mat yqt = arma::quantile(yhat2, prob, 1);
+    output2["yest"] = Rcpp::wrap(yqt);
+
+    return output2;
+}
 
 //' @export
 // [[Rcpp::export]]
@@ -108,43 +236,6 @@ Rcpp::List dgtf_default_model()
     return Model::default_settings();
 }
 
-//' @export
-// [[Rcpp::export]]
-Rcpp::List dgtf_model(
-    const std::string &obs_dist = "nbinom",
-    const std::string &link_func = "identity",
-    const std::string &trans_func = "sliding",
-    const std::string &gain_func = "softplus",
-    const std::string &lag_dist = "lognorm",
-    const std::string &err_dist = "gaussian",
-    const unsigned int &nlag = 10,
-    const unsigned int &ntime = 200,
-    const bool &truncated = true,
-    const Rcpp::NumericVector &obs_param = Rcpp::NumericVector::create(0., 30.),  // (mu0, delta_nb)
-    const Rcpp::NumericVector &lag_param = Rcpp::NumericVector::create(1.4, 0.3), // (kappa, r) or (mu, sd2)
-    const Rcpp::NumericVector &err_param = Rcpp::NumericVector::create(0.01, 0.)  // (W, w[0]))
-)
-{
-    // Consolidate the model definitions into a Rcpp list.s
-    Rcpp::List model;
-    model["obs_dist"] = tolower(obs_dist);
-    model["link_func"] = tolower(link_func);
-    model["trans_func"] = tolower(trans_func);
-    model["gain_func"] = tolower(gain_func);
-    model["lag_dist"] = tolower(lag_dist);
-    model["err_dist"] = tolower(err_dist);
-
-    Rcpp::List param;
-    param["obs"] = obs_param;
-    param["lag"] = lag_param;
-    param["truncated"] = truncated;
-
-    Rcpp::List settings;
-    settings["model"] = model;
-    settings["param"] = param;
-
-    return settings;
-}
 
 //' @export
 // [[Rcpp::export]]

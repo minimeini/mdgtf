@@ -790,6 +790,7 @@ namespace MCMC
 
             arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1); // (nT + 1) x 3
+            output["psi_stored"] = Rcpp::wrap(psi_stored);
             output["psi"] = Rcpp::wrap(psi_quantile);
             output["wt_accept"] = Rcpp::wrap(wt_accept / ntotal);
             

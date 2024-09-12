@@ -26,15 +26,23 @@ epi_poisson_data <- function(y, mean_si, sd2_si) {
   ydat = data.frame(I = c(y))
 
   config <- list(
-    mean_si = mean_si, std_mean_si = 1,
-    min_mean_si = quantile(rnorm(10000, mean_si, 1), 0.025),
-    max_mean_si = quantile(rnorm(10000, mean_si, 1), 0.975),
-    std_si = sqrt(sd2_si), std_std_si = 0.5,
-    min_std_si = quantile(rnorm(10000, sqrt(sd2_si), 0.5), 0.025),
-    max_std_si =  quantile(rnorm(10000, sqrt(sd2_si), 0.5), 0.975),
+    mean_si = mean_si, std_mean_si = 2,
+    min_mean_si = 1,
+    max_mean_si = 10,
+    std_si = sqrt(sd2_si), std_std_si = 1,
+    min_std_si = 1,
+    max_std_si =  5,
     t_start = 2:(ntime - 6),
-    t_end = 8:ntime
+    t_end = 8:ntime,
+    n1 = 500,
+    n2 = 500
   )
+
+  # config <- list(
+  #   si_distr = diff(plnorm(0:30, 1.386262, 0.3226017)),
+  #   t_start = 2:(ntime - 6),
+  #   t_end = 8:ntime
+  # )
   
   epi_out <- EpiEstim::estimate_R(ydat,
     method = "uncertain_si",

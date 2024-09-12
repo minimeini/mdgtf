@@ -707,6 +707,16 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = true)
         {
+            if (smoothing)
+            {
+                arma::mat psi = Theta_smooth.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
+            else
+            {
+                arma::mat psi = Theta.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
             return output;
         }
 
@@ -854,23 +864,16 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = true)
         {
-            // arma::vec ci_prob = {0.025, 0.5, 0.975};
-            // Rcpp::List output;
-
-            // arma::mat psi_forward = Theta.row_as_mat(0);
-
-            // arma::mat psi_f = arma::quantile(psi_forward, ci_prob, 1);
-            // output["psi_filter"] = Rcpp::wrap(psi_f);
-            // output["eff_forward"] = Rcpp::wrap(eff_forward);
-
-            // if (smoothing)
-            // {
-            //     arma::mat psi = arma::quantile(psi_smooth, ci_prob, 1);
-            //     output["psi"] = Rcpp::wrap(psi);
-            // }
-
-            // output["log_marginal_likelihood"] = marginal_likelihood(log_cond_marginal, true);
-
+            if (smoothing)
+            {
+                arma::mat psi = Theta_smooth.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
+            else
+            {
+                arma::mat psi = Theta.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
             return output;
         }
 
@@ -1040,6 +1043,16 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = true)
         {
+            if (smoothing)
+            {
+                arma::mat psi = Theta_smooth.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
+            else
+            {
+                arma::mat psi = Theta.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
             return output;
         }
 
@@ -1594,6 +1607,16 @@ namespace SMC
 
         Rcpp::List get_output(const bool &summarize = TRUE)
         {
+            if (smoothing)
+            {
+                arma::mat psi = Theta_smooth.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
+            else
+            {
+                arma::mat psi = Theta.row_as_mat(0);
+                output["psi_stored"] = Rcpp::wrap(psi);
+            }
             return output;
         }
 
