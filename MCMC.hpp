@@ -639,24 +639,6 @@ namespace MCMC
 
             ntotal = nburnin + nthin * nsample + 1;
 
-            nforecast = 0;
-            if (opts.containsElementNamed("num_step_ahead_forecast"))
-            {
-                nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
-            }
-
-            nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
-            if (opts.containsElementNamed("num_eval_forecast_error"))
-            {
-                nforecast_err = Rcpp::as<unsigned int>(opts["num_eval_forecast_error"]);
-            }
-
-            tstart_pct = 0.9;
-            if (opts.containsElementNamed("tstart_pct"))
-            {
-                tstart_pct = Rcpp::as<double>(opts["tstart_pct"]);
-            }
-
             W_prior.init("invgamma", 0.01, 0.01);
             W_stored.set_size(nsample);
             W_accept = 0.;
@@ -775,11 +757,6 @@ namespace MCMC
             opts["nburnin"] = 100;
             opts["nthin"] = 1;
             opts["nsample"] = 100;
-
-            opts["num_step_ahead_forecast"] = 0;
-            opts["num_eval_forecast_error"] = 0;
-            opts["tstart_pct"] = 0.9;
-
             return opts;
         }
 
@@ -822,31 +799,6 @@ namespace MCMC
             return output;
         }
 
-        Rcpp::List forecast(const Model &model, const arma::vec &y)
-        {
-            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            // arma::mat psi_stored = wt_stored;
-            Rcpp::List out = Model::forecast(
-                y, psi_stored, W_stored, model, nforecast);
-
-            return out;
-        }
-
-
-        Rcpp::List fitted_error(const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
-        {
-            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            // arma::mat psi_stored = wt_stored;
-            return Model::fitted_error(psi_stored, y, model, loss_func);
-        }
-
-        void fitted_error(double &err, const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
-        {
-            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
-            // arma::mat psi_stored = wt_stored;
-            Model::fitted_error(err, psi_stored, y, model, loss_func);
-            return;
-        }
 
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
@@ -987,9 +939,6 @@ namespace MCMC
         unsigned int nthin = 1;
         unsigned int nsample = 100;
         unsigned int ntotal = 200;
-        unsigned int nforecast = 0;
-        unsigned int nforecast_err = 10; // forecasting for indices (1, ..., ntime-1) has `nforecast` elements
-        double tstart_pct = 0.9;
 
         unsigned int max_lag = 50;
 

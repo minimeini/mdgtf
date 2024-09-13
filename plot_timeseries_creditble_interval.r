@@ -49,7 +49,6 @@ plot_ts_ci_multi <- function(psi_list = NULL,
   n <- max(c(unlist(lapply(psi_list, function(psi) {
     dim(psi)[1]
   }))))
-  nl2 <- sum(toupper(names(psi_list)) %in% c(mlist_dgtf, toupper("Koyama2021")))
 
   if (is.null(time_label)) {
     time_label <- c(1:n)
@@ -96,10 +95,10 @@ plot_ts_ci_multi <- function(psi_list = NULL,
   # cols = clist[col_tmp]
 
   p <- ggplot(psi_list, aes(x = time, y = est, group = method)) +
-    geom_line(aes(color = method), na.rm = TRUE) +
     geom_ribbon(aes(ymin = lobnd, ymax = hibnd, fill = method),
       alpha = alpha, na.rm = TRUE
     ) +
+    geom_line(aes(color = method), na.rm = TRUE) +
     scale_color_manual(name = legend.name, breaks = methods, values = cols) +
     scale_fill_manual(name = legend.name, breaks = methods, values = cols) +
     theme_minimal() +
@@ -137,8 +136,8 @@ plot_ts_ci_single <- function(
 
   p <- ggplot(data = dat, aes(x = time, y = psi)) +
     theme_minimal() +
-    geom_line(na.rm = TRUE) +
     geom_ribbon(aes(ymin = psi_min, ymax = psi_max), alpha = 0.5, fill = "lightgrey") +
+    geom_line(na.rm = TRUE) +  
     ylab(ylab) +
     labs(title = main)
 

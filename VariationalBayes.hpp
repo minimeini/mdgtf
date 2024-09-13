@@ -24,7 +24,6 @@ namespace VB
         unsigned int nthin = 2;
         unsigned int nburnin = 1000;
         unsigned int ntotal = 3001;
-        unsigned int nforecast = 0;
         unsigned int N = 500; // number of SMC particles
 
         bool use_discount = false;
@@ -74,12 +73,6 @@ namespace VB
             if (opts.containsElementNamed("num_particle"))
             {
                 N = Rcpp::as<unsigned int>(opts["num_particle"]);
-            }
-
-            nforecast = 0;
-            if (opts.containsElementNamed("num_step_ahead_forecast"))
-            {
-                nforecast = Rcpp::as<unsigned int>(opts["num_step_ahead_forecast"]);
             }
 
             state_sampler = "smc";
@@ -212,7 +205,6 @@ namespace VB
             opts["nburnin"] = 1000;
             opts["state_sampler"] = "smc";
             opts["num_particle"] = 100;
-            opts["num_step_ahead_forecast"] = 0;
             opts["use_discount"] = false;
             opts["discount_factor"] = 0.95;
 
@@ -223,31 +215,6 @@ namespace VB
             opts["par2"] = par2_opts;
 
             return opts;
-        }
-
-        Rcpp::List forecast(const Model &model, const arma::vec &y)
-        {
-            Rcpp::List out = Model::forecast(y, psi_stored, W_stored, model, nforecast);
-            return out;
-        }
-
-        // Rcpp::List forecast_error(
-        //     const Model &model,
-        //     const std::string &loss_func = "quadratic",
-        //     const unsigned int &k = 1)
-        // {
-        //     return Model::forecast_error(psi_stored, y, model, loss_func, k);
-        // }
-
-        Rcpp::List fitted_error(const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
-        {
-            return Model::fitted_error(psi_stored, y, model, loss_func);
-        }
-
-        void fitted_error(double &err, const Model &model, const arma::vec &y, const std::string &loss_func = "quadratic")
-        {
-            Model::fitted_error(err, psi_stored, y, model, loss_func);
-            return;
         }
     };
     /**
