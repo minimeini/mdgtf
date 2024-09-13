@@ -394,24 +394,28 @@ namespace SMC
                 }
 
 
-                arma::vec logq(N, arma::fill::zeros);
-                arma::vec tau;
+                arma::vec logq;
                 if (model.derr.full_rank && use_discount)
                 {
                     arma::vec loc = arma::zeros<arma::mat>(model.nP, N);
                     arma::cube prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
                     arma::mat param;
                     arma::vec W;
-                    tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), W, param, y);
+                    logq = qforecast(loc, prec_chol_inv, model, t + 1, Theta.slice(t), W, param, y);
                 }
                 else
                 {
-                    tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
+                    logq = qforecast0(model, t + 1, Theta.slice(t), y);
                 }
 
-                tau = weights % tau;
+                
                 if (t > 0)
                 {
+                    arma::vec tau = logq + weights;
+                    double tmax = tau.max();
+                    tau.for_each([&tmax](arma::vec::elem_type &val)
+                                 { val = std::exp(val - tmax); });
+
                     arma::uvec resample_idx = get_resample_index(tau);
                     if (initial_resample_all)
                     {
@@ -457,18 +461,16 @@ namespace SMC
 
                 Theta.slice(t + 1) = Theta_new;
 
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
                 if (final_resample_by_weights || t >= nT - 1)
                 {
-                    double eff = effective_sample_size(weights);
+                    double wmax = weights.max();
+                    arma::vec wtmp = arma::exp(weights - wmax);
+                    double eff = effective_sample_size(wtmp);
                     if (eff < 0.95 * N)
                     {
-                        arma::uvec resample_idx = get_resample_index(weights);
+                        arma::uvec resample_idx = get_resample_index(wtmp);
                         Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
-                        weights.ones();
+                        weights.zeros();
                     }
                 }
 
@@ -520,10 +522,7 @@ namespace SMC
 
 
             for (unsigned int t = 0; t < nT; t++)
-            {
-                
-                arma::vec logq(N, arma::fill::zeros);
-                arma::vec tau = logq;
+            {                
                 arma::mat loc;            // (model.nP, N, arma::fill::zeros);
                 arma::cube prec_chol_inv; // nP x nP x N
 
@@ -543,19 +542,24 @@ namespace SMC
                     }
                 }
 
-
+                arma::vec logq;
                 if (model.derr.full_rank)
                 {
                     loc = arma::zeros<arma::mat>(model.nP, N);
                     prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
                     arma::mat param;
                     arma::vec W;
-                    tau = qforecast(loc, prec_chol_inv, logq, model, t + 1, Theta.slice(t), W, param, y);
+                    logq = qforecast(loc, prec_chol_inv, model, t + 1, Theta.slice(t), W, param, y);
                 }
                 else
                 {
-                    tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
+                    logq = qforecast0(model, t + 1, Theta.slice(t), y);
                 }
+
+                arma::vec tau = logq;
+                double tmax = tau.max();
+                tau.for_each([&tmax](arma::vec::elem_type &val)
+                             { val = std::exp(val - tmax); });
 
                 tau = weights % tau;
                 weights_forward.row(t) = logq.t();
@@ -1105,7 +1109,6 @@ namespace SMC
             {
                 Rcpp::checkUserInterrupt();
 
-                arma::vec logq(N, arma::fill::zeros);
                 arma::mat loc(model.nP, N, arma::fill::zeros);
                 arma::cube prec_chol_inv; // nP x nP x N
                 if (model.derr.full_rank)
@@ -1128,12 +1131,17 @@ namespace SMC
 
                 arma::mat ut(model.nP, N, arma::fill::zeros);
                 arma::cube Uprec = arma::zeros<arma::cube>(model.nP, model.nP, N);
-                arma::vec tau = qbackcast(
-                    loc, prec_chol_inv, ut, Uprec, logq,
-                    model, t, Theta_backward.slice(t + 1), Theta_backward.slice(t),
+                arma::vec logq = qbackcast(
+                    loc, prec_chol_inv, ut, Uprec, model, t, 
+                    Theta_backward.slice(t + 1), Theta_backward.slice(t),
                     mu_marginal.col(t), mu_marginal.col(t + 1), Prec_marginal.slice(t), y);
-                tau = tau % weights;
 
+                arma::vec tau = logq + weights;
+                double tmax = tau.max();
+                tau.for_each([&tmax](arma::vec::elem_type &val)
+                             { val = std::exp(val - tmax); });
+
+                eff_backward.at(t + 1) = effective_sample_size(tau);
                 if (t < y.n_elem - 2)
                 {
                     arma::uvec resample_idx = get_resample_index(tau);
@@ -1206,11 +1214,6 @@ namespace SMC
                 } // loop over i, index of particles
 
                 Theta_backward.slice(t) = Theta_cur;
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
-                eff_backward.at(t + 1) = effective_sample_size(weights);
 
                 if (verbose)
                 {
@@ -1696,7 +1699,6 @@ namespace SMC
                  *
                  */
 
-                arma::vec logq(N, arma::fill::zeros);
                 arma::mat loc(model.nP, N, arma::fill::zeros); // nP x N
                 arma::cube prec_chol_inv; // nP x nP x N
                 if (model.derr.full_rank)
@@ -1704,12 +1706,15 @@ namespace SMC
                     prec_chol_inv = arma::zeros<arma::cube>(model.nP, model.nP, N); // nP x nP x N
                 }
 
-                arma::vec tau = qforecast(
-                    loc, prec_chol_inv, logq,
-                    model, t + 1, Theta.slice(t), W_filter, param_filter, y, 
+                arma::vec logq = qforecast(
+                    loc, prec_chol_inv, model, t + 1, 
+                    Theta.slice(t), W_filter, param_filter, y, 
                     prior_W.infer, obs_update, lag_update, use_discount, discount_factor);
-                
 
+                arma::vec tau = logq;
+                double tmax = tau.max();
+                tau.for_each([&tmax](arma::vec::elem_type &val)
+                             { val = std::exp(val - tmax); });
                 tau = tau % weights;
                 arma::uvec resample_idx = get_resample_index(tau);
 
@@ -2033,7 +2038,6 @@ namespace SMC
                  *
                  */
 
-                arma::vec logq(N, arma::fill::zeros);
                 arma::mat mu(model.nP, N, arma::fill::zeros);// nP x N
                 arma::cube Sigma_chol = arma::zeros<arma::cube>(model.nP, model.nP, N);
                 arma::mat ut(model.nP, N, arma::fill::zeros);
@@ -2048,13 +2052,17 @@ namespace SMC
                 arma::mat vt_next = mu_marginal.col_as_mat(t_next);
                 arma::mat Vprec_cur = Prec_marginal.col_as_mat(t_cur);
 
-                arma::vec tau = qbackcast(
-                    mu, Sigma_chol, ut, Uprec, logq, model, t_cur, 
+                arma::vec logq = qbackcast(
+                    mu, Sigma_chol, ut, Uprec, model, t_cur, 
                     Theta_next, Theta_backward.slice(t_cur),
                     W_backward, param_backward, vt_cur, vt_next, Vprec_cur, y,
                     prior_W.infer, prior_seas.infer, prior_rho.infer, lag_update);
 
-                tau = tau % weights;
+                arma::vec tau = logq + weights;
+                double tmax = tau.max();
+                tau.for_each([&tmax](arma::vec::elem_type &val)
+                             { val = std::exp(val - tmax); });
+                
                 if (t < y.n_elem - 2)
                 {
                     arma::uvec resample_idx = get_resample_index(tau);
@@ -2148,13 +2156,7 @@ namespace SMC
                 } // loop over i, index of particles
 
                 Theta_backward.slice(t_cur) = Theta_cur;
-                double wmax = weights.max();
-                weights.for_each([&wmax](arma::vec::elem_type &val)
-                                 { val -= wmax; });
-                weights = arma::exp(weights);
-                #ifdef DGTF_DO_BOUND_CHECK
-                bound_check<arma::vec>(weights, "PL::backward_filter: propagation weights at t = " + std::to_string(t), true, true);
-                #endif
+
 
                 if (verbose)
                 {

@@ -25,7 +25,6 @@
  * @return arma::vec 
  */
 static arma::vec qforecast0(
-    arma::vec &logq,           // N x 1
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
@@ -33,6 +32,7 @@ static arma::vec qforecast0(
 {
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
+    arma::vec logq(Theta_old.n_cols, arma::fill::zeros);
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
@@ -51,16 +51,11 @@ static arma::vec qforecast0(
         logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
     }
 
-    double logq_max = logq.max();
-    logq.for_each([&logq_max](arma::vec::elem_type &val)
-                  { val -= logq_max; });
-
-    arma::vec weights = arma::exp(logq);
 
     #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(weights, "qforecast");
+        bound_check<arma::vec>(logq, "qforecast");
     #endif
-    return weights;
+    return logq;
 } // func: imp_weights_forecast
 
 
@@ -87,7 +82,6 @@ static arma::vec qforecast0(
 static arma::vec qforecast(
     arma::mat &loc,            // p x N
     arma::cube &Prec_chol_inv, // p x p x N
-    arma::vec &logq,           // N x 1
     const Model &model,
     const unsigned int &t_new,  // current time t. The following inputs come from time t-1.
     const arma::mat &Theta_old, // p x N, {theta[t-1]}
@@ -102,6 +96,7 @@ static arma::vec qforecast(
 {
     const double y_old = y.at(t_new - 1);
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink);
+    arma::vec logq(Theta_old.n_cols, arma::fill::zeros);
 
     arma::mat W_inv(model.nP, model.nP, arma::fill::zeros);
     double ldet_W = 0.;
@@ -218,16 +213,10 @@ static arma::vec qforecast(
         } // one-step-ahead predictive density
     }
 
-    double logq_max = logq.max();
-    logq.for_each([&logq_max](arma::vec::elem_type &val)
-                  { val -= logq_max; });
-
-    arma::vec weights = arma::exp(logq);
-
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(weights, "qforecast");
     #endif
-    return weights;
+    return logq;
 } // func: qforecast
 
 
@@ -488,7 +477,6 @@ static arma::vec qbackcast(
     arma::cube &Prec_chol_inv, // p x p x N, left chol of the variance of theta[t_cur] | y[t_cur:nT], theta[t_next], W
     arma::mat &ut,
     arma::cube &Uprec,
-    arma::vec &logq,        // N x 1
     Model &model,
     const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
@@ -500,13 +488,12 @@ static arma::vec qbackcast(
 )
 {
     const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
-    const unsigned int N = Theta_next.n_cols;
-    
+    arma::vec logq(Theta_next.n_cols, arma::fill::zeros);
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
-    for (unsigned int i = 0; i < N; i++)
+    for (unsigned int i = 0; i < Theta_next.n_cols; i++)
     {
         arma::vec r_cur(model.nP, arma::fill::zeros);
         arma::mat K_cur(model.nP, model.nP, arma::fill::zeros);
@@ -557,15 +544,10 @@ static arma::vec qbackcast(
         }
     }
 
-    double logq_max = logq.max();
-    logq.for_each([&logq_max](arma::vec::elem_type &val)
-                  { val -= logq_max; });
-    arma::vec weights = arma::exp(logq);
-
     #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(weights, "qbackcast");
+        bound_check<arma::vec>(logq, "qbackcast");
     #endif
-    return weights;
+    return logq;
 } // qbackcast
 
 static arma::vec qbackcast(
@@ -573,7 +555,6 @@ static arma::vec qbackcast(
     arma::cube &Prec_chol_inv, // p x p x N, left chol of the variance of theta[t_cur] | y[t_cur:nT], theta[t_next], W
     arma::mat &ut, // p x N
     arma::cube &Uprec, // p x p x N
-    arma::vec &logq, // N x 1
     const Model &model,
     const unsigned int &t_cur,   // current time "t". The following inputs come from time t+1. t_next = t + 1; t_prev = t - 1
     const arma::mat &Theta_next, // p x N, {theta[t+1]}
@@ -590,12 +571,12 @@ static arma::vec qbackcast(
     const bool &infer_lag = false)
 {
     const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
-    const unsigned int N = Theta_next.n_cols;
+    arma::vec logq(Theta_next.n_cols, arma::fill::zeros);
 
     #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
-    for (unsigned int i = 0; i < N; i++)
+    for (unsigned int i = 0; i < Theta_next.n_cols; i++)
     {
         Model mod = model;
 
@@ -671,15 +652,10 @@ static arma::vec qbackcast(
         }
     }
 
-    double logq_max = logq.max();
-    logq.for_each([&logq_max](arma::vec::elem_type &val)
-                  { val -= logq_max; });
-    arma::vec weights = arma::exp(logq);
-
     #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(weights, "qbackcast");
+        bound_check<arma::vec>(logq, "qbackcast");
     #endif
-    return weights;
+    return logq;
 } // qbackcast
 
 
