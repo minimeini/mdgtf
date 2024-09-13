@@ -914,9 +914,7 @@ public:
     static double dnbinom(const double &y, const double &kappa, const double &r)
     {
         double c3 = std::pow(1. - kappa, r);
-
-        double a = y + r - 1.;
-        double c1 = binom(a, y);
+        double c1 = binom(r + y - 1, y);
         double c2 = std::pow(kappa, y);
         double output = (c1 * c2) * c3;
 
@@ -934,8 +932,7 @@ public:
      */
     static double dnbinom(const double &y, const double &kappa, const double &r, const double &c3)
     {
-        double a = y + r - 1.;
-        double c1 = binom(a, y);
+        double c1 = binom(r + y - 1, y);
         double c2 = std::pow(kappa, y);
         double output = (c1 * c2) * c3;
 
@@ -948,14 +945,15 @@ public:
         {
             throw std::invalid_argument("nbinom::dlag_dlogitkappa only valid if r >= 1.");
         }
-        double dkappa_dlogit = kappa * (1. - kappa);
+
         double c1 = std::pow(kappa, y - 1);
         double c2 = std::pow(1. - kappa, r - 1);
-        double c3 = c1 * c2;
+        double c3 = (1. - kappa) * y - r * kappa;
+        double c4 = binom(r + y - 1, y);
+        double dlag_dkappa = c1 * c2 * c3 * c4;
 
-        c1 = (1. - kappa) * y;
-        c2 = - r * kappa;
-        double dlag_dkappa = (c2 + c1) * c3;
+        double dkappa_dlogit = kappa * (1. - kappa);
+        
         double out = dlag_dkappa * dkappa_dlogit;
         if (DEBUG)
         {
