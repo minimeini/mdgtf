@@ -170,12 +170,6 @@ Rcpp::List dgtf_infer(
     const unsigned int nT = y.n_elem - 1;
     model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
 
-    unsigned int nforecast = 0;
-    if (method_settings.containsElementNamed("num_step_ahead_forecast"))
-    {
-        nforecast = Rcpp::as<unsigned int>(method_settings["num_step_ahead_forecast"]);
-    }
-
     Rcpp::List output, forecast, error;
     arma::mat psi(nT + 1, 3);
     arma::vec ci_prob = {0.025, 0.5, 0.975};
@@ -199,11 +193,15 @@ Rcpp::List dgtf_infer(
 
         output = linear_bayes.get_output(model);
 
-        Rcpp::List tmp = linear_bayes.forecast_error(model, y, 1000, loss_func, k, tstart_forecast, tend_forecast);
-        error["forecast"] = tmp;
+        {
+            Rcpp::List tmp = linear_bayes.forecast_error(model, y, 1000, loss_func, k, tstart_forecast, tend_forecast);
+            error["forecast"] = tmp;
+        }
 
-        Rcpp::List tmp = linear_bayes.fitted_error(model, y, 1000, loss_func);
-        error["fitted"] = tmp;
+        {
+            Rcpp::List tmp = linear_bayes.fitted_error(model, y, 1000, loss_func);
+            error["fitted"] = tmp;
+        }
 
         break;
     } // case Linear Bayes
@@ -220,11 +218,15 @@ Rcpp::List dgtf_infer(
 
         output = mcs.get_output();
 
-        Rcpp::List tmp = mcs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-        error["forecast"] = tmp;
+        {
+            Rcpp::List tmp = mcs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
+            error["forecast"] = tmp;
+        }
 
-        Rcpp::List tmp = mcs.fitted_error(model, y, loss_func);
-        error["fitted"] = tmp;
+        {
+            Rcpp::List tmp = mcs.fitted_error(model, y, loss_func);
+            error["fitted"] = tmp;
+        }
 
         break;
     } // case MCS
@@ -238,12 +240,15 @@ Rcpp::List dgtf_infer(
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
         output = ffbs.get_output();
 
-        Rcpp::List tmp = ffbs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-        error["forecast"] = tmp;
+        {
+            Rcpp::List tmp = ffbs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
+            error["forecast"] = tmp;
+        }
 
-        Rcpp::List tmp = ffbs.fitted_error(model, y, loss_func);
-        error["fitted"] = tmp;
-
+        {
+            Rcpp::List tmp = ffbs.fitted_error(model, y, loss_func);
+            error["fitted"] = tmp;
+        }
         break;
     } // case FFBS
     case AVAIL::Algo::TFS:
@@ -258,15 +263,15 @@ Rcpp::List dgtf_infer(
 
         output = tfs.get_output();
 
-        if (nforecast > 0)
         {
-            forecast = tfs.forecast(model, y);
+            Rcpp::List tmp = tfs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
+            error["forecast"] = tmp;
         }
-
-        Rcpp::List tmp = tfs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-        error["forecast"] = tmp;
-        Rcpp::List tmp = tfs.fitted_error(model, y, loss_func);
-        error["fitted"] = tmp;
+        
+        {
+            Rcpp::List tmp = tfs.fitted_error(model, y, loss_func);
+            error["fitted"] = tmp;
+        }
 
         break;
     } // case TFS
@@ -282,16 +287,15 @@ Rcpp::List dgtf_infer(
 
         output = pl.get_output();
 
-        if (nforecast > 0)
         {
-            forecast = pl.forecast(model, y);
+            Rcpp::List tmp = pl.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
+            error["forecast"] = tmp;
         }
-
-        Rcpp::List tmp = pl.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-        error["forecast"] = tmp;
-        Rcpp::List tmp = pl.fitted_error(model, y, loss_func);
-        error["fitted"] = tmp;
-
+        
+        {
+            Rcpp::List tmp = pl.fitted_error(model, y, loss_func);
+            error["fitted"] = tmp;
+        }
         break;
     } // case particle learning
     case AVAIL::Algo::MCMC:
