@@ -395,7 +395,7 @@ namespace SMC
 
 
                 arma::vec logq(N, arma::fill::zeros);
-                arma::vec tau = qforecast0(logq, model, t + 1, Theta.slice(t), y);
+                arma::vec tau;
                 if (model.derr.full_rank && use_discount)
                 {
                     arma::vec loc = arma::zeros<arma::mat>(model.nP, N);
@@ -426,7 +426,6 @@ namespace SMC
                     }
 
                     logq = logq.elem(resample_idx);
-                    weights = weights.elem(resample_idx);
                 }
 
 
