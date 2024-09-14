@@ -622,13 +622,13 @@ namespace LBA
                 model.ftrans, model.fgain, model.dlag, 
                 mt_old, y.at(t - 1), 
                 model.seas.period, model.seas.in_state); // Checked. OK.
-            
+
             func_Gt(Gt, model, mt_old, y.at(t - 1));
             Rt_new = func_Rt(
                 Gt, Ct_old, model.derr.par1, 
                 use_discount, discount_factor,
                 discount_type);
-
+            
             ft_prior = 0.;
             qt_prior = 0.;
             func_prior_ft(
@@ -639,7 +639,6 @@ namespace LBA
             double alpha = 0.;
             double beta = 0.;
             func_alpha_beta(alpha, beta, model, ft_prior, qt_prior, y.at(t), true);
-
             arma::mat At = func_At(Rt_new, Ft, qt_prior);
 
             ft_posterior = 0.;
@@ -648,7 +647,6 @@ namespace LBA
 
             mt_new = func_mt(at_new, At, ft_prior, ft_posterior);
             Ct_new = func_Ct(Rt_new, At, qt_prior, qt_posterior);
-
             return;
         }
 
@@ -679,6 +677,8 @@ namespace LBA
                          { val *= theta_upbnd; });
 
             Rt = arma::zeros<arma::cube>(model.nP, model.nP, nT + 1);
+
+            
 
             unsigned int tstart = 1;
             if (do_reference_analysis && (model.dlag.nL < nT))

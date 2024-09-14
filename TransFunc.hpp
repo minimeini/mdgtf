@@ -97,7 +97,12 @@ public:
      */
     static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
     {
-        unsigned int nstate = nP - seasonal_period;
+        unsigned int nstate = nP;
+        if (season_in_state)
+        {
+            nstate -= seasonal_period;
+        }
+        
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::mat G0(nP, nP, arma::fill::zeros);
         G0.at(0, 0) = 1.;
