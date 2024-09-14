@@ -752,9 +752,7 @@ namespace LBA
             arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
 
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-            bool is_iterative = trans_list[model.ftrans] == TransFunc::Transfer::iterative;
-            std::map<std::string, DiscountType> discount_list = map_discount_type();
-            bool is_first_elem_discount = discount_list[discount_type] == DiscountType::first_elem;
+            const bool is_sliding = trans_list[model.ftrans] == TransFunc::Transfer::sliding;
 
             atilde.set_size(model.nP, nT + 1);
             atilde.zeros();
@@ -766,7 +764,21 @@ namespace LBA
 
             for (unsigned int t = nT; t > 0; t--)
             {
-                if (!use_discount)
+                if (use_discount && is_sliding)
+                {
+                    // use discount factor + sliding transFunc and only consider psi[t], 1st elem of theta[t].
+                    atilde.col(t - 1).zeros();
+                    Rtilde.slice(t - 1).zeros();
+
+                    double aleft = (1. - discount_factor) * mt.at(0, t - 1);
+                    double aright = discount_factor * atilde.at(0, t);
+                    atilde.at(0, t - 1) = aleft + aright;
+                    
+                    double rleft = (1. - discount_factor) * Ct.at(0, 0, t - 1);
+                    double rright = std::pow(discount_factor, 2.) * Rtilde.at(0, 0, t);
+                    Rtilde.at(0, 0, t - 1) = rleft + rright;
+                }
+                else
                 {
                     arma::mat Rtinv = inverse(Rt.slice(t));
 
@@ -782,52 +794,6 @@ namespace LBA
                     arma::mat Rtilde_right = (Bt * diff_R) * Bt.t();
                     Rtilde.slice(t - 1) = Ct.slice(t - 1) + Rtilde_right;
                 }
-                else if (is_iterative || (use_pseudo && !is_first_elem_discount))
-                {
-                    // use discount factor + iterative transFunc / sliding transFunc with pseudo inverse for Gt
-                    func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
-                    arma::mat Gt_inv;
-                    if (is_iterative)
-                    {
-                        /*
-                        Gt is invertible but asymmetric for iterative transfer function.
-                        */
-                        Gt_inv = arma::inv(Gt);
-                    }
-                    else
-                    {
-                        // Gt is not invertible for sliding transfer function, use pseudo inverse instead.
-                        Gt_inv = arma::pinv(Gt);
-                    }
-
-                    arma::vec atilde_left = (1. - discount_factor) * mt.col(t - 1);
-                    arma::vec atilde_right = discount_factor * Gt_inv * atilde.col(t);
-                    atilde.col(t - 1) = atilde_left + atilde_right;
-
-                    arma::mat Rtilde_left = (1. - discount_factor) * Ct.slice(t - 1);
-
-                    double delta = discount_factor;
-                    arma::mat Rtilde_right = (Gt_inv * Rtilde.slice(t)) * Gt_inv.t();
-                    Rtilde_right.for_each([&delta](arma::mat::elem_type &val)
-                                           { val *= delta * delta; });
-
-                    Rtilde.slice(t - 1) = Rtilde_left + Rtilde_right;
-                }
-                else
-                {
-                    // use discount factor + sliding transFunc and only consider psi[t], 1st elem of theta[t].
-                    atilde.col(t - 1).zeros();
-                    Rtilde.slice(t - 1).zeros();
-
-                    double aleft = (1. - discount_factor) * mt.at(0, t - 1);
-                    double aright = discount_factor * atilde.at(0, t);
-                    atilde.at(0, t - 1) = aleft + aright;
-                    
-                    double rleft = (1. - discount_factor) * Ct.at(0, 0, t - 1);
-                    double rright = std::pow(discount_factor, 2.) * Rtilde.at(0, 0, t);
-                    Rtilde.at(0, 0, t - 1) = rleft + rright;
-                }
-
             }
         }
 
