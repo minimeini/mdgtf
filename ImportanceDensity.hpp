@@ -31,7 +31,7 @@ static arma::vec qforecast0(
     const arma::vec &y)
 {
     const double y_old = y.at(t_new - 1);
-    const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink, 0.);
+    const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink);
     arma::vec logq(Theta_old.n_cols, arma::fill::zeros);
 
     #ifdef _OPENMP
@@ -39,15 +39,20 @@ static arma::vec qforecast0(
     #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        arma::vec gtheta_old_i = StateSpace::func_gt(
+            model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, 
+            model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
+        
+        double ft_gtheta = StateSpace::func_ft(
+            model.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        
         double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
 
         double Vt = ApproxDisturbance::func_Vt_approx(
             lambda, model.dobs, model.flink); // (eq 3.11)
-
+        
         logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
     }
 
@@ -241,9 +246,9 @@ static void prior_forward(
     arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
     for (unsigned int t = 1; t <= nT; t++)
     {
-        mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state);
+        mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // mu[t] = g(mu[t-1])
         LBA::func_Gt(Gt, model, mu.col(t - 1), y.at(t - 1));
-        sig = Gt * sig * Gt.t();
+        sig = Gt * sig * Gt.t(); // sig[t] = W[t] + G[t] x sig[t-1] x t(G[t])
         sig.diag() += EPS;
         if (use_discount)
         {
@@ -272,8 +277,8 @@ static void prior_forward(
     arma::vec &log_marg,
     Model &model,
     const arma::mat &Theta, // p x N, theta[nT]
-    const arma::vec &W, // N x 1
-    const arma::mat &param,
+    const arma::vec &W, // N x 1, only initialized if W is updated and assumed to be a univariate constant
+    const arma::mat &param, // only initialized if any parameters are updated
     const arma::vec &y,   // (nT + 1) x 1
     const arma::cube &Wt, // p x p x (nT + 1), only initialized if using discount factor
     const bool &use_discount = false,

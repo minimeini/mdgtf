@@ -31,7 +31,7 @@
 class LagDist : public Dist
 {
 private:
-    double prob_thres = 0.99;
+    double prob_thres = 0.995;
 public:
     static const std::map<std::string, AVAIL::Dist> lag_list;
     unsigned int nL = 0; // number of lags
