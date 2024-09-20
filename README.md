@@ -8,6 +8,12 @@
 - R packages: RcppArmadillo, nloptr, 
 - Benchmarks: EpiEstim (an R package)
 
+Compile in R:
+
+```{r}
+Rcpp::sourceCpp("./export.cpp")
+```
+
 ## Model
 
 This is a model for count time series, $\{y_{t},t=1,\dots\}$, where $y_{t}\in\{0,1,2,\dots\}$.

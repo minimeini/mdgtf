@@ -22,3 +22,6 @@ script*
 *.txt
 *hcp*
 *copy*
+external_methods.r
+load_data.r
+plot_timeseries_creditble_interval.r
