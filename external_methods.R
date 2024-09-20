@@ -1,3 +1,35 @@
+deseason = function(y, period = 7) {
+  # Koyama's treatment to weekly seasonality
+  
+  Pmat <- matrix(0, nrow = period, ncol = period)
+  Pmat[period, 1] <- 1
+  for (i in 1:(period - 1)) {
+    Pmat[i, i + 1] <- 1
+  }
+
+  Xmat <- matrix(0, nrow = period, ncol = length(y))
+  Xmat[1, 1] <- 1
+  for (t in 1:(length(y) - 1)) {
+    Xmat[, t + 1] <- t(Pmat) %*% Xmat[, t]
+  }
+
+  day_idx <- apply(Xmat, 2, which.max)
+
+  yvar = NULL
+  for (i in 1:period) {
+    yvar = c(yvar, var(y[day_idx == i]))
+  }
+
+  ysd <- sqrt(yvar)
+  ysd <- ysd / sum(ysd) * 7
+  print(ysd)
+
+  seas_reg <- c(t(Xmat) %*% ysd)
+  yhat <- round(c(y) / seas_reg)
+  return(yhat)
+}
+
+
 epi_poisson = function(y, mean_si, sd2_si) {
   require(EpiEstim)
   ntime = length(c(y))

@@ -8,7 +8,7 @@
 - R packages: RcppArmadillo, nloptr, 
 - Benchmarks: EpiEstim (an R package)
 
-## Models
+## Model
 
 This is a model for count time series, $\{y_{t},t=1,\dots\}$, where $y_{t}\in\{0,1,2,\dots\}$.
 
@@ -25,10 +25,4 @@ This is a model for count time series, $\{y_{t},t=1,\dots\}$, where $y_{t}\in\{0
 - Method 2. MCMC with Univariate MH Proposal via Reparameterisation: `mcmc_disturbance_poisson.cpp`
 - Method 3. Particle Filtering and Smoothing: `pl_poisson.cpp`
 - Method 4. Variational Inference: `vb_poisson.cpp` and `hva_poisson.cpp`
-
-
-## Demo
-
-- `script_model_sample_data.R`: Sample data provided by Koyama.
-- `script_model_country_data.R`: Country level Covid daily new confirmed cases from March 1, 2020 to Dec 1, 2020.
 
