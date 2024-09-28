@@ -147,22 +147,6 @@ public:
         return G0;
     }
 
-    static arma::mat H0_sliding(const unsigned int &nP) // Tested. OK.
-    {
-        arma::mat H0(nP, nP, arma::fill::zeros);
-        H0.at(nP - 1, nP - 1) = 1.;
-
-        unsigned int nr = nP - 1;
-        for (unsigned int i = 1; i <= nr; i++)
-        {
-            H0.at(i - 1, i) = 1.;
-        }
-        // G0.diag(-1).ones();
-
-        return H0;
-    }
-
-
 
     /**
      * @brief g[t](\btheta[t-1], y[t-1]), exact formula
