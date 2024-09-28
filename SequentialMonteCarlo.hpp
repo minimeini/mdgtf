@@ -446,7 +446,7 @@ namespace SMC
                     arma::vec theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
 
@@ -636,7 +636,7 @@ namespace SMC
 
                     Theta_new.col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = logp - logq.at(i);
@@ -812,7 +812,7 @@ namespace SMC
                     arma::vec theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     weights.at(i) = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                 }
@@ -1206,7 +1206,7 @@ namespace SMC
 
                     Theta_cur.col(i) = theta_cur;
 
-                    double ft_cur = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta_cur, y);
+                    double ft_cur = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name);
 
                     logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
@@ -1297,7 +1297,7 @@ namespace SMC
 
                     arma::vec gtheta_cur = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t - 1).col(i), y.at(t - 1), model.seas.period, model.seas.in_state); // g(theta[t-1])
 
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, gtheta_cur, y);
+                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, gtheta_cur, y);
                     double eta = ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink);
                     double Vt = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink); // (eq 3.11)
@@ -1352,7 +1352,7 @@ namespace SMC
                         logp += MVNorm::dmvnorm2(Theta_next.col(i), gtheta_next, Wnext_prec);
                     }
 
-                    ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta_cur, y);
+                    ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta_cur, y);
                     lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
                     logp -= MVNorm::dmvnorm2(Theta_next.col(i), mu_marg, Prec_marg, true);
@@ -1898,7 +1898,7 @@ namespace SMC
                         model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
                     }
 
-                    double ft_new = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
+                    double ft_new = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
                     double lambda_old = LinkFunc::ft2mu(ft_new, model.flink); // ft_new from time t + 1, mu0_filter from time t (old).
 
                     {
@@ -1951,7 +1951,7 @@ namespace SMC
                         if (prior_seas.infer)
                         {
                             model.seas.val = param_filter.submat(0, i, model.seas.period - 1, i);
-                            ft_new = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
+                            ft_new = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y); // ft(theta[t+1])
                         }
                     } // seasonal component
 
@@ -2156,7 +2156,7 @@ namespace SMC
                     Theta_cur.col(i) = theta_cur;
                     logp.at(i) += R::dnorm4(theta_cur.at(model.nP - 1), Theta_next.at(model.nP - 1, i), std::sqrt(W_backward.at(i)), true);
 
-                    double ft_cur = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, theta_cur, y);
+                    double ft_cur = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name);
 
                     logp.at(i) += ObsDist::loglike(
@@ -2293,7 +2293,7 @@ namespace SMC
                     }
 
                     arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t_prev).col(i), y.at(t_prev), model.seas.period, model.seas.in_state);
-                    double ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, gtheta, y);
+                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, gtheta, y);
                     double eta = ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink);
                     double Vt = ApproxDisturbance::func_Vt_approx(
@@ -2343,7 +2343,7 @@ namespace SMC
                     gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, y.at(t_cur), model.seas.period, model.seas.in_state);
                     logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t_next), theta_cur.at(0), std::sqrt(W_backward.at(i)), true);
 
-                    ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, theta_cur, y);
+                    ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, theta_cur, y);
                     lambda = LinkFunc::ft2mu(ft, model.flink);
                     logp.at(i) += ObsDist::loglike(
                         y.at(t_cur), model.dobs.name, lambda, 

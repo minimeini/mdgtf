@@ -252,7 +252,7 @@ namespace LBA
         const arma::mat &Rt,
         const bool &fill_zero = LBA_FILL_ZERO)
     {
-        mean_ft = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
+        mean_ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
         _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seas.period, model.seas.in_state);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
         bound_check(var_ft, "LBA::func_prior_ft: var_ft", true, true);

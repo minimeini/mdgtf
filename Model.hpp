@@ -1307,79 +1307,7 @@ public:
         return theta_prev;
     }
 
-    /**
-     * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
-     *
-     * @param model
-     * @param t  time index of theta_cur; yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
-     * @param theta_cur theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-     * @param yall
-     * @return double
-     * 
-     * 
-     * @note Checked. OK.
-     */
-    static double func_ft(
-        const std::string &ftrans,
-        const std::string &fgain,
-        const LagDist &dlag,
-        const Season &seas,
-        const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...;  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
-        const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
-    )
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        double ft_cur;
-        if (trans_list[ftrans] == TransFunc::sliding)
-        {
-            int nelem = std::min(t, (int)dlag.nL); // min(t,nL)
 
-            arma::vec yold(dlag.nL, arma::fill::zeros);
-            if (nelem > 1)
-            {
-                yold.tail(nelem) = yall.subvec(t - nelem, t - 1); // 0, ..., 0, y[t - nelem], ..., y[t-1]
-            }
-            else if (t > 0) // nelem = 1 at t = 1
-            {
-                yold.at(dlag.nL - 1) = yall.at(t - 1);
-            }
-
-            yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
-
-            arma::vec ft_vec = dlag.Fphi; // nL x 1
-            arma::vec th = theta_cur.head(dlag.nL);
-
-            arma::vec hpsi_cur = GainFunc::psi2hpsi<arma::vec>(th, fgain); // (h(psi[t]), ..., h(psi[t+1 - nL])), nL x 1
-            arma::vec ftmp = yold % hpsi_cur; // nL x 1
-            ft_vec = ft_vec % ftmp;
-
-            ft_cur = arma::accu(ft_vec);
-        } // sliding
-        else
-        {
-            ft_cur = theta_cur.at(1);
-        } // iterative
-
-        if (seas.period > 0)
-        {
-            // Add the current seasonal level
-            if (seas.in_state)
-            {
-                
-                ft_cur += theta_cur.at(theta_cur.n_elem - seas.period);
-            }
-            else
-            {
-                ft_cur += arma::as_scalar(seas.X.col(t).t() * seas.val);
-            }
-        }
-
-        #ifdef DGTF_DO_BOUND_CHECK
-            bound_check(ft_cur, "func_ft: ft_cur");
-        #endif
-        return ft_cur;
-    }
 
     static void simulate(
         arma::vec &y,
@@ -1451,7 +1379,7 @@ public:
                 psi.at(psi_idx) = Theta.at(0, t);
             }
 
-            ft.at(t) = StateSpace::func_ft(
+            ft.at(t) = TransFunc::func_ft(
                 model.ftrans, model.fgain, model.dlag,
                 seas, t, Theta.col(t), y);
 
@@ -1508,7 +1436,7 @@ public:
                     theta_next.at(0) += R::rnorm(0., Wsqrt);
                 }
                 // arma::vec theta_next = StateSpace::func_state_propagate(model, theta_now, ynow, Wsqrt, false);
-                double ft_next = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, idx + 1, theta_next, yvec);
+                double ft_next = TransFunc::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, idx + 1, theta_next, yvec);
                 double lambda = LinkFunc::ft2mu(ft_next, mod.flink);
                 double ynext = 0.;
 
@@ -1596,7 +1524,7 @@ public:
                 for (unsigned int j = 1; j <= k; j ++)
                 {
                     arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
-                    double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + j, theta_next, ytmp);
+                    double ft_next = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + j, theta_next, ytmp);
                     double lambda = LinkFunc::ft2mu(ft_next, model.flink);
                     ycast.at(t, i, j - 1) = lambda;
 
@@ -1722,7 +1650,7 @@ public:
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t), model.seas.period, model.seas.in_state);
-                double ft_next = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_next, y);
+                double ft_next = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_next, y);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink);
                 ycast.at(t + 1, i) = lambda;
 
@@ -1803,7 +1731,7 @@ public:
             for (unsigned int i = 0; i < nsample; i ++)
             {                
                 arma::vec th = theta.slice(t).col(i); // p x 1
-                double ft = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
+                double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
                 double lambda = LinkFunc::ft2mu(ft, model.flink);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);
@@ -1880,7 +1808,7 @@ public:
             for (unsigned int i = 0; i < nsample; i++)
             {
                 arma::vec th = theta.slice(t).col(i); // p x 1
-                double ft = func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
+                double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, th, y);
                 double lambda = LinkFunc::ft2mu(ft, model.flink);
                 yhat.at(t, i) = lambda;
                 residual.at(t, i) = y.at(t) - yhat.at(t, i);

@@ -11,6 +11,7 @@
 #include <RcppArmadillo.h>
 #include "LagDist.hpp"
 #include "GainFunc.hpp"
+#include "Regression.hpp"
 // #include "LinkFunc.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
@@ -266,6 +267,81 @@ public:
         }
 
         return ft_now;
+    }
+
+
+    /**
+     * @brief f[t]( theta[t] ) - maps state theta[t] to observation-level variable f[t].
+     * 
+     * @param ftrans 
+     * @param fgain 
+     * @param dlag 
+     * @param seas 
+     * @param t 
+     * @param theta_cur 
+     * @param yall 
+     * @return double 
+     */
+    static double func_ft(
+        const std::string &ftrans,
+        const std::string &fgain,
+        const LagDist &dlag,
+        const Season &seas,
+        const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...;  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
+        const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
+        const arma::vec &yall       // We use y[t - nelem], ..., y[t-1]
+    )
+    {
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
+        double ft_cur;
+        if (trans_list[ftrans] == Transfer::sliding)
+        {
+            int nelem = std::min(t, (int)dlag.nL); // min(t,nL)
+
+            arma::vec yold(dlag.nL, arma::fill::zeros);
+            if (nelem > 1)
+            {
+                yold.tail(nelem) = yall.subvec(t - nelem, t - 1); // 0, ..., 0, y[t - nelem], ..., y[t-1]
+            }
+            else if (t > 0) // nelem = 1 at t = 1
+            {
+                yold.at(dlag.nL - 1) = yall.at(t - 1);
+            }
+
+            yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
+
+            arma::vec ft_vec = dlag.Fphi; // nL x 1
+            arma::vec th = theta_cur.head(dlag.nL);
+
+            arma::vec hpsi_cur = GainFunc::psi2hpsi<arma::vec>(th, fgain); // (h(psi[t]), ..., h(psi[t+1 - nL])), nL x 1
+            arma::vec ftmp = yold % hpsi_cur; // nL x 1
+            ft_vec = ft_vec % ftmp;
+
+            ft_cur = arma::accu(ft_vec);
+        } // sliding
+        else
+        {
+            ft_cur = theta_cur.at(1);
+        } // iterative
+
+        if (seas.period > 0)
+        {
+            // Add the current seasonal level
+            if (seas.in_state)
+            {
+                
+                ft_cur += theta_cur.at(theta_cur.n_elem - seas.period);
+            }
+            else
+            {
+                ft_cur += arma::as_scalar(seas.X.col(t).t() * seas.val);
+            }
+        }
+
+        #ifdef DGTF_DO_BOUND_CHECK
+            bound_check(ft_cur, "func_ft: ft_cur");
+        #endif
+        return ft_cur;
     }
 
 

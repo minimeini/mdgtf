@@ -43,7 +43,7 @@ static arma::vec qforecast0(
             model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, 
             model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
         
-        double ft_gtheta = StateSpace::func_ft(
+        double ft_gtheta = TransFunc::func_ft(
             model.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         
         double eta = ft_gtheta;
@@ -180,7 +180,7 @@ static arma::vec qforecast(
         }
 
         arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state); // gt(theta[t-1, i])
-        double ft_gtheta = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
+        double ft_gtheta = TransFunc::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
@@ -511,7 +511,7 @@ static arma::vec qbackcast(
         ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
         Uprec.slice(i) = Uprec_cur;
 
-        double ft_ut = StateSpace::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, ut.col(i), y);
+        double ft_ut = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, ut.col(i), y);
         double eta = ft_ut;
         double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.58)
         double Vtilde = ApproxDisturbance::func_Vt_approx(
@@ -619,7 +619,7 @@ static arma::vec qbackcast(
         ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
         Uprec.slice(i) = Uprec_cur;
 
-        double ft_ut = StateSpace::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_cur, ut.col(i), y);
+        double ft_ut = TransFunc::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_cur, ut.col(i), y);
         double eta = ft_ut;
         double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.58)
         double Vtilde = ApproxDisturbance::func_Vt_approx(
