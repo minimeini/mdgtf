@@ -347,7 +347,8 @@ Rcpp::List dgtf_posterior_predictive(
     const Rcpp::List &output, 
     const Rcpp::List &model_opts, 
     const arma::vec &y, 
-    const unsigned int &nrep = 100)
+    const unsigned int &nrep = 100,
+    const Rcpp::Nullable<Rcpp::NumericVector> &Rt = R_NilValue)
 {
     const unsigned int ntime = y.n_elem - 1;
     Model model(model_opts);
@@ -416,6 +417,12 @@ Rcpp::List dgtf_posterior_predictive(
         }
     }
 
+    arma::vec hpsi_true;
+    arma::mat hpsi_res(ntime + 1, nsample, arma::fill::zeros);
+    if (Rt.isNotNull())
+    {
+        hpsi_true = Rcpp::as<arma::vec>(Rt);
+    }
     arma::cube yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     arma::cube res = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     Progress p(nsample*ntime, true);
@@ -427,6 +434,10 @@ Rcpp::List dgtf_posterior_predictive(
         arma::vec ft(ntime + 1, arma::fill::zeros);
         arma::vec psi = psi_stored.col(i);
         arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+        if (Rt.isNotNull())
+        {
+            hpsi_res.col(i) = arma::abs(hpsi - hpsi_true);
+        }
 
         Model mod = model;
         mod.dobs.par2 = rho_stored.at(i);
@@ -470,11 +481,12 @@ Rcpp::List dgtf_posterior_predictive(
     arma::mat res2 = rtmp.slice(0); // (ntime + 1) x (nsample * nrep)
     arma::mat res_qt = arma::quantile(res2, prob, 1);
 
-    double rmse = std::sqrt(arma::mean(arma::mean(arma::pow(res2, 2))));
-    double mae = arma::mean(arma::mean(res2));
     output2["res"] = Rcpp::wrap(res_qt);
-    output2["rmse"] = rmse;
-    output2["mae"] = mae;
+    output2["rmse"] = std::sqrt(arma::mean(arma::mean(arma::pow(res2, 2))));
+    output2["mae"] = arma::mean(arma::mean(res2));
+
+    output2["rmse_Rt"] = std::sqrt(arma::mean(arma::mean(arma::pow(hpsi_res, 2))));
+    output2["mae_Rt"] = arma::mean(arma::mean(hpsi_res));
 
     return output2;
 }
