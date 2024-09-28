@@ -1,5 +1,7 @@
 ### Fast Approximate Inference for a General Class of State-Space Models for Count Data
 
+Documentation is in the [Wiki](https://bitbucket.org/minimeini/dgtf/wiki/).
+
 
 Dependencies
 
@@ -13,7 +15,3 @@ Compile in R:
 ```{r}
 Rcpp::sourceCpp("./export.cpp")
 ```
-
-
-Documentation is in the [wiki](https://bitbucket.org/minimeini/dgtf/wiki/).
-
