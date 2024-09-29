@@ -34,7 +34,7 @@ static arma::vec qforecast0(
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink);
     arma::vec logq(Theta_old.n_cols, arma::fill::zeros);
 
-    #ifdef _OPENMP
+    #ifdef DGTF_USE_OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
@@ -121,7 +121,7 @@ static arma::vec qforecast(
         }
     }
 
-    #ifdef _OPENMP
+    #ifdef DGTF_USE_OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
@@ -219,7 +219,7 @@ static arma::vec qforecast(
     }
 
     #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(weights, "qforecast");
+        bound_check<arma::vec>(logq, "qforecast");
     #endif
     return logq;
 } // func: qforecast
@@ -295,7 +295,7 @@ static void prior_forward(
     prec_stored = arma::zeros<arma::cube>(model.nP * model.nP, y.n_elem, N);
     log_marg.set_size(N);
 
-    #ifdef _OPENMP
+    #ifdef DGTF_USE_OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < N; i++)
@@ -495,7 +495,7 @@ static arma::vec qbackcast(
     const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
     arma::vec logq(Theta_next.n_cols, arma::fill::zeros);
 
-    #ifdef _OPENMP
+    #ifdef DGTF_USE_OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_next.n_cols; i++)
@@ -578,7 +578,7 @@ static arma::vec qbackcast(
     const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
     arma::vec logq(Theta_next.n_cols, arma::fill::zeros);
 
-    #ifdef _OPENMP
+    #ifdef DGTF_USE_OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_next.n_cols; i++)

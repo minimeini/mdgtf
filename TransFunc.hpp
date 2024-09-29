@@ -172,7 +172,9 @@ public:
         double Fast_now = hpsi_now * y_prev;
         ft += nbinom::coef_now(lag_par1, lag_par2) * Fast_now; // (1-kappa)^r y[t-1] * h(psi[t])
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(ft, "transfer_iterative: ft");
+        #endif
         return ft;
     }
 

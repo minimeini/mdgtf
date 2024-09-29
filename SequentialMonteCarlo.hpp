@@ -436,7 +436,7 @@ namespace SMC
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::mat Theta_cur = Theta.slice(t); // nP x N
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
@@ -602,7 +602,7 @@ namespace SMC
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::mat Theta_cur = Theta.slice(t); // nP x N
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
@@ -798,7 +798,7 @@ namespace SMC
 
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 bool positive_noise = (t < Theta.n_rows) ? true : false;
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
@@ -1176,7 +1176,7 @@ namespace SMC
                 arma::mat Theta_cur(model.nP, N, arma::fill::zeros);
                 arma::vec mu = mu_marginal.col(t);
                 arma::mat Prec = Prec_marginal.slice(t);
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
@@ -1288,7 +1288,7 @@ namespace SMC
                 arma::mat Theta_next = Theta_backward.slice(t + 1);
                 arma::vec mu_marg = mu_marginal.col(t + 1);
                 arma::mat Prec_marg = Prec_marginal.slice(t + 1);
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)

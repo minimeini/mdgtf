@@ -125,7 +125,9 @@ namespace LBA
             Rt.at(0, 0) += W;
         }
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(Rt, "func_Rt: Rt");
+        #endif
         return Rt;
     }
 
@@ -167,7 +169,9 @@ namespace LBA
             Wt.at(0, 0) = W;
         }
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(Wt, "Rt2Wt: Wt");
+        #endif
         return Wt;
     }
 
@@ -226,7 +230,9 @@ namespace LBA
             Ft.at(nstate) = 1.;
         }
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(Ft, "func_Ft: Ft");
+        #endif
         return Ft;
     }
 
@@ -255,7 +261,10 @@ namespace LBA
         mean_ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
         _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seas.period, model.seas.in_state);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
+
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(var_ft, "LBA::func_prior_ft: var_ft", true, true);
+        #endif
         return;
     }
 
@@ -342,8 +351,10 @@ namespace LBA
         }
         }
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(alpha, "func_alpha_beta: alpha");
         bound_check(beta, "func_alpha_beta: beta");
+        #endif
 
         return;
     }
@@ -401,9 +412,10 @@ namespace LBA
         }
         }
 
-
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(mean_ft, "func_posterior_ft: mean_ft");
         bound_check(var_ft, "func_posterior_ft: var_ft");
+        #endif
 
         return;
     }
@@ -417,7 +429,10 @@ namespace LBA
         At.for_each([&qt](arma::vec::elem_type &val)
                     { val /= qt; });
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(At, "func_At: At");
+        #endif
+        
         return At;
     }
 
@@ -430,7 +445,9 @@ namespace LBA
         double err = posterior_mean_ft - prior_mean_ft;
         arma::vec mt = at + At * err;
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(mt, "func_mt: mt");
+        #endif
         return mt;
     }
 
@@ -442,7 +459,10 @@ namespace LBA
     {
         double err = posterior_var_ft - prior_var_ft;
         arma::mat Ct = Rt + err * (At * At.t());
+
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(Ct, "func_Ct: Ct");
+        #endif
         return Ct;
     }
 

@@ -15,14 +15,18 @@
 #endif
 
 #ifdef _OPENMP
+    #if !defined(DGTF_USE_OPENMP)
+        #define DGTF_USE_OPENMP
+    #endif
+
     #if !defined(ARMA_USE_OPENMP)
         #define ARMA_USE_OPENMP
     #endif
 #endif
 
-// #if !defined(DGTF_DO_BOUND_CHECK)
-//     #define DGTF_DO_BOUND_CHECK
-// #endif
+#if !defined(DGTF_DO_BOUND_CHECK)
+    #define DGTF_DO_BOUND_CHECK
+#endif
 
 // #if !defined(DGTF_DETAILED_OUTPUT)
 //     #define DGTF_DETAILED_OUTPUT
@@ -48,7 +52,6 @@ inline constexpr double NB_R = 6;
 inline constexpr double NB_LAMBDA = 0.;
 inline constexpr double NB_DELTA = 30;
 
-inline constexpr bool DEBUG = true;
 inline constexpr bool VERBOSE = true;
 inline constexpr unsigned int MAX_ITER = 100;
 

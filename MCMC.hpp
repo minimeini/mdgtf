@@ -146,7 +146,9 @@ namespace MCMC
             }
             }
 
+            #ifdef DGTF_DO_BOUND_CHECK
             bound_check(model.derr.par1, "update: W", true, true);
+            #endif
             return;
         } // func update_W
 
@@ -300,7 +302,10 @@ namespace MCMC
 
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
+                #ifdef DGTF_DO_BOUND_CHECK
                 bound_check(rho_new, "Posterior::update_mu0");
+                #endif
+                
                 model.dobs.par2 = rho_new;
                 rho_accept += 1.;
                 // logp_mu0 = logp_new;
@@ -817,7 +822,10 @@ namespace MCMC
             wt = arma::randn(nT + 1) * 0.01;
             wt.at(0) = 0.;
             wt.subvec(1, model.nP) = arma::abs(wt.subvec(1, model.nP));
+
+            #ifdef DGTF_DO_BOUND_CHECK
             bound_check(wt, "Disturbance::init");
+            #endif
 
             wt_stored.set_size(nT + 1, nsample);
             wt_accept.set_size(nT + 1);
