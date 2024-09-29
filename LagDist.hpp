@@ -119,11 +119,20 @@ public:
         switch (lag_list[lag_dist])
         {
         case AVAIL::Dist::lognorm:
+        {
             Fphi = lognorm::dlognorm(nlag, lag_par1, lag_par2);
             break;
+        }
         case AVAIL::Dist::nbinomp:
+        {
             Fphi = nbinom::dnbinom(nlag, lag_par1, lag_par2);
             break;
+        }
+        case AVAIL::Dist::uniform:
+        {
+            Fphi.ones();
+            break;
+        }
         default:
             throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
         }
@@ -172,6 +181,11 @@ public:
             {
                 double dlag_dlogitkappa = nbinom::dlag_dlogitkappa(d, lag_par1, lag_par2);
                 Fphi_deriv.at(d - 1, 0) = dlag_dlogitkappa;
+                break;
+            }
+            case AVAIL::Dist::uniform:
+            {
+                Fphi_deriv.zeros();
                 break;
             }
             default:
@@ -237,7 +251,7 @@ public:
         }
         default:
         {
-            throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom', 'nbinomm', 'gamma'.");
+            throw std::invalid_argument("LagDist::get_nlag - Supported lag distributions: 'lognorm', 'nbinom', 'nbinomm', 'gamma'.");
         }
         }
 

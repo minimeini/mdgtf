@@ -168,7 +168,8 @@ public:
         }
         case Evolution::autoregression:
         {
-
+            theta_next.subvec(1, nr) = theta_cur.subvec(0, nr - 1);
+            theta_next.at(0) = theta_cur.at(nr);
         }
         default:
         {
