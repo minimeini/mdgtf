@@ -91,7 +91,7 @@ public:
         {
             if (!param_settings.containsElementNamed("lag"))
             {
-                throw std::invalid_argument("Model::init - autoregressive coefficients are missing.");
+                throw std::invalid_argument("Model::init - true/initial values of autoregressive coefficients are missing.");
             }
 
             Rcpp::NumericVector tmp = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
