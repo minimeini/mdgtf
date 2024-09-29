@@ -186,7 +186,9 @@ public:
         }
         }
 
+        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(deriv, "LinkFunc::dlambda_deta: deriv");
+        #endif
         return deriv;
     }
 

@@ -285,10 +285,9 @@ public:
     static double sample(const double &alpha, const double &beta)
     {
         double out = 1. / R::rgamma(alpha, 1. / beta);
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(out, "InverseGamma::sample: out");
-        }
+        #endif
         return out;
     }
 
@@ -315,10 +314,9 @@ public:
             out = std::exp(out);
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(out, "InverseGamma::dinvgamma: out");
-        }
+        #endif
         return out;
     }
 };
@@ -552,10 +550,9 @@ public:
     static double dlogp_dlambda(const double &lambda, const double &yt)
     {
         double output = (yt / lambda) - 1.;
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(output, "Poisson::dlogp_dlambda: output");
-        }
+        #endif
         return output;
     }
 
@@ -748,10 +745,9 @@ public:
         double c2 = nom / denom;
 
         double output = c1 - c2;
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(output, "nbinomm::dlogp_dlambda: output");
-        }
+        #endif
         return output;
     }
 
@@ -767,10 +763,9 @@ public:
             out *= par2;
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(out, "nbinomm::dlogp_dpar2: out");
-        }
+        #endif
         return out;
     }
 
@@ -895,10 +890,10 @@ public:
 
             output.at(d) = dnbinom(static_cast<double>(d), kappa, r, c3);
         }
-        if (DEBUG)
-        {
+
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(output, "dnbinom", false, true);
-        }
+        #endif
         return output;
     }
 
@@ -955,10 +950,9 @@ public:
         double dkappa_dlogit = kappa * (1. - kappa);
         
         double out = dlag_dkappa * dkappa_dlogit;
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(out, "nbinom::dlag_dlogitkappa: out");
-        }
+        #endif
         return out;
     }
 
@@ -992,10 +986,9 @@ public:
             coef.at(k) = -c1 * c2; // coef[0]=-c(r,1)(-kappa)^1, ..., coef[_r-1]=-c(r,r)(-kappa)^r
         }
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(coef, "nbinom::iter_coef: coef");
-        }
+        #endif
         return coef;
     }
 
@@ -1179,10 +1172,9 @@ public:
 
         arma::vec out = {dlag_dmu, dlag_dlogsig2};
 
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(out, "lognorm::dlag_dpar: out");
-        }
+        #endif
         return out;
     }
 
@@ -1224,10 +1216,9 @@ private:
             output -= plognorm(lag - 1., mu, sd2);
         }
         
-        if (DEBUG)
-        {
+        #ifdef DGTF_DO_BOUND_CHECK
             bound_check(output, "dlognorm0", false, true);
-        }
+        #endif
         return output;
     }
 

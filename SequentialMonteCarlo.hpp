@@ -436,13 +436,15 @@ namespace SMC
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::mat Theta_cur = Theta.slice(t); // nP x N
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec eps = Wt_chol.t() * arma::randn(model.nP);
-                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), 
+                        model.seas.period, model.seas.in_state);
                     arma::vec theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
@@ -602,12 +604,14 @@ namespace SMC
                 // Propagate
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::mat Theta_cur = Theta.slice(t); // nP x N
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), 
+                        model.seas.period, model.seas.in_state);
                     arma::vec eps(model.nP, arma::fill::zeros);
                     arma::vec theta_new;
                     double logp = 0.;
@@ -798,12 +802,14 @@ namespace SMC
 
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 bool positive_noise = (t < Theta.n_rows) ? true : false;
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t + B - 1).col(i), y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, Theta.slice(t + B - 1).col(i), 
+                        y.at(t), model.seas.period, model.seas.in_state);
                     arma::vec eps = Wt_chol.t() * arma::randn<arma::vec>(gtheta.n_elem);
                     if (positive_noise)
                     {
@@ -1176,7 +1182,7 @@ namespace SMC
                 arma::mat Theta_cur(model.nP, N, arma::fill::zeros);
                 arma::vec mu = mu_marginal.col(t);
                 arma::mat Prec = Prec_marginal.slice(t);
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
@@ -1195,7 +1201,7 @@ namespace SMC
                     else
                     {
                         double eps = R::rnorm(0., std::sqrt(model.derr.par1));
-                        theta_cur = StateSpace::func_backward_gt(model.ftrans, model.fgain, model.dlag, Theta_next.col(i), y.at(t), eps, model.seas.period, model.seas.in_state);
+                        theta_cur = SysEq::func_backward_gt(model.ftrans, model.fgain, model.dlag, Theta_next.col(i), y.at(t), eps, model.seas.period, model.seas.in_state);
 
                         if (!use_discount)
                         {
@@ -1288,14 +1294,16 @@ namespace SMC
                 arma::mat Theta_next = Theta_backward.slice(t + 1);
                 arma::vec mu_marg = mu_marginal.col(t + 1);
                 arma::mat Prec_marg = Prec_marginal.slice(t + 1);
-                #ifdef _OPENMP
+                #ifdef DGTF_USE_OPENMP
                     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
                     double logq = weights_forward.at(t, i) + weights_backward.at(t, i);
 
-                    arma::vec gtheta_cur = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t - 1).col(i), y.at(t - 1), model.seas.period, model.seas.in_state); // g(theta[t-1])
+                    arma::vec gtheta_cur = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, Theta.slice(t - 1).col(i), 
+                        y.at(t - 1), model.seas.period, model.seas.in_state); // g(theta[t-1])
 
                     double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, gtheta_cur, y);
                     double eta = ft;
@@ -1317,15 +1325,17 @@ namespace SMC
                     }
                     else
                     {
-                        arma::vec Ft = LBA::func_Ft(
+                        arma::vec Ft = TransFunc::func_Ft(
                             model.ftrans, model.fgain, model.dlag, 
-                            t, gtheta_cur, y, LBA_FILL_ZERO, 
+                            t, gtheta_cur, y, 
                             model.seas.period, model.seas.in_state);
 
                         double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta_cur);
                         double delta = yhat_cur - ft_tilde;
-                        arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-                        LBA::func_Gt(Gt, model, gtheta_cur, y.at(t));
+                        arma::mat Gt = SysEq::init_Gt(
+                            model.nP, model.dlag, model.fsys, 
+                            model.seas.period, model.seas.in_state);
+                        SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, gtheta_cur, y.at(t));
 
                         arma::mat prec = Wcur_prec + Gt.t() * Wnext_prec * Gt + Ft * Ft.t() / Vt;
                         arma::mat prec_chol = arma::chol(arma::symmatu(prec));
@@ -1341,7 +1351,7 @@ namespace SMC
                     }
 
                     Theta_cur.col(i) = theta_cur;
-                    arma::vec gtheta_next = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta_next = SysEq::func_gt(model.fsys, model.fgain, model.dlag, theta_cur, y.at(t), model.seas.period, model.seas.in_state);
 
                     if (!model.derr.full_rank)
                     {
@@ -2275,7 +2285,9 @@ namespace SMC
                         model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
                         // unsigned int nlag = model.update_dlag(param_filter.at(0, i), param_filter.at(1, i), 30, false);
                     }
-                    arma::vec gtheta_prev_fwd = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t_prev).col(i), y.at(t_prev), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta_prev_fwd = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, Theta.slice(t_prev).col(i), 
+                        y.at(t_prev), model.seas.period, model.seas.in_state);
 
                     if (prior_seas.infer)
                     {
@@ -2292,7 +2304,9 @@ namespace SMC
                         // unsigned int nlag = model.update_dlag(param_backward.at(0, i), param_backward.at(1, i), 30, false);
                     }
 
-                    arma::vec gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, Theta.slice(t_prev).col(i), y.at(t_prev), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, Theta.slice(t_prev).col(i), 
+                        y.at(t_prev), model.seas.period, model.seas.in_state);
                     double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, gtheta, y);
                     double eta = ft;
                     double lambda = LinkFunc::ft2mu(eta, model.flink);
@@ -2308,14 +2322,18 @@ namespace SMC
                     }
                     else
                     {
-                        arma::vec Ft = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, gtheta, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
+                        arma::vec Ft = TransFunc::func_Ft(
+                            model.ftrans, model.fgain, model.dlag, t_cur, gtheta, y, 
+                            model.seas.period, model.seas.in_state);
                         double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
                         arma::mat FFt_norm = Ft * Ft.t() / Vt;
 
                         double delta = yhat_cur - ft_tilde;
 
-                        arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
-                        LBA::func_Gt(Gt, model, gtheta, y.at(t_cur));
+                        arma::mat Gt = SysEq::init_Gt(
+                            model.nP, model.dlag, model.fsys, 
+                            model.seas.period, model.seas.in_state);
+                        SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, gtheta, y.at(t_cur));
                         arma::mat Wprec(model.nP, model.nP, arma::fill::zeros);
                         Wprec.at(0, 0) = 1. / W_backward.at(i);
                         arma::mat prec_part1 = Gt.t() * Wprec * Gt;
@@ -2340,7 +2358,9 @@ namespace SMC
 
                     logp.at(i) = R::dnorm4(theta_cur.at(0), gtheta_prev_fwd.at(0), std::sqrt(W_filter.at(i)), true);
 
-                    gtheta = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, y.at(t_cur), model.seas.period, model.seas.in_state);
+                    gtheta = SysEq::func_gt(
+                        model.fsys, model.fgain, model.dlag, theta_cur, y.at(t_cur), 
+                        model.seas.period, model.seas.in_state);
                     logp.at(i) += R::dnorm4(Theta_backward.at(0, i, t_next), theta_cur.at(0), std::sqrt(W_backward.at(i)), true);
 
                     ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t_cur, theta_cur, y);
