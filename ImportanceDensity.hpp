@@ -34,13 +34,13 @@ static arma::vec qforecast0(
     const double yhat_new = LinkFunc::mu2ft(y.at(t_new), model.flink);
     arma::vec logq(Theta_old.n_cols, arma::fill::zeros);
 
-    #ifdef DGTF_USE_OPENMP
+    #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
     {
-        arma::vec gtheta_old_i = SysEq::func_gt(
-            model.fsys, model.fgain, model.dlag, Theta_old.col(i), y_old, 
+        arma::vec gtheta_old_i = StateSpace::func_gt(
+            model.ftrans, model.fgain, model.dlag, Theta_old.col(i), y_old, 
             model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
         
         double ft_gtheta = TransFunc::func_ft(
@@ -121,7 +121,7 @@ static arma::vec qforecast(
         }
     }
 
-    #ifdef DGTF_USE_OPENMP
+    #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_old.n_cols; i++)
@@ -156,10 +156,8 @@ static arma::vec qforecast(
         {
             LBA::LinearBayes lba(use_discount, discount_factor);
             lba.filter(mod, y);
-            arma::mat Gt = SysEq::init_Gt(
-                mod.nP, mod.dlag, mod.fsys, 
-                mod.seas.period, mod.seas.in_state);
-            SysEq::func_Gt(Gt, mod.fsys, model.fgain, model.dlag, lba.mt.col(t_new - 1), y_old);
+            arma::mat Gt = TransFunc::init_Gt(mod.nP, mod.dlag, mod.ftrans, mod.seas.period, mod.seas.in_state);
+            LBA::func_Gt(Gt, mod, lba.mt.col(t_new - 1), y_old);
             arma::mat Pt = Gt * lba.Ct.slice(t_new - 1) * Gt.t();
             arma::mat What = (1. / discount_factor - 1.) * Pt;
             What.diag() += EPS8;
@@ -181,9 +179,7 @@ static arma::vec qforecast(
             }
         }
 
-        arma::vec gtheta_old_i = SysEq::func_gt(
-            mod.fsys, mod.fgain, mod.dlag, Theta_old.col(i), y_old, 
-            mod.seas.period, mod.seas.in_state); // gt(theta[t-1, i])
+        arma::vec gtheta_old_i = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, Theta_old.col(i), y_old, mod.seas.period, mod.seas.in_state); // gt(theta[t-1, i])
         double ft_gtheta = TransFunc::func_ft(mod.ftrans, mod.fgain, mod.dlag, mod.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
@@ -199,9 +195,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = TransFunc::func_Ft(
-                mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, 
-                mod.seas.period, mod.seas.in_state);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + Winv; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
             
@@ -225,7 +219,7 @@ static arma::vec qforecast(
     }
 
     #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(logq, "qforecast");
+        bound_check<arma::vec>(weights, "qforecast");
     #endif
     return logq;
 } // func: qforecast
@@ -249,16 +243,11 @@ static void prior_forward(
     arma::mat sig = arma::eye<arma::mat>(model.nP, model.nP) * 2.;
     prec.slice(0) = arma::eye<arma::mat>(model.nP, model.nP) * 0.5;
 
-    arma::mat Gt = SysEq::init_Gt(
-        model.nP, model.dlag, model.fsys, 
-        model.seas.period, model.seas.in_state);
-    
+    arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
     for (unsigned int t = 1; t <= nT; t++)
     {
-        mu.col(t) = SysEq::func_gt(
-            model.fsys, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), 
-            model.seas.period, model.seas.in_state); // mu[t] = g(mu[t-1])
-        SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1));
+        mu.col(t) = StateSpace::func_gt(model.ftrans, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // mu[t] = g(mu[t-1])
+        LBA::func_Gt(Gt, model, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t(); // sig[t] = W[t] + G[t] x sig[t-1] x t(G[t])
         sig.diag() += EPS;
         if (use_discount)
@@ -306,7 +295,7 @@ static void prior_forward(
     prec_stored = arma::zeros<arma::cube>(model.nP * model.nP, y.n_elem, N);
     log_marg.set_size(N);
 
-    #ifdef DGTF_USE_OPENMP
+    #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < N; i++)
@@ -333,9 +322,7 @@ static void prior_forward(
             model.derr.var.at(0, 0) = W.at(i);
         }
 
-        arma::mat Gt = SysEq::init_Gt(
-            model.nP, model.dlag, model.fsys, 
-            model.seas.period, model.seas.in_state);
+        arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
         arma::vec mu(model.nP, arma::fill::zeros);
         arma::mat sig(model.nP, model.nP, arma::fill::eye);
         arma::mat prec = sig;
@@ -361,9 +348,9 @@ static void prior_forward(
                 }
             }
 
-            SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mu, y.at(t - 1));
-            mu = SysEq::func_gt(
-                model.fsys, model.fgain, model.dlag, mu, y.at(t - 1),
+            LBA::func_Gt(Gt, model, mu, y.at(t - 1));
+            mu = StateSpace::func_gt(
+                model.ftrans, model.fgain, model.dlag, mu, y.at(t - 1),
                 model.seas.period, model.seas.in_state);
             mu_stored.slice(i).col(t) = mu;
 
@@ -459,10 +446,8 @@ static void backward_kernel(
     }
     else if (model.derr.full_rank)
     {
-        arma::mat G_next = SysEq::init_Gt(
-            model.nP, model.dlag, model.fsys, 
-            model.seas.period, model.seas.in_state);
-        SysEq::func_Gt(G_next, model.fsys, model.fgain, model.dlag, vt, y.at(t_cur));
+        arma::mat G_next = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state);
+        LBA::func_Gt(G_next, model, vt, y.at(t_cur));
 
         arma::mat W_chol = arma::chol(arma::symmatu(model.derr.var));
         arma::mat W_chol_inv = arma::inv(arma::trimatu(W_chol));
@@ -477,8 +462,8 @@ static void backward_kernel(
 
         K = U * G_next.t() * W_inv; // K[t]
 
-        arma::vec ghat = SysEq::func_gt(
-            model.fsys, model.fgain, model.dlag, 
+        arma::vec ghat = StateSpace::func_gt(
+            model.ftrans, model.fgain, model.dlag, 
             theta_hat, y.at(t_cur), 
             model.seas.period, model.seas.in_state);
         arma::vec ht = ghat - G_next * theta_hat;
@@ -510,7 +495,7 @@ static arma::vec qbackcast(
     const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
     arma::vec logq(Theta_next.n_cols, arma::fill::zeros);
 
-    #ifdef DGTF_USE_OPENMP
+    #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_next.n_cols; i++)
@@ -541,9 +526,7 @@ static arma::vec qbackcast(
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = TransFunc::func_Ft(
-                model.ftrans, model.fgain, model.dlag, t_cur, ut.col(i), y, 
-                model.seas.period, model.seas.in_state);
+            arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 
@@ -595,7 +578,7 @@ static arma::vec qbackcast(
     const double yhat_cur = LinkFunc::mu2ft(y.at(t_cur), model.flink);
     arma::vec logq(Theta_next.n_cols, arma::fill::zeros);
 
-    #ifdef DGTF_USE_OPENMP
+    #ifdef _OPENMP
         #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < Theta_next.n_cols; i++)
@@ -651,9 +634,7 @@ static arma::vec qbackcast(
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = TransFunc::func_Ft(
-                mod.ftrans, mod.fgain, mod.dlag, t_cur, ut.col(i), y, 
-                mod.seas.period, mod.seas.in_state);
+            arma::vec F_cur = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 

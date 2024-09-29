@@ -27,39 +27,7 @@ public:
         none,
         degenerate // Only t(Fphi) * theta[t], {y[t]} is not involved
     };
-    
     static const std::map<std::string, Transfer> trans_list;
-
-
-    /**
-     * @brief init_Ft
-     *
-     * @param nP
-     * @param trans_func
-     * @param seasonal_period
-     * @return F0: arma::vec, nP x 1
-     *
-     * @note Non-transfer function part, i.e., seasonal component is also added to F0.
-     */
-    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
-    {
-        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
-        arma::vec F0(nP, arma::fill::zeros);
-        if (trans_list[trans_func] == Transfer::iterative)
-        {
-            F0.at(1) = 1.;
-        }
-
-        if (seasonal_period > 0 && season_in_state)
-        {
-            unsigned int nstate = nP - seasonal_period;
-            F0.at(nstate) = 1.;
-        }
-        return F0;
-    }
-
-
-
     /**
      * @brief f[t](btheta[t],y[0:t]) calculate: sum Fphi[k] * h(psi[t + 1 - k]) * y[t - k]. This is exact formula for sliding transfer function. The effective number of elements is min(nL, t).
      *
@@ -90,6 +58,95 @@ public:
         return ft;
     }
 
+    /**
+     * @brief init_Ft
+     *
+     * @param nP
+     * @param trans_func
+     * @param seasonal_period
+     * @return F0: arma::vec, nP x 1
+     *
+     * @note Non-transfer function part, i.e., seasonal component is also added to F0.
+     */
+    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
+    {
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
+        arma::vec F0(nP, arma::fill::zeros);
+        if (trans_list[trans_func] == Transfer::iterative)
+        {
+            F0.at(1) = 1.;
+        }
+
+        if (seasonal_period > 0 && season_in_state)
+        {
+            unsigned int nstate = nP - seasonal_period;
+            F0.at(nstate) = 1.;
+        }
+        return F0;
+    }
+
+    /**
+     * @brief init_Gt
+     * 
+     * @param nP 
+     * @param dlag 
+     * @param trans_func 
+     * @param seasonal_period 
+     * @return G0: arma::mat, nP x nP
+     * 
+     * @note Non-transfer function part, i.e., seasonal component is also added to G0.
+     */
+    static arma::mat init_Gt(const unsigned int &nP, const LagDist &dlag, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
+    {
+        unsigned int nstate = nP;
+        if (season_in_state)
+        {
+            nstate -= seasonal_period;
+        }
+        
+        std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
+        arma::mat G0(nP, nP, arma::fill::zeros);
+        G0.at(0, 0) = 1.;
+
+        if (trans_list[trans_func] == Transfer::iterative)
+        {
+            arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2);
+            double coef_now = std::pow(1. - dlag.par1, dlag.par2);
+
+            G0.at(1, 0) = coef_now;                      // (1 - kappa)^r
+            G0.submat(1, 1, 1, nstate - 1) = iter_coef.t(); // c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
+
+            for (unsigned int i = 2; i < nstate; i++)
+            {
+                G0.at(i, i - 1) = 1.;
+            }
+        }
+        else
+        {
+            for (unsigned int i = 1; i < dlag.nL; i++)
+            {
+                G0.at(i, i - 1) = 1.;
+            }
+        }
+
+        if (seasonal_period == 1 && season_in_state)
+        {
+            // first-order trend
+            G0.at(nP - 1, nP - 1) = 1.;
+        }
+        else if (seasonal_period > 1 && season_in_state)
+        {
+            // Seasonal permutation matrix
+            G0.at(nP - 1, nstate) = 1.;
+            for (unsigned int i = 1; i < seasonal_period; i++)
+            {
+                G0.at(nstate + i - 1, nstate + i) = 1.;
+            }
+        }
+
+        return G0;
+    }
+
 
     /**
      * @brief g[t](\btheta[t-1], y[t-1]), exact formula
@@ -118,6 +175,8 @@ public:
         bound_check(ft, "transfer_iterative: ft");
         return ft;
     }
+
+
 
 
     /**
@@ -267,62 +326,6 @@ public:
             bound_check(ft_cur, "func_ft: ft_cur");
         #endif
         return ft_cur;
-    }
-
-
-    /**
-     * @brief First-order derivative of f[t] w.r.t theta[t].
-     *
-     * @param model
-     * @param t time index of theta_cur
-     * @param theta_cur theta[t] = (psi[t], ..., psi[t+1 - nL]) with sliding transfer function or (psi[t+1], f[t], ..., f[t+1-r]) with iterative transfer function
-     * @param yall y[0], y[1], ..., y[nT]
-     * @return arma::vec
-     */
-    static arma::vec func_Ft(
-        const std::string &ftrans,
-        const std::string &fgain,
-        const LagDist &dlag,
-        const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
-        const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall,      // y[0], y[1], ..., y[nT]
-        const unsigned int &seasonal_period = 0,
-        const bool &season_in_state = false)
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        arma::vec Ft(theta_cur.n_elem, arma::fill::zeros);
-        if (trans_list[ftrans] == TransFunc::sliding)
-        {
-            unsigned int nstart = (t > dlag.nL) ? (t - dlag.nL) : 0;
-            // unsigned int nstart = std::max((unsigned int)0, t - nL);
-            unsigned int nend = std::max(dlag.nL - 1, t - 1);
-            unsigned int nelem = nend - nstart + 1;
-
-            arma::vec yold(dlag.nL, arma::fill::zeros);
-            yold.tail(nelem) = yall.subvec(nstart, nend);
-            yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(dlag.nL));
-            yold = arma::reverse(yold);
-
-            arma::vec th = theta_cur.head(dlag.nL); // nL x 1
-            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
-            arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
-            Ft.head(dlag.nL) = Ftmp % dlag.Fphi;
-        }
-        else
-        {
-            Ft.at(1) = 1.;
-        }
-
-        if (seasonal_period > 0 && season_in_state)
-        {
-            unsigned int nstate = theta_cur.n_elem - seasonal_period;
-            Ft.at(nstate) = 1.;
-        }
-
-        #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(Ft, "func_Ft: Ft");
-        #endif
-        return Ft;
     }
 
 

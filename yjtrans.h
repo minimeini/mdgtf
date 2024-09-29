@@ -58,9 +58,10 @@ inline double tYJ(
 {
     double sgn = (theta < 0.) ? -1. : 1.;
     double gmt = (theta < 0.) ? (2. - gamma) : gamma;
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(gmt, "tYJ: gmt", false, true);
-    #endif
+    }
 
     double nu;
     double tmp = std::abs(theta);
@@ -75,9 +76,10 @@ inline double tYJ(
     }
     nu *= sgn;
 
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(nu, "tYJ: nu");
-    #endif
+    }
     return nu;
 } // Status: Checked. OK.
 
@@ -105,10 +107,11 @@ inline double tYJinv(
 {
     double sgn = (nu < 0.) ? -1. : 1.;
     double gmt = (nu < 0.) ? (2. - gamma) : gamma;
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(nu, "tYJinv: nu");
         bound_check(gmt, "tYJinv: gmt", false, true);
-    #endif
+    }
 
     double tmp, theta;
     if (gmt < EPS8)
@@ -124,9 +127,10 @@ inline double tYJinv(
     }
     theta *= sgn;
 
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(theta, "tYJinv: " + std::to_string(gmt < EPS8) + " theta");
-    #endif
+    }
     return theta;
 } // Status: Checked. OK.
 
@@ -149,9 +153,10 @@ inline double gamma2tau(const double gamma)
 {
     double output = std::log(gamma + EPS);
     output -= std::log(2. - gamma + EPS);
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(output, "gamma2tau");
-    #endif
+    }
     return output;
 } // Status: Checked. OK.
 
@@ -172,9 +177,10 @@ inline double tau2gamma(const double tau)
 {
     double neg_tau = std::min(-tau, UPBND);
     double output = 2. / (std::exp(neg_tau) + 1.);
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(output, "tau2gamma: gamma", 0., 2.);
-    #endif
+    }
     return output;
 } // Status: Checked. OK.
 
@@ -198,9 +204,10 @@ inline double dgamma_dtau_tau(const double tau)
     double etau = std::min(tau, UPBND);
     etau = std::exp(etau);
     double output = 2. * etau / std::pow(1. + etau, 2.);
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(output, "dgamma_dtau_tau");
-    #endif
+    }
     return output;
 } // Status: Checked. OK.
 
@@ -242,9 +249,10 @@ inline double dtYJ_dtheta(
         output = std::exp(output);
     }
     
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(output, "dtYJ_dtheta");
-    #endif
+    }
     return output;
 } // Status: Checked. OK.
 
@@ -269,9 +277,10 @@ inline double dtYJ_dgamma(const double theta, const double gamma)
 {
     double sgn = (theta < 0.) ? -1. : 1.;
     double gmt = (theta < 0.) ? (2. - gamma) : gamma;
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(gmt, "dtYJ_dgamma", false, true);
-    #endif
+    }
     
 
     double res;
@@ -288,9 +297,10 @@ inline double dtYJ_dgamma(const double theta, const double gamma)
         res *= std::pow(gmt, -2.);
     }
     
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(res, "dtYJ_dgamma: res");
-    #endif
+    }
     return res;
 } // Check -- Correct
 
@@ -298,9 +308,10 @@ inline double dtYJ_dgamma(const double theta, const double gamma)
 inline double dlogdYJ_dtheta(const double theta, const double gamma)
 {
     double output = (gamma - 1.) / (1. + std::abs(theta));
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(output, "dlogdYJ_dtheta");
-    #endif
+    }
     return output;
 }
 
@@ -325,9 +336,10 @@ Correspond to `./Derivatives/dtheta_dphi.m`
 inline double dYJinv_dnu(const double nu, const double gamma)
 {
     double gmt = (nu < 0.) ? (2. - gamma) : gamma;
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(gmt, "dYJinv_dnu: gmt", false, true);
-    #endif
+    }
 
     double res, tmp;
     if (gmt < EPS8)
@@ -343,9 +355,10 @@ inline double dYJinv_dnu(const double nu, const double gamma)
         res = std::pow(1. + tmp, pow);
     }
     
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(res, "dtYJ_dnu: res");
-    #endif
+    }
     return res;
 } // Status: Checked. OK.
 
@@ -379,9 +392,10 @@ dYJinv_dgamma(nu,gm)
 inline double dYJinv_dgamma(const double nu, const double gamma)
 {
     double gmt = (nu < 0.) ? (2. - gamma) : gamma;
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(gmt, "dYJinv_dgamma: gmt", false, true);
-    #endif
+    }
 
     double res;
     if (std::abs(gmt) < EPS8)
@@ -396,9 +410,10 @@ inline double dYJinv_dgamma(const double nu, const double gamma)
         res *= -std::pow(1. + tmp, 1. / gmt);
     }
 
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(res, "dYJinv_dgamma: res");
-    #endif
+    }
     return res;
 } // Status: Checked. OK.
 
@@ -470,9 +485,10 @@ inline arma::mat get_sigma_inv(
     arma::mat SigInv = Dm2 - Dm2 * B * tmp.i() * B.t() * Dm2; // Woodbury formula
     SigInv = arma::symmatu(SigInv);                           // m x m
     
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check<arma::mat>(SigInv, "get_sigma_inv: SigInv");
-    #endif
+    }
     return SigInv;
 }
 
@@ -492,9 +508,10 @@ inline arma::vec dlogq_dtheta(
     arma::vec deriv2 = dlogdYJ_dtheta(theta, gamma);        // m x 1
     arma::vec output = deriv + deriv2;
     
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check<arma::vec>(output, "dlogq_dtheta: output");
-    #endif
+    }
     return output;                                  // m x 1
 } // Status: Checked. OK.
 
@@ -543,9 +560,10 @@ inline double logq0(
         logq += dtYJ_dtheta(eta_tilde.at(i), gamma.at(i), true);
     }
     
-    #ifdef DGTF_DO_BOUND_CHECK
+    if (DEBUG)
+    {
         bound_check(logq, "logq0");
-    #endif
+    }
     return logq;
 }
 

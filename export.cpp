@@ -178,7 +178,10 @@ Rcpp::List dgtf_infer(
     {
     case AVAIL::Algo::LinearBayes:
     {
-        y.clamp(0.01 / static_cast<double>(model.nP), y.max());
+        if (LBA_FILL_ZERO)
+        {
+            y.clamp(0.01 / static_cast<double>(model.nP), y.max());
+        }
         LBA::LinearBayes linear_bayes(method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
@@ -423,7 +426,7 @@ Rcpp::List dgtf_posterior_predictive(
     arma::cube yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     arma::cube res = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     Progress p(nsample*ntime, true);
-    #ifdef DGTF_USE_OPENMP
+    #ifdef _OPENMP
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < nsample; i++)
@@ -570,7 +573,7 @@ Rcpp::List dgtf_forecast(
 
     arma::mat ycast = arma::zeros<arma::mat>(nsample, nrep);
     Progress p(nsample, true);
-    // #ifdef DGTF_USE_OPENMP
+    // #ifdef _OPENMP
     // #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     // #endif
     for (unsigned int i = 0; i < nsample; i++)
@@ -739,7 +742,10 @@ arma::mat dgtf_tuning(
             {
             case AVAIL::Algo::LinearBayes:
             {
-                y.clamp(0.01 / static_cast<double>(model.nP), y.max());
+                if (LBA_FILL_ZERO)
+                {
+                    y.clamp(0.01 / static_cast<double>(model.nP), y.max());
+                }
                 LBA::LinearBayes linear_bayes(algo);
                 linear_bayes.filter(model, y);
                 linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);

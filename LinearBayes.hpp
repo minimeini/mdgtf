@@ -42,6 +42,48 @@ namespace LBA
         return map;
     }
 
+    /**
+     * @brief First-order derivative of g[t] w.r.t theta[t]; used in the calculation of R[t] = G[t] C[t-1] t(G[t]) + W[t].
+     *
+     * @param model
+     * @param mt_old
+     * @param yold
+     * @return arma::mat
+     */
+    static void func_Gt(
+        arma::mat &Gt, // nP x nP, must be already initialized via `TransFunc::init_Gt()`
+        const Model &model,
+        const arma::vec &mt_old,
+        const double &yold)
+    {
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
+        {
+            double coef_now = std::pow(1. - model.dlag.par1, model.dlag.par2);
+            double dhpsi_now = GainFunc::psi2dhpsi(
+                mt_old.at(0), // h'(psi[t])
+                model.fgain);
+            Gt.at(1, 0) = coef_now * yold * dhpsi_now;
+        }
+
+        return;
+    }
+
+
+    // static void func_Ht(
+    //     arma::mat &Ht, // np x nP, must be initialized via `TransFunc::H0_sliding()`
+    //     const Model &model)
+    // {
+    //     std::map<std::string, AVAIL::Transfer> trans_list = AVAIL::trans_list;
+    //     // arma::mat Ht = model.transfer.H0;
+    //     if (trans_list[model.ftrans] == AVAIL::Transfer::iterative)
+    //     {
+    //         throw std::invalid_argument("Ht for iterative transfer function: not defined yet.");
+    //     }
+
+    //     return;
+    // }
+
 
     /**
      * @brief Variance of the one-step-ahead forecasting distribution of latent state, theta[t] | D[t-1].
@@ -83,10 +125,7 @@ namespace LBA
             Rt.at(0, 0) += W;
         }
 
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(Rt, "func_Rt: Rt");
-        #endif
         return Rt;
     }
 
@@ -128,13 +167,68 @@ namespace LBA
             Wt.at(0, 0) = W;
         }
 
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(Wt, "Rt2Wt: Wt");
-        #endif
         return Wt;
     }
 
+    /**
+     * @brief First-order derivative of f[t] w.r.t theta[t].
+     *
+     * @param model
+     * @param t time index of theta_cur
+     * @param theta_cur theta[t] = (psi[t], ..., psi[t+1 - nL]) with sliding transfer function or (psi[t+1], f[t], ..., f[t+1-r]) with iterative transfer function
+     * @param yall y[0], y[1], ..., y[nT]
+     * @return arma::vec
+     */
+    static arma::vec func_Ft(
+        const std::string &ftrans,
+        const std::string &fgain,
+        const LagDist &dlag,
+        const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
+        const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
+        const arma::vec &yall,      // y[0], y[1], ..., y[nT]
+        const bool &fill_zero = LBA_FILL_ZERO,
+        const unsigned int &seasonal_period = 0,
+        const bool &season_in_state = false)
+    {
+        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        arma::vec Ft(theta_cur.n_elem, arma::fill::zeros);
+        if (trans_list[ftrans] == TransFunc::sliding)
+        {
+            unsigned int nstart = (t > dlag.nL) ? (t - dlag.nL) : 0;
+            // unsigned int nstart = std::max((unsigned int)0, t - nL);
+            unsigned int nend = std::max(dlag.nL - 1, t - 1);
+            unsigned int nelem = nend - nstart + 1;
+
+            arma::vec yold(dlag.nL, arma::fill::zeros);
+            yold.tail(nelem) = yall.subvec(nstart, nend);
+
+            if (fill_zero)
+            {
+                yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(dlag.nL));
+            }
+            
+            yold = arma::reverse(yold);
+
+            arma::vec th = theta_cur.head(dlag.nL); // nL x 1
+            arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
+            arma::vec Ftmp = yold % dhpsi_cur; // nL x 1
+            Ft.head(dlag.nL) = Ftmp % dlag.Fphi;
+        }
+        else
+        {
+            Ft.at(1) = 1.;
+        }
+
+        if (seasonal_period > 0 && season_in_state)
+        {
+            unsigned int nstate = theta_cur.n_elem - seasonal_period;
+            Ft.at(nstate) = 1.;
+        }
+
+        bound_check<arma::vec>(Ft, "func_Ft: Ft");
+        return Ft;
+    }
 
     /**
      * @brief From (a[t], R[t]) to (f[t], q[t]).
@@ -155,17 +249,13 @@ namespace LBA
         const Model &model,
         const arma::vec &yall,
         const arma::vec &at,
-        const arma::mat &Rt)
+        const arma::mat &Rt,
+        const bool &fill_zero = LBA_FILL_ZERO)
     {
         mean_ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
-        _Ft = TransFunc::func_Ft(
-            model.ftrans, model.fgain, model.dlag, t, at, yall, 
-            model.seas.period, model.seas.in_state);
+        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seas.period, model.seas.in_state);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(var_ft, "LBA::func_prior_ft: var_ft", true, true);
-        #endif
         return;
     }
 
@@ -252,11 +342,8 @@ namespace LBA
         }
         }
 
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(alpha, "func_alpha_beta: alpha");
         bound_check(beta, "func_alpha_beta: beta");
-        #endif
 
         return;
     }
@@ -315,10 +402,8 @@ namespace LBA
         }
 
 
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(mean_ft, "func_posterior_ft: mean_ft");
         bound_check(var_ft, "func_posterior_ft: var_ft");
-        #endif
 
         return;
     }
@@ -332,9 +417,7 @@ namespace LBA
         At.for_each([&qt](arma::vec::elem_type &val)
                     { val /= qt; });
 
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(At, "func_At: At");
-        #endif
         return At;
     }
 
@@ -347,9 +430,7 @@ namespace LBA
         double err = posterior_mean_ft - prior_mean_ft;
         arma::vec mt = at + At * err;
 
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(mt, "func_mt: mt");
-        #endif
         return mt;
     }
 
@@ -361,10 +442,7 @@ namespace LBA
     {
         double err = posterior_var_ft - prior_var_ft;
         arma::mat Ct = Rt + err * (At * At.t());
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(Ct, "func_Ct: Ct");
-        #endif
         return Ct;
     }
 
@@ -391,6 +469,7 @@ namespace LBA
 
             discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
             do_reference_analysis = false;
+            fill_zero = LBA_FILL_ZERO;
             return;
         }
 
@@ -421,6 +500,12 @@ namespace LBA
                 do_reference_analysis = Rcpp::as<bool>(opts["do_reference_analysis"]);
             }
 
+            fill_zero = LBA_FILL_ZERO;
+            if (opts.containsElementNamed("fill_zero"))
+            {
+                fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
+            }
+
             discount_type = "first_elem";
             if (opts.containsElementNamed("discount_type"))
             {
@@ -437,6 +522,7 @@ namespace LBA
             opts["discount_factor"] = 0.95;
             opts["do_smoothing"] = true;
             opts["do_reference_analysis"] = false;
+            opts["fill_zero"] = LBA_FILL_ZERO;
 
             return opts;
         }
@@ -478,8 +564,8 @@ namespace LBA
         arma::cube get_Wt(const Model &model, const arma::vec &y, const double &discount_factor)
         {
             arma::cube Wt = arma::zeros<arma::cube>(model.nP, model.nP, y.n_elem);
-            arma::mat Gt = SysEq::init_Gt(
-                model.nP, model.dlag, model.fsys,
+            arma::mat Gt = TransFunc::init_Gt(
+                model.nP, model.dlag, model.ftrans,
                 model.seas.period, model.seas.in_state);
 
             if (model.derr.full_rank)
@@ -493,7 +579,7 @@ namespace LBA
 
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mt.col(t - 1), y.at(t - 1));
+                LBA::func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
                 arma::mat Pt = Gt * Ct.slice(t - 1) * Gt.t();
                 arma::mat Wt_hat = (1. / discount_factor - 1.) * Pt;
                 Wt_hat.diag() += EPS8;
@@ -532,12 +618,12 @@ namespace LBA
             const double &discount_factor,
             const std::string &discount_type)
         {
-            at_new = SysEq::func_gt(
-                model.fsys, model.fgain, model.dlag, 
+            at_new = StateSpace::func_gt(
+                model.ftrans, model.fgain, model.dlag, 
                 mt_old, y.at(t - 1), 
                 model.seas.period, model.seas.in_state); // Checked. OK.
 
-            SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mt_old, y.at(t - 1));
+            func_Gt(Gt, model, mt_old, y.at(t - 1));
             Rt_new = func_Rt(
                 Gt, Ct_old, model.derr.par1, 
                 use_discount, discount_factor,
@@ -545,7 +631,10 @@ namespace LBA
             
             ft_prior = 0.;
             qt_prior = 0.;
-            func_prior_ft(ft_prior, qt_prior, Ft, t, model, y, at_new, Rt_new);
+            func_prior_ft(
+                ft_prior, qt_prior, Ft,
+                t, model, y,
+                at_new, Rt_new, LBA_FILL_ZERO);
 
             double alpha = 0.;
             double beta = 0.;
@@ -565,7 +654,7 @@ namespace LBA
         {
             const unsigned int nT = y.n_elem - 1;
             arma::vec Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seas.period, model.seas.in_state);             // set F[0]
-            arma::mat Gt = SysEq::init_Gt(model.nP, model.dlag, model.fsys, model.seas.period, model.seas.in_state); // set G[0]
+            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
 
             ft_prior_mean.set_size(nT + 1);
             ft_prior_mean.zeros();
@@ -660,7 +749,7 @@ namespace LBA
         {
             const unsigned int nT = y.n_elem - 1;
             arma::vec Ft = TransFunc::init_Ft(model.nP, model.ftrans, model.seas.period, model.seas.in_state);             // set F[0]
-            arma::mat Gt = SysEq::init_Gt(model.nP, model.dlag, model.fsys, model.seas.period, model.seas.in_state); // set G[0]
+            arma::mat Gt = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans, model.seas.period, model.seas.in_state); // set G[0]
 
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
             const bool is_sliding = trans_list[model.ftrans] == TransFunc::Transfer::sliding;
@@ -693,7 +782,7 @@ namespace LBA
                 {
                     arma::mat Rtinv = inverse(Rt.slice(t));
 
-                    SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mt.col(t - 1), y.at(t - 1));
+                    func_Gt(Gt, model, mt.col(t - 1), y.at(t - 1));
                     arma::mat Bt = (Ct.slice(t - 1) * Gt.t()) * Rtinv;
 
                     arma::vec diff_a = atilde.col(t) - at.col(t);
@@ -861,9 +950,7 @@ namespace LBA
 
             arma::cube at_cast = arma::zeros<arma::cube>(model.nP, nT + 1, k + 1);
             arma::field<arma::cube> Rt_cast(k + 1);
-            arma::mat Gt_cast = SysEq::init_Gt(
-                model.nP, model.dlag, model.fsys, 
-                model.seas.period, model.seas.in_state);
+            arma::mat Gt_cast = TransFunc::init_Gt(model.nP, model.dlag, model.ftrans);
 
             for (unsigned int j = 0; j <= k; j ++)
             {
@@ -890,14 +977,9 @@ namespace LBA
                 arma::mat Wt_onestep(model.nP, model.nP, arma::fill::zeros);
                 for (unsigned int j = 1; j <= k; j ++)
                 {
-                    at_cast.slice(j).col(t) = SysEq::func_gt(
-                        model.fsys, model.fgain, model.dlag, 
-                        at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), 
-                        model.seas.period, model.seas.in_state);
-
-                    SysEq::func_Gt(
-                        Gt_cast, model.fsys, model.fgain, model.dlag, 
-                        at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
+                    at_cast.slice(j).col(t) = StateSpace::func_gt(
+                        model.ftrans, model.fgain, model.dlag, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
+                    func_Gt(Gt_cast, model, at_cast.slice(j - 1).col(t), ytmp.at(t + j - 1));
 
 
                     if (use_discount)
@@ -938,7 +1020,9 @@ namespace LBA
                         ft_tmp, qt_tmp, Ft_cast, 
                         t + j, model, ytmp, 
                         at_cast.slice(j).col(t),
-                        Rt_cast.at(j).slice(t));
+                        Rt_cast.at(j).slice(t),
+                        fill_zero
+                    );
 
                     ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, model.flink, 0.);
 
@@ -1115,6 +1199,8 @@ namespace LBA
         bool use_discount = false;
         std::string discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
         bool do_reference_analysis = false;
+        bool fill_zero = LBA_FILL_ZERO;
+
         
         arma::vec ft_prior_mean; // (nT + 1) x 1, one-step-ahead forecasting distribution of y
         arma::vec ft_prior_var;  // (nT + 1) x 1, one-step-ahead forecasting distribution of y

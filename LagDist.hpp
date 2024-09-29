@@ -128,10 +128,7 @@ public:
             throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
         }
 
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(Fphi, "arma::vec get_Fphi: Fphi");
-        #endif
         return Fphi;
     }
 
@@ -241,9 +238,10 @@ public:
         }
         }
 
-        #ifdef DGTF_DO_BOUND_CHECK
+        if (DEBUG)
+        {
             bound_check(nlag_, "LagDist::update_nlag: nlag_");
-        #endif
+        }
         unsigned int nlag = static_cast<unsigned int>(nlag_);
 
         nlag = std::max(nlag, min_lag);

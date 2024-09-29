@@ -174,10 +174,7 @@ public:
             break;
         }
 
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(density, "ObsDist::loglike");
-        #endif
         return density;
     }
 
@@ -214,10 +211,7 @@ public:
         }
         } // switch by obs type
 
-
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(deriv, "dloglike_dlambda: deriv");
-        #endif
         return deriv;
     }
 
@@ -293,9 +287,7 @@ public:
         }
         }
 
-        #ifdef DGTF_DO_BOUND_CHECK
         bound_check(logp_pred, "dforecast(y="+std::to_string(ynext)+", alpha=" + std::to_string(alpha_next) + ", beta=" + std::to_string(beta_next)+")");
-        #endif
 
         if (return_log)
         {
