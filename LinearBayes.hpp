@@ -438,11 +438,22 @@ namespace LBA
 
         Rcpp::List get_output(const Model &model)
         {
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
             Rcpp::List output;
-            arma::mat psi = get_psi(atilde, Rtilde);
-            arma::mat psi_filter = get_psi(mt, Ct);
-            output["psi"] = Rcpp::wrap(psi);
-            output["psi_filter"] = Rcpp::wrap(psi_filter);
+
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            {
+                output["mt"] = Rcpp::wrap(mt);
+                output["Ct"] = Rcpp::wrap(Ct);
+            }
+            else
+            {
+                arma::mat psi = get_psi(atilde, Rtilde);
+                arma::mat psi_filter = get_psi(mt, Ct);
+                output["psi"] = Rcpp::wrap(psi);
+                output["psi_filter"] = Rcpp::wrap(psi_filter);
+            }
+            
 
             output["nlag"] = model.dlag.nL;
             output["seasonal_period"] = model.seas.period;
