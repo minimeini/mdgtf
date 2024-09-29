@@ -123,7 +123,7 @@ Rcpp::List dgtf_simulate(
     std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
 
     arma::vec theta0(model.nP, arma::fill::zeros);
-    if (sys_list[model.fsys] == SysEq::Evolution::autoregression)
+    if (sys_list[model.fsys] == SysEq::Evolution::identity)
     {
         Rcpp::List param_settings = settings["param"];
         if (!param_settings.containsElementNamed("lag"))

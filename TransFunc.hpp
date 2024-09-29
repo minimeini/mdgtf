@@ -238,12 +238,11 @@ public:
             yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
             arma::vec ft_vec = dlag.Fphi; // nL x 1
-            arma::vec th = theta_cur.head(dlag.nL);
 
+            arma::vec th = theta_cur.head(dlag.nL);
             arma::vec hpsi_cur = GainFunc::psi2hpsi<arma::vec>(th, fgain); // (h(psi[t]), ..., h(psi[t+1 - nL])), nL x 1
             arma::vec ftmp = yold % hpsi_cur; // nL x 1
             ft_vec = ft_vec % ftmp;
-
             ft_cur = arma::accu(ft_vec);
         } // sliding
         else

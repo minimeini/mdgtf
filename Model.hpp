@@ -11,13 +11,6 @@
 #include "Regression.hpp"
 #include "utils.h"
 
-// #ifdef _OPENMP
-// #include <omp.h>
-// #else
-// #define omp_get_num_threads() 0
-// #define omp_get_thread_num() 0
-// #endif
-
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
@@ -42,7 +35,7 @@ public:
     LagDist dlag;
     ErrDist derr;
 
-    std::string fsys = "hawkes";
+    std::string fsys = "shift";
     std::string ftrans = "sliding";
     std::string flink = "identity";
     std::string fgain = "softplus";
@@ -52,7 +45,7 @@ public:
         // no seasonality and no baseline mean in the latent state by default
         flink = "identity";
         fgain = "softplus";
-        fsys = "hawkes";
+        fsys = "shift";
         ftrans = "sliding";
 
         dobs.init_default();
@@ -87,7 +80,7 @@ public:
 
         Rcpp::NumericVector lag_param {LN_MU, LN_SD2};
         std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
-        if (sys_list[fsys] == SysEq::Evolution::autoregression)
+        if (sys_list[fsys] == SysEq::Evolution::identity)
         {
             if (!param_settings.containsElementNamed("lag"))
             {
@@ -144,20 +137,20 @@ public:
             flink = tolower(Rcpp::as<std::string>(model["link_func"]));
         }
 
-        fsys = "hawkes";
+        fsys = "shift";
         if (model.containsElementNamed("sys_eq"))
         {
             fsys = tolower(Rcpp::as<std::string>(model["sys_eq"]));
         }
 
         std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
-        if (sys_list[fsys] == SysEq::Evolution::solow)
+        if (sys_list[fsys] == SysEq::Evolution::nbinom)
         {
             ftrans = "iterative";
             dlag.truncated = false;
             dlag.name = "nbinom";
         }
-        else if (sys_list[fsys] == SysEq::Evolution::autoregression)
+        else if (sys_list[fsys] == SysEq::Evolution::identity)
         {
             ftrans = "sliding";
             dlag.truncated = true;
@@ -174,7 +167,7 @@ public:
             }
         }
 
-        if (sys_list[fsys] == SysEq::Evolution::autoregression)
+        if (sys_list[fsys] == SysEq::Evolution::identity)
         {
             fgain = "identity";
         }
@@ -227,7 +220,7 @@ public:
         model_settings["link_func"] = "identity";
         model_settings["gain_func"] = "softplus";
         model_settings["lag_dist"] = "lognorm";
-        model_settings["sys_eq"] = "hawkes";
+        model_settings["sys_eq"] = "shift";
         model_settings["err_dist"] = "gaussian";
 
         Rcpp::List param_settings;
@@ -1157,7 +1150,6 @@ public:
         {
             model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
         }
-        Season seas;
 
         Theta.set_size(model.nP, ntime + 1);
         Theta.zeros();
@@ -1174,6 +1166,7 @@ public:
         ft = y;
 
         psi = ErrDist::sample(model.derr, ntime, true);
+
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
             unsigned int psi_idx;
@@ -1190,11 +1183,11 @@ public:
                 model.fsys, model.fgain, model.dlag,
                 Theta.col(t - 1), y.at(t - 1), 0, false);
 
-            if (!model.derr.full_rank)
+            if ((!model.derr.full_rank) && (model.derr.par1 > EPS))
             {
                 Theta.at(0, t) = psi.at(psi_idx);
             }
-            else
+            else if (model.derr.full_rank)
             {
                 arma::vec eps = arma::randn<arma::vec>(Theta.n_rows);
                 arma::mat var_chol = arma::chol(model.derr.var);
@@ -1202,16 +1195,12 @@ public:
                 psi.at(psi_idx) = Theta.at(0, t);
             }
 
+
             ft.at(t) = TransFunc::func_ft(
                 model.ftrans, model.fgain, model.dlag,
-                seas, t, Theta.col(t), y);
+                model.seas, t, Theta.col(t), y);
 
             double eta = ft.at(t);
-            if (model.seas.period > 0)
-            {
-                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
-            }
-
             lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.
             y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
         }

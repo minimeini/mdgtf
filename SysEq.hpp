@@ -22,9 +22,9 @@ class SysEq
 public:
     enum Evolution
     {
-        autoregression, // autoregression
-        hawkes, // discretized-Hawkes process
-        solow // distributed lags
+        identity, // autoregression
+        shift, // discretized-Hawkes process
+        nbinom // distributed lags
     };
 
     static const std::map<std::string, Evolution> sys_list;
@@ -56,7 +56,7 @@ public:
         
         std::map<std::string, Evolution> sys_list = SysEq::sys_list;
         arma::mat G0(nP, nP, arma::fill::zeros);
-        if (sys_list[fsys] == Evolution::solow)
+        if (sys_list[fsys] == Evolution::nbinom)
         {
             G0.at(0, 0) = 1.;
 
@@ -71,7 +71,7 @@ public:
                 G0.at(i, i - 1) = 1.;
             }
         }
-        else if (sys_list[fsys] == Evolution::hawkes)
+        else if (sys_list[fsys] == Evolution::shift)
         {
             G0.at(0, 0) = 1.;
 
@@ -80,13 +80,9 @@ public:
                 G0.at(i, i - 1) = 1.;
             }
         }
-        else if (sys_list[fsys] == Evolution::autoregression)
+        else if (sys_list[fsys] == Evolution::identity)
         {
-            G0.at(0, nstate - 1) = 1;
-            for (unsigned int i = 1; i < nstate; i++)
-            {
-                G0.at(i, i - 1) = 1.;
-            }
+            G0 = arma::eye<arma::mat>(nP, nP);
         }
         else
         {
@@ -148,7 +144,7 @@ public:
 
         switch (sys_list[fsys])
         {
-        case Evolution::solow:
+        case Evolution::nbinom:
         {
             double hpsi = GainFunc::psi2hpsi(theta_cur.at(0), fgain);
             theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
@@ -159,17 +155,16 @@ public:
             theta_next.subvec(2, nr) = theta_cur.subvec(1, nr - 1);
             break;
         }
-        case Evolution::hawkes:
+        case Evolution::shift:
         {
             // theta_next = model.transfer.G0 * theta_cur;
             theta_next.at(0) = theta_cur.at(0);
             theta_next.subvec(1, nr) = theta_cur.subvec(0, nr - 1);
             break;
         }
-        case Evolution::autoregression:
+        case Evolution::identity:
         {
-            theta_next.subvec(1, nr) = theta_cur.subvec(0, nr - 1);
-            theta_next.at(0) = theta_cur.at(nr);
+            theta_next.subvec(0, nr) = theta_cur.subvec(0, nr);
             break;
         }
         default:
@@ -334,7 +329,7 @@ public:
         const double &yold)
     {
         std::map<std::string, Evolution> sys_list = SysEq::sys_list;
-        if (sys_list[fsys] == Evolution::solow)
+        if (sys_list[fsys] == Evolution::nbinom)
         {
             double coef_now = std::pow(1. - dlag.par1, dlag.par2);
             double dhpsi_now = GainFunc::psi2dhpsi(mt_old.at(0), fgain);
@@ -351,19 +346,9 @@ private:
     static std::map<std::string, Evolution> map_sys_eq()
     {
         std::map<std::string, Evolution> MAP;
-        MAP["autoregression"] = Evolution::autoregression;
-        MAP["autoregressive"] = Evolution::autoregression;
-        MAP["ar"] = Evolution::autoregression;
-
-        MAP["hawkes"] = Evolution::hawkes;
-        MAP["discretized_hawkes"] = Evolution::hawkes;
-        MAP["point_process"] = Evolution::hawkes;
-        MAP["point"] = Evolution::hawkes;
-
-        MAP["distributed_lag"] = Evolution::solow;
-        MAP["koyck"] = Evolution::solow;
-        MAP["solow"] = Evolution::solow;
-
+        MAP["identity"] = Evolution::identity;
+        MAP["shift"] = Evolution::shift;
+        MAP["nbinom"] = Evolution::nbinom;
         return MAP;
     }
 };

@@ -58,7 +58,7 @@ public:
     void init_default()
     {
         name = "gaussian";
-        par1 = 0.01;  // W
+        par1 = 0.0;  // W
         par2 = 0.0; // w[0]
 
         var.set_size(1, 1);
@@ -77,7 +77,7 @@ public:
         }
 
         arma::mat var_tmp(1, 1);
-        var_tmp.at(0, 0) = 0.01;
+        var_tmp.at(0, 0) = 0.0;
         if (err_opts.containsElementNamed("var"))
         {
             var_tmp.clear();
