@@ -70,14 +70,22 @@ public:
         par2 = par2_in;
         truncated = truncated_in;
 
-        if (truncated)
+        if (lag_list[name] == AVAIL::Dist::uniform)
+        {
+            nL = static_cast<unsigned int>(par1);
+        }
+        else if (truncated)
         {
             nL = get_nlag(name, par1, par2, prob_thres);
-            Fphi = get_Fphi(nL, name, par1, par2);
         }
         else
         {
             nL = 0;
+        }
+
+        if (truncated)
+        {
+            Fphi = get_Fphi(nL, name, par1, par2);
         }
 
         return;
@@ -249,9 +257,14 @@ public:
             nlag_ = R::qgamma(prob, lag_par1, 1./lag_par2, true, false);
             break;
         }
+        case AVAIL::Dist::uniform:
+        {
+            nlag_ = lag_par1;
+            break;
+        }
         default:
         {
-            throw std::invalid_argument("LagDist::get_nlag - Supported lag distributions: 'lognorm', 'nbinom', 'nbinomm', 'gamma'.");
+            throw std::invalid_argument("LagDist::get_nlag - unknown lag distribution.");
         }
         }
 

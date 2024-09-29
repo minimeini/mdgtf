@@ -76,12 +76,38 @@ public:
         init_model(model_settings);
 
         Rcpp::List param_settings = settings["param"];
-        Rcpp::NumericVector lag_param, obs_param; //, err_param;
-        init_param(obs_param, lag_param, dlag.truncated, param_settings);
-        dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
+        Rcpp::NumericVector obs_param = Rcpp::NumericVector::create(0., 30.);
+        if (param_settings.containsElementNamed("obs"))
+        {
+            obs_param = Rcpp::as<Rcpp::NumericVector>(param_settings["obs"]);
+        }
         dobs.par1 = obs_param[0];
         dobs.par2 = obs_param[1];
 
+
+        Rcpp::NumericVector lag_param {LN_MU, LN_SD2};
+        std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+        if (sys_list[fsys] == SysEq::Evolution::autoregression)
+        {
+            if (!param_settings.containsElementNamed("lag"))
+            {
+                throw std::invalid_argument("Model::init - autoregressive coefficients are missing.");
+            }
+
+            Rcpp::NumericVector tmp = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
+
+            lag_param[0] = static_cast<double>(tmp.length());
+            lag_param[1] = 0.;
+        }
+        else if (param_settings.containsElementNamed("lag"))
+        {
+            Rcpp::NumericVector tmp = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
+            lag_param[0] = tmp[0];
+            lag_param[1] = tmp[1];
+        }
+        dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
+
+        
         if (settings.containsElementNamed("season"))
         {
             Rcpp::List season_settings = settings["season"];
@@ -94,11 +120,6 @@ public:
 
         nP = get_nP(dlag, seas.period, seas.in_state);
 
-        // err_param = Rcpp::NumericVector::create(0.01, 0.);
-        // if (param_settings.containsElementNamed("err"))
-        // {
-        //     err_param = Rcpp::as<Rcpp::NumericVector>(param_settings["err"]);
-        // }
         if (param_settings.containsElementNamed("err"))
         {
             Rcpp::List err_opts = Rcpp::as<Rcpp::List>(param_settings["err"]);
@@ -133,61 +154,45 @@ public:
         if (sys_list[fsys] == SysEq::Evolution::solow)
         {
             ftrans = "iterative";
+            dlag.truncated = false;
+            dlag.name = "nbinom";
+        }
+        else if (sys_list[fsys] == SysEq::Evolution::autoregression)
+        {
+            ftrans = "sliding";
+            dlag.truncated = true;
+            dlag.name = "uniform";
         }
         else
         {
             ftrans = "sliding";
+            dlag.truncated = true;
+            dlag.name = "lognorm";
+            if (model.containsElementNamed("lag_dist"))
+            {
+                dlag.name = tolower(Rcpp::as<std::string>(model["lag_dist"]));
+            }
         }
 
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        if (trans_list[ftrans] == TransFunc::Transfer::iterative)
+        if (sys_list[fsys] == SysEq::Evolution::autoregression)
         {
-            dlag.truncated = false;
+            fgain = "identity";
         }
         else
         {
-            dlag.truncated = true;
+            fgain = "softplus";
+            if (model.containsElementNamed("gain_func"))
+            {
+                fgain = tolower(Rcpp::as<std::string>(model["gain_func"]));
+            }
         }
-
-        fgain = "softplus";
-        if (model.containsElementNamed("gain_func"))
-        {
-            fgain = tolower(Rcpp::as<std::string>(model["gain_func"]));
-        }
-
-        dlag.name = "lognorm";
-        if (model.containsElementNamed("lag_dist"))
-        {
-            dlag.name = tolower(Rcpp::as<std::string>(model["lag_dist"]));
-        }
-
+        
         derr.name = "gaussian";
         if (model.containsElementNamed("err_dist"))
         {
             derr.name = tolower(Rcpp::as<std::string>(model["err_dist"]));
         }
         return;
-    }
-
-    static void init_param(
-        Rcpp::NumericVector &obs,
-        Rcpp::NumericVector &lag,
-        bool &truncated,
-        const Rcpp::List &param_settings)
-    {
-        Rcpp::List param = param_settings;
-
-        obs = Rcpp::NumericVector::create(0., 30.);
-        if (param.containsElementNamed("obs"))
-        {
-            obs = Rcpp::as<Rcpp::NumericVector>(param["obs"]);
-        }
-
-        lag = Rcpp::NumericVector::create(LN_MU, LN_SD2);
-        if (param.containsElementNamed("lag"))
-        {
-            lag = Rcpp::as<Rcpp::NumericVector>(param["lag"]);
-        }
     }
 
 
@@ -1133,14 +1138,17 @@ public:
         Model &model,
         const unsigned int &ntime,
         const double &y0,
+        const arma::vec &theta0,
         const bool &full_rank = false)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+
         if (!model.dlag.truncated)
         {
             model.dlag.nL = ntime;
         }
         model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+
         arma::mat Gmat = SysEq::init_Gt(
             model.nP, model.dlag, model.fsys,
             model.seas.period, model.seas.in_state);
@@ -1153,6 +1161,11 @@ public:
 
         Theta.set_size(model.nP, ntime + 1);
         Theta.zeros();
+        Theta.col(0) = theta0;
+        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
+        {
+            Theta.at(0, 0) = psi.at(1);
+        }
 
         y.set_size(ntime + 1);
         y.zeros();
@@ -1161,11 +1174,6 @@ public:
         ft = y;
 
         psi = ErrDist::sample(model.derr, ntime, true);
-        if (trans_list[model.ftrans] == TransFunc::Transfer::iterative)
-        {
-            Theta.at(0, 0) = psi.at(1);
-        }
-
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
             unsigned int psi_idx;

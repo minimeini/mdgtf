@@ -120,10 +120,23 @@ Rcpp::List dgtf_simulate(
     const double &y0 = 0.)
 {
     Model model(settings);
+    std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+
+    arma::vec theta0(model.nP, arma::fill::zeros);
+    if (sys_list[model.fsys] == SysEq::Evolution::autoregression)
+    {
+        Rcpp::List param_settings = settings["param"];
+        if (!param_settings.containsElementNamed("lag"))
+        {
+            throw std::invalid_argument("Model::init - autoregressive coefficients are missing.");
+        }
+
+        theta0 = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
+    }
 
     arma::vec psi, ft, lambda, y;
     arma::mat Theta;
-    StateSpace::simulate(y, lambda, ft, Theta, psi, model, ntime, y0);
+    StateSpace::simulate(y, lambda, ft, Theta, psi, model, ntime, y0, theta0, model.derr.full_rank);
 
     Rcpp::List output;
     output["model"] = model.info();

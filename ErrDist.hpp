@@ -156,6 +156,11 @@ public:
         double W = derr.par1;
         double w0 = derr.par2;
 
+        if (W < EPS)
+        {
+            return wt;
+        }
+
         switch (err_list[derr.name])
         {
         case AVAIL::Dist::gaussian:
