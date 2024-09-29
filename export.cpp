@@ -178,10 +178,7 @@ Rcpp::List dgtf_infer(
     {
     case AVAIL::Algo::LinearBayes:
     {
-        if (LBA_FILL_ZERO)
-        {
-            y.clamp(0.01 / static_cast<double>(model.nP), y.max());
-        }
+        y.clamp(0.01 / static_cast<double>(model.nP), y.max());
         LBA::LinearBayes linear_bayes(method_settings);
 
         auto start = std::chrono::high_resolution_clock::now();
@@ -742,10 +739,7 @@ arma::mat dgtf_tuning(
             {
             case AVAIL::Algo::LinearBayes:
             {
-                if (LBA_FILL_ZERO)
-                {
-                    y.clamp(0.01 / static_cast<double>(model.nP), y.max());
-                }
+                y.clamp(0.01 / static_cast<double>(model.nP), y.max());
                 LBA::LinearBayes linear_bayes(algo);
                 linear_bayes.filter(model, y);
                 linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);

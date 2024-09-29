@@ -1319,7 +1319,7 @@ namespace SMC
                     {
                         arma::vec Ft = LBA::func_Ft(
                             model.ftrans, model.fgain, model.dlag, 
-                            t, gtheta_cur, y, LBA_FILL_ZERO, 
+                            t, gtheta_cur, y, 
                             model.seas.period, model.seas.in_state);
 
                         double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta_cur);
@@ -2308,7 +2308,7 @@ namespace SMC
                     }
                     else
                     {
-                        arma::vec Ft = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, gtheta, y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
+                        arma::vec Ft = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, gtheta, y, model.seas.period, model.seas.in_state);
                         double ft_tilde = ft - arma::as_scalar(Ft.t() * gtheta);
                         arma::mat FFt_norm = Ft * Ft.t() / Vt;
 

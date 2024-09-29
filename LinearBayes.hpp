@@ -191,7 +191,6 @@ namespace LBA
         const unsigned int &t,      // time index of theta_cur, t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,      // y[0], y[1], ..., y[nT]
-        const bool &fill_zero = LBA_FILL_ZERO,
         const unsigned int &seasonal_period = 0,
         const bool &season_in_state = false)
     {
@@ -206,12 +205,7 @@ namespace LBA
 
             arma::vec yold(dlag.nL, arma::fill::zeros);
             yold.tail(nelem) = yall.subvec(nstart, nend);
-
-            if (fill_zero)
-            {
-                yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(dlag.nL));
-            }
-            
+            yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(dlag.nL));
             yold = arma::reverse(yold);
 
             arma::vec th = theta_cur.head(dlag.nL); // nL x 1
@@ -255,11 +249,10 @@ namespace LBA
         const Model &model,
         const arma::vec &yall,
         const arma::vec &at,
-        const arma::mat &Rt,
-        const bool &fill_zero = LBA_FILL_ZERO)
+        const arma::mat &Rt)
     {
         mean_ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
-        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, fill_zero, model.seas.period, model.seas.in_state);
+        _Ft = func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, model.seas.period, model.seas.in_state);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
 
         #ifdef DGTF_DO_BOUND_CHECK
@@ -489,7 +482,6 @@ namespace LBA
 
             discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
             do_reference_analysis = false;
-            fill_zero = LBA_FILL_ZERO;
             return;
         }
 
@@ -520,12 +512,6 @@ namespace LBA
                 do_reference_analysis = Rcpp::as<bool>(opts["do_reference_analysis"]);
             }
 
-            fill_zero = LBA_FILL_ZERO;
-            if (opts.containsElementNamed("fill_zero"))
-            {
-                fill_zero = Rcpp::as<bool>(opts["fill_zero"]);
-            }
-
             discount_type = "first_elem";
             if (opts.containsElementNamed("discount_type"))
             {
@@ -542,7 +528,6 @@ namespace LBA
             opts["discount_factor"] = 0.95;
             opts["do_smoothing"] = true;
             opts["do_reference_analysis"] = false;
-            opts["fill_zero"] = LBA_FILL_ZERO;
 
             return opts;
         }
@@ -654,7 +639,7 @@ namespace LBA
             func_prior_ft(
                 ft_prior, qt_prior, Ft,
                 t, model, y,
-                at_new, Rt_new, LBA_FILL_ZERO);
+                at_new, Rt_new);
 
             double alpha = 0.;
             double beta = 0.;
@@ -1040,9 +1025,7 @@ namespace LBA
                         ft_tmp, qt_tmp, Ft_cast, 
                         t + j, model, ytmp, 
                         at_cast.slice(j).col(t),
-                        Rt_cast.at(j).slice(t),
-                        fill_zero
-                    );
+                        Rt_cast.at(j).slice(t));
 
                     ytmp.at(t + j) = LinkFunc::ft2mu(ft_tmp, model.flink, 0.);
 
@@ -1219,8 +1202,6 @@ namespace LBA
         bool use_discount = false;
         std::string discount_type = "first_elem"; // all_lag_elems, all_elems, first_elem
         bool do_reference_analysis = false;
-        bool fill_zero = LBA_FILL_ZERO;
-
         
         arma::vec ft_prior_mean; // (nT + 1) x 1, one-step-ahead forecasting distribution of y
         arma::vec ft_prior_var;  // (nT + 1) x 1, one-step-ahead forecasting distribution of y

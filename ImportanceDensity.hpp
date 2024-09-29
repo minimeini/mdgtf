@@ -195,7 +195,7 @@ static arma::vec qforecast(
         } // One-step-ahead predictive density
         else
         {
-            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
+            arma::vec Ft_gtheta = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_new, gtheta_old_i, y, mod.seas.period, mod.seas.in_state);
             arma::mat Prec_i = Ft_gtheta * Ft_gtheta.t() / Vt + Winv; // nP x nP, function of mu0[i, t]
             Prec_i.diag() += EPS;
             
@@ -526,7 +526,7 @@ static arma::vec qbackcast(
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, model.seas.period, model.seas.in_state);
+            arma::vec F_cur = LBA::func_Ft(model.ftrans, model.fgain, model.dlag, t_cur, ut.col(i), y, model.seas.period, model.seas.in_state);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 
@@ -634,7 +634,7 @@ static arma::vec qbackcast(
         } // one-step backcasting
         else
         {
-            arma::vec F_cur = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_cur, ut.col(i), y, LBA_FILL_ZERO, mod.seas.period, mod.seas.in_state);
+            arma::vec F_cur = LBA::func_Ft(mod.ftrans, mod.fgain, mod.dlag, t_cur, ut.col(i), y, mod.seas.period, mod.seas.in_state);
             arma::mat Prec = arma::symmatu(F_cur * F_cur.t() / Vtilde) + Uprec_cur;
             Prec.diag() += EPS;
 

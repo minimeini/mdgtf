@@ -54,12 +54,4 @@ inline constexpr double NB_DELTA = 30;
 
 inline constexpr bool VERBOSE = true;
 inline constexpr unsigned int MAX_ITER = 100;
-
-
-/**
- * @brief Default settings of linear Bayes
- * 
- */
-inline constexpr bool LBA_FILL_ZERO = true;
-
 #endif
