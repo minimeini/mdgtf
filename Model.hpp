@@ -4,6 +4,7 @@
 
 #include <RcppArmadillo.h>
 #include "ErrDist.hpp"
+#include "SysEq.hpp"
 #include "TransFunc.hpp"
 #include "ObsDist.hpp"
 #include "LinkFunc.hpp"
@@ -41,15 +42,17 @@ public:
     LagDist dlag;
     ErrDist derr;
 
-    std::string ftrans;
-    std::string flink;
-    std::string fgain;
+    std::string fsys = "hawkes";
+    std::string ftrans = "sliding";
+    std::string flink = "identity";
+    std::string fgain = "softplus";
     
     Model()
     {
         // no seasonality and no baseline mean in the latent state by default
         flink = "identity";
         fgain = "softplus";
+        fsys = "hawkes";
         ftrans = "sliding";
 
         dobs.init_default();
@@ -120,10 +123,20 @@ public:
             flink = tolower(Rcpp::as<std::string>(model["link_func"]));
         }
 
-        ftrans = "sliding";
-        if (model.containsElementNamed("trans_func"))
+        fsys = "hawkes";
+        if (model.containsElementNamed("sys_eq"))
         {
-            ftrans = tolower(Rcpp::as<std::string>(model["trans_func"]));
+            fsys = tolower(Rcpp::as<std::string>(model["sys_eq"]));
+        }
+
+        std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+        if (sys_list[fsys] == SysEq::Evolution::solow)
+        {
+            ftrans = "iterative";
+        }
+        else
+        {
+            ftrans = "sliding";
         }
 
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -183,9 +196,9 @@ public:
         Rcpp::List model;
         model["obs_dist"] = dobs.name;
         model["link_func"] = flink;
-        model["trans_func"] = ftrans;
         model["gain_func"] = fgain;
         model["lag_dist"] = dlag.name;
+        model["sys_eq"] = fsys;
         model["err_dist"] = derr.name;
 
         Rcpp::List param;
@@ -207,12 +220,10 @@ public:
         Rcpp::List model_settings;
         model_settings["obs_dist"] = "nbinom";
         model_settings["link_func"] = "identity";
-        model_settings["trans_func"] = "sliding";
         model_settings["gain_func"] = "softplus";
         model_settings["lag_dist"] = "lognorm";
+        model_settings["sys_eq"] = "hawkes";
         model_settings["err_dist"] = "gaussian";
-        model_settings["seasonal_period"] = 1;
-        model_settings["season_in_state"] = false;
 
         Rcpp::List param_settings;
         param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
@@ -1113,202 +1124,6 @@ private:
 class StateSpace
 {
 public:
-    /**
-     * @brief Expected state evolution equation for the DLM form model. Expectation of theta[t + 1] = g(theta[t]).
-     *
-     * @param model
-     * @param theta_cur
-     * @param ycur
-     * @return arma::vec
-     * 
-     * 
-     * @note Checked. OK.
-     */
-    static arma::vec func_gt(
-        const std::string &ftrans,
-        const std::string &fgain,
-        const LagDist &dlag,
-        // const Model &model,
-        const arma::vec &theta_cur, // nP x 1, (psi[t], f[t-1], ..., f[t-r])
-        const double &ycur,
-        const unsigned int &seasonal_period = 0,
-        const bool &season_in_state = false
-    )
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        const unsigned int nP = theta_cur.n_elem;
-        arma::vec theta_next(nP, arma::fill::zeros); // nP x 1
-        // theta_next.copy_size(theta_cur);
-
-        unsigned int nr = nP - 1;
-        if (season_in_state)
-        {
-            nr -= seasonal_period;
-        }
-        
-
-        switch (trans_list[ftrans])
-        {
-        case TransFunc::Transfer::iterative:
-        {
-            double hpsi = GainFunc::psi2hpsi(theta_cur.at(0), fgain);
-            theta_next.at(0) = theta_cur.at(0); // Expectation of random walk.
-            theta_next.at(1) = TransFunc::transfer_iterative(
-                theta_cur.subvec(1, nr), // f[t-1], ..., f[t-r]
-                hpsi, ycur, dlag.par1, dlag.par2);
-
-            theta_next.subvec(2, nr) = theta_cur.subvec(1, nr - 1);
-            break;
-        }
-        default: // AVAIL::Transfer::sliding
-        {
-            // theta_next = model.transfer.G0 * theta_cur;
-            theta_next.at(0) = theta_cur.at(0);
-            theta_next.subvec(1, nr) = theta_cur.subvec(0, nr - 1);
-
-            break;
-        }
-        }
-
-        if (season_in_state)
-        {
-            if (seasonal_period == 1)
-            {
-                theta_next.at(nr + 1) = theta_cur.at(nr + 1);
-            }
-            else if (seasonal_period == 2)
-            {
-                // nP - 1 = nr + 2
-                theta_next.at(nr + 1) = theta_cur.at(nr + 2);
-                theta_next.at(nr + 2) = theta_cur.at(nr + 1);
-            }
-            else if (seasonal_period > 2)
-            {
-                theta_next.subvec(nr + 1, nP - 2) = theta_cur.subvec(nr + 2, nP - 1);
-                theta_next.at(nP - 1) = theta_cur.at(nr + 1);
-            }
-        }
-        
-
-        #ifdef DGTF_DO_BOUND_CHECK
-            bound_check<arma::vec>(theta_next, "func_gt: theta_next");
-        #endif
-        return theta_next;
-    }
-
-    /**
-     * @brief A backward propagate from theta[t] to theta[t-1]
-     *
-     * @param ftrans
-     * @param fgain
-     * @param dlag
-     * @param theta theta[t]
-     * @param yprev y[t-1]
-     * @return arma::vec, theta[t-1]
-     *
-     * @note
-     * Backward propagation doesn't work for iterative transfer functions.
-     * 
-     * For an iterative transfer function, theta[t] = (psi[t+1],f[t],...,f[t+1-r]);
-     * For a sliding transfer function, theta[t] = (psi[t],...,psi[t+1-nlag]).
-     * 
-     * The backward propagate probably is not gonna work for iterative transfer function.
-     */
-    static arma::vec func_backward_gt(
-        const std::string &ftrans,
-        const std::string &fgain,
-        const LagDist &dlag,
-        const arma::vec &theta, // nP x 1, theta[t]
-        const double &yprev, // y[t-1]
-        const double &eps = 0.,
-        const unsigned int &seasonal_period = 0,
-        const bool &season_in_state = false
-    )
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        const unsigned int nP = theta.n_elem;
-        unsigned int nstate = nP;
-        if (season_in_state)
-        {
-            nstate -= seasonal_period;
-        }
-
-        arma::vec theta_prev(nP, arma::fill::zeros); // nP x 1
-
-        if (trans_list[ftrans] == TransFunc::Transfer::iterative)
-        {
-            /*
-            From theta[t] to theta[t-1]
-            <=>
-            from (psi[t+1],f[t],...,f[t+1-r]) to (psi[t],f[t-1],...,f[t-r]).
-
-            First, we need to get psi[t] = psi[t+1] + eps;
-            Second, we need to get f[t-r]
-            */
-            theta_prev.subvec(1, nP - 2) = theta.subvec(2, nP - 1);
-
-            arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2, true);
-            iter_coef = arma::reverse(iter_coef); // r x 1, r = nP - 1
-            double ctmp = arma::accu(iter_coef % theta.subvec(1, nP - 1));
-            double coef_now = std::pow((dlag.par1 - 1) / dlag.par1, dlag.par2);
-
-            double hpsi_bnd = -ctmp / yprev;
-            hpsi_bnd /= coef_now;
-            double psi_bnd = GainFunc::hpsi2psi(hpsi_bnd, fgain);
-            double eps_bnd = psi_bnd - theta.at(0);
-
-            bool in_bound = (static_cast<int>(dlag.par2) % 2 == 0) ? (eps > eps_bnd) : (eps < eps_bnd);
-            if (!in_bound)
-            {
-                throw std::runtime_error("StateSpace::func_backward_gt: invalid eps leads a negative ft.");
-            }
-
-            theta_prev.at(0) = theta.at(0) + eps; // psi[t] = psi[t+1] + eps
-
-            /*
-            hpsi_bnd
-            It is an lower bound if r is even, an upper bound otherwise.
-            */
-
-            double hpsi = GainFunc::psi2hpsi(theta_prev.at(0), fgain);
-            double ft_old = ctmp + coef_now * hpsi * yprev;
-
-            if (ft_old < 0)
-            {
-                throw std::invalid_argument("State::Space::func_backward_gt: ft must be non-negative");
-            }
-
-            theta_prev.at(nP - 1) = ft_old;
-        }
-        else
-        {
-            // theta[t] = K[t] * theta[t + 1] + w[t]
-            theta_prev.subvec(0, nstate - 2) = theta.subvec(1, nstate - 1);
-            theta_prev.at(nstate - 1) = theta.at(nstate - 1) + eps;
-        }
-
-        if (season_in_state)
-        {
-            if (seasonal_period == 1)
-            {
-                theta_prev.at(nstate) = theta.at(nstate);
-            }
-            else if (seasonal_period > 1)
-            {
-                theta_prev.at(nstate) = theta.at(nP - 1);
-                for (unsigned int i = nstate + 1; i < nP; i++)
-                {
-                    theta_prev.at(i) = theta.at(i - 1);
-                }
-            }
-        }
-        
-
-        return theta_prev;
-    }
-
-
-
     static void simulate(
         arma::vec &y,
         arma::vec &lambda,
@@ -1326,8 +1141,8 @@ public:
             model.dlag.nL = ntime;
         }
         model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
-        arma::mat Gmat = TransFunc::init_Gt(
-            model.nP, model.dlag, model.ftrans,
+        arma::mat Gmat = SysEq::init_Gt(
+            model.nP, model.dlag, model.fsys,
             model.seas.period, model.seas.in_state);
 
         if (model.seas.period > 0)
@@ -1363,8 +1178,8 @@ public:
                 psi_idx = t;
             }
 
-            Theta.col(t) = StateSpace::func_gt(
-                model.ftrans, model.fgain, model.dlag,
+            Theta.col(t) = SysEq::func_gt(
+                model.fsys, model.fgain, model.dlag,
                 Theta.col(t - 1), y.at(t - 1), 0, false);
 
             if (!model.derr.full_rank)
@@ -1430,7 +1245,7 @@ public:
                 unsigned int idx = t + nT;
                 double ynow = yvec.at(idx); // (nT + 1 + k) x 1
                 arma::vec theta_now = Theta_all.slice(idx).col(i);
-                arma::vec theta_next = StateSpace::func_gt(mod.ftrans, mod.fgain, mod.dlag, theta_now, ynow, mod.seas.period, mod.seas.in_state);
+                arma::vec theta_next = SysEq::func_gt(mod.fsys, mod.fgain, mod.dlag, theta_now, ynow, mod.seas.period, mod.seas.in_state);
                 if (Wsqrt > 0)
                 {
                     theta_next.at(0) += R::rnorm(0., Wsqrt);
@@ -1523,7 +1338,7 @@ public:
                 arma::vec ytmp = y;
                 for (unsigned int j = 1; j <= k; j ++)
                 {
-                    arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
+                    arma::vec theta_next = SysEq::func_gt(model.fsys, model.fgain, model.dlag, theta_cur, ytmp.at(t + j - 1), model.seas.period, model.seas.in_state);
                     double ft_next = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + j, theta_next, ytmp);
                     double lambda = LinkFunc::ft2mu(ft_next, model.flink);
                     ycast.at(t, i, j - 1) = lambda;
@@ -1649,7 +1464,7 @@ public:
 
             for (unsigned int i = 0; i < nsample; i++)
             {
-                arma::vec theta_next = func_gt(model.ftrans, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t), model.seas.period, model.seas.in_state);
+                arma::vec theta_next = SysEq::func_gt(model.fsys, model.fgain, model.dlag, theta.slice(t).col(i), y.at(t), model.seas.period, model.seas.in_state);
                 double ft_next = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_next, y);
                 double lambda = LinkFunc::ft2mu(ft_next, model.flink);
                 ycast.at(t + 1, i) = lambda;
