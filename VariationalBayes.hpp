@@ -99,7 +99,7 @@ namespace VB
             W_stored.set_size(nsample);
             W_stored.zeros();
             W_prior.init("invgamma", 1., 1.);
-            W_prior.infer = true;
+            W_prior.infer = false;
             if (opts.containsElementNamed("W"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["W"]);
@@ -114,6 +114,7 @@ namespace VB
             seas_stored.set_size(model.seas.period, nsample);
             seas_stored.zeros();
             seas_prior.init("gaussian", 1., 10.);
+            seas_prior.infer = false;
             if (opts.containsElementNamed("seas"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["seas"]);
@@ -127,6 +128,7 @@ namespace VB
 
             rho_stored = W_stored;
             rho_prior.init("invgamma", 1., 1.);
+            rho_prior.infer = false;
             if (opts.containsElementNamed("rho"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
@@ -140,6 +142,7 @@ namespace VB
 
             par1_stored.set_size(nsample);
             par1_prior.init("gaussian", 0., 1.);
+            par1_prior.infer = false;
             if (opts.containsElementNamed("par1"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
@@ -153,6 +156,7 @@ namespace VB
 
             par2_stored.set_size(nsample);
             par2_prior.init("invgamma", 1., 1.);
+            par2_prior.infer = false;
             if (opts.containsElementNamed("par2"))
             {
                 Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
@@ -175,7 +179,7 @@ namespace VB
         static Rcpp::List default_settings()
         {
             Rcpp::List W_opts;
-            W_opts["infer"] = true;
+            W_opts["infer"] = false;
             W_opts["prior_name"] = "invgamma";
             W_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
 
@@ -896,7 +900,7 @@ namespace VB
                 hpsi = GainFunc::psi2hpsi(psi, model.fgain);
                 if (infer_dlag)
                 {
-                    dllk_dpar = Model::dloglik_dpar(y, hpsi, model);
+                    dllk_dpar = Model::dloglik_dlag(y, hpsi, model);
                 }
             }
 

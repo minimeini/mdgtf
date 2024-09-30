@@ -49,7 +49,6 @@ static arma::vec qforecast0(
         double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
-
         double Vt = ApproxDisturbance::func_Vt_approx(
             lambda, model.dobs, model.flink); // (eq 3.11)
         
@@ -114,7 +113,7 @@ static arma::vec qforecast(
             W_inv = W_chol_inv * W_chol_inv.t();
             ldet_W = arma::log_det_sympd(model.derr.var);
         }
-        else
+        else if (model.derr.par1 > EPS)
         {
             W_inv.at(0, 0) = 1. / model.derr.par1;
             ldet_W = std::log(std::abs(model.derr.par1) + EPS);
@@ -184,7 +183,6 @@ static arma::vec qforecast(
         double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, mod.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
-
         double Vt = ApproxDisturbance::func_Vt_approx(lambda, mod.dobs, mod.flink); // (eq 3.11)
 
         if (!mod.derr.full_rank)
@@ -413,8 +411,9 @@ static void backward_kernel(
         nstate -= model.seas.period;
     }
     std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-    
-    if (trans_list[model.ftrans] == TransFunc::sliding && !model.derr.full_rank)
+    std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+
+    if (sys_list[model.fsys] == SysEq::Evolution::shift && !model.derr.full_rank)
     {
         for (unsigned int i = 0; i < nstate - 1; i++)
         {
@@ -440,9 +439,21 @@ static void backward_kernel(
 
         Uinv.set_size(model.nP, model.nP);
         Uinv.zeros();
-        Uinv.at(nstate - 1, nstate - 1) = 1. / model.derr.par1;
-        ldetU = std::log(model.derr.par1);
+        ldetU = 0.;
+        if (model.derr.par1 > EPS)
+        {
+            Uinv.at(nstate - 1, nstate - 1) = 1. / model.derr.par1;
+            ldetU = std::log(model.derr.par1);
+        }
+        
         r = vt - K * vt_next;
+    }
+    else if (sys_list[model.fsys] == SysEq::Evolution::identity)
+    {
+        r = arma::zeros<arma::vec>(model.nP);
+        K = arma::eye<arma::mat>(model.nP, model.nP);
+        Uinv = arma::zeros<arma::mat>(model.nP, model.nP);
+        ldetU = 0.;
     }
     else if (model.derr.full_rank)
     {

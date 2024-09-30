@@ -367,7 +367,7 @@ namespace SMC
                 {
                     Wt_chol = arma::chol(model.derr.var);
                 }
-                else
+                else if (model.derr.par1 > EPS)
                 {
                     Wt_chol.at(0, 0) = std::sqrt(model.derr.par1);
                 }
@@ -385,7 +385,7 @@ namespace SMC
                         Wt_chol = arma::chol(Wt.slice(t + 1));
                         model.derr.var = Wt.slice(t + 1);
                     }
-                    else
+                    else if (model.derr.par1 > EPS)
                     {
                         Wt_chol.at(0, 0) = std::sqrt(Wt.at(0, 0, t + 1));
                         model.derr.par1 = Wt.at(0, 0, t + 1);
@@ -514,7 +514,7 @@ namespace SMC
                 {
                     Wt_chol = arma::chol(model.derr.var);
                 }
-                else
+                else if (model.derr.par1 > EPS)
                 {
                     Wt_chol.at(0, 0) = std::sqrt(model.derr.par1);
                 }
@@ -534,13 +534,14 @@ namespace SMC
                         Wt_chol = arma::chol(Wt.slice(t + 1));
                         model.derr.var = Wt.slice(t + 1);
                     }
-                    else
+                    else if (model.derr.par1 > EPS)
                     {
                         Wt_chol.at(0, 0) = std::sqrt(Wt.at(0, 0, t + 1));
                         model.derr.par1 = Wt.at(0, 0, t + 1);
                         model.derr.var.at(0, 0) = Wt.at(0, 0, t + 1);
                     }
                 }
+
 
                 arma::vec logq;
                 if (model.derr.full_rank)
@@ -608,6 +609,7 @@ namespace SMC
                 for (unsigned int i = 0; i < N; i++)
                 {
                     arma::vec gtheta = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+
                     arma::vec eps(model.nP, arma::fill::zeros);
                     arma::vec theta_new;
                     double logp = 0.;
@@ -626,7 +628,7 @@ namespace SMC
                         eps = Wt_chol.t() * arma::randn(Theta_new.n_rows);
                         theta_new = gtheta + eps;
 
-                        if (!use_discount)
+                        if (!use_discount && (Wt_chol.at(0, 0) > EPS))
                         {
                             // not full rank and not use discount
                             logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
@@ -641,6 +643,7 @@ namespace SMC
                     logp += ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     weights.at(i) = logp - logq.at(i);
                 }
+
 
                 double wmax = weights.max();
                 weights.for_each([&wmax](arma::vec::elem_type &val)
@@ -762,7 +765,7 @@ namespace SMC
                 {
                     Wt_chol = arma::chol(model.derr.var);
                 }
-                else
+                else if (model.derr.par1 > EPS)
                 {
                     Wt_chol.at(0, 0) = std::sqrt(model.derr.par1);
                 }
@@ -945,9 +948,13 @@ namespace SMC
                     {
                         Wsqrt.fill(std::sqrt(Wt.at(0, 0, t)));
                     }
-                    else
+                    else if (model.derr.par1 > EPS)
                     {
                         Wsqrt.fill(std::sqrt(model.derr.par1));
+                    }
+                    else
+                    {
+                        Wsqrt.fill(EPS);
                     }
                     smooth_idx = get_smooth_index(psi_smooth_now, psi_filter_prev, Wsqrt); // M x 1
                 }
@@ -975,6 +982,8 @@ namespace SMC
 
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+
             if (use_discount)
             {
                 LBA::LinearBayes lba(use_discount, discount_factor);
@@ -984,14 +993,22 @@ namespace SMC
 
 
             Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-            Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
-            if (model.seas.in_state && model.seas.period > 0)
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
             {
+                Theta.slice(0) = arma::randu<arma::mat>(model.nP, N);
+            }
+            else if (model.seas.in_state && model.seas.period > 0)
+            {
+                Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
                 for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
                 {
                     Theta.slice(0).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
                     Theta.slice(1).row(i) = arma::randu<arma::rowvec>(N, arma::distr_param(model.seas.lobnd, model.seas.hibnd));
                 }
+            }
+            else
+            {
+                Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
             }
 
             arma::mat weights_forward(y.n_elem, N, arma::fill::zeros);
@@ -1141,12 +1158,13 @@ namespace SMC
                     mu_marginal.col(t), mu_marginal.col(t + 1), Prec_marginal.slice(t), y);
                 // logq(y[t] | theta[t+1])
 
+
                 arma::vec tau = logq + weights;
                 double tmax = tau.max();
                 tau.for_each([&tmax](arma::vec::elem_type &val)
                              { val = std::exp(val - tmax); });
-
                 eff_backward.at(t + 1) = effective_sample_size(tau);
+
                 if (t < y.n_elem - 2)
                 {
                     arma::uvec resample_idx = get_resample_index(tau);
@@ -1189,15 +1207,18 @@ namespace SMC
                         arma::vec zt = prec_chol_inv.slice(i).t() * loc.col(i) + eps; // shifted
                         theta_cur = prec_chol_inv.slice(i) * zt;
                         logq.at(i) += MVNorm::dmvnorm0(zt, loc.col(i), prec_chol_inv.slice(i), true);
-
                         logp += MVNorm::dmvnorm2(theta_cur, ut.col(i), Uprec.slice(i), true);
                     }
                     else
                     {
-                        double eps = R::rnorm(0., std::sqrt(model.derr.par1));
-                        theta_cur = SysEq::func_backward_gt(model.ftrans, model.fgain, model.dlag, Theta_next.col(i), y.at(t), eps, model.seas.period, model.seas.in_state);
+                        double eps = 0.;
+                        if (model.derr.par1 > EPS)
+                        {
+                            eps = R::rnorm(0., std::sqrt(model.derr.par1));
+                        }
+                        theta_cur = SysEq::func_backward_gt(model.fsys, model.fgain, model.dlag, Theta_next.col(i), y.at(t), eps, model.seas.period, model.seas.in_state);
 
-                        if (!use_discount)
+                        if ((!use_discount) && (model.derr.par1 > EPS))
                         {
                             logq.at(i) += R::dnorm4(eps, 0, std::sqrt(model.derr.par1), true);
                             logp += R::dnorm4(eps, 0., std::sqrt(model.derr.par1), true);
@@ -1208,13 +1229,12 @@ namespace SMC
 
                     double ft_cur = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta_cur, y);
                     double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name);
-
                     logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density
+
                     // logp.at(i) -= log_marg.at(i);
                     logp -= log_marg.at(i); // p(theta[t + 1])
                     log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu, Prec, true);
                     logp += log_marg.at(i); // p(theta[t])
-
                     weights.at(i) = logp - logq.at(i); // + logw_next;
                 } // loop over i, index of particles
 
@@ -1386,6 +1406,8 @@ namespace SMC
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+
             if (trans_list[model.ftrans] == TransFunc::iterative && !model.derr.full_rank && smoothing)
             {
                 model.ftrans = "sliding";
@@ -1405,7 +1427,15 @@ namespace SMC
 
             // forward filter
             Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-            Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            {
+                Theta.slice(0) = arma::randu<arma::mat>(model.nP, N);
+            }
+            else
+            {
+                Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
+            }
+            
             if (model.seas.in_state && model.seas.period > 0)
             {
                 for (unsigned int i = model.nP - model.seas.period; i < model.nP; i++)
@@ -1487,7 +1517,7 @@ namespace SMC
                 bw_forward.fill(prior_W.par2);
 
                 W_filter.set_size(N);
-                W_filter.ones();
+                W_filter.fill(model.derr.par1);
 
                 if (prior_W.infer)
                 {
@@ -1686,7 +1716,16 @@ namespace SMC
             }
             arma::uvec indices(indices_c);
 
-            Theta = arma::randn<arma::cube>(model.nP, N, y.n_elem);
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            {
+                Theta = arma::randu<arma::cube>(model.nP, N, y.n_elem);
+            }
+            else
+            {
+                Theta = arma::randn<arma::cube>(model.nP, N, y.n_elem);
+            }
+
             weights_forward.set_size(y.n_elem, N);
             weights_forward.zeros();
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
@@ -1830,8 +1869,8 @@ namespace SMC
 
                         if (lag_update)
                         {
-                            model.dlag.par1 = param_filter.at(model.seas.period + 1, i);           // mu
-                            model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i)); // sig2
+                            model.dlag.par1 = param_filter.at(model.seas.period + 1, i);
+                            model.dlag.par2 = std::exp(param_filter.at(model.seas.period + 2, i));
                         }
 
                         if (prior_rho.infer)
@@ -1851,9 +1890,13 @@ namespace SMC
                     else
                     {
                         theta_new = loc.col(i);
-                        double eps = R::rnorm(0., std::sqrt(W_filter.at(i)));
+                        double eps = 0.;
+                        if (W_filter.at(i) > EPS)
+                        {
+                            eps = R::rnorm(0., std::sqrt(W_filter.at(i)));
+                            logq.at(i) += R::dnorm4(eps, 0., std::sqrt(W_filter.at(i)), true);
+                        }
                         theta_new.at(0) += eps;
-                        logq.at(i) += R::dnorm4(eps, 0., std::sqrt(W_filter.at(i)), true);
                     }
 
                     Theta.slice(t + 1).col(i) = theta_new;
@@ -1886,7 +1929,7 @@ namespace SMC
                             logq.at(i) += R::dgamma(1. / wtmp, aw_forward.at(i), 1. / bw_forward.at(i), true);
                         }
                     } // Propagate W
-                    W_filter.at(i) = wtmp;
+                    W_filter.at(i) = std::max(wtmp, EPS * 0.1);
 
                     if (prior_W.infer)
                     {
@@ -2026,7 +2069,6 @@ namespace SMC
         void backward_filter(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             const unsigned int nT = y.n_elem - 1;
-            const bool full_rank = false;
             arma::vec eff_backward(y.n_elem, arma::fill::zeros);
             weights.ones();
             // forward_filter(model, y, VERBOSE);
@@ -2137,7 +2179,7 @@ namespace SMC
                         model.dlag.par2 = std::exp(param_backward.at(model.seas.period + 2, i));
                     }
                     arma::vec theta_cur;
-                    if (full_rank)
+                    if (model.derr.full_rank)
                     {
                         arma::vec eps = arma::randn(Theta_cur.n_rows);
                         arma::vec zt = Sigma_chol.slice(i).t() * mu.col(i) + eps; // shifted
@@ -2147,9 +2189,14 @@ namespace SMC
                     else
                     {
                         theta_cur = mu.col(i);
-                        double eps = R::rnorm(0., std::sqrt(W_backward.at(i)));
+                        double eps = 0.;
+                        if (W_backward.at(i) > EPS)
+                        {
+                            eps = R::rnorm(0., std::sqrt(W_backward.at(i)));
+                            logq.at(i) += R::dnorm4(eps, 0, std::sqrt(W_backward.at(i)), true);
+                        }
+
                         theta_cur.at(model.nP - 1) += eps;
-                        logq.at(i) += R::dnorm4(eps, 0, std::sqrt(W_backward.at(i)), true);
                     }
 
 

@@ -218,7 +218,7 @@ public:
      * The backward propagate probably is not gonna work for iterative transfer function.
      */
     static arma::vec func_backward_gt(
-        const std::string &ftrans,
+        const std::string &fsys,
         const std::string &fgain,
         const LagDist &dlag,
         const arma::vec &theta, // nP x 1, theta[t]
@@ -228,7 +228,8 @@ public:
         const bool &season_in_state = false
     )
     {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+
         const unsigned int nP = theta.n_elem;
         unsigned int nstate = nP;
         if (season_in_state)
@@ -238,7 +239,7 @@ public:
 
         arma::vec theta_prev(nP, arma::fill::zeros); // nP x 1
 
-        if (trans_list[ftrans] == TransFunc::Transfer::iterative)
+        if (sys_list[fsys] == SysEq::Evolution::nbinom)
         {
             /*
             From theta[t] to theta[t-1]
@@ -283,11 +284,15 @@ public:
 
             theta_prev.at(nP - 1) = ft_old;
         }
-        else
+        else if (sys_list[fsys] == SysEq::Evolution::shift)
         {
             // theta[t] = K[t] * theta[t + 1] + w[t]
             theta_prev.subvec(0, nstate - 2) = theta.subvec(1, nstate - 1);
             theta_prev.at(nstate - 1) = theta.at(nstate - 1) + eps;
+        }
+        else
+        {
+            theta_prev = theta;
         }
 
         if (season_in_state)
