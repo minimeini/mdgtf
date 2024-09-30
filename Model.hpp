@@ -1037,79 +1037,8 @@ public:
         return grad_out;
     }
 
-    /**
-     * @brief This one is for HVA.
-     *
-     * @param y
-     * @param hpsi
-     * @param model
-     * @return arma::vec
-     *
-     * @note  Parameter must be first mapped to real line. For iterative transfer function, we must use its EXACT sliding form.
-     */
-    static arma::vec dloglik_dlag(
-        const arma::vec &y, // (ntime + 1) x 1
-        const arma::vec &hpsi, // (ntime + 1) x 1
-        const Model &model)
-    {
-        std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
-        LagDist dlag = model.dlag;
-        dlag.nL = (trans_list[model.ftrans] == TransFunc::Transfer::iterative) ? y.n_elem - 1 : dlag.nL;
-        dlag.Fphi = LagDist::get_Fphi(dlag);
-        arma::mat dFphi_grad = LagDist::get_Fphi_grad(dlag.nL, dlag.name, dlag.par1, dlag.par2);
-
-        arma::mat grad(y.n_elem, 2, arma::fill::zeros);
-        for (unsigned int t = 1; t < y.n_elem; t++)
-        {
-            double eta = TransFunc::transfer_sliding(t, dlag.nL, y, dlag.Fphi, hpsi);
-            if (model.seas.period > 0)
-            {
-                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
-            }
-            double dll_deta = dloglik_deta(eta, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
-
-            // For iterative transfer function, we must use its EXACT sliding form.
-            double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, y, dFphi_grad.col(0), hpsi);
-            double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, y, dFphi_grad.col(1), hpsi);
-
-            grad.at(t, 0) = dll_deta * deta_dpar1;
-            grad.at(t, 1) = dll_deta * deta_dpar2;
-        }
-
-        #ifdef DGTF_DO_BOUND_CHECK
-            bound_check<arma::mat>(grad, "Model::dloglik_dlag: grad");
-        #endif
-        arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
-        return grad_out;
-    }
-
 
     static double dlogp_dpar2_obs(
-        const Model &model, 
-        const arma::vec &y, 
-        const arma::vec &hpsi, 
-        const bool &jacobian = true)
-    {
-        double out = 0.;
-        arma::vec ft(y.n_elem, arma::fill::zeros);
-        for (unsigned int t = 1; t < y.n_elem; t++)
-        {
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, model.dlag, model.ftrans);
-            // double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-            double eta = ft.at(t);
-            if (model.seas.period > 0)
-            {
-                eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
-            }
-            double lambda = LinkFunc::ft2mu(eta, model.flink);
-            out += nbinomm::dlogp_dpar2(y.at(t), lambda, model.dobs.par2, jacobian);
-        }
-
-        return out;
-    }
-
-
-    static double dlogp_dpar2_obs0(
         const Model &model, 
         const arma::vec &y, 
         const arma::vec &lambda, // (nT + 1) x 1

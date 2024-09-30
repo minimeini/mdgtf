@@ -906,7 +906,7 @@ namespace VB
                 }
                 case AVAIL::Param::rho:
                 {
-                    deriv.at(idx) = Model::dlogp_dpar2_obs0(model, y, lambda, true);
+                    deriv.at(idx) = Model::dlogp_dpar2_obs(model, y, lambda, true);
                     deriv.at(idx) += Prior::dlogprior_dpar(model.dobs.par2, rho_prior, true);
                     idx += 1;
                     break;
