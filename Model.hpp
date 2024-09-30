@@ -997,10 +997,10 @@ public:
      * 
      * @note For iterative transfer function, we must use its EXACT sliding form.
      */
-    static arma::vec dloglik_dpar(
+    static arma::vec dloglik_dlag(
         arma::vec &Fphi,
-        const arma::vec &y, 
-        const arma::vec &hpsi,
+        const arma::vec &y, // (ntime + 1) x 1
+        const arma::vec &hpsi, // (ntime + 1) x 1
         const unsigned int &nlag,
         const std::string &lag_dist,
         const double &lag_par1,
@@ -1031,7 +1031,7 @@ public:
         }
 
         #ifdef DGTF_DO_BOUND_CHECK
-            bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+            bound_check<arma::mat>(grad, "Model::dloglik_dlag: grad");
         #endif
         arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
         return grad_out;
@@ -1047,9 +1047,9 @@ public:
      *
      * @note  Parameter must be first mapped to real line. For iterative transfer function, we must use its EXACT sliding form.
      */
-    static arma::vec dloglik_dpar(
-        const arma::vec &y,
-        const arma::vec &hpsi,
+    static arma::vec dloglik_dlag(
+        const arma::vec &y, // (ntime + 1) x 1
+        const arma::vec &hpsi, // (ntime + 1) x 1
         const Model &model)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -1077,11 +1077,12 @@ public:
         }
 
         #ifdef DGTF_DO_BOUND_CHECK
-            bound_check<arma::mat>(grad, "Model::dloglik_dpar: grad");
+            bound_check<arma::mat>(grad, "Model::dloglik_dlag: grad");
         #endif
         arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
         return grad_out;
     }
+
 
     static double dlogp_dpar2_obs(
         const Model &model, 
@@ -1102,6 +1103,24 @@ public:
             }
             double lambda = LinkFunc::ft2mu(eta, model.flink);
             out += nbinomm::dlogp_dpar2(y.at(t), lambda, model.dobs.par2, jacobian);
+        }
+
+        return out;
+    }
+
+
+    static double dlogp_dpar2_obs0(
+        const Model &model, 
+        const arma::vec &y, 
+        const arma::vec &lambda, // (nT + 1) x 1
+        const bool &jacobian = true)
+    {
+        LagDist dlag = model.dlag;
+        dlag.Fphi = LagDist::get_Fphi(dlag.nL, dlag.name, dlag.par1, dlag.par2);
+        double out = 0.;
+        for (unsigned int t = 1; t < y.n_elem; t++)
+        {
+            out += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), model.dobs.par2, jacobian);
         }
 
         return out;

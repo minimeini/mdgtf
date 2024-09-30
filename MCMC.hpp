@@ -501,7 +501,7 @@ namespace MCMC
             unsigned int nlag = model.dlag.nL;
             arma::vec Fphi_new = model.dlag.Fphi;
 
-            arma::vec grad_U = Model::dloglik_dpar(
+            arma::vec grad_U = Model::dloglik_dlag(
                 Fphi_new, y, hpsi, nlag,
                 lag_dist, par1_old, par2_old,
                 model.dobs, model.seas, model.flink);
@@ -523,7 +523,7 @@ namespace MCMC
                 par2_new = Prior::val2real(q.at(1), par2_prior.name, true);
 
                 nlag = LagDist::get_nlag(lag_dist, par1_new, par2_new, 0.99, max_lag);
-                grad_U = Model::dloglik_dpar(
+                grad_U = Model::dloglik_dlag(
                     Fphi_new, y, hpsi, nlag,
                     lag_dist, par1_new, par2_new,
                     model.dobs, model.seas, model.flink);

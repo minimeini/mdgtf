@@ -224,7 +224,6 @@ public:
         if (trans_list[ftrans] == Transfer::sliding)
         {
             int nelem = std::min(t, (int)dlag.nL); // min(t,nL)
-
             arma::vec yold(dlag.nL, arma::fill::zeros);
             if (nelem > 1)
             {

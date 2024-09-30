@@ -31,11 +31,7 @@ namespace VB
 
         bool update_static = true;
         unsigned int m = 1; // number of unknown static parameters
-        std::string state_sampler = "smc";
         std::vector<std::string> param_selected = {"W"};
-
-        arma::vec psi;        // (nT + 1) x 1
-        arma::mat psi_stored; // (nT + 1) x nsample
 
         Prior W_prior, seas_prior, rho_prior, par1_prior, par2_prior;
 
@@ -44,6 +40,7 @@ namespace VB
         arma::vec rho_stored;  // nsample x 1
         arma::vec par1_stored; // nsample x 1
         arma::vec par2_stored; // nsample x 1
+        arma::mat psi_stored; // (nT + 1) x nsample
 
         VariationalBayes(const Model &model, const Rcpp::List &vb_opts)
         {
@@ -75,11 +72,6 @@ namespace VB
                 N = Rcpp::as<unsigned int>(opts["num_particle"]);
             }
 
-            state_sampler = "smc";
-            if (opts.containsElementNamed("state_sampler"))
-            {
-                state_sampler = Rcpp::as<std::string>(opts["state_sampler"]);
-            }
 
             use_discount = false;
             if (opts.containsElementNamed("use_discount"))
@@ -207,7 +199,6 @@ namespace VB
             opts["nsample"] = 1000;
             opts["nthin"] = 1;
             opts["nburnin"] = 1000;
-            opts["state_sampler"] = "smc";
             opts["num_particle"] = 100;
             opts["use_discount"] = false;
             opts["discount_factor"] = 0.95;
@@ -815,24 +806,16 @@ namespace VB
         */
         static arma::vec dloglike_dlogseas( // Checked. OK.
             const arma::vec &y,           // (nT+1) x 1
-            const arma::vec &ft,          // (n+1) x 1, (f[0],f[1],...,f[nT])
+            const arma::vec &lambda,          // (n+1) x 1, (f[0],f[1],...,f[nT])
             const ObsDist &dobs,
             const arma::vec &seas,
-            const arma::mat &Xseas,
-            const std::string &link_func)
+            const arma::mat &Xseas)
         { // 0 - negative binomial; 1 - poisson
 
             arma::vec deriv(seas.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = ft.at(t);
-                if (seas.n_elem > 0)
-                {
-                    eta += arma::as_scalar(Xseas.col(t).t() * seas);
-                }
-                double lambda = LinkFunc::ft2mu(eta, link_func);
-
-                double dy_dlambda = ObsDist::dloglike_dlambda(y.at(t), lambda, dobs);
+                double dy_dlambda = ObsDist::dloglike_dlambda(y.at(t), lambda.at(t), dobs);
                 arma::vec dlambda_dlogseas = Xseas.col(t) % seas;
                 deriv = deriv + dy_dlambda * dlambda_dlogseas;
             }
@@ -854,6 +837,7 @@ namespace VB
             return logp;
         }
 
+
         /**
          * @brief Derivative of the logarithm of joint probability with respect to parameters mapped to real-line (but before Yeo-Johnson transformation).
          *
@@ -871,8 +855,9 @@ namespace VB
          */
         static arma::vec dlogJoint_deta( // Checked. OK.
             const arma::vec &y,          // (nT + 1) x 1
-            const arma::vec &psi,        // (nT + 1) x 1
-            const arma::vec &ft,         // (nT + 1) x 1
+            const arma::mat &Theta,        // nP x (nT + 1)
+            const arma::vec &lambda,         // (nT + 1) x 1
+            const arma::vec &dllk_dpar, // 2 x 1
             const arma::vec &eta,        // m x 1
             const std::vector<std::string> &param_selected,
             const Prior &W_prior,
@@ -893,17 +878,6 @@ namespace VB
             }
             arma::vec deriv(nelem, arma::fill::zeros);
 
-            bool infer_dlag = lag_par1_prior.infer || lag_par2_prior.infer;
-            arma::vec dllk_dpar, hpsi;
-            if (infer_dlag || rho_prior.infer)
-            {
-                hpsi = GainFunc::psi2hpsi(psi, model.fgain);
-                if (infer_dlag)
-                {
-                    dllk_dpar = Model::dloglik_dlag(y, hpsi, model);
-                }
-            }
-
             unsigned int idx = 0;
             for (unsigned int i = 0; i < param_selected.size(); i++)
             {
@@ -913,6 +887,7 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
+                    arma::vec psi = arma::vectorise(Theta.row(0));
                     deriv.at(idx) = dlogJoint_dWtilde(psi, 1., val, W_prior);
                     idx += 1;
                     break;
@@ -922,8 +897,7 @@ namespace VB
                     arma::vec seas = arma::abs(eta.subvec(idx, idx + model.seas.period - 1));
                     arma::vec logseas = arma::log(seas + EPS);
 
-                    arma::vec dloglik = dloglike_dlogseas(
-                        y, ft, model.dobs, seas, model.seas.X, model.flink);
+                    arma::vec dloglik = dloglike_dlogseas(y, lambda, model.dobs, seas, model.seas.X);
                     arma::vec dlogprior = logprior_logseas(logseas, seas_prior.par2);
 
                     deriv.subvec(idx, idx + model.seas.period - 1) = dloglik + dlogprior;
@@ -932,7 +906,7 @@ namespace VB
                 }
                 case AVAIL::Param::rho:
                 {
-                    deriv.at(idx) = Model::dlogp_dpar2_obs(model, y, hpsi, true);
+                    deriv.at(idx) = Model::dlogp_dpar2_obs0(model, y, lambda, true);
                     deriv.at(idx) += Prior::dlogprior_dpar(model.dobs.par2, rho_prior, true);
                     idx += 1;
                     break;
@@ -1099,74 +1073,71 @@ namespace VB
         {
             std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
             const unsigned int nT = y.n_elem - 1;
-
-            psi.set_size(y.n_elem);
-            psi.zeros();
-            psi_stored.set_size(psi.n_elem, nsample);
+            psi_stored.set_size(y.n_elem, nsample);
             psi_stored.zeros();
-
-            ApproxDisturbance approx_dlm(nT, model.fgain);
-            Prior w0_prior("gaussian", 0., model.derr.par1, true);
-            if (algo_list[state_sampler] == AVAIL::Algo::MCMC)
-            {
-                approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
-            }
 
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                switch (algo_list[state_sampler])
-                {
-                case AVAIL::Algo::SMC:
-                {
-                    // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
-                    arma::cube Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-                    Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
-                    Theta.slice(0).row(0).fill(psi.at(0)); // 1 x N
+                // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
+                arma::cube Theta_tmp = arma::randu<arma::cube>(model.nP, N, y.n_elem);
+                double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
+                    Theta_tmp, model, y, N, true, false, use_discount, discount_factor);
+                arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
 
-                    double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                        Theta, model, y, N, true, false, use_discount, discount_factor);
-
-                    arma::mat psi_all = Theta.row_as_mat(0); // (nT + B) x N
-                    psi = arma::mean(psi_all.head_rows(y.n_elem), 1);
-                    break;
+                arma::mat dFphi_grad;
+                arma::vec dloglik_dlag(2, arma::fill::zeros);
+                if (par1_prior.infer || par2_prior.infer)
+                {
+                    dFphi_grad = LagDist::get_Fphi_grad(
+                        model.dlag.nL, model.dlag.name, 
+                        model.dlag.par1, model.dlag.par2);
                 }
-                case AVAIL::Algo::MCMC:
-                {
-                    arma::vec wt(psi.n_elem, arma::fill::zeros);
-                    arma::vec wt_accept = wt;
-                    wt.tail(psi.n_elem - 1) = arma::diff(psi);
 
-                    for (unsigned int i = 0; i < N; i++)
+                arma::vec lambda(y.n_elem, arma::fill::zeros);
+                for (unsigned int t = 1; t < lambda.n_elem; t++)
+                {
+                    unsigned int nelem = std::min(t, model.dlag.nL); // min(t,nL)
+                    arma::vec yold(model.dlag.nL, arma::fill::zeros);
+                    if (nelem > 1)
                     {
-                        MCMC::Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, 0.1);
+                        yold.tail(nelem) = y.subvec(t - nelem, t - 1);
                     }
-                    psi = arma::cumsum(wt);
-                    break;
-                }
-                default:
-                {
-                    throw std::invalid_argument("Unknown state sampler.");
-                    break;
-                }
-                }
+                    else if (t > 0) // nelem = 1 at t = 1
+                    {
+                        yold.at(model.dlag.nL - 1) = y.at(t - 1);
+                    }
+                    yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
-                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
-                arma::vec ft = psi;
-                ft.at(0) = 0.;
-                for (unsigned int t = 1; t < ft.n_elem; t++)
-                {
-                    ft.at(t) = TransFunc::func_ft(
-                        t, y, ft, hpsi, model.dlag, model.ftrans); // Checked. OK.
+                    arma::vec theta = arma::vectorise(Theta.submat(0, t, model.dlag.nL - 1, t));
+                    arma::vec htheta = GainFunc::psi2hpsi<arma::vec>(theta, model.fgain);
+
+                    double ft = arma::accu(model.dlag.Fphi % yold % htheta);
+                    if ((model.seas.period > 0) && (!model.seas.in_state))
+                    {
+                        ft += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    }
+                    lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
+
+                    if (par1_prior.infer || par2_prior.infer)
+                    {
+                        double dll_deta = Model::dloglik_deta(
+                            ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
+                        double deta_dpar1 = arma::accu(dFphi_grad.col(0) % yold % htheta);
+                        double deta_dpar2 = arma::accu(dFphi_grad.col(1) % yold % htheta);
+
+                        dloglik_dlag.at(0) += dll_deta * deta_dpar1;
+                        dloglik_dlag.at(1) += dll_deta * deta_dpar2;
+                    }
                 }
 
 
                 if (update_static)
                 {
                     arma::vec dlogJoint = dlogJoint_deta(
-                        y, psi, ft, eta, param_selected,
+                        y, Theta, lambda, dloglik_dlag, eta, param_selected,
                         W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model); // Checked. OK.
 
 
@@ -1225,11 +1196,6 @@ namespace VB
                         W_prior.name, par1_prior.name, model.dlag.name, 
                         model.seas.period, model.seas.in_state);
                     update_params(model, param_selected, eta);
-
-                    if ((par1_prior.infer || par2_prior.infer) && (algo_list[state_sampler] == AVAIL::Algo::MCMC))
-                    {
-                        approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
-                    }
                 } // end update_static
 
 
@@ -1245,7 +1211,7 @@ namespace VB
                         idx_run = nsample - 1;
                     }
 
-                    psi_stored.col(idx_run) = psi;
+                    psi_stored.col(idx_run) = arma::vectorise(Theta.row(0));
 
                     if (W_prior.infer)
                     {

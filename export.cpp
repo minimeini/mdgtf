@@ -812,7 +812,9 @@ arma::mat dgtf_tuning(
 
                 VB::Hybrid hvb(model, algo);
                 hvb.infer(model, y, false);
-                Model::forecast_error(err_forecast, cov_forecast, width_forecast, hvb.psi_stored, y, model, loss, false);
+                Model::forecast_error(
+                    err_forecast, cov_forecast, width_forecast, 
+                    hvb.psi_stored, y, model, loss, false);
                 break;
             }
             default:
