@@ -167,19 +167,12 @@ public:
             }
         }
 
-        if (sys_list[fsys] == SysEq::Evolution::identity)
+        fgain = "softplus";
+        if (model.containsElementNamed("gain_func"))
         {
-            fgain = "identity";
+            fgain = tolower(Rcpp::as<std::string>(model["gain_func"]));
         }
-        else
-        {
-            fgain = "softplus";
-            if (model.containsElementNamed("gain_func"))
-            {
-                fgain = tolower(Rcpp::as<std::string>(model["gain_func"]));
-            }
-        }
-        
+
         derr.name = "gaussian";
         if (model.containsElementNamed("err_dist"))
         {

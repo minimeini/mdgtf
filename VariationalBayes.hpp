@@ -313,6 +313,9 @@ namespace VB
     class Hybrid : public VariationalBayes
     {
     public:
+        arma::cube Theta_stored; // nP x (nT + 1) x nsample
+        std::string fsys;
+
         Hybrid(const Model &model_in, const Rcpp::List &hvb_opts) : VariationalBayes(model_in, hvb_opts)
         {
             Rcpp::List opts = hvb_opts;
@@ -1071,9 +1074,19 @@ namespace VB
             const arma::vec &y,
             const bool &verbose = VERBOSE)
         {
-            std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+            fsys = model.fsys;
             const unsigned int nT = y.n_elem - 1;
-            psi_stored.set_size(y.n_elem, nsample);
+
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            {
+                psi_stored.set_size(model.nP, nsample);
+                Theta_stored = arma::zeros<arma::cube>(model.nP, y.n_elem, nsample);
+            }
+            else
+            {
+                psi_stored.set_size(y.n_elem, nsample);
+            }
             psi_stored.zeros();
 
             for (unsigned int b = 0; b < ntotal; b++)
@@ -1082,7 +1095,7 @@ namespace VB
                 Rcpp::checkUserInterrupt();
 
                 // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
-                arma::cube Theta_tmp = arma::randu<arma::cube>(model.nP, N, y.n_elem);
+                arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
                     Theta_tmp, model, y, N, true, false, use_discount, discount_factor);
                 arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
@@ -1211,8 +1224,16 @@ namespace VB
                         idx_run = nsample - 1;
                     }
 
-                    psi_stored.col(idx_run) = arma::vectorise(Theta.row(0));
-
+                    if (sys_list[model.fsys] == SysEq::Evolution::identity)
+                    {
+                        psi_stored.col(idx_run) = Theta.col(y.n_elem - 1);
+                        Theta_stored.slice(idx_run) = Theta;
+                    }
+                    else
+                    {
+                        psi_stored.col(idx_run) = arma::vectorise(Theta.row(0));
+                    }
+                    
                     if (W_prior.infer)
                     {
                         W_stored.at(idx_run) = model.derr.par1;
@@ -1257,6 +1278,12 @@ namespace VB
             arma::vec qprob = {0.025, 0.5, 0.975};
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1);
             output["psi"] = Rcpp::wrap(psi_quantile);
+
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+            if (sys_list[fsys] == SysEq::Evolution::identity)
+            {
+                output["Theta"] = Rcpp::wrap(Theta_stored);
+            }
 
             if (W_prior.infer)
             {

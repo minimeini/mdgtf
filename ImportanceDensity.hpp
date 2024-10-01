@@ -452,8 +452,17 @@ static void backward_kernel(
     {
         r = arma::zeros<arma::vec>(model.nP);
         K = arma::eye<arma::mat>(model.nP, model.nP);
-        Uinv = arma::zeros<arma::mat>(model.nP, model.nP);
-        ldetU = 0.;
+
+        if (model.derr.par1 > EPS)
+        {
+            Uinv.diag().fill(1. / model.derr.par1);
+            ldetU = std::log(model.derr.par1) * static_cast<double>(model.nP);
+        }
+        else
+        {
+            Uinv = arma::zeros<arma::mat>(model.nP, model.nP);
+            ldetU = 0.;
+        }
     }
     else if (model.derr.full_rank)
     {

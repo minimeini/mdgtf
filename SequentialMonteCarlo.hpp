@@ -346,6 +346,7 @@ namespace SMC
             const bool &use_discount = false,
             const double &discount_factor = 0.95)
         {
+            std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
             const unsigned int nT = y.n_elem - 1;
             const double logN = std::log(static_cast<double>(N));
             arma::vec weights(N, arma::fill::ones);
@@ -373,7 +374,15 @@ namespace SMC
                 }
             }
 
-            Theta.slice(0) = arma::randn<arma::mat>(Theta.n_rows, Theta.n_cols);
+            Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            {
+                Theta.slice(0) = arma::randu<arma::mat>(Theta.n_rows, Theta.n_cols);
+            }
+            else
+            {
+                Theta.slice(0) = arma::randn<arma::mat>(Theta.n_rows, Theta.n_cols);
+            }
 
             for (unsigned int t = 0; t < nT; t++)
             {
@@ -450,7 +459,7 @@ namespace SMC
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
 
-                    if (!use_discount)
+                    if ((!use_discount) && (Wt_chol.at(0, 0) > EPS))
                     {
                         logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
                         logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
@@ -721,11 +730,13 @@ namespace SMC
             {
                 arma::mat psi = Theta_smooth.row_as_mat(0);
                 output["psi_stored"] = Rcpp::wrap(psi);
+                output["Theta_stored"] = Rcpp::wrap(Theta_smooth);
             }
             else
             {
                 arma::mat psi = Theta.row_as_mat(0);
                 output["psi_stored"] = Rcpp::wrap(psi);
+                output["Theta_stored"] = Rcpp::wrap(Theta);
             }
             return output;
         }
@@ -878,11 +889,13 @@ namespace SMC
             {
                 arma::mat psi = Theta_smooth.row_as_mat(0);
                 output["psi_stored"] = Rcpp::wrap(psi);
+                output["Theta_stored"] = Rcpp::wrap(Theta_smooth);
             }
             else
             {
                 arma::mat psi = Theta.row_as_mat(0);
                 output["psi_stored"] = Rcpp::wrap(psi);
+                output["Theta_stored"] = Rcpp::wrap(Theta);
             }
             return output;
         }
@@ -1071,11 +1084,13 @@ namespace SMC
             {
                 arma::mat psi = Theta_smooth.row_as_mat(0);
                 output["psi_stored"] = Rcpp::wrap(psi);
+                output["Theta_stored"] = Rcpp::wrap(Theta_smooth);
             }
             else
             {
                 arma::mat psi = Theta.row_as_mat(0);
                 output["psi_stored"] = Rcpp::wrap(psi);
+                output["Theta_stored"] = Rcpp::wrap(Theta);
             }
             return output;
         }
@@ -1275,15 +1290,18 @@ namespace SMC
 
                 arma::mat Wcur_prec(model.nP, model.nP, arma::fill::zeros);
                 arma::mat Wnext_prec = Wcur_prec;
+                arma::mat Wcur(model.nP, model.nP, arma::fill::zeros);
                 if (use_discount)
                 {
                     if (model.derr.full_rank)
                     {
+                        Wcur = Wt.slice(t);
                         Wcur_prec = arma::inv(Wt.slice(t));
                         Wnext_prec = arma::inv(Wt.slice(t + 1));
                     }
                     else
                     {
+                        Wcur.at(0, 0) = Wt.at(0, 0, t);
                         Wcur_prec.at(0, 0) = 1. / Wt.at(0, 0, t);
                         Wnext_prec.at(0, 0) = 1. / Wt.at(0, 0, t + 1);
                     }
@@ -1292,11 +1310,13 @@ namespace SMC
                 {
                     if (model.derr.full_rank)
                     {
+                        Wcur = model.derr.var;
                         Wcur_prec = arma::inv(model.derr.var);
                         Wnext_prec = Wcur_prec;
                     }
                     else
                     {
+                        Wcur.at(0, 0) = model.derr.par1;
                         Wcur_prec.at(0, 0) = 1. / model.derr.par1;
                         Wnext_prec.at(0, 0) = 1. / model.derr.par1;
                     }
@@ -1326,14 +1346,17 @@ namespace SMC
                     double logp = 0.;
 
 
-                    if (!model.derr.full_rank)
+                    if ((!model.derr.full_rank))
                     {
                         theta_cur = gtheta_cur;
-                        double eps = R::rnorm(0., std::sqrt(1. / Wcur_prec.at(0, 0)));
-                        theta_cur.at(0) += eps;
+                        if (Wcur.at(0, 0) > EPS)
+                        {
+                            double eps = R::rnorm(0., std::sqrt(Wcur.at(0, 0)));
+                            theta_cur.at(0) += eps;
 
-                        logq += R::dnorm4(eps, 0., std::sqrt(1. / Wcur_prec.at(0, 0)), true);
-                        logp += R::dnorm4(theta_cur.at(0), gtheta_cur.at(0), std::sqrt(1. / Wcur_prec.at(0, 0)), true); // p(theta[t] | g(theta[t-1]), W[t])
+                            logq += R::dnorm4(eps, 0., std::sqrt(Wcur.at(0, 0)), true);
+                            logp += R::dnorm4(theta_cur.at(0), gtheta_cur.at(0), std::sqrt(Wcur.at(0, 0)), true); // p(theta[t] | g(theta[t-1]), W[t])
+                        }
                     }
                     else
                     {

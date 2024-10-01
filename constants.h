@@ -15,18 +15,18 @@
 #endif
 
 #ifdef _OPENMP
-    // #if !defined(DGTF_USE_OPENMP)
-    //     #define DGTF_USE_OPENMP
-    // #endif
+    #if !defined(DGTF_USE_OPENMP)
+        #define DGTF_USE_OPENMP
+    #endif
 
     #if !defined(ARMA_USE_OPENMP)
         #define ARMA_USE_OPENMP
     #endif
 #endif
 
-#if !defined(DGTF_DO_BOUND_CHECK)
-    #define DGTF_DO_BOUND_CHECK
-#endif
+// #if !defined(DGTF_DO_BOUND_CHECK)
+//     #define DGTF_DO_BOUND_CHECK
+// #endif
 
 // #if !defined(DGTF_DETAILED_OUTPUT)
 //     #define DGTF_DETAILED_OUTPUT
