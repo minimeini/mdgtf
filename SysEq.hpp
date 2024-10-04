@@ -293,6 +293,8 @@ public:
         else
         {
             theta_prev = theta;
+            theta_prev.for_each([&eps](arma::vec::elem_type &val)
+                                { val += eps; });
         }
 
         if (season_in_state)

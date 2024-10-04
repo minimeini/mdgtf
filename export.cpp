@@ -365,7 +365,14 @@ Rcpp::List dgtf_posterior_predictive(
     model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
 
     arma::mat psi_stored;
-    if (output.containsElementNamed("psi_stored"))
+    arma::cube Theta_stored;
+    bool use_theta = false;
+    if (output.containsElementNamed("Theta"))
+    {
+        Theta_stored = Rcpp::as<arma::cube>(output["Theta"]);
+        use_theta = true;
+    }
+    else if (output.containsElementNamed("psi_stored"))
     {
         psi_stored = Rcpp::as<arma::mat>(output["psi_stored"]);
     }
@@ -382,7 +389,15 @@ Rcpp::List dgtf_posterior_predictive(
         throw std::invalid_argument("No state samples.");
     }
 
-    const unsigned int nsample = psi_stored.n_cols;
+    unsigned int nsample;
+    if (use_theta)
+    {
+        nsample = Theta_stored.n_slices;
+    }
+    else
+    {
+        nsample = psi_stored.n_cols;
+    }
 
     arma::vec W_stored(nsample);
     W_stored.fill(model.derr.par1);
@@ -436,17 +451,25 @@ Rcpp::List dgtf_posterior_predictive(
     arma::cube yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     arma::cube res = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
     Progress p(nsample*ntime, true);
-    #ifdef _OPENMP
+    #ifdef DGTF_USE_OPENMP
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
     #endif
     for (unsigned int i = 0; i < nsample; i++)
     {
-        arma::vec ft(ntime + 1, arma::fill::zeros);
-        arma::vec psi = psi_stored.col(i);
-        arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
-        if (Rt.isNotNull())
+        arma::vec hpsi;
+        arma::mat Theta;
+        if (use_theta)
         {
-            hpsi_res.col(i) = arma::abs(hpsi - hpsi_true);
+            Theta = Theta_stored.slice(i); // ar(nP) x (nT + 1)
+        }
+        else
+        {
+            arma::vec psi = psi_stored.col(i);
+            hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+            if (Rt.isNotNull())
+            {
+                hpsi_res.col(i) = arma::abs(hpsi - hpsi_true);
+            }
         }
 
         Model mod = model;
@@ -456,13 +479,27 @@ Rcpp::List dgtf_posterior_predictive(
         mod.dlag.par2 = par2_stored.at(i);
         mod.seas.val = seas_stored.col(i);
 
+        arma::vec ft(ntime + 1, arma::fill::zeros);
         for (unsigned int t = 1; t <= ntime; t++)
         {
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, mod.dlag, mod.ftrans);
-            double eta = ft.at(t);
-            if (mod.seas.period > 0)
+            double eta;
+            if (use_theta)
             {
-                eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
+                ft.at(t) = TransFunc::func_ft(
+                    model.ftrans, model.fgain, model.dlag,
+                    model.seas, t, Theta.col(t), y);
+
+                eta = ft.at(t);
+            }
+            else
+            {
+                ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, mod.dlag, mod.ftrans);
+
+                eta = ft.at(t);
+                if (mod.seas.period > 0)
+                {
+                    eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
+                }
             }
 
             double lambda = LinkFunc::ft2mu(eta, model.flink);
@@ -495,8 +532,11 @@ Rcpp::List dgtf_posterior_predictive(
     output2["rmse"] = std::sqrt(arma::mean(arma::mean(arma::pow(res2, 2))));
     output2["mae"] = arma::mean(arma::mean(res2));
 
-    output2["rmse_Rt"] = std::sqrt(arma::mean(arma::mean(arma::pow(hpsi_res, 2))));
-    output2["mae_Rt"] = arma::mean(arma::mean(hpsi_res));
+    if (!use_theta && Rt.isNotNull())
+    {
+        output2["rmse_Rt"] = std::sqrt(arma::mean(arma::mean(arma::pow(hpsi_res, 2))));
+        output2["mae_Rt"] = arma::mean(arma::mean(hpsi_res));
+    }
 
     return output2;
 }
