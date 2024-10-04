@@ -459,10 +459,13 @@ namespace SMC
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
                     double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
 
-                    if ((!use_discount) && (Wt_chol.at(0, 0) > EPS))
+                    if ((!use_discount))
                     {
-                        logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
-                        logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
+                        if (!model.derr.full_rank && (Wt_chol.at(0, 0) > EPS))
+                        {
+                            logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
+                            logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
+                        }
                     }
 
                     weights.at(i) = logp - logq.at(i);

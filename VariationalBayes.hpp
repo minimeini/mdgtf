@@ -649,7 +649,7 @@ namespace VB
             const double G,              // evolution transition matrix
             const double W,              // evolution variance conditional on V
             const Dist &W_prior)
-        { // 0 - Gamma(aw=shape,bw=rate); 1 - Half-Cauchy(aw=location=0, bw=scale); 2 - Inverse-Gamma(aw=shape,bw=rate)
+        {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
 
             double aw = W_prior.par1;
@@ -737,6 +737,84 @@ namespace VB
             #endif
             return deriv;
         }
+
+
+        static double dlogJoint_dWtilde(
+            const arma::mat &Theta, // nP x (nT + 1)
+            const double W,              // evolution variance conditional on V
+            const Dist &W_prior,
+            const bool &full_rank = false)
+        {
+            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+            double aw = W_prior.par1;
+            double bw = W_prior.par2;
+            const double n = static_cast<double>(Theta.n_cols) - 1;
+            const double p = full_rank ? static_cast<double>(Theta.n_rows) : 1.;
+            const unsigned int ni = Theta.n_cols - 1;
+
+            double res = 0.;
+            for (unsigned int t = 0; t < ni; t++)
+            {
+                double tmp = 0.;
+                if (full_rank)
+                {
+                    arma::vec err = Theta.col(t + 1) - Theta.col(t);
+                    tmp = arma::as_scalar(err.t() * err);
+                }
+                else
+                {
+                    double err = Theta.at(0, t + 1) - Theta.at(0, t);
+                    tmp = err * err;
+                }
+                res += tmp;
+            }
+            // res = sum((w[t])^2)
+
+            double deriv;
+            if (dist_list[W_prior.name] == AVAIL::Dist::invgamma)
+            {
+                double bnew = bw + 0.5 * res;
+                double log_bnew_W = std::log(std::abs(bnew) + EPS) - std::log(std::abs(W) + EPS);
+                log_bnew_W = std::min(log_bnew_W, UPBND);
+                deriv = -std::exp(log_bnew_W);
+
+                double a_new = aw;
+                a_new += 0.5 * n * p;
+                a_new += 1.;
+                deriv += a_new;
+            }
+            else
+            {
+                double rdw = std::log(std::abs(res) + EPS) - std::log(std::abs(W) + EPS); // sum(w[t]^2) / W
+                rdw = std::min(rdw, UPBND);
+                rdw = std::exp(rdw);
+                #ifdef DGTF_DO_BOUND_CHECK
+                bound_check(rdw, "dlogJoint_dWtilde: rdw");
+                #endif
+
+                if (dist_list[W_prior.name] == AVAIL::Dist::gamma)
+                {
+                    deriv = aw;
+                    deriv -= 0.5 * n;
+                    deriv -= bw * W;
+                    deriv += 0.5 * rdw;
+                }
+                else if (dist_list[W_prior.name] == AVAIL::Dist::halfcauchy)
+                {
+                    deriv = 0.5 * n - 0.5 * rdw + W / (bw * bw + W) - 0.5;
+                }
+                else
+                {
+                    throw std::invalid_argument("dlogJoint_dWtilde: prior is not defined.");
+                }
+            }
+
+            #ifdef DGTF_DO_BOUND_CHECK
+                bound_check(deriv, "dlogJoint_dWtilde: deriv");
+            #endif
+            return deriv;
+        }
+
 
         /**
          * @todo Move this to the corresponding distribution.
@@ -890,8 +968,7 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
-                    arma::vec psi = arma::vectorise(Theta.row(0));
-                    deriv.at(idx) = dlogJoint_dWtilde(psi, 1., val, W_prior);
+                    deriv.at(idx) = dlogJoint_dWtilde(Theta, val, W_prior, model.derr.full_rank);
                     idx += 1;
                     break;
                 }
@@ -1021,6 +1098,11 @@ namespace VB
                 case AVAIL::Param::W: // W is selected
                 {
                     model.derr.par1 = val;
+                    if (model.derr.full_rank)
+                    {
+                        model.derr.var.zeros();
+                        model.derr.var.diag().fill(val);
+                    }
                     idx += 1;
                     break;
                 }

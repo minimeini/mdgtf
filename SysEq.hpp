@@ -44,7 +44,7 @@ public:
     static arma::mat init_Gt(
         const unsigned int &nP, 
         const LagDist &dlag, 
-        const std::string &fsys = "hawkes", 
+        const std::string &fsys = "shift", 
         const unsigned int &seasonal_period = 0, 
         const bool &season_in_state = false)
     {
