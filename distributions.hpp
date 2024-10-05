@@ -675,10 +675,14 @@ public:
         return par1;
     }
 
-
     static double mean(const double &lambda, const double &delta)
     {
         return lambda;
+    }
+
+    static double var(const double &lambda, const double &delta)
+    {
+        return lambda * (1. + lambda / delta);
     }
 
     double mean2conj()

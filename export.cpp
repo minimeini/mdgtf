@@ -357,7 +357,7 @@ Rcpp::List dgtf_posterior_predictive(
     const Rcpp::List &output, 
     const Rcpp::List &model_opts, 
     const arma::vec &y, 
-    const unsigned int &nrep = 100,
+    const unsigned int &nrep = 0,
     const Rcpp::Nullable<Rcpp::NumericVector> &Rt = R_NilValue)
 {
     const unsigned int ntime = y.n_elem - 1;
@@ -448,8 +448,14 @@ Rcpp::List dgtf_posterior_predictive(
     {
         hpsi_true = Rcpp::as<arma::vec>(Rt);
     }
-    arma::cube yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
-    arma::cube res = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
+
+    arma::cube yhat;
+    if (nrep > 0)
+    {
+        yhat = arma::zeros<arma::cube>(ntime + 1, nsample, nrep);
+
+    }
+    arma::vec chi_sqr(nsample, arma::fill::zeros);
     Progress p(nsample*ntime, true);
     #ifdef DGTF_USE_OPENMP
     #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
@@ -480,6 +486,8 @@ Rcpp::List dgtf_posterior_predictive(
         mod.seas.val = seas_stored.col(i);
 
         arma::vec ft(ntime + 1, arma::fill::zeros);
+        arma::vec yres2(ntime + 1, arma::fill::zeros);
+        arma::vec yvar = yres2;
         for (unsigned int t = 1; t <= ntime; t++)
         {
             double eta;
@@ -503,34 +511,37 @@ Rcpp::List dgtf_posterior_predictive(
             }
 
             double lambda = LinkFunc::ft2mu(eta, model.flink);
+            double var = nbinomm::var(lambda, model.dobs.par2);
+            yres2.at(t) = 2. * std::log(std::abs(y.at(t) - lambda));
+            yvar.at(t) = std::log(var);
 
-            for (unsigned int j = 0; j < nrep; j++)
+            if (nrep > 0)
             {
-                yhat.at(t, i, j) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
-                res.at(t, i, j) = std::abs(yhat.at(t, i, j) - y.at(t));
+                for (unsigned int j = 0; j < nrep; j++)
+                {
+                    yhat.at(t, i, j) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
+                }
             }
 
             p.increment(); 
         }
+
+        chi_sqr.at(i) = arma::mean(arma::exp(yres2 - yvar));
     }
 
-    arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
-    arma::mat yhat2 = ytmp.slice(0);
 
     Rcpp::List output2;
-    // output2["yhat"] = Rcpp::wrap(yhat2);
+    output2["chi"] = arma::mean(chi_sqr);
 
-    arma::vec prob = {0.025, 0.5, 0.975};
-    arma::mat yqt = arma::quantile(yhat2, prob, 1);
-    output2["yhat"] = Rcpp::wrap(yqt);
+    if (nrep > 0)
+    {
+        arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
+        arma::mat yhat2 = ytmp.slice(0);
+        arma::vec prob = {0.025, 0.5, 0.975};
+        arma::mat yqt = arma::quantile(yhat2, prob, 1);
+        output2["yhat"] = Rcpp::wrap(yqt);
+    }
 
-    arma::cube rtmp = res.reshape(ntime + 1, nsample * nrep, 1);
-    arma::mat res2 = rtmp.slice(0); // (ntime + 1) x (nsample * nrep)
-    arma::mat res_qt = arma::quantile(res2, prob, 1);
-
-    output2["res"] = Rcpp::wrap(res_qt);
-    output2["rmse"] = std::sqrt(arma::mean(arma::mean(arma::pow(res2, 2))));
-    output2["mae"] = arma::mean(arma::mean(res2));
 
     if (!use_theta && Rt.isNotNull())
     {
