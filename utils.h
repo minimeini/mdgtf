@@ -314,4 +314,27 @@ arma::vec logp_shifted(const arma::vec &logp)
 	return logp_new;
 }
 
+
+
+double logit(const double &p)
+{
+	double val = p / (1. - p);
+	#ifdef DGTF_DO_BOUND_CHECK
+	bound_check(val, "logit", true, true);
+	#endif
+	return std::log(val);
+}
+
+
+
+double logistic(const double &x)
+{
+	double val = 1. / (1. + std::exp(-x));
+	#ifdef DGTF_DO_BOUND_CHECK
+	bound_check(val, "logistic");
+	#endif
+	return val;
+}
+
+
 #endif

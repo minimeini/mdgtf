@@ -5,6 +5,11 @@
 #include <RcppArmadillo.h>
 #include "utils.h"
 
+
+/**
+ * @brief Seasonality component to the conditional intensity.
+ * 
+ */
 class Season
 {
 public:
@@ -123,6 +128,179 @@ public:
         settings["val"] = Rcpp::wrap(val.t());
         return settings;
     }
+};
+
+
+/**
+ * @brief Logistic regression of the probability of zero-inflation.
+ * 
+ */
+class ZeroInflation
+{
+public:
+    bool inflated = false;
+    arma::vec beta;   // p x 1
+    double intercept; // intercept of the logistic regression
+    double coef; // AR coef of the logistic regression
+
+    arma::mat X; // p x (ntime + 1), covariates of the logistic regression
+
+    arma::vec prob; // (ntime + 1) x 1, z ~ Bernouli(prob)
+    arma::vec z; // (ntime + 1) x 1, indicator, z = 0 for constant 0 and z = 1 for conditional NB/Poisson.
+
+    ZeroInflation()
+    {
+        init_default();
+        return;
+    }
+
+    ZeroInflation(const Rcpp::List &settings)
+    {
+        init(settings);
+        return;
+    }
+
+    void init_default()
+    {
+        inflated = false;
+        intercept = 0.;
+        coef = 0.;
+
+        beta.reset();
+        X.reset();
+        return;
+    }
+
+
+    void init(const Rcpp::List &settings)
+    {
+        Rcpp::List opts = settings;
+
+        inflated = false;
+        if (opts.containsElementNamed("inflated"))
+        {
+            inflated = Rcpp::as<bool>(opts["inflated"]);
+        }
+
+        intercept = 0.;
+        if (opts.containsElementNamed("intercept"))
+        {
+            intercept = Rcpp::as<double>(opts["intercept"]);
+        }
+
+        coef = 0.;
+        if (opts.containsElementNamed("coef"))
+        {
+            coef = Rcpp::as<double>(opts["coef"]);
+        }
+
+        beta.reset();
+        X.reset();
+        if (opts.containsElementNamed("beta"))
+        {
+            beta = Rcpp::as<arma::vec>(opts["beta"]); //  p x 1
+        }
+
+        return;
+    }
+
+    void setX(const arma::mat &Xmat) // p x (ntime + 1)
+    {
+        inflated = true;
+        X = Xmat;
+
+        if (beta.is_empty())
+        {
+            beta = 10. * arma::randn(Xmat.n_rows);
+        }
+        else if (beta.n_elem != Xmat.n_rows)
+        {
+            throw std::invalid_argument("Zero: dimension of beta != number of covariates in X.");
+        }
+
+        return;
+    }
+
+    void setZ(const arma::vec &zvec, const unsigned int &ntime)
+    {
+        z.set_size(ntime + 1);
+        z.ones();
+        z.at(0) = 0.;
+        z.tail(zvec.n_elem) = zvec;
+
+        prob = z;
+
+        double zsum = arma::accu(arma::abs(z));
+        if ((zsum > 1. - EPS) && (zsum < (double)ntime))
+        {
+            inflated = true;
+        }
+
+        return;
+    }
+
+    void simulateZ(const unsigned int &ntime)
+    {
+        z.set_size(ntime + 1);
+        z.ones();
+        z.at(0) = 0.;
+        if (prob.is_empty())
+        {
+            prob = z;
+        }
+
+        if (inflated)
+        {
+            for (unsigned int t = 1; t < (ntime + 1); t++)
+            {
+                double val = intercept;
+                if (std::abs(z.at(t - 1) - 1.) < EPS)
+                {
+                    val += coef;
+                }
+
+                if (!X.is_empty())
+                {
+                    val += arma::accu(beta % X.col(t));
+                }
+
+                prob.at(t) = logistic(val);
+                z.at(t) = (R::runif(0., 1.) < prob.at(t)) ? 1. : 0.;
+            }
+        }
+
+        return;
+    }
+
+    Rcpp::List info()
+    {
+        Rcpp::List settings;
+        settings["inflated"] = inflated;
+        settings["intercept"] = intercept;
+        settings["coef"] = coef;
+        if (beta.is_empty())
+        {
+            settings["beta"] = NA_REAL;
+        }
+        else
+        {
+            settings["beta"] = Rcpp::wrap(beta.t());
+        }
+        
+        return settings;
+    }
+
+    static Rcpp::List default_settings()
+    {
+        Rcpp::List settings;
+        settings["inflated"] = true;
+        settings["intercept"] = 0.;
+        settings["coef"] = 0.;
+        settings["beta"] = NA_REAL;
+        return settings;
+    }
+
+
 };
 
 #endif

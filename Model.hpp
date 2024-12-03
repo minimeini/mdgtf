@@ -30,6 +30,7 @@ class Model
 public:
     unsigned int nP;
     Season seas;
+    ZeroInflation zero;
 
     ObsDist dobs;
     LagDist dlag;
@@ -54,6 +55,8 @@ public:
 
         seas.init_default();
         nP = get_nP(dlag, seas.period, seas.in_state);
+
+        zero.init_default();
         return;
     }
 
@@ -117,6 +120,17 @@ public:
         {
             Rcpp::List err_opts = Rcpp::as<Rcpp::List>(param_settings["err"]);
             derr.init(err_opts, nP);
+        }
+
+
+        if (settings.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_settings = settings["zero"];
+            zero.init(zero_settings);
+        }
+        else
+        {
+            zero.init_default();
         }
 
         return;
@@ -203,6 +217,10 @@ public:
 
         Rcpp::List season = seas.info();
         out["season"] = season;
+
+        Rcpp::List zero_inflation = zero.info();
+        out["zero"] = zero_inflation;
+
         return out;
     }
 
@@ -210,6 +228,7 @@ public:
     {
         Rcpp::List model_settings;
         model_settings["obs_dist"] = "nbinom";
+        model_settings["zero_inflated"] = false;
         model_settings["link_func"] = "identity";
         model_settings["gain_func"] = "softplus";
         model_settings["lag_dist"] = "lognorm";
@@ -218,14 +237,15 @@ public:
 
         Rcpp::List param_settings;
         param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
+        param_settings["zero"] = Rcpp::NumericVector::create(0., 0.);
         param_settings["lag"] = Rcpp::NumericVector::create(1.4, 0.3);
-        // param_settings["err"] = Rcpp::NumericVector::create(0.01, 0.);
         param_settings["err"] = ErrDist::default_settings();
 
         Rcpp::List settings;
         settings["model"] = model_settings;
         settings["param"] = param_settings;
         settings["season"] = Season::default_settings();
+        settings["zero"] = ZeroInflation::default_settings();
 
         return settings;
     }
@@ -1092,6 +1112,11 @@ public:
             model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
         }
 
+        if (model.zero.z.is_empty())
+        {
+            model.zero.simulateZ(ntime);
+        }
+
         Theta.set_size(model.nP, ntime + 1);
         Theta.zeros();
         Theta.col(0) = theta0;
@@ -1136,14 +1161,21 @@ public:
                 psi.at(psi_idx) = Theta.at(0, t);
             }
 
-
             ft.at(t) = TransFunc::func_ft(
                 model.ftrans, model.fgain, model.dlag,
                 model.seas, t, Theta.col(t), y);
 
             double eta = ft.at(t);
             lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.
-            y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
+
+            if (std::abs(model.zero.z.at(t) - 1.) < EPS)
+            {
+                y.at(t) = ObsDist::sample(lambda.at(t), model.dobs.par2, model.dobs.name);
+            }
+            else
+            {
+                y.at(t) = 0.;
+            }
         }
 
         return; // Checked. OK.

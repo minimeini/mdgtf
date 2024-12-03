@@ -117,10 +117,17 @@ Rcpp::List dgtf_default_model()
 Rcpp::List dgtf_simulate(
     const Rcpp::List &settings,
     const unsigned int &ntime,
-    const double &y0 = 0.)
+    const double &y0 = 0.,
+    const Rcpp::Nullable<Rcpp::NumericVector> &z = R_NilValue) // p x (<=ntime), zero inflation
 {
-    Model model(settings);
     std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
+    Model model(settings);
+    if (z.isNotNull())
+    {
+        arma::vec zvec = Rcpp::as<arma::vec>(z);
+        model.zero.setZ(zvec, ntime);
+    }
+
 
     arma::vec theta0(model.nP, arma::fill::zeros);
     if (sys_list[model.fsys] == SysEq::Evolution::identity)
@@ -146,6 +153,13 @@ Rcpp::List dgtf_simulate(
     output["Theta"] = Rcpp::wrap(Theta);
     output["ft"] = Rcpp::wrap(ft.t());
     output["lambda"] = Rcpp::wrap(lambda.t());
+
+    if (model.zero.inflated)
+    {
+        output["prob"] = Rcpp::wrap(model.zero.prob.t());
+        output["z"] = Rcpp::wrap(model.zero.z.t());
+    }
+
     return output;
 }
 
@@ -158,6 +172,7 @@ Rcpp::List dgtf_infer(
     const Rcpp::List &method_settings,
     const std::string &loss_func = "quadratic",
     const unsigned int &k = 1,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &X = R_NilValue, // p x (ntime + 1), zero inflation
     const Rcpp::Nullable<unsigned int> &tstart_forecast = R_NilValue,
     const Rcpp::Nullable<unsigned int> &tend_forecast = R_NilValue,
     const bool &add_y0 = false)
@@ -182,6 +197,12 @@ Rcpp::List dgtf_infer(
 
     const unsigned int nT = y.n_elem - 1;
     model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
+
+    if (X.isNotNull())
+    {
+        arma::mat Xzero = Rcpp::as<arma::mat>(X);
+        model.zero.setX(Xzero);
+    }
 
     Rcpp::List output, forecast, error;
     arma::mat psi(nT + 1, 3);
