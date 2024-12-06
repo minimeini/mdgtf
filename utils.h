@@ -316,7 +316,7 @@ arma::vec logp_shifted(const arma::vec &logp)
 
 
 
-double logit(const double &p)
+inline double logit(const double &p)
 {
 	double val = p / (1. - p);
 	#ifdef DGTF_DO_BOUND_CHECK
@@ -326,8 +326,15 @@ double logit(const double &p)
 }
 
 
+template <typename T>
+inline T logit(const T&x)
+{
+	T val = x / (1. - x);
+	T out = arma::log(val);
+	return out;
+}
 
-double logistic(const double &x)
+inline double logistic(const double &x)
 {
 	double val = 1. / (1. + std::exp(-x));
 	#ifdef DGTF_DO_BOUND_CHECK
@@ -336,5 +343,14 @@ double logistic(const double &x)
 	return val;
 }
 
+
+template <typename T>
+inline T logistic(const T& x)
+{
+	T val = arma::exp(-x) + 1.;
+	T out = 1. / val;
+	bound_check<T>(out, "logistic", true, true);
+	return out;
+}
 
 #endif
