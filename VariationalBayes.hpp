@@ -34,6 +34,8 @@ namespace VB
         std::vector<std::string> param_selected = {"W"};
 
         Prior W_prior, seas_prior, rho_prior, par1_prior, par2_prior;
+        bool zintercept_infer = false;
+        bool zzcoef_infer = false;
 
         arma::vec W_stored;    // nsample x 1
         arma::mat seas_stored;  // period x nsample
@@ -41,6 +43,10 @@ namespace VB
         arma::vec par1_stored; // nsample x 1
         arma::vec par2_stored; // nsample x 1
         arma::mat psi_stored; // (nT + 1) x nsample
+        arma::mat z_stored; // (nT + 1) x nsample
+        arma::mat prob_stored; // (nT + 1) x nsample
+        arma::vec zintercept_stored; // nsample x 1
+        arma::vec zzcoef_stored; // nsample x 1
 
         VariationalBayes(const Model &model, const Rcpp::List &vb_opts)
         {
@@ -87,9 +93,7 @@ namespace VB
 
             param_selected.clear();
             m = 0;
-
-            W_stored.set_size(nsample);
-            W_stored.zeros();
+            
             W_prior.init("invgamma", 1., 1.);
             W_prior.infer = false;
             if (opts.containsElementNamed("W"))
@@ -101,10 +105,10 @@ namespace VB
             {
                 param_selected.push_back("W");
                 m += 1;
+                W_stored.set_size(nsample);
+                W_stored.zeros();
             }
 
-            seas_stored.set_size(model.seas.period, nsample);
-            seas_stored.zeros();
             seas_prior.init("gaussian", 1., 10.);
             seas_prior.infer = false;
             if (opts.containsElementNamed("seas"))
@@ -116,9 +120,10 @@ namespace VB
             {
                 param_selected.push_back("seas");
                 m += model.seas.period;
+                seas_stored.set_size(model.seas.period, nsample);
+                seas_stored.zeros();
             }
-
-            rho_stored = W_stored;
+            
             rho_prior.init("invgamma", 1., 1.);
             rho_prior.infer = false;
             if (opts.containsElementNamed("rho"))
@@ -130,6 +135,8 @@ namespace VB
             {
                 param_selected.push_back("rho");
                 m += 1;
+                rho_stored.set_size(nsample);
+                rho_stored.zeros();
             }
 
             par1_stored.set_size(nsample);
@@ -144,9 +151,10 @@ namespace VB
             {
                 param_selected.push_back("par1");
                 m += 1;
+                par1_stored.set_size(nsample);
+                par1_stored.zeros();
             }
 
-            par2_stored.set_size(nsample);
             par2_prior.init("invgamma", 1., 1.);
             par2_prior.infer = false;
             if (opts.containsElementNamed("par2"))
@@ -158,6 +166,33 @@ namespace VB
             {
                 param_selected.push_back("par2");
                 m += 1;
+                par2_stored.set_size(nsample);
+                par2_stored.zeros();
+            }
+
+            zintercept_infer = false;
+            if (opts.containsElementNamed("zintercept"))
+            {
+                zintercept_infer = Rcpp::as<bool>(opts["zintercept"]);
+                if (zintercept_infer)
+                {
+                    param_selected.push_back("zintercept");
+                    m += 1;
+                    zintercept_stored.set_size(nsample);
+                    zintercept_stored.zeros();
+                }
+            }
+
+            zzcoef_infer = false;
+            if (opts.containsElementNamed("zzcoef"))
+            {
+                zzcoef_infer = Rcpp::as<bool>(opts["zzcoef"]);
+                if (zzcoef_infer) {
+                    param_selected.push_back("zzcoef");
+                    m += 1;
+                    zzcoef_stored.set_size(nsample);
+                    zzcoef_stored.zeros();
+                }
             }
 
             update_static = false;
@@ -195,6 +230,7 @@ namespace VB
             par2_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
             par2_opts["prior_name"] = "invgamma";
 
+
             Rcpp::List opts;
             opts["nsample"] = 1000;
             opts["nthin"] = 1;
@@ -208,6 +244,8 @@ namespace VB
             opts["rho"] = rho_opts;
             opts["par1"] = par1_opts;
             opts["par2"] = par2_opts;
+            opts["zintercept"] = false;
+            opts["zzcoef"] = false;
 
             return opts;
         }
@@ -485,10 +523,22 @@ namespace VB
                 } // lag_par1
                 case AVAIL::Param::lag_par2:
                 {
-                    eta_tilde.at(i) = std::log(std::abs(val) + EPS);
+                    eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
                     idx += 1;
                     break;
                 } // lag_par2
+                case AVAIL::Param::zintercept:
+                {
+                    eta_tilde.at(idx) = val;
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zzcoef:
+                {
+                    idx += 1;
+                    eta_tilde.at(idx) = val;
+                    break;
+                }
                 default:
                 {
                     throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined static parameter " + param_selected[i]);
@@ -620,6 +670,18 @@ namespace VB
                     idx += 1;
                     break;
                 } // lag_par2
+                case AVAIL::Param::zintercept:
+                {
+                    eta.at(idx) = val;
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zzcoef:
+                {
+                    eta.at(idx) = val;
+                    idx += 1;
+                    break;
+                }
                 default:
                 {
                     throw std::invalid_argument("VB::Hybrid::tilde2eta: undefined static parameter " + param_selected[i]);
@@ -648,27 +710,33 @@ namespace VB
             const arma::mat &Theta, // nP x (nT + 1)
             const double W,              // evolution variance conditional on V
             const Dist &W_prior,
+            const ZeroInflation &zero,
             const bool &full_rank = false)
         {
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
             double aw = W_prior.par1;
             double bw = W_prior.par2;
-            const double n = static_cast<double>(Theta.n_cols) - 1;
             const double p = full_rank ? static_cast<double>(Theta.n_rows) : 1.;
-            const unsigned int ni = Theta.n_cols - 1;
 
             double res = 0.;
-            for (unsigned int t = 0; t < ni; t++)
+            double cnt = 0.;
+            for (unsigned int t = 1; t < Theta.n_cols; t++)
             {
+                if (zero.inflated && zero.z.at(t) < EPS)
+                {
+                    continue;
+                }
+
+                cnt += 1.;
                 double tmp = 0.;
                 if (full_rank)
                 {
-                    arma::vec err = Theta.col(t + 1) - Theta.col(t);
+                    arma::vec err = Theta.col(t) - Theta.col(t - 1);
                     tmp = arma::as_scalar(err.t() * err);
                 }
                 else
                 {
-                    double err = Theta.at(0, t + 1) - Theta.at(0, t);
+                    double err = Theta.at(0, t) - Theta.at(0, t - 1);
                     tmp = err * err;
                 }
                 res += tmp;
@@ -684,7 +752,7 @@ namespace VB
                 deriv = -std::exp(log_bnew_W);
 
                 double a_new = aw;
-                a_new += 0.5 * n * p;
+                a_new += 0.5 * cnt * p;
                 a_new += 1.;
                 deriv += a_new;
             }
@@ -700,13 +768,13 @@ namespace VB
                 if (dist_list[W_prior.name] == AVAIL::Dist::gamma)
                 {
                     deriv = aw;
-                    deriv -= 0.5 * n;
+                    deriv -= 0.5 * cnt;
                     deriv -= bw * W;
                     deriv += 0.5 * rdw;
                 }
                 else if (dist_list[W_prior.name] == AVAIL::Dist::halfcauchy)
                 {
-                    deriv = 0.5 * n - 0.5 * rdw + W / (bw * bw + W) - 0.5;
+                    deriv = 0.5 * cnt - 0.5 * rdw + W / (bw * bw + W) - 0.5;
                 }
                 else
                 {
@@ -794,6 +862,7 @@ namespace VB
             const arma::vec &y,           // (nT+1) x 1
             const arma::vec &lambda,          // (n+1) x 1, (f[0],f[1],...,f[nT])
             const ObsDist &dobs,
+            const ZeroInflation & zero,
             const arma::vec &seas,
             const arma::mat &Xseas)
         { // 0 - negative binomial; 1 - poisson
@@ -801,6 +870,11 @@ namespace VB
             arma::vec deriv(seas.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
+                if (zero.inflated && zero.z.at(t) < EPS)
+                {
+                    continue;
+                }
+
                 double dy_dlambda = ObsDist::dloglike_dlambda(y.at(t), lambda.at(t), dobs);
                 arma::vec dlambda_dlogseas = Xseas.col(t) % seas;
                 deriv = deriv + dy_dlambda * dlambda_dlogseas;
@@ -823,6 +897,19 @@ namespace VB
             return logp;
         }
 
+
+        static double dlogJoint_dzintercept(
+            const ZeroInflation &zero
+        ){
+            arma::vec diff = zero.z - zero.prob;
+            return arma::accu(diff);
+        }
+
+        static double dlogJoint_dzzcoef(const ZeroInflation& zero)
+        {
+            arma::vec diff = zero.z - zero.prob;
+            return arma::accu(diff % zero.z);
+        }
 
         /**
          * @brief Derivative of the logarithm of joint probability with respect to parameters mapped to real-line (but before Yeo-Johnson transformation).
@@ -873,7 +960,8 @@ namespace VB
                 {
                 case AVAIL::Param::W:
                 {
-                    deriv.at(idx) = dlogJoint_dWtilde(Theta, val, W_prior, model.derr.full_rank);
+                    deriv.at(idx) = dlogJoint_dWtilde(
+                        Theta, val, W_prior, model.zero, model.derr.full_rank);
                     idx += 1;
                     break;
                 }
@@ -882,7 +970,8 @@ namespace VB
                     arma::vec seas = arma::abs(eta.subvec(idx, idx + model.seas.period - 1));
                     arma::vec logseas = arma::log(seas + EPS);
 
-                    arma::vec dloglik = dloglike_dlogseas(y, lambda, model.dobs, seas, model.seas.X);
+                    arma::vec dloglik = dloglike_dlogseas(
+                        y, lambda, model.dobs, model.zero, seas, model.seas.X);
                     arma::vec dlogprior = logprior_logseas(logseas, seas_prior.par2);
 
                     deriv.subvec(idx, idx + model.seas.period - 1) = dloglik + dlogprior;
@@ -907,6 +996,18 @@ namespace VB
                 {
                     deriv.at(idx) = dllk_dpar.at(1);
                     deriv.at(idx) += Prior::dlogprior_dpar(model.dlag.par2, lag_par2_prior, true);
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zintercept:
+                {
+                    deriv.at(idx) = dlogJoint_dzintercept(model.zero);
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zzcoef:
+                {
+                    deriv.at(idx) = dlogJoint_dzzcoef(model.zero);
                     idx += 1;
                     break;
                 }
@@ -960,19 +1061,31 @@ namespace VB
                 }
                 case AVAIL::Param::rho:
                 {
-                    eta.at(i) = model.dobs.par2;
+                    eta.at(idx) = model.dobs.par2;
                     idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par1:
                 {
-                    eta.at(i) = model.dlag.par1;
+                    eta.at(idx) = model.dlag.par1;
                     idx += 1;
                     break;
                 }
                 case AVAIL::Param::lag_par2:
                 {
-                    eta.at(i) = model.dlag.par2;
+                    eta.at(idx) = model.dlag.par2;
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zintercept:
+                {
+                    eta.at(idx) = model.zero.intercept;
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zzcoef:
+                {
+                    eta.at(idx) = model.zero.coef;
                     idx += 1;
                     break;
                 }
@@ -1037,6 +1150,18 @@ namespace VB
                     idx += 1;
                     break;
                 }
+                case AVAIL::Param::zintercept:
+                {
+                    model.zero.intercept = val;
+                    idx += 1;
+                    break;
+                }
+                case AVAIL::Param::zzcoef:
+                {
+                    model.zero.coef = val;
+                    idx += 1;
+                    break;
+                }
                 default:
                 {
                     throw std::invalid_argument("VB::Hybrid::update_params: undefined static parameter " + params_selected[i]);
@@ -1065,6 +1190,15 @@ namespace VB
             fsys = model.fsys;
             const unsigned int nT = y.n_elem - 1;
 
+            model.zero.z.set_size(y.n_elem);
+            model.zero.z.ones();
+            model.zero.prob = model.zero.z;
+            if (model.zero.inflated)
+            {
+                z_stored.set_size(y.n_elem, nsample);
+                prob_stored.set_size(y.n_elem, nsample);
+            }
+
             if (sys_list[model.fsys] == SysEq::Evolution::identity)
             {
                 psi_stored.set_size(model.nP, nsample);
@@ -1083,9 +1217,21 @@ namespace VB
 
                 // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
                 arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+                arma::mat ztmp(N, y.n_elem, arma::fill::ones);
+                arma::mat ptmp(N, y.n_elem, arma::fill::randu);
                 double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                    Theta_tmp, model, y, N, true, false, use_discount, discount_factor);
+                    Theta_tmp, ztmp, ptmp, model, y, N, 
+                    true, false, use_discount, discount_factor);
                 arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
+                if (model.zero.inflated)
+                {
+                    model.zero.prob = arma::vectorise(arma::mean(ptmp, 0)); // (nT + 1) x 1
+                    for (unsigned int t = 0; t < model.zero.z.n_elem; t++)
+                    {
+                        model.zero.z.at(t) = (R::runif(0., 1.) < model.zero.prob.at(t)) ? 1. : 0.;
+                    }
+                        
+                }
 
                 arma::mat dFphi_grad;
                 arma::vec dloglik_dlag(2, arma::fill::zeros);
@@ -1099,6 +1245,11 @@ namespace VB
                 arma::vec lambda(y.n_elem, arma::fill::zeros);
                 for (unsigned int t = 1; t < lambda.n_elem; t++)
                 {
+                    if (model.zero.z.at(t) < EPS)
+                    {
+                        continue;
+                    }
+
                     unsigned int nelem = std::min(t, model.dlag.nL); // min(t,nL)
                     arma::vec yold(model.dlag.nL, arma::fill::zeros);
                     if (nelem > 1)
@@ -1123,13 +1274,16 @@ namespace VB
 
                     if (par1_prior.infer || par2_prior.infer)
                     {
-                        double dll_deta = Model::dloglik_deta(
-                            ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
-                        double deta_dpar1 = arma::accu(dFphi_grad.col(0) % yold % htheta);
-                        double deta_dpar2 = arma::accu(dFphi_grad.col(1) % yold % htheta);
+                        if (!model.zero.inflated || model.zero.z.at(t) > EPS)
+                        {
+                            double dll_deta = Model::dloglik_deta(
+                                ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
+                            double deta_dpar1 = arma::accu(dFphi_grad.col(0) % yold % htheta);
+                            double deta_dpar2 = arma::accu(dFphi_grad.col(1) % yold % htheta);
 
-                        dloglik_dlag.at(0) += dll_deta * deta_dpar1;
-                        dloglik_dlag.at(1) += dll_deta * deta_dpar2;
+                            dloglik_dlag.at(0) += dll_deta * deta_dpar1;
+                            dloglik_dlag.at(1) += dll_deta * deta_dpar2;
+                        }
                     }
                 }
 
@@ -1139,7 +1293,6 @@ namespace VB
                     arma::vec dlogJoint = dlogJoint_deta(
                         y, Theta, lambda, dloglik_dlag, eta, param_selected,
                         W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model); // Checked. OK.
-
 
                     arma::mat SigInv = get_sigma_inv(B, d, k);
                     arma::vec dlogq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu);
@@ -1242,6 +1395,22 @@ namespace VB
                         par1_stored.at(idx_run) = model.dlag.par1;
                         par2_stored.at(idx_run) = model.dlag.par2;
                     }
+
+                    if (model.zero.inflated)
+                    {
+                        z_stored.col(idx_run) = model.zero.z;
+                        prob_stored.col(idx_run) = model.zero.prob;
+                    }
+
+                    if (zintercept_infer)
+                    {
+                        zintercept_stored.at(idx_run) = model.zero.intercept;
+                    }
+
+                    if (zzcoef_infer)
+                    {
+                        zzcoef_stored.at(idx_run) = model.zero.coef;
+                    }
                 }
 
                 if (verbose)
@@ -1272,6 +1441,12 @@ namespace VB
                 output["Theta"] = Rcpp::wrap(Theta_stored);
             }
 
+            if (!z_stored.is_empty() && !prob_stored.is_empty())
+            {
+                output["z"] = Rcpp::wrap(z_stored);
+                output["prob"] = Rcpp::wrap(prob_stored);
+            }
+
             if (W_prior.infer)
             {
                 output["W"] = Rcpp::wrap(W_stored.t());
@@ -1295,6 +1470,16 @@ namespace VB
             if (par2_prior.infer)
             {
                 output["par2"] = Rcpp::wrap(par2_stored.t());
+            }
+
+            if (zintercept_infer)
+            {
+                output["zintercept"] = Rcpp::wrap(zintercept_stored.t());
+            }
+
+            if (zzcoef_infer)
+            {
+                output["zzcoef"] = Rcpp::wrap(zzcoef_stored.t());
             }
 
             output["inferred"] = Rcpp::wrap(param_selected);

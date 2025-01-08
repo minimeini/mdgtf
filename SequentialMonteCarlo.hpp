@@ -82,12 +82,6 @@ namespace SMC
                 smoothing = Rcpp::as<bool>(settings["do_smoothing"]);
             }
 
-            update_zero_inflation = false;
-            if (settings.containsElementNamed("update_zero_inflation"))
-            {
-                update_zero_inflation = Rcpp::as<bool>(settings["update_zero_inflation"]);
-            }
-
             return;
         }
 
@@ -101,7 +95,6 @@ namespace SMC
             opts["use_discount"] = false;
             opts["discount_factor"] = 0.95;
             opts["do_smoothing"] = false;
-            opts["update_zero_inflation"] = false;
 
             return opts;
         }
@@ -345,6 +338,8 @@ namespace SMC
 
         static double auxiliary_filter0(
             arma::cube &Theta, // p x N x (nT + 1)
+            arma::mat &z, // N x (nT + 1)
+            arma::mat &prob, // N x (nT + 1)
             Model &model,
             const arma::vec &y, // (nT + 1) x 1
             const unsigned int &N = 1000,
@@ -438,11 +433,27 @@ namespace SMC
                         for (unsigned int k = 0; k <= t; k++)
                         {
                             Theta.slice(k) = Theta.slice(k).cols(resample_idx);
+                            if (model.zero.inflated)
+                            {
+                                arma::vec tmp = prob.col(k);
+                                prob.col(k) = tmp.elem(resample_idx);
+
+                                tmp = z.col(k);
+                                z.col(k) = tmp.elem(resample_idx);
+                            }
                         }
                     }
                     else
                     {
                         Theta.slice(t) = Theta.slice(t).cols(resample_idx);
+                        if (model.zero.inflated)
+                        {
+                            arma::vec tmp = prob.col(t);
+                            prob.col(t) = tmp.elem(resample_idx);
+
+                            tmp = z.col(t);
+                            z.col(t) = tmp.elem(resample_idx);
+                        }
                     }
 
                     logq = logq.elem(resample_idx);
@@ -450,6 +461,21 @@ namespace SMC
 
 
                 // Propagate
+                if (model.zero.inflated)
+                {
+                    // *prob: N x (ntime + 1)
+                    // *z: N x (ntime + 1)
+                    double val = model.zero.intercept;
+                    if (!model.zero.X.is_empty())
+                    {
+                        val += arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                    }
+
+                    arma::vec zval = z.col(t) * model.zero.coef + val;
+                    prob.col(t + 1) = logistic(zval);
+
+                }
+
                 arma::mat Theta_new(model.nP, N, arma::fill::zeros);
                 arma::mat Theta_cur = Theta.slice(t); // nP x N
                 #ifdef DGTF_USE_OPENMP
@@ -462,9 +488,22 @@ namespace SMC
                     arma::vec theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
-                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink);
-                    double logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    if (model.zero.inflated)
+                    {
+                        z.at(i, t + 1) = (R::runif(0., 1.) < prob.at(i, t + 1)) ? 1. : 0.;
+                    }
+
+                    double logp;
+                    if (model.zero.inflated && z.at(i, t + 1) < EPS)
+                    {
+                        logp = y.at(t + 1) < EPS ? 0. : -9e16; // numerically exp(-9e16) = 0
+                    }
+                    else
+                    {
+                        double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
+                        double lambda = LinkFunc::ft2mu(ft, model.flink);
+                        logp = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
+                    }
 
                     if ((!use_discount))
                     {
@@ -515,8 +554,7 @@ namespace SMC
             const bool &final_resample_by_weights = false,
             const bool &use_discount = false,
             const double &discount_factor = 0.95,
-            const bool &verbose = false,
-            const bool &zero_inflated = false)
+            const bool &verbose = false)
         {
             const unsigned int nT = y.n_elem - 1;
             const double logN = std::log(static_cast<double>(N));
@@ -604,7 +642,7 @@ namespace SMC
                             arma::vec wtmp = arma::vectorise(weights_forward.row(k + 1));
                             weights_forward.row(k + 1) = wtmp.elem(resample_idx).t();
 
-                            if (zero_inflated)
+                            if (model.zero.inflated)
                             {
                                 arma::vec tmp = prob.col(k);
                                 prob.col(k) = tmp.elem(resample_idx);
@@ -620,7 +658,7 @@ namespace SMC
                         arma::vec wtmp = arma::vectorise(weights_forward.row(t + 1));
                         weights_forward.row(t + 1) = wtmp.elem(resample_idx).t();
 
-                        if (zero_inflated)
+                        if (model.zero.inflated)
                         {
                             arma::vec tmp = prob.col(t);
                             prob.col(t) = tmp.elem(resample_idx);
@@ -642,7 +680,7 @@ namespace SMC
 
 
                 // Propagate
-                if (zero_inflated)
+                if (model.zero.inflated)
                 {
                     // *prob: N x (ntime + 1)
                     // *z: N x (ntime + 1)
@@ -697,13 +735,13 @@ namespace SMC
                     double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     double lambda = LinkFunc::ft2mu(ft, model.flink);
 
-                    if (zero_inflated)
+                    if (model.zero.inflated)
                     {
                         z.at(i, t + 1) = (R::runif(0., 1.) < prob.at(i, t + 1)) ? 1. : 0.;
                     }
 
                     double val;
-                    if (zero_inflated && z.at(i, t + 1) < EPS)
+                    if (model.zero.inflated && z.at(i, t + 1) < EPS)
                     {
                         val = y.at(t + 1) < EPS ? 0. : -9e16; // numerically exp(-9e16) = 0
                     }
@@ -732,7 +770,7 @@ namespace SMC
                         arma::uvec resample_idx = get_resample_index(weights);
                         Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
                         weights.ones();
-                        if (zero_inflated)
+                        if (model.zero.inflated)
                         {
                             arma::vec tmp = prob.col(t + 1);
                             prob.col(t + 1) = tmp.elem(resample_idx);
@@ -774,7 +812,6 @@ namespace SMC
         unsigned int nforecast = 0;
 
         bool use_discount = false;
-        bool update_zero_inflation = false;
         double discount_factor = 0.95;
         bool smoothing = true;
 
@@ -974,7 +1011,7 @@ namespace SMC
                 output["Theta_stored"] = Rcpp::wrap(Theta);
             }
 
-            if (update_zero_inflation)
+            if (!z.is_empty() && !prob.is_empty())
             {
                 output["z_stored"] = Rcpp::wrap(z);
                 output["prob_stored"] = Rcpp::wrap(prob);
@@ -1079,7 +1116,7 @@ namespace SMC
         void infer(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
-            if (update_zero_inflation)
+            if (model.zero.inflated)
             {
                 // Initialize z and prob for t = 0
                 double val = model.zero.intercept;
@@ -1130,7 +1167,7 @@ namespace SMC
             double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
                 Theta, z, prob, weights_forward, eff_forward, Wt,
                 model, y, N, false, true, 
-                use_discount, discount_factor, verbose, update_zero_inflation);
+                use_discount, discount_factor, verbose);
 
             arma::mat psi = Theta.row_as_mat(0); // (nT + 1) x N
             output["psi_filter"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
@@ -1194,11 +1231,12 @@ namespace SMC
                 output["Theta_stored"] = Rcpp::wrap(Theta);
             }
 
-            if (update_zero_inflation)
+            if (!z.is_empty() && !prob.is_empty())
             {
                 output["z_stored"] = Rcpp::wrap(z);
                 output["prob_stored"] = Rcpp::wrap(prob);
             }
+
             return output;
         }
 
@@ -1537,7 +1575,7 @@ namespace SMC
         {
             std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
             std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
-            if (update_zero_inflation)
+            if (model.zero.inflated)
             {
                 // Initialize z and prob for t = 0
                 double val = model.zero.intercept;

@@ -1020,6 +1020,7 @@ public:
         const double &lag_par2,
         const ObsDist &dobs,
         const Season &seas,
+        const ZeroInflation &zero,
         const std::string &link_func)
     {
         Fphi.clear();
@@ -1027,20 +1028,28 @@ public:
         arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, lag_dist, lag_par1, lag_par2);
 
         arma::mat grad(y.n_elem, 2, arma::fill::zeros);
-        for (unsigned int t = 1; t < y.n_elem; t ++)
+        for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
-            if (seas.period > 0)
+            if (zero.inflated && zero.z.at(t) < EPS)
             {
-                eta += arma::as_scalar(seas.X.col(t).t() * seas.val);
+                grad.at(t, 0) = 0.;
+                grad.at(t, 1) = 0.;
             }
-            double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
+            else
+            {
+                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
+                if (seas.period > 0)
+                {
+                    eta += arma::as_scalar(seas.X.col(t).t() * seas.val);
+                }
+                double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
 
-            double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
-            double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
+                double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
+                double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
 
-            grad.at(t, 0) = dll_deta * deta_dpar1;
-            grad.at(t, 1) = dll_deta * deta_dpar2;
+                grad.at(t, 0) = dll_deta * deta_dpar1;
+                grad.at(t, 1) = dll_deta * deta_dpar2;
+            }
         }
 
         #ifdef DGTF_DO_BOUND_CHECK
@@ -1062,6 +1071,11 @@ public:
         double out = 0.;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
+            if (model.zero.inflated && model.zero.z.at(t) < EPS)
+            {
+                continue;
+            }
+            
             out += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), model.dobs.par2, jacobian);
         }
 

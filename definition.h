@@ -63,7 +63,9 @@ public:
         k,
         mh_sd,
         lag_par1,
-        lag_par2
+        lag_par2,
+        zintercept,
+        zzcoef
     };
 
     enum Loss
@@ -185,6 +187,8 @@ private:
         map["par1"] = Param::lag_par1;
         map["lag_par2"] = Param::lag_par2;
         map["par2"] = Param::lag_par2;
+        map["zintercept"] = Param::zintercept;
+        map["zzcoef"] = Param::zzcoef;
 
         return map;
     }
