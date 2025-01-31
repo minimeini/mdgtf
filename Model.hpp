@@ -91,15 +91,16 @@ public:
             }
 
             Rcpp::NumericVector tmp = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
-
-            lag_param[0] = static_cast<double>(tmp.length());
-            lag_param[1] = 0.;
+            // Use uniform lag distribution (specified in `init_model`)
+            lag_param[0] = static_cast<double>(tmp.length()); // order of autoregression
+            lag_param[1] = 0.; // no meaning
         }
         else if (param_settings.containsElementNamed("lag"))
         {
             Rcpp::NumericVector tmp = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
-            lag_param[0] = tmp[0];
-            lag_param[1] = tmp[1];
+            // Lag distribution is specified in `init_model`
+            lag_param[0] = tmp[0]; // first param of lag distribution
+            lag_param[1] = tmp[1]; // second param of lag distribution
         }
         dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
 
@@ -228,7 +229,6 @@ public:
     {
         Rcpp::List model_settings;
         model_settings["obs_dist"] = "nbinom";
-        model_settings["zero_inflated"] = false;
         model_settings["link_func"] = "identity";
         model_settings["gain_func"] = "softplus";
         model_settings["lag_dist"] = "lognorm";
@@ -1131,6 +1131,8 @@ public:
             model.zero.simulateZ(ntime);
         }
 
+        psi = ErrDist::sample(model.derr, ntime, true);
+
         Theta.set_size(model.nP, ntime + 1);
         Theta.zeros();
         Theta.col(0) = theta0;
@@ -1144,8 +1146,6 @@ public:
         y.at(0) = y0;
         lambda = y;
         ft = y;
-
-        psi = ErrDist::sample(model.derr, ntime, true);
 
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
@@ -1165,6 +1165,7 @@ public:
 
             if ((!model.derr.full_rank) && (model.derr.par1 > EPS))
             {
+                // Only update theta if err variance > 0
                 Theta.at(0, t) = psi.at(psi_idx);
             }
             else if (model.derr.full_rank)

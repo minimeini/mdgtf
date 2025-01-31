@@ -1390,9 +1390,13 @@ namespace VB
                         rho_stored.at(idx_run) = model.dobs.par2;
                     }
 
-                    if (par1_prior.infer || par2_prior.infer)
+                    if (par1_prior.infer)
                     {
                         par1_stored.at(idx_run) = model.dlag.par1;
+                    }
+
+                    if (par2_prior.infer)
+                    {
                         par2_stored.at(idx_run) = model.dlag.par2;
                     }
 

@@ -158,6 +158,7 @@ public:
 
         if (W < EPS)
         {
+            // zero variance, i.e., no error
             return wt;
         }
 

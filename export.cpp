@@ -138,7 +138,7 @@ Rcpp::List dgtf_simulate(
             throw std::invalid_argument("Model::init - autoregressive coefficients are missing.");
         }
 
-        theta0 = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]);
+        theta0 = Rcpp::as<Rcpp::NumericVector>(param_settings["lag"]); // ar coefficients
     }
 
     arma::vec psi, ft, lambda, y;
