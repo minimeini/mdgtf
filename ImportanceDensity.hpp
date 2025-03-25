@@ -247,7 +247,7 @@ static void prior_forward(
         mu.col(t) = SysEq::func_gt(model.fsys, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1), model.seas.period, model.seas.in_state); // mu[t] = g(mu[t-1])
         SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mu.col(t - 1), y.at(t - 1));
         sig = Gt * sig * Gt.t(); // sig[t] = W[t] + G[t] x sig[t-1] x t(G[t])
-        sig.diag() += EPS;
+        sig.diag() += EPS8;
         if (use_discount)
         {
             sig = sig + Wt.slice(t);
