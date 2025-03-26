@@ -395,6 +395,7 @@ static void prior_forward(
 static void backward_kernel(
     arma::mat &K,
     arma::vec &r,
+    arma::mat &U_lchol,
     arma::mat &Uinv,
     double &ldetU,
     const Model &model,
@@ -402,7 +403,6 @@ static void backward_kernel(
     const arma::vec &vt,  // nP x 1, v[t]
     const arma::vec &vt_next, // nP x 1, v[t + 1]
     const arma::mat &Vt_inv, // nP x nP, inv(V[t])
-    const arma::vec &theta_hat, // p x p, point of theta[t] for taylor expansion
     const arma::vec &y)
 {
     unsigned int nstate = model.nP;
@@ -410,6 +410,11 @@ static void backward_kernel(
     {
         nstate -= model.seas.period;
     }
+    Uinv.set_size(model.nP, model.nP);
+    Uinv.zeros();
+    U_lchol = Uinv;
+    ldetU = 0.;
+
     std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
     std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
 
@@ -437,12 +442,10 @@ static void backward_kernel(
             }
         }
 
-        Uinv.set_size(model.nP, model.nP);
-        Uinv.zeros();
-        ldetU = 0.;
         if (model.derr.par1 > EPS)
         {
             Uinv.at(nstate - 1, nstate - 1) = 1. / model.derr.par1;
+            U_lchol.at(nstate - 1, nstate - 1) = std::sqrt(model.derr.par1);
             ldetU = std::log(model.derr.par1);
         }
         
@@ -456,12 +459,8 @@ static void backward_kernel(
         if (model.derr.par1 > EPS)
         {
             Uinv.diag().fill(1. / model.derr.par1);
+            U_lchol.diag().fill(std::sqrt(model.derr.par1));
             ldetU = std::log(model.derr.par1) * static_cast<double>(model.nP);
-        }
-        else
-        {
-            Uinv = arma::zeros<arma::mat>(model.nP, model.nP);
-            ldetU = 0.;
         }
     }
     else if (model.derr.full_rank)
@@ -476,17 +475,18 @@ static void backward_kernel(
         Uinv = Vt_inv + G_next.t() * W_inv * G_next; // inv(U[t])
         Uinv.diag() += EPS;
         arma::mat U_inv_chol = arma::chol(arma::symmatu(Uinv));
-        arma::mat U_chol = arma::inv(arma::trimatu(U_inv_chol));
-        arma::mat U = U_chol * U_chol.t(); // U[t]
+        U_lchol = arma::inv(arma::trimatu(U_inv_chol));
+
+        arma::mat U = U_lchol * U_lchol.t(); // U[t]
         ldetU = arma::log_det_sympd(arma::symmatu(U));
 
         K = U * G_next.t() * W_inv; // K[t]
 
         arma::vec ghat = SysEq::func_gt(
             model.fsys, model.fgain, model.dlag, 
-            theta_hat, y.at(t_cur), 
+            vt, y.at(t_cur), 
             model.seas.period, model.seas.in_state);
-        arma::vec ht = ghat - G_next * theta_hat;
+        arma::vec ht = ghat - G_next * vt;
         r = U * (Vt_inv * vt - G_next.t() * W_inv * ht);
     }
     else
@@ -496,6 +496,7 @@ static void backward_kernel(
 
     return;
 }
+
 
 static arma::vec qbackcast(
     arma::mat &loc, // p x N, mean of the posterior of theta[t_cur] | y[t_cur:nT], theta[t_next], W
@@ -523,10 +524,12 @@ static arma::vec qbackcast(
         arma::vec r_cur(model.nP, arma::fill::zeros);
         arma::mat K_cur(model.nP, model.nP, arma::fill::zeros);
         arma::mat Uprec_cur = K_cur;
+        arma::mat Ulchol_cur = K_cur;
         double ldetU = 0.;
+
         backward_kernel(
-            K_cur, r_cur, Uprec_cur, ldetU, model, t_cur,
-            vt_cur, vt_next, Vprec_cur, Theta_cur.col(i), y);
+            K_cur, r_cur, Ulchol_cur, Uprec_cur, ldetU, model, t_cur,
+            vt_cur, vt_next, Vprec_cur, y);
 
         ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
         Uprec.slice(i) = Uprec_cur;
@@ -631,10 +634,12 @@ static arma::vec qbackcast(
         arma::vec r_cur(mod.nP, arma::fill::zeros);
         arma::mat K_cur(mod.nP, mod.nP, arma::fill::zeros);
         arma::mat Uprec_cur = K_cur;
+        arma::mat Ulchol_cur = K_cur;
         double ldetU = 0.;
+
         backward_kernel(
-            K_cur, r_cur, Uprec_cur, ldetU, mod, t_cur,
-            vt_cur.col(i), vt_next.col(i), Vprec, Theta_cur.col(i), y);
+            K_cur, r_cur, Ulchol_cur, Uprec_cur, ldetU, mod, t_cur,
+            vt_cur.col(i), vt_next.col(i), Vprec, y);
 
         ut.col(i) = K_cur * Theta_next.col(i) + r_cur;
         Uprec.slice(i) = Uprec_cur;

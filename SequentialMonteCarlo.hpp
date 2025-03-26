@@ -544,7 +544,7 @@ namespace SMC
             arma::cube &Theta, // p x N x (nT + 1)
             arma::mat &z, // N x (nT + 1)
             arma::mat &prob, // N x (nT + 1)
-            arma::mat &weights_forward, // (nT + 1) x N
+            arma::mat &weights_forecast, // (nT + 1) x N
             arma::vec &eff_forward, // (nT + 1) x 1
             arma::cube &Wt, // p x p x (nT + 1), only needs to be initialized if using discount factor.
             Model &model,
@@ -559,8 +559,8 @@ namespace SMC
             const unsigned int nT = y.n_elem - 1;
             const double logN = std::log(static_cast<double>(N));
 
-            weights_forward.set_size(y.n_elem, N);
-            weights_forward.zeros();
+            weights_forecast.set_size(y.n_elem, N);
+            weights_forecast.zeros();
             eff_forward.set_size(y.n_elem);
             eff_forward.zeros();
 
@@ -627,8 +627,11 @@ namespace SMC
                 tau.for_each([&tmax](arma::vec::elem_type &val)
                              { val = std::exp(val - tmax); });
 
-                tau = weights % tau;
-                weights_forward.row(t + 1) = logq.t();
+                tau = weights % tau; 
+                // resample by w[t-1] * q(y[t] | theta[t-1]) 
+                // so w[t-1] is canceled out in the calculation of w[t]
+                // in both forward filter and the two-filter smoother
+                weights_forecast.row(t + 1) = logq.t();
                 
 
                 if (t > 0)
@@ -639,8 +642,8 @@ namespace SMC
                         for (unsigned int k = 0; k <= t; k++)
                         {
                             Theta.slice(k) = Theta.slice(k).cols(resample_idx);
-                            arma::vec wtmp = arma::vectorise(weights_forward.row(k + 1));
-                            weights_forward.row(k + 1) = wtmp.elem(resample_idx).t();
+                            arma::vec wtmp = arma::vectorise(weights_forecast.row(k + 1));
+                            weights_forecast.row(k + 1) = wtmp.elem(resample_idx).t();
 
                             if (model.zero.inflated)
                             {
@@ -655,8 +658,8 @@ namespace SMC
                     else
                     {
                         Theta.slice(t) = Theta.slice(t).cols(resample_idx);
-                        arma::vec wtmp = arma::vectorise(weights_forward.row(t + 1));
-                        weights_forward.row(t + 1) = wtmp.elem(resample_idx).t();
+                        arma::vec wtmp = arma::vectorise(weights_forecast.row(t + 1));
+                        weights_forecast.row(t + 1) = wtmp.elem(resample_idx).t();
 
                         if (model.zero.inflated)
                         {
@@ -1162,10 +1165,10 @@ namespace SMC
                 Theta.slice(0) = arma::randn<arma::mat>(model.nP, N);
             }
 
-            arma::mat weights_forward(y.n_elem, N, arma::fill::zeros);
+            arma::mat weights_forecast(y.n_elem, N, arma::fill::zeros);
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
-                Theta, z, prob, weights_forward, eff_forward, Wt,
+                Theta, z, prob, weights_forecast, eff_forward, Wt,
                 model, y, N, false, true, 
                 use_discount, discount_factor, verbose);
 
@@ -1191,8 +1194,8 @@ namespace SMC
     {
     private:
         arma::cube Wt; // p x p x (nT + 1)
-        arma::mat weights_forward;  // (nT + 1) x N
-        arma::mat weights_backward; // (nT + 1) x N
+        arma::mat weights_forecast;  // (nT + 1) x N
+        arma::mat weights_backcast; // (nT + 1) x N
         arma::cube Theta_backward; // p x N x (nT + 1)
         bool resample_all = false;
 
@@ -1271,7 +1274,7 @@ namespace SMC
 
             arma::vec eff_backward(y.n_elem, arma::fill::zeros);
             Theta_backward = Theta; // p x N x (nT + B)
-            weights_backward = weights_forward;
+            weights_backcast = weights_forecast;
 
             arma::mat mu_marginal(model.nP, y.n_elem, arma::fill::zeros);
             arma::cube Prec_marginal(model.nP, model.nP, y.n_elem);
@@ -1319,6 +1322,9 @@ namespace SMC
                 // logq(y[t] | theta[t+1])
 
 
+                // resample by w[t+1] * q(y[t] | theta[t+1])
+                // so that w[t+1] is canceled out in the calculation of w[t]
+                // in both backward filter and the smoother.
                 arma::vec tau = logq + weights;
                 double tmax = tau.max();
                 tau.for_each([&tmax](arma::vec::elem_type &val)
@@ -1345,7 +1351,7 @@ namespace SMC
                     weights = weights.elem(resample_idx);
                 }
 
-                weights_backward.row(t) = logq.t();
+                weights_backcast.row(t) = logq.t();
 
                 /*
                 Propagation
@@ -1468,7 +1474,7 @@ namespace SMC
                 }
 
                 // arma::vec logp(N, arma::fill::zeros);
-                // arma::vec logq = arma::vectorise(weights_forward.row(t - 1) + weights_backward.row(t + 1));
+                // arma::vec logq = arma::vectorise(weights_forecast.row(t - 1) + weights_backcast.row(t + 1));
 
                 arma::mat Theta_next = Theta_backward.slice(t + 1);
                 arma::vec mu_marg = mu_marginal.col(t + 1);
@@ -1478,7 +1484,7 @@ namespace SMC
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
-                    double logq = weights_forward.at(t, i) + weights_backward.at(t, i);
+                    double logq = weights_forecast.at(t, i) + weights_backcast.at(t, i);
 
                     arma::vec gtheta_cur = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta.slice(t - 1).col(i), y.at(t - 1), model.seas.period, model.seas.in_state); // g(theta[t-1])
 
@@ -1634,7 +1640,7 @@ namespace SMC
 
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter(
-                Theta, z, prob, weights_forward, eff_forward, Wt,
+                Theta, z, prob, weights_forecast, eff_forward, Wt,
                 model, y, N, false, true,
                 use_discount, discount_factor, verbose);
             
@@ -1913,8 +1919,8 @@ namespace SMC
                 Theta = arma::randn<arma::cube>(model.nP, N, y.n_elem);
             }
 
-            weights_forward.set_size(y.n_elem, N);
-            weights_forward.zeros();
+            weights_forecast.set_size(y.n_elem, N);
+            weights_forecast.zeros();
             arma::vec eff_forward(y.n_elem, arma::fill::zeros);
             arma::vec log_cond_marginal = eff_forward;
 
@@ -1973,7 +1979,7 @@ namespace SMC
                 }
 
                 eff_forward.at(t + 1) = effective_sample_size(tau);
-                weights_forward.row(t) = logq.t();
+                weights_forecast.row(t) = logq.t();
 
                 // No need to update static parameters if we already inferred them during forward filtering once with the same data (filter_pass = true).
                 if (prior_W.infer)
@@ -2263,7 +2269,7 @@ namespace SMC
             Theta_backward = Theta;
             W_backward = W_filter;
             param_backward = param_filter;
-            weights_backward = weights_forward;
+            weights_backcast = weights_forecast;
 
             // mu0_filter.fill(model.dobs.par1); // N x 1
             arma::vec log_marg(N, arma::fill::zeros);
@@ -2338,7 +2344,7 @@ namespace SMC
                 }
 
                 eff_backward.at(t_cur) = effective_sample_size(tau);
-                weights_backward.row(t_next) = logq.t();
+                weights_backcast.row(t_next) = logq.t();
 
 
                 // NEED TO CHANGE PROPAGATE STEP
@@ -2493,7 +2499,7 @@ namespace SMC
                  * No resampling here because the resampling were performed in forward and backward filterings and the resampled particles are saved.
                  * 
                  */
-                arma::vec logq = arma::vectorise(weights_forward.row(t_prev) + weights_backward.row(t_next));
+                arma::vec logq = arma::vectorise(weights_forecast.row(t_prev) + weights_backcast.row(t_next));
 
                 arma::mat prec_tmp = Prec_marginal.col_as_mat(t_next); // nP^2 x N
                 arma::mat Prec_marg = prec_tmp;                        //.cols(resample_idx); 
@@ -2641,8 +2647,8 @@ namespace SMC
         arma::cube mu_marginal;    // nP x (nT + 1) x N
         arma::cube Prec_marginal;  // nP^2 x (nT + 1) x N
 
-        arma::mat weights_forward;  // (nT + 1) x N
-        arma::mat weights_backward; // (nT + 1) x N
+        arma::mat weights_forecast;  // (nT + 1) x N
+        arma::mat weights_backcast; // (nT + 1) x N
         arma::cube Theta_backward; // p x N x (nT + 1)
 
         arma::vec aw_forward; // N x 1, shape of IG
