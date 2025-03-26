@@ -1425,6 +1425,130 @@ namespace SMC
             return;
         }
 
+
+        /**
+         * @brief Bootstrap filtering style backward filter.
+         * @todo particle degeneracy is very bad.
+         * 
+         * @param model 
+         * @param y 
+         * @param verbose 
+         */
+        void bootstrap_backward_filter(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
+        {
+            std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+
+            arma::vec eff_backward(y.n_elem, arma::fill::zeros);
+            Theta_backward = Theta; // p x N x (nT + B)
+            weights_backcast = weights_forecast;
+            weights_backcast.zeros();
+
+            arma::mat mu_marginal(model.nP, y.n_elem, arma::fill::zeros);
+            arma::cube Prec_marginal(model.nP, model.nP, y.n_elem);
+            prior_forward(mu_marginal, Prec_marginal, model, y, Wt, use_discount);
+
+            arma::vec log_marg(N, arma::fill::zeros);
+            for (unsigned int i = 0; i < N; i++)
+            {
+                arma::vec theta = Theta_backward.slice(y.n_elem - 1).col(i);
+                log_marg.at(i) = MVNorm::dmvnorm2(
+                    theta, mu_marginal.col(y.n_elem - 1), Prec_marginal.slice(y.n_elem - 1), true);
+            }
+
+            for (unsigned int t = y.n_elem - 2; t > 0; t--)
+            {
+                Rcpp::checkUserInterrupt();
+
+                if (use_discount)
+                {
+                    if (model.derr.full_rank)
+                    {
+                        model.derr.var = Wt.slice(t + 1);
+                    }
+                    else
+                    {
+                        model.derr.var.at(0, 0) = Wt.at(0, 0, t + 1);
+                        model.derr.par1 = Wt.at(0, 0, t + 1);
+                    }
+                }
+
+
+                /*
+                Propagation
+                */
+                arma::mat Theta_next = Theta_backward.slice(t + 1); // nP x N;
+                arma::mat Theta_cur(model.nP, N, arma::fill::zeros);
+                arma::vec mu = mu_marginal.col(t);
+                arma::mat Prec = Prec_marginal.slice(t);
+
+                arma::vec mu_next = mu_marginal.col(t + 1);
+
+                arma::vec weights(N, arma::fill::zeros);
+
+                #ifdef DGTF_USE_OPENMP
+                    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #endif
+                for (unsigned int i = 0; i < N; i++)
+                {
+                    // Calculate backward evolution kernel: K[t], r[t], U[t]
+                    arma::vec rt(model.nP, arma::fill::zeros);
+                    arma::mat Kt(model.nP, model.nP, arma::fill::zeros);
+                    arma::mat Ut_inv = Kt;
+                    arma::mat Ut_lchol = Kt;
+                    double ldetU = 0.;
+                    backward_kernel(Kt, rt, Ut_lchol, Ut_inv, ldetU, model, t, mu, mu_next, Prec, y);
+
+                    arma::vec eps = Ut_lchol * arma::randn(model.nP);
+                    arma::vec ut = rt + Kt * Theta_next.col(i); // theta[t] = r[t] + K[t]*theta[t+1]
+                    arma::vec theta_cur = ut + eps;
+                    Theta_cur.col(i) = theta_cur;
+
+                    double logq = MVNorm::dmvnorm2(theta_cur, ut, Ut_inv, -ldetU, true); // backward evolution
+                    double logp = Model::logp_forward_evolution(model, Theta_next.col(i), theta_cur); // forward evolution
+
+                    double ft_cur = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta_cur, y);
+                    double lambda_cur = LinkFunc::ft2mu(ft_cur, model.dobs.name);
+                    logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda_cur, model.dobs.par2, true); // observation density / likelihood
+
+                    // logp.at(i) -= log_marg.at(i);
+                    logp -= log_marg.at(i); // p(theta[t + 1]): artificial prior of theta[t+1]
+                    log_marg.at(i) = MVNorm::dmvnorm2(theta_cur, mu, Prec, true);
+                    logp += log_marg.at(i); // p(theta[t]): artificial prior of theta[t]
+                    weights.at(i) = logp - logq; // + logw_next;
+                } // loop over i, index of particles
+
+                Theta_backward.slice(t) = Theta_cur;
+
+
+                // resample
+                double wmax = weights.max();
+                arma::vec wtmp = arma::exp(weights - wmax);
+                eff_backward.at(t) = effective_sample_size(wtmp);
+                
+                arma::uvec resample_idx = get_resample_index(wtmp);
+                Theta_backward.slice(t + 1) = Theta_backward.slice(t + 1).cols(resample_idx);
+
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rBackward Filtering: " << y.n_elem - t << "/" << (y.n_elem - 1);
+                }
+
+            } // propagate and resample
+
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+
+            // psi_backward = Theta_backward.row_as_mat(0); // (nT + 1) x N
+            arma::mat psi = Theta_backward.row_as_mat(0);
+            output["psi_backward"] = Rcpp::wrap(arma::quantile(psi, ci_prob, 1));
+            output["eff_backward"] = Rcpp::wrap(eff_backward.t());
+            return;
+        }
+
+
+
         void smoother(Model &model, const arma::vec &y, const bool &verbose = VERBOSE)
         {
             Theta_smooth = Theta;
