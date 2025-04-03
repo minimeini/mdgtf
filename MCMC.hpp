@@ -11,6 +11,7 @@
 #include "Model.hpp"
 #include "LinkFunc.hpp"
 #include "LinearBayes.hpp"
+#include "StaticParams.hpp"
 
 namespace MCMC
 {
@@ -499,10 +500,9 @@ namespace MCMC
 
             // half step update of momentum
             unsigned int nlag = model.dlag.nL;
-            arma::vec Fphi_new = model.dlag.Fphi;
 
             arma::vec grad_U = Model::dloglik_dlag(
-                Fphi_new, y, hpsi, nlag,
+                y, hpsi, nlag,
                 lag_dist, par1_old, par2_old,
                 model.dobs, model.seas, model.zero, model.flink);
 
@@ -524,7 +524,7 @@ namespace MCMC
 
                 nlag = LagDist::get_nlag(lag_dist, par1_new, par2_new, 0.99, max_lag);
                 grad_U = Model::dloglik_dlag(
-                    Fphi_new, y, hpsi, nlag,
+                    y, hpsi, nlag,
                     lag_dist, par1_new, par2_new,
                     model.dobs, model.seas, model.zero, model.flink);
                 grad_U.at(0) += Prior::dlogprior_dpar(par1_new, par1_prior, true);
@@ -545,6 +545,7 @@ namespace MCMC
 
             // log of conditional posterior for the proposed lag parameters.
             double logp_new = 0.;
+            arma::vec Fphi_new = LagDist::get_Fphi(nlag, lag_dist, par1_new, par2_new);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
@@ -878,13 +879,13 @@ namespace MCMC
 
                 if (par1_prior.infer || par2_prior.infer)
                 {
-                    Posterior::update_dlag(
-                        par1_accept, par2_accept, model,
-                        y, hpsi, par1_prior, par2_prior,
-                        par1_mh_sd, par2_mh_sd, max_lag);
-                    // arma::vec out = Posterior::update_dlag_hmc(
-                    //     par1_accept, par2_accept, model, y, hpsi,
-                    //     par1_prior, par2_prior, epsilon, L, m, max_lag);
+                    // Posterior::update_dlag(
+                    //     par1_accept, par2_accept, model,
+                    //     y, hpsi, par1_prior, par2_prior,
+                    //     par1_mh_sd, par2_mh_sd, max_lag);
+                    arma::vec out = Posterior::update_dlag_hmc(
+                        par1_accept, par2_accept, model, y, hpsi,
+                        par1_prior, par2_prior, epsilon, L, m, max_lag);
                 }
 
                 if (seas_prior.infer)
