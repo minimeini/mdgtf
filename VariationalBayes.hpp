@@ -12,6 +12,8 @@
 #include "yjtrans.h"
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
+#include "StaticParams.hpp"
+// #include "MCMC.hpp"
 
 // [[Rcpp::depends(RcppArmadillo)]]
 
@@ -21,9 +23,9 @@ namespace VB
     {
     public:
         unsigned int nsample = 1000;
-        unsigned int nthin = 2;
-        unsigned int nburnin = 1000;
-        unsigned int ntotal = 3001;
+        // unsigned int nthin = 2;
+        unsigned int niter = 1000;
+        // unsigned int ntotal = 3001;
         unsigned int N = 500; // number of SMC particles
 
         bool use_discount = false;
@@ -58,19 +60,23 @@ namespace VB
                 nsample = Rcpp::as<unsigned int>(opts["nsample"]);
             }
 
-            nthin = 1000;
-            if (opts.containsElementNamed("nthin"))
+            // nthin = 1000;
+            // if (opts.containsElementNamed("nthin"))
+            // {
+            //     nthin = Rcpp::as<unsigned int>(opts["nthin"]);
+            // }
+
+            niter = 5000;
+            if (opts.containsElementNamed("niter"))
             {
-                nthin = Rcpp::as<unsigned int>(opts["nthin"]);
+                niter = Rcpp::as<unsigned int>(opts["niter"]);
+            }
+            else if (opts.containsElementNamed("nburnin"))
+            {
+                niter = Rcpp::as<unsigned int>(opts["nburnin"]);
             }
 
-            nburnin = 1000;
-            if (opts.containsElementNamed("nburnin"))
-            {
-                nburnin = Rcpp::as<unsigned int>(opts["nburnin"]);
-            }
-
-            ntotal = nburnin + nthin * nsample + 1;
+            // ntotal = niter + nthin * nsample + 1;
 
             N = 500;
             if (opts.containsElementNamed("num_particle"))
@@ -91,162 +97,72 @@ namespace VB
                 discount_factor = Rcpp::as<double>(opts["discount_factor"]);
             }
 
-            param_selected.clear();
-            m = 0;
-            
-            W_prior.init("invgamma", 1., 1.);
-            W_prior.infer = false;
-            if (opts.containsElementNamed("W"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["W"]);
-                W_prior.init(param_opts);
-            }
-            if (W_prior.infer)
-            {
-                param_selected.push_back("W");
-                m += 1;
-                W_stored.set_size(nsample);
-                W_stored.zeros();
-            }
-
-            seas_prior.init("gaussian", 1., 10.);
-            seas_prior.infer = false;
-            if (opts.containsElementNamed("seas"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["seas"]);
-                seas_prior.init(param_opts);
-            }
-            if (seas_prior.infer)
-            {
-                param_selected.push_back("seas");
-                m += model.seas.period;
-                seas_stored.set_size(model.seas.period, nsample);
-                seas_stored.zeros();
-            }
-            
-            rho_prior.init("invgamma", 1., 1.);
-            rho_prior.infer = false;
-            if (opts.containsElementNamed("rho"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
-                rho_prior.init(param_opts);
-            }
-            if (rho_prior.infer)
-            {
-                param_selected.push_back("rho");
-                m += 1;
-                rho_stored.set_size(nsample);
-                rho_stored.zeros();
-            }
-
-            par1_stored.set_size(nsample);
-            par1_prior.init("gaussian", 0., 1.);
-            par1_prior.infer = false;
-            if (opts.containsElementNamed("par1"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
-                par1_prior.init(param_opts);
-            }
-            if (par1_prior.infer)
-            {
-                param_selected.push_back("par1");
-                m += 1;
-                par1_stored.set_size(nsample);
-                par1_stored.zeros();
-            }
-
-            par2_prior.init("invgamma", 1., 1.);
-            par2_prior.infer = false;
-            if (opts.containsElementNamed("par2"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
-                par2_prior.init(param_opts);
-            }
-            if (par2_prior.infer)
-            {
-                param_selected.push_back("par2");
-                m += 1;
-                par2_stored.set_size(nsample);
-                par2_stored.zeros();
-            }
-
-            zintercept_infer = false;
-            if (opts.containsElementNamed("zintercept"))
-            {
-                zintercept_infer = Rcpp::as<bool>(opts["zintercept"]);
-                if (zintercept_infer)
-                {
-                    param_selected.push_back("zintercept");
-                    m += 1;
-                    zintercept_stored.set_size(nsample);
-                    zintercept_stored.zeros();
-                }
-            }
-
-            zzcoef_infer = false;
-            if (opts.containsElementNamed("zzcoef"))
-            {
-                zzcoef_infer = Rcpp::as<bool>(opts["zzcoef"]);
-                if (zzcoef_infer) {
-                    param_selected.push_back("zzcoef");
-                    m += 1;
-                    zzcoef_stored.set_size(nsample);
-                    zzcoef_stored.zeros();
-                }
-            }
+            Static::init_prior(
+                param_selected, m,
+                W_prior, seas_prior, rho_prior,
+                par1_prior, par2_prior,
+                zintercept_infer, zzcoef_infer,
+                opts, model);
 
             update_static = false;
             if (m > 0)
             {
                 update_static = true;
             }
+
+            if (W_prior.infer)
+            {
+                W_stored.set_size(nsample);
+                W_stored.zeros();
+            }
+
+            if (seas_prior.infer)
+            {
+                seas_stored.set_size(model.seas.period, nsample);
+                seas_stored.zeros();
+            }
+
+            if (rho_prior.infer)
+            {
+                rho_stored.set_size(nsample);
+                rho_stored.zeros();
+            }
+
+            if (par1_prior.infer)
+            {
+                par1_stored.set_size(nsample);
+                par1_stored.zeros();
+            }
+
+            if (par2_prior.infer)
+            {
+                par2_stored.set_size(nsample);
+                par2_stored.zeros();
+            }
+
+            if (zintercept_infer)
+            {
+                zintercept_stored.set_size(nsample);
+                zintercept_stored.zeros();
+            }
+
+            if (zzcoef_infer) {
+                zzcoef_stored.set_size(nsample);
+                zzcoef_stored.zeros();
+            }
+            
         }
 
 
         static Rcpp::List default_settings()
         {
-            Rcpp::List W_opts;
-            W_opts["infer"] = false;
-            W_opts["prior_name"] = "invgamma";
-            W_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
-
-            Rcpp::List seas_opts;
-            seas_opts["infer"] = false;
-            seas_opts["prior_name"] = "gaussian";
-            seas_opts["prior_param"] = Rcpp::NumericVector::create(1., 10.);
-
-            Rcpp::List rho_opts;
-            rho_opts["infer"] = false;
-            rho_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
-            rho_opts["prior_name"] = "invgamma";
-
-            Rcpp::List par1_opts;
-            par1_opts["infer"] = false;
-            par1_opts["prior_param"] = Rcpp::NumericVector::create(0., 1.);
-            par1_opts["prior_name"] = "gaussian";
-
-            Rcpp::List par2_opts;
-            par2_opts["infer"] = false;
-            par2_opts["prior_param"] = Rcpp::NumericVector::create(1., 1.);
-            par2_opts["prior_name"] = "invgamma";
-
-
-            Rcpp::List opts;
+            Rcpp::List opts = Static::default_settings();
             opts["nsample"] = 1000;
-            opts["nthin"] = 1;
-            opts["nburnin"] = 1000;
-            opts["num_particle"] = 100;
+            // opts["nthin"] = 1;
+            opts["niter"] = 5000;
+            opts["num_particle"] = 500;
             opts["use_discount"] = false;
             opts["discount_factor"] = 0.95;
-
-            opts["W"] = W_opts;
-            opts["seas"] = seas_opts;
-            opts["rho"] = rho_opts;
-            opts["par1"] = par1_opts;
-            opts["par2"] = par2_opts;
-            opts["zintercept"] = false;
-            opts["zzcoef"] = false;
-
             return opts;
         }
     };
@@ -377,6 +293,15 @@ namespace VB
             }
             k = std::min(k, m);
 
+            marglike_stored.set_size(niter);
+            marglike_stored.zeros();
+
+            condlike_stored.set_size(niter);
+            condlike_stored.zeros();
+
+            grad_stored.set_size(niter);
+            grad_stored.zeros();
+
             gamma.set_size(m);
             gamma.ones();
             grad_tau.init(m, learning_rate, eps_step_size);
@@ -391,8 +316,8 @@ namespace VB
 
             eps = d;
 
-            eta = init_eta(param_selected, model_in, update_static); // Checked. OK.
-            eta_tilde = eta2tilde(eta, param_selected, W_prior.name, par1_prior.name, model_in.seas.period, model_in.seas.in_state);
+            eta = Static::init_eta(param_selected, model_in, update_static); // Checked. OK.
+            eta_tilde = Static::eta2tilde(eta, param_selected, W_prior.name, par1_prior.name, model_in.seas.period, model_in.seas.in_state);
 
             nu = tYJ(eta_tilde, gamma);
 
@@ -423,763 +348,6 @@ namespace VB
             return opts;
         }
 
-        static arma::vec eta2tilde( // Checked. OK.
-            const arma::vec &eta,   // m x 1
-            const std::vector<std::string> &param_selected,
-            const std::string &W_prior = "invgamma",
-            const std::string &lag_par1_prior = "gaussian",
-            const unsigned int &seasonal_period = 1,
-            const bool &season_in_state = false)
-        {
-            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-
-            arma::vec eta_tilde = eta;
-            unsigned int idx = 0;
-            for (unsigned int i = 0; i < param_selected.size(); i++)
-            {
-                double val = eta.at(idx);
-                switch (static_param_list[tolower(param_selected[i])])
-                {
-                case AVAIL::Param::W:
-                {
-                    switch (dist_list[tolower(W_prior)])
-                    {
-                    case AVAIL::Dist::invgamma:
-                    {
-                        eta_tilde.at(idx) = -std::log(std::abs(val) + EPS);
-                        break;
-                    }
-                    case AVAIL::Dist::gamma:
-                    {
-                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
-                        break;
-                    }
-                    default:
-                    {
-                        throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined prior " + W_prior + " for W.");
-                        break;
-                    }
-                    } // switch W prior.
-
-                    idx += 1;
-                    break;
-                } // W
-                case AVAIL::Param::seas:
-                {
-                    // bound_check(val, "VB::Hybrid::eta2tilde: mu0", false, true);
-                    if (!season_in_state)
-                    {
-                        arma::vec seas = eta.subvec(idx, idx + seasonal_period - 1);
-
-                        #ifdef DGTF_DO_BOUND_CHECK
-                            bound_check<arma::vec>(seas, "VB::Hybrid::eta2tilde: seas", false, true);
-                        #endif
-
-                        eta_tilde.subvec(idx, idx + seasonal_period - 1) = arma::log(seas + EPS);
-                        idx += seasonal_period;
-                    }
-                    break;
-                } // mu0
-                case AVAIL::Param::rho:
-                {
-                    eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
-                    idx += 1;
-                    break;
-                } // rho
-                case AVAIL::Param::lag_par1:
-                {
-                    switch (dist_list[tolower(lag_par1_prior)])
-                    {
-                    case AVAIL::Dist::gaussian:
-                    {
-                        eta_tilde.at(idx) = val;
-                        break;
-                    }
-                    case AVAIL::Dist::invgamma:
-                    {
-                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
-                        break;
-                    }
-                    case AVAIL::Dist::gamma:
-                    {
-                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
-                        break;
-                    }
-                    case AVAIL::Dist::beta:
-                    {
-                        eta_tilde.at(idx) = std::log(std::abs(val) + EPS) - std::log(std::abs(1. - val) + EPS);
-                        break;
-                    }
-                    default:
-                    {
-                        throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined prior " + lag_par1_prior + " for first parameter of lag distribution.");
-                        break;
-                    }
-                    } // switch prior type for lag_par1.
-
-                    idx += 1;
-                    break;
-                } // lag_par1
-                case AVAIL::Param::lag_par2:
-                {
-                    eta_tilde.at(idx) = std::log(std::abs(val) + EPS);
-                    idx += 1;
-                    break;
-                } // lag_par2
-                case AVAIL::Param::zintercept:
-                {
-                    eta_tilde.at(idx) = val;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zzcoef:
-                {
-                    idx += 1;
-                    eta_tilde.at(idx) = val;
-                    break;
-                }
-                default:
-                {
-                    throw std::invalid_argument("VB::Hybrid::eta2tilde: undefined static parameter " + param_selected[i]);
-                    break;
-                }
-                } // switch param
-            }
-
-            #ifdef DGTF_DO_BOUND_CHECK
-                bound_check<arma::vec>(eta_tilde, "VB::Hybrid::eta2tilde: eta_tilde");
-            #endif
-            return eta_tilde;
-        }
-
-        static arma::vec tilde2eta(     // Checked. OK.
-            const arma::vec &eta_tilde, // m x 1
-            const std::vector<std::string> &param_selected,
-            const std::string &W_prior = "invgamma",
-            const std::string &lag_par1_prior = "gaussian",
-            const std::string &lag_dist = "lognorm",
-            const unsigned int &seasonal_period = 1,
-            const bool &season_in_state = false)
-        {
-            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-            std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
-            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-
-            arma::vec eta = eta_tilde;
-            unsigned int idx = 0;
-            for (unsigned int i = 0; i < param_selected.size(); i++)
-            {
-                double val = eta_tilde.at(idx);
-                switch (static_param_list[tolower(param_selected[i])])
-                {
-                case AVAIL::Param::W:
-                {
-                    switch (dist_list[tolower(W_prior)])
-                    {
-                    case AVAIL::Dist::invgamma:
-                    {
-                        val *= -1.;
-                        val = std::min(val, UPBND);
-                        eta.at(idx) = std::exp(val);
-                        break;
-                    }
-                    case AVAIL::Dist::gamma:
-                    {
-                        val = std::min(val, UPBND);
-                        eta.at(idx) = std::exp(val);
-                        break;
-                    }
-                    default:
-                    {
-                        break;
-                    }
-                    } // switch W prior.
-
-                    idx += 1;
-                    break;
-                } // W
-                case AVAIL::Param::seas:
-                {
-                    if (!season_in_state)
-                    {
-                        arma::vec log_seas = eta_tilde.subvec(idx, idx + seasonal_period - 1);
-                        log_seas.clamp(log_seas.min(), UPBND);
-                        eta.subvec(idx, idx + seasonal_period - 1) = arma::exp(log_seas);
-                        idx += seasonal_period;
-                    }
-                    break;
-                } // mu0
-                case AVAIL::Param::rho:
-                {
-                    val = std::min(val, UPBND);
-                    eta.at(idx) = std::exp(val);
-
-                    idx += 1;
-                    break;
-                } // rho
-                case AVAIL::Param::lag_par1:
-                {
-                    switch (dist_list[tolower(lag_par1_prior)])
-                    {
-                    case AVAIL::Dist::gaussian:
-                    {
-                        eta.at(idx) = val;
-                        break;
-                    }
-                    case AVAIL::Dist::invgamma:
-                    {
-                        val = std::min(val, UPBND);
-                        eta.at(idx) = std::exp(val);
-                        break;
-                    }
-                    case AVAIL::Dist::gamma:
-                    {
-                        val = std::min(val, UPBND);
-                        eta.at(idx) = std::exp(val);
-                        break;
-                    }
-                    case AVAIL::Dist::beta:
-                    {
-                        val = std::min(val, UPBND);
-                        double tmp = std::exp(val);
-                        eta.at(idx) = tmp;
-                        eta.at(idx) /= (1. + tmp);
-                        break;
-                    }
-                    default:
-                    {
-                        throw std::invalid_argument("VB::Hybrid::tilde2eta: undefined prior " + lag_par1_prior + " for first parameter of lag distribution.");
-                        break;
-                    }
-                    } // switch prior type for lag_par1.
-
-                    idx += 1;
-                    break;
-                } // lag_par1
-                case AVAIL::Param::lag_par2:
-                {
-                    val = std::min(val, UPBND);
-                    eta.at(idx) = std::exp(val);
-
-                    if (lag_list[lag_dist] == AVAIL::Dist::nbinomp)
-                    {
-                        eta.at(idx) = std::max(std::ceil(eta.at(idx)), 1.);
-                    }
-                    else
-                    idx += 1;
-                    break;
-                } // lag_par2
-                case AVAIL::Param::zintercept:
-                {
-                    eta.at(idx) = val;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zzcoef:
-                {
-                    eta.at(idx) = val;
-                    idx += 1;
-                    break;
-                }
-                default:
-                {
-                    throw std::invalid_argument("VB::Hybrid::tilde2eta: undefined static parameter " + param_selected[i]);
-                    break;
-                }
-                } // switch param
-
-                
-            }
-
-            #ifdef DGTF_DO_BOUND_CHECK
-                bound_check<arma::vec>(eta, "tilde2eta: eta");
-            #endif
-            return eta;
-        }
-
-        /*
-        ------ dlogJoint_dWtilde ------
-        The derivative of the full joint density with respect to Wtilde=log(1/W), where W
-        is the evolution variance that affects
-            psi[t] | psi[t-1] ~ N(psi[t-1], W)
-
-        Therefore, this function remains unchanged as long as we using the same evolution equation for psi.
-        */
-        static double dlogJoint_dWtilde(
-            const arma::mat &Theta, // nP x (nT + 1)
-            const double W,              // evolution variance conditional on V
-            const Dist &W_prior,
-            const ZeroInflation &zero,
-            const bool &full_rank = false)
-        {
-            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-            double aw = W_prior.par1;
-            double bw = W_prior.par2;
-            const double p = full_rank ? static_cast<double>(Theta.n_rows) : 1.;
-
-            double res = 0.;
-            double cnt = 0.;
-            for (unsigned int t = 1; t < Theta.n_cols; t++)
-            {
-                if (zero.inflated && zero.z.at(t) < EPS)
-                {
-                    continue;
-                }
-
-                cnt += 1.;
-                double tmp = 0.;
-                if (full_rank)
-                {
-                    arma::vec err = Theta.col(t) - Theta.col(t - 1);
-                    tmp = arma::as_scalar(err.t() * err);
-                }
-                else
-                {
-                    double err = Theta.at(0, t) - Theta.at(0, t - 1);
-                    tmp = err * err;
-                }
-                res += tmp;
-            }
-            // res = sum((w[t])^2)
-
-            double deriv;
-            if (dist_list[W_prior.name] == AVAIL::Dist::invgamma)
-            {
-                double bnew = bw + 0.5 * res;
-                double log_bnew_W = std::log(std::abs(bnew) + EPS) - std::log(std::abs(W) + EPS);
-                log_bnew_W = std::min(log_bnew_W, UPBND);
-                deriv = -std::exp(log_bnew_W);
-
-                double a_new = aw;
-                a_new += 0.5 * cnt * p;
-                a_new += 1.;
-                deriv += a_new;
-            }
-            else
-            {
-                double rdw = std::log(std::abs(res) + EPS) - std::log(std::abs(W) + EPS); // sum(w[t]^2) / W
-                rdw = std::min(rdw, UPBND);
-                rdw = std::exp(rdw);
-                #ifdef DGTF_DO_BOUND_CHECK
-                bound_check(rdw, "dlogJoint_dWtilde: rdw");
-                #endif
-
-                if (dist_list[W_prior.name] == AVAIL::Dist::gamma)
-                {
-                    deriv = aw;
-                    deriv -= 0.5 * cnt;
-                    deriv -= bw * W;
-                    deriv += 0.5 * rdw;
-                }
-                else if (dist_list[W_prior.name] == AVAIL::Dist::halfcauchy)
-                {
-                    deriv = 0.5 * cnt - 0.5 * rdw + W / (bw * bw + W) - 0.5;
-                }
-                else
-                {
-                    throw std::invalid_argument("dlogJoint_dWtilde: prior is not defined.");
-                }
-            }
-
-            #ifdef DGTF_DO_BOUND_CHECK
-                bound_check(deriv, "dlogJoint_dWtilde: deriv");
-            #endif
-            return deriv;
-        }
-
-
-        /**
-         * @todo Move this to the corresponding distribution.
-         * @brief
-         *
-         * @param Wtilde
-         * @param W_prior
-         * @return double
-         */
-        static double logprior_Wtilde( // Checked. OK.
-            const double &Wtilde,      // evolution variance conditional on V
-            const Dist &W_prior)
-        {
-            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
-
-            double InvGamma_cnst = W_prior.par1;
-            InvGamma_cnst *= std::log(W_prior.par2);
-            InvGamma_cnst -= std::lgamma(W_prior.par1);
-
-            double logp = -16.;
-            switch (dist_list[W_prior.name])
-            {
-            case AVAIL::Dist::invgamma:
-            {
-                /*
-                W ~ Inverse-Gamma(aw=shape, bw=rate)
-                Wtilde = -log(W)
-                */
-                logp = InvGamma_cnst;
-                logp += W_prior.par1 * Wtilde;
-                double Wast = std::min(Wtilde, UPBND);
-                logp -= W_prior.par2 * std::exp(Wast);
-                break;
-            }
-            case AVAIL::Dist::gamma:
-            {
-                /*
-                W ~ Gamma(aw=shape, bw=rate)
-                Wtilde = log(W)
-                */
-                logp = W_prior.par1 * std::log(W_prior.par2);
-                logp -= std::lgamma(W_prior.par1);
-                logp += W_prior.par1 * Wtilde;
-
-                double Wast = std::min(Wtilde, UPBND);
-                logp -= W_prior.par2 * std::exp(Wast);
-                break;
-            }
-            default:
-            {
-                break;
-            }
-            } // switch by W prior type
-
-            #ifdef DGTF_DO_BOUND_CHECK
-                bound_check(logp, "logprior_Wtilde: logp");
-            #endif
-
-            return logp;
-        }
-
-        /*
-        ------ dlogJoint_dlogmu0 ------
-        The derivative of the full joint density with respect to logmu0=log(mu0), where mu0
-        is the baseline intensity such that:
-            y[t] ~ EFM(lambda[t]=mu[0]+lambda[t])
-
-        mu0 > 0 has a Gamma prior:
-            mu[0] ~ Gamma(amu,bmu)
-        */
-        static arma::vec dloglike_dlogseas( // Checked. OK.
-            const arma::vec &y,           // (nT+1) x 1
-            const arma::vec &lambda,          // (n+1) x 1, (f[0],f[1],...,f[nT])
-            const ObsDist &dobs,
-            const ZeroInflation & zero,
-            const arma::vec &seas,
-            const arma::mat &Xseas)
-        { // 0 - negative binomial; 1 - poisson
-
-            arma::vec deriv(seas.n_elem, arma::fill::zeros);
-            for (unsigned int t = 1; t < y.n_elem; t++)
-            {
-                if (zero.inflated && zero.z.at(t) < EPS)
-                {
-                    continue;
-                }
-
-                double dy_dlambda = ObsDist::dloglike_dlambda(y.at(t), lambda.at(t), dobs);
-                arma::vec dlambda_dlogseas = Xseas.col(t) % seas;
-                deriv = deriv + dy_dlambda * dlambda_dlogseas;
-            }
-            return deriv;
-        }
-
-
-        static arma::vec logprior_logseas(
-            const arma::vec &logseas, // evolution variance conditional on V
-            const double &sig2_mu0 = 10.)
-        {
-            /*
-            log(mu0) ~ N(0,sig2_mu0)
-            */
-            arma::vec logp = - logseas / sig2_mu0;
-            #ifdef DGTF_DO_BOUND_CHECK
-                bound_check<arma::vec>(logp, "logprior_logseas: logp");
-            #endif
-            return logp;
-        }
-
-
-        static double dlogJoint_dzintercept(
-            const ZeroInflation &zero
-        ){
-            arma::vec diff = zero.z - zero.prob;
-            return arma::accu(diff);
-        }
-
-        static double dlogJoint_dzzcoef(const ZeroInflation& zero)
-        {
-            arma::vec diff = zero.z - zero.prob;
-            return arma::accu(diff % zero.z);
-        }
-
-        /**
-         * @brief Derivative of the logarithm of joint probability with respect to parameters mapped to real-line (but before Yeo-Johnson transformation).
-         *
-         * @param y
-         * @param psi
-         * @param ft
-         * @param eta
-         * @param param_selected
-         * @param W_prior
-         * @param lag_par1_prior
-         * @param lag_par2_prior
-         * @param rho_prior
-         * @param model
-         * @return arma::vec
-         */
-        static arma::vec dlogJoint_deta( // Checked. OK.
-            const arma::vec &y,          // (nT + 1) x 1
-            const arma::mat &Theta,        // nP x (nT + 1)
-            const arma::vec &lambda,         // (nT + 1) x 1
-            const arma::vec &dllk_dpar, // 2 x 1
-            const arma::vec &eta,        // m x 1
-            const std::vector<std::string> &param_selected,
-            const Prior &W_prior,
-            const Prior &lag_par1_prior,
-            const Prior &lag_par2_prior,
-            const Prior &rho_prior,
-            const Prior &seas_prior,
-            const Model &model)
-        {
-            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-            unsigned int nelem = param_selected.size();
-            for (unsigned int i = 0; i < param_selected.size(); i++)
-            {
-                if (static_param_list[tolower(param_selected[i])] == AVAIL::Param::seas)
-                {
-                    nelem += model.seas.period - 1;
-                }
-            }
-            arma::vec deriv(nelem, arma::fill::zeros);
-
-            unsigned int idx = 0;
-            for (unsigned int i = 0; i < param_selected.size(); i++)
-            {
-                double val = eta.at(idx);
-
-                switch (static_param_list[tolower(param_selected[i])])
-                {
-                case AVAIL::Param::W:
-                {
-                    deriv.at(idx) = dlogJoint_dWtilde(
-                        Theta, val, W_prior, model.zero, model.derr.full_rank);
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::seas:
-                {
-                    arma::vec seas = arma::abs(eta.subvec(idx, idx + model.seas.period - 1));
-                    arma::vec logseas = arma::log(seas + EPS);
-
-                    arma::vec dloglik = dloglike_dlogseas(
-                        y, lambda, model.dobs, model.zero, seas, model.seas.X);
-                    arma::vec dlogprior = logprior_logseas(logseas, seas_prior.par2);
-
-                    deriv.subvec(idx, idx + model.seas.period - 1) = dloglik + dlogprior;
-                    idx += model.seas.period;
-                    break;
-                }
-                case AVAIL::Param::rho:
-                {
-                    deriv.at(idx) = Model::dlogp_dpar2_obs(model, y, lambda, true);
-                    deriv.at(idx) += Prior::dlogprior_dpar(model.dobs.par2, rho_prior, true);
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::lag_par1:
-                {
-                    deriv.at(idx) = dllk_dpar.at(0);
-                    deriv.at(idx) += Prior::dlogprior_dpar(model.dlag.par1, lag_par1_prior, true);
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::lag_par2:
-                {
-                    deriv.at(idx) = dllk_dpar.at(1);
-                    deriv.at(idx) += Prior::dlogprior_dpar(model.dlag.par2, lag_par2_prior, true);
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zintercept:
-                {
-                    deriv.at(idx) = dlogJoint_dzintercept(model.zero);
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zzcoef:
-                {
-                    deriv.at(idx) = dlogJoint_dzzcoef(model.zero);
-                    idx += 1;
-                    break;
-                }
-                default:
-                {
-                    break;
-                }
-                } // switch param
-            }
-
-            return deriv;
-        }
-
-        static arma::vec init_eta( // Checked. OK.
-            const std::vector<std::string> &params_selected,
-            const Model &model,
-            const bool &update_static)
-        {
-            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-            unsigned int nelem = params_selected.size();
-            for (unsigned int i = 0; i < params_selected.size(); i++)
-            {
-                if (static_param_list[tolower(params_selected[i])] == AVAIL::Param::seas)
-                {
-                    nelem += model.seas.period - 1;
-                }
-            }
-            arma::vec eta(nelem, arma::fill::zeros);
-
-            if (!update_static)
-            {
-                return eta;
-            }
-
-            unsigned int idx = 0;
-            for (unsigned int i = 0; i < params_selected.size(); i++)
-            {
-                switch (static_param_list[params_selected[i]])
-                {
-                case AVAIL::Param::W:
-                {
-                    eta.at(idx) = model.derr.par1;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::seas:
-                {
-                    eta.subvec(idx, idx + model.seas.period - 1) = model.seas.val;
-                    idx += model.seas.period;
-                    break;
-                }
-                case AVAIL::Param::rho:
-                {
-                    eta.at(idx) = model.dobs.par2;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::lag_par1:
-                {
-                    eta.at(idx) = model.dlag.par1;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::lag_par2:
-                {
-                    eta.at(idx) = model.dlag.par2;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zintercept:
-                {
-                    eta.at(idx) = model.zero.intercept;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zzcoef:
-                {
-                    eta.at(idx) = model.zero.coef;
-                    idx += 1;
-                    break;
-                }
-                default:
-                {
-                    break;
-                }
-                } // switch by param
-            }
-
-            return eta;
-        }
-
-        static void update_params(
-            Model &model,
-            const std::vector<std::string> &params_selected,
-            const arma::vec &eta)
-        {
-            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
-            bool update_dlag = false;
-
-            unsigned int idx = 0;
-            for (unsigned int i = 0; i < params_selected.size(); i++)
-            {
-                double val = eta.at(idx);
-                switch (static_param_list[params_selected[i]])
-                {
-                case AVAIL::Param::W: // W is selected
-                {
-                    model.derr.par1 = val;
-                    if (model.derr.full_rank)
-                    {
-                        model.derr.var.zeros();
-                        model.derr.var.diag().fill(val);
-                    }
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::seas: // mu0 is selected
-                {
-                    model.seas.val = eta.subvec(idx, idx + model.seas.period - 1);
-                    idx += model.seas.period;
-                    break;
-                }
-                case AVAIL::Param::rho: // rho is selected
-                {
-                    model.dobs.par2 = val;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::lag_par1: // par 1 is selected
-                {
-                    update_dlag = true;
-                    model.dlag.par1 = val;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::lag_par2: // par 2 is selected
-                {
-                    update_dlag = true;
-                    model.dlag.par2 = val;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zintercept:
-                {
-                    model.zero.intercept = val;
-                    idx += 1;
-                    break;
-                }
-                case AVAIL::Param::zzcoef:
-                {
-                    model.zero.coef = val;
-                    idx += 1;
-                    break;
-                }
-                default:
-                {
-                    throw std::invalid_argument("VB::Hybrid::update_params: undefined static parameter " + params_selected[i]);
-                    break;
-                }
-                }
-            }
-
-            if (update_dlag)
-            {
-                model.dlag.nL = LagDist::get_nlag(model.dlag);
-                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
-                model.nP = Model::get_nP(model.dlag, model.seas.period, model.seas.in_state);
-            }
-
-            return;
-        }
-
        
         void infer(
             Model &model, 
@@ -1193,36 +361,26 @@ namespace VB
             model.zero.z.set_size(y.n_elem);
             model.zero.z.ones();
             model.zero.prob = model.zero.z;
-            if (model.zero.inflated)
-            {
-                z_stored.set_size(y.n_elem, nsample);
-                prob_stored.set_size(y.n_elem, nsample);
-            }
 
-            if (sys_list[model.fsys] == SysEq::Evolution::identity)
-            {
-                psi_stored.set_size(model.nP, nsample);
-                Theta_stored = arma::zeros<arma::cube>(model.nP, y.n_elem, nsample);
-            }
-            else
-            {
-                psi_stored.set_size(y.n_elem, nsample);
-            }
-            psi_stored.zeros();
 
-            for (unsigned int b = 0; b < ntotal; b++)
+            for (unsigned int b = 0; b < niter; b++)
             {
-                bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
+                // bool saveiter = b > niter && ((b - niter - 1) % nthin == 0);
                 Rcpp::checkUserInterrupt();
 
-                // You MUST set initial_resample_all = true and final_resample_by_weights = false to make this algorithm work.
+                // TFS sampler
+                // ------------------
+                // You MUST set initial_resample_all = true (MCS smoothing) and final_resample_by_weights = false (reduce degeneracy) to make this algorithm work.
                 arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::mat ztmp(N, y.n_elem, arma::fill::ones);
                 arma::mat ptmp(N, y.n_elem, arma::fill::randu);
-                double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
+                double marg_loglik = SMC::SequentialMonteCarlo::auxiliary_filter0(
                     Theta_tmp, ztmp, ptmp, model, y, N, 
                     true, false, use_discount, discount_factor);
                 arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
+
+                marglike_stored.at(b) = marg_loglik;
+
                 if (model.zero.inflated)
                 {
                     model.zero.prob = arma::vectorise(arma::mean(ptmp, 0)); // (nT + 1) x 1
@@ -1232,6 +390,23 @@ namespace VB
                     }
                         
                 }
+                // ------------------
+
+                // // MCMC sampler
+                // // ------------------
+                // ApproxDisturbance approx_dlm(nT, model.fgain);
+                // approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
+                // arma::vec wt_accept(nT + 1, arma::fill::zeros);
+                // arma::vec wt = arma::randn<arma::vec>(nT + 1);
+                // for (unsigned int k = 0; k < 100; k++)
+                // {
+                //     MCMC::Posterior::update_wt(wt, wt_accept, approx_dlm, y, model);
+                // }
+
+                // arma::vec psi = arma::cumsum(wt); // (nT + 1) x 1
+                // arma::mat Theta = TransFunc::psi2theta(psi, y, model.ftrans, model.fgain, model.dlag);
+                // // ------------------
+
 
                 arma::mat dFphi_grad;
                 arma::vec dloglik_dlag(2, arma::fill::zeros);
@@ -1272,6 +447,9 @@ namespace VB
                     }
                     lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
 
+                    condlike_stored.at(b) += ObsDist::loglike(
+                        y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+
                     if (par1_prior.infer || par2_prior.infer)
                     {
                         if (!model.zero.inflated || model.zero.z.at(t) > EPS)
@@ -1290,7 +468,7 @@ namespace VB
 
                 if (update_static)
                 {
-                    arma::vec dlogJoint = dlogJoint_deta(
+                    arma::vec dlogJoint = Static::dlogJoint_deta(
                         y, Theta, lambda, dloglik_dlag, eta, param_selected,
                         W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model); // Checked. OK.
 
@@ -1298,14 +476,17 @@ namespace VB
                     arma::vec dlogq = dlogq_dtheta(SigInv, nu, eta_tilde, gamma, mu);
                     arma::vec ddiff = dlogJoint - dlogq;
 
+                    // mu
                     arma::vec L_mu = dYJinv_dnu(nu, gamma) * ddiff;
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
 
+                    grad_stored.at(b) += arma::accu(arma::abs(grad_mu.change));
 
                     if (m > 1)
                     {
-                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi);             // m x mk
+                        // B
+                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi); // m x mk
                         arma::mat L_B = arma::reshape(dtheta_dB.t() * ddiff, m, k); // m x k
                         if (k > 1)
                         {
@@ -1327,13 +508,15 @@ namespace VB
                         {
                             B.elem(B_uptri_idx).zeros();
                         }
-                    }
 
+                        grad_stored.at(b) += arma::accu(arma::abs(grad_vecB.change));
+                    }
 
                     // d
                     arma::vec L_d = dYJinv_dD(nu, gamma, eps) * ddiff; // m x 1
                     grad_d.update_grad(L_d);
                     d = d + grad_d.change;
+                    grad_stored.at(b) += arma::accu(arma::abs(grad_d.change));
 
                     // tau
                     arma::vec tau = gamma2tau(gamma);
@@ -1341,88 +524,183 @@ namespace VB
                     grad_tau.update_grad(L_tau);
                     tau = tau + grad_tau.change;
                     gamma = tau2gamma(tau);
-
+                    grad_stored.at(b) += arma::accu(arma::abs(grad_tau.change));
 
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                    eta = tilde2eta(
+                    eta = Static::tilde2eta(
                         eta_tilde, param_selected, 
                         W_prior.name, par1_prior.name, model.dlag.name, 
                         model.seas.period, model.seas.in_state);
-                    update_params(model, param_selected, eta);
+                    Static::update_params(model, param_selected, eta);
                 } // end update_static
 
 
-                if (saveiter || b == (ntotal - 1))
+                if (verbose)
                 {
-                    unsigned int idx_run;
-                    if (saveiter)
-                    {
-                        idx_run = (b - nburnin - 1) / nthin;
-                    }
-                    else
-                    {
-                        idx_run = nsample - 1;
-                    }
+                    Rcpp::Rcout << "\rProgress: " << b + 1 << "/" << niter;
+                }
 
-                    if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            } // HVB SGD Loop
+
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
+
+
+            if (model.zero.inflated)
+            {
+                z_stored.set_size(y.n_elem, nsample);
+                prob_stored.set_size(y.n_elem, nsample);
+            }
+
+            if (sys_list[model.fsys] == SysEq::Evolution::identity)
+            {
+                psi_stored.set_size(model.nP, nsample);
+                Theta_stored = arma::zeros<arma::cube>(model.nP, y.n_elem, nsample);
+            }
+            else
+            {
+                psi_stored.set_size(y.n_elem, nsample);
+            }
+
+            psi_stored.zeros();
+
+            std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
+
+            // arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, nsample, y.n_elem);
+            // arma::mat ztmp(nsample, y.n_elem, arma::fill::ones);
+            // arma::mat ptmp(nsample, y.n_elem, arma::fill::randu);
+            // double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
+            //     Theta_tmp, ztmp, ptmp, model, y, nsample,
+            //     true, true, false, 1.);
+            
+            // if (sys_list[model.fsys] != SysEq::Evolution::identity)
+            // {
+            //     psi_stored = Theta_tmp.row_as_mat(0); // (nT + 1) x nsample
+            // }
+
+            
+
+            for (unsigned int i = 0; i < nsample; i++)
+            {
+                arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+                arma::mat ztmp(N, y.n_elem, arma::fill::ones);
+                arma::mat ptmp(N, y.n_elem, arma::fill::randu);
+                double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
+                    Theta_tmp, ztmp, ptmp, model, y, N, 
+                    true, false, use_discount, discount_factor);
+                arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
+
+                if (model.zero.inflated)
+                {
+                    prob_stored.col(i) = arma::vectorise(arma::mean(ptmp, 0)); // (nT + 1) x 1
+                    for (unsigned int t = 0; t < model.zero.z.n_elem; t++)
                     {
-                        psi_stored.col(idx_run) = Theta.col(y.n_elem - 1);
-                        Theta_stored.slice(idx_run) = Theta;
+                        z_stored.at(t, i) = (R::runif(0., 1.) < prob_stored.at(t, i)) ? 1. : 0.;
                     }
-                    else
-                    {
-                        psi_stored.col(idx_run) = arma::vectorise(Theta.row(0));
-                    }
+                }
+
+                // ApproxDisturbance approx_dlm(nT, model.fgain);
+                // approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
+                // arma::vec wt_accept(nT + 1, arma::fill::zeros);
+                // arma::vec wt = arma::randn<arma::vec>(nT + 1);
+                // for (unsigned int k = 0; k < 100; k++)
+                // {
+                //     MCMC::Posterior::update_wt(wt, wt_accept, approx_dlm, y, model);
+                // }
                     
-                    if (W_prior.infer)
-                    {
-                        W_stored.at(idx_run) = model.derr.par1;
-                        
-                    }
+                // arma::vec psi = arma::cumsum(wt); // (nT + 1) x 1
+                // arma::mat Theta = TransFunc::psi2theta(psi, y, model.ftrans, model.fgain, model.dlag);
 
-                    if (seas_prior.infer)
-                    {
-                        seas_stored.col(idx_run) = model.seas.val;
-                    }
 
-                    if (rho_prior.infer)
-                    {
-                        rho_stored.at(idx_run) = model.dobs.par2;
-                    }
+                if (sys_list[model.fsys] == SysEq::Evolution::identity)
+                {
+                    psi_stored.col(i) = Theta.col(y.n_elem - 1);
+                    Theta_stored.slice(i) = Theta;
+                }
+                else
+                {
+                    psi_stored.col(i) = arma::vectorise(Theta.row(0));
+                }
 
-                    if (par1_prior.infer)
-                    {
-                        par1_stored.at(idx_run) = model.dlag.par1;
-                    }
+                rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
+                eta = Static::tilde2eta(
+                    eta_tilde, param_selected, 
+                    W_prior.name, par1_prior.name, model.dlag.name, 
+                    model.seas.period, model.seas.in_state);
+                
+                Static::update_params(model, param_selected, eta);
 
-                    if (par2_prior.infer)
+                unsigned int idx = 0;
+                for (unsigned int k = 0; k < param_selected.size(); k++)
+                {
+                    /*
+                    idx: location of parameter in eta
+                    k: location of parameter name in param_selected
+                    i: the i-th sample in **_stored
+                    */
+                    double val = eta.at(idx);
+                    switch (static_param_list[param_selected[k]])
                     {
-                        par2_stored.at(idx_run) = model.dlag.par2;
+                    case AVAIL::Param::W:
+                    {
+                        W_stored.at(i) = val;
+                        idx += 1;
+                        break;
                     }
-
-                    if (model.zero.inflated)
+                    case AVAIL::Param::seas:
                     {
-                        z_stored.col(idx_run) = model.zero.z;
-                        prob_stored.col(idx_run) = model.zero.prob;
+                        if (!model.seas.in_state)
+                        {
+                            arma::vec seass = eta.subvec(idx, idx + model.seas.period - 1);
+                            seas_stored.col(i) = seass;
+                            idx += model.seas.period;
+                        }
+                        break;
                     }
-
-                    if (zintercept_infer)
+                    case AVAIL::Param::rho:
                     {
-                        zintercept_stored.at(idx_run) = model.zero.intercept;
+                        rho_stored.at(i) = val;
+                        idx += 1;
+                        break;
                     }
-
-                    if (zzcoef_infer)
+                    case AVAIL::Param::lag_par1:
                     {
-                        zzcoef_stored.at(idx_run) = model.zero.coef;
+                        par1_stored.at(i) = val;
+                        idx += 1;
+                        break;
+                    }
+                    case AVAIL::Param::lag_par2:
+                    {
+                        par2_stored.at(i) = val;
+                        idx += 1;
+                        break;
+                    }
+                    case AVAIL::Param::zintercept:
+                    {
+                        zintercept_stored.at(i) = val;
+                        idx += 1;
+                        break;
+                    }
+                    case AVAIL::Param::zzcoef:
+                    {
+                        zzcoef_stored.at(i) = val;
+                        idx += 1;
+                        break;
+                    }
+                    default:
+                    {
+                        throw std::invalid_argument("VariationalBayes::infer: undefined static parameter " + param_selected[k]);
+                    }
                     }
                 }
 
                 if (verbose)
                 {
-                    Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+                    Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << nsample;
                 }
-
-            } // HVB loop
+            } // sampling loop
 
             if (verbose)
             {
@@ -1434,6 +712,10 @@ namespace VB
         Rcpp::List get_output()
         {
             Rcpp::List output;
+            output["marglik"] = Rcpp::wrap(marglike_stored);
+            output["condlik"] = Rcpp::wrap(condlike_stored);
+            output["grad_norm"] = Rcpp::wrap(grad_stored);
+
             output["psi_stored"] = Rcpp::wrap(psi_stored);
             arma::vec qprob = {0.025, 0.5, 0.975};
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1);
@@ -1487,7 +769,6 @@ namespace VB
             }
 
             output["inferred"] = Rcpp::wrap(param_selected);
-
             return output;
         }
 
@@ -1499,6 +780,8 @@ namespace VB
         // StaticParam W, mu0, delta, kappa, r;
         HybridParams grad_mu, grad_vecB, grad_d, grad_tau;
         arma::vec mu, d, gamma, nu, eps, eta, eta_tilde; // m x 1
+        arma::vec marglike_stored, condlike_stored, grad_stored; // niter x 1
+
         arma::vec xi;                                    // k x 1
         arma::mat B;                                     // m x k
         arma::vec vecL_B;                                // mk x 1

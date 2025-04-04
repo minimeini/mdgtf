@@ -133,6 +133,33 @@ public:
         }
     }
 
+
+    static double dmvnorm2(
+        const arma::vec &x, 
+        const arma::vec &mu, 
+        const arma::mat &Prec, 
+        const double &logdet_prec, 
+        const bool &return_log = true)
+    {
+        double cnst = static_cast<double>(mu.n_elem) * LOG2PI;
+
+        arma::vec diff = x - mu;
+        double dist = arma::as_scalar(diff.t() * Prec * diff);
+
+        double logprob = -cnst + logdet_prec - dist;
+        logprob *= 0.5;
+
+        if (return_log)
+        {
+            return logprob;
+        }
+        else
+        {
+            logprob = std::min(logprob, UPBND);
+            return std::exp(logprob);
+        }
+    }
+
 private:
     arma::vec mu; // mean
     arma::mat Sigma; // Variance-covariance matrix

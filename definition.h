@@ -323,6 +323,7 @@ class Prior : public Dist
 {
 public:
     bool infer = false;
+    double mh_sd = 1.;
 
     Prior() : Dist()
     {
@@ -362,6 +363,11 @@ public:
         if (param_opts.containsElementNamed("infer"))
         {
             infer = Rcpp::as<bool>(param_opts["infer"]);
+        }
+
+        if (param_opts.containsElementNamed("mh_sd"))
+        {
+            mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
         }
 
         return;
@@ -445,7 +451,12 @@ public:
      * @param jacobian Return `dlogpi(gamma) / dtilde(gamma)` if set to true; otherwise return `dlogpi(gamma) / dgamma`.
      * @return double
      */
-    static double dlogprior_dpar(const double &val, const Dist &prior, const double &jacobian = true)
+    static double dlogprior_dpar(
+        const double &val, 
+        const Dist &prior, 
+        const bool &jacobian = true,
+        const bool &neg_invgamma = false
+    )
     {
         std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
         double out = 0.;
@@ -456,6 +467,10 @@ public:
             if (jacobian) // plus jacobian
             {
                 out = -prior.par1 + prior.par2 / val;
+                if (neg_invgamma)
+                {
+                    out *= -1.;
+                }
             }
             else
             {
@@ -506,7 +521,11 @@ public:
         return out;
     }
 
-    static double val2real(const double &val, const std::string &dist_name, const bool &inverse_transform = false)
+    static double val2real(
+        const double &val, 
+        const std::string &dist_name, 
+        const bool &inverse_transform = false, 
+        const bool &neg_invgamma = false)
     {
         std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
         double out = val;
@@ -515,13 +534,29 @@ public:
         {
         case AVAIL::Dist::gamma: // non-negative
         {
+            // if neg_invgamma == true: the transformation is log(val)
+            // if neg_invgamma == false: the transformation is -log(val)
             if (inverse_transform)
             {
-                out = std::exp(val);
+                if (neg_invgamma)
+                {
+                    out = std::exp(-val);
+                }
+                else
+                {
+                    out = std::exp(val);
+                }
             }
             else
             {
-                out = std::log(std::abs(val) + EPS);
+                if (neg_invgamma)
+                {
+                    out = -std::log(std::abs(val) + EPS);
+                }
+                else
+                {
+                    out = std::log(std::abs(val) + EPS);
+                }
             }
             break;
         }
