@@ -24,11 +24,10 @@ namespace MCMC
             ApproxDisturbance &approx_dlm,
             const arma::vec &y, // (nT + 1) x 1
             Model &model,
-            const Dist &w0_prior,
             const double &mh_sd = 0.1)
         {
             arma::vec ft(y.n_elem, arma::fill::zeros);
-            double prior_sd = std::sqrt(w0_prior.par2);
+            double prior_sd = std::sqrt(model.derr.par1);
 
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
@@ -41,7 +40,7 @@ namespace MCMC
                     logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
                 } // Checked. OK.
 
-                logp_old += R::dnorm4(wt_old, w0_prior.par1, prior_sd, true);
+                logp_old += R::dnorm4(wt_old, 0., prior_sd, true);
 
                 /*
                 Metropolis-Hastings
@@ -81,7 +80,7 @@ namespace MCMC
                     logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
                 } // Checked. OK.
 
-                logp_new += R::dnorm4(wt_new, w0_prior.par1, prior_sd, true); // prior
+                logp_new += R::dnorm4(wt_new, 0., prior_sd, true); // prior
 
                 double logratio = logp_new - logp_old;
                 // logratio += logq_old - logq_new;
@@ -159,7 +158,6 @@ namespace MCMC
             const arma::vec &y, // (ntime + 1) x 1
             const arma::vec &hpsi,
             const Prior &seas_prior,
-            const double &mh_sd = 1.,
             const double &min_var = 0.1)
         {
             std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
@@ -206,7 +204,7 @@ namespace MCMC
 
             arma::mat seas_prec_chol = arma::chol(arma::symmatu(seas_prec));
             arma::mat seas_chol = arma::inv(arma::trimatu(seas_prec_chol));
-            arma::vec seas_new = seas_old + mh_sd * seas_chol * arma::randn(model.seas.period);
+            arma::vec seas_new = seas_old + seas_prior.mh_sd * seas_chol * arma::randn(model.seas.period);
 
 
             for (unsigned int t = 1; t < y.n_elem; t++)
@@ -252,8 +250,7 @@ namespace MCMC
             Model &model,
             const arma::vec &y, // nobs x 1
             const arma::vec &hpsi,
-            const Dist &rho_prior,
-            const double &mh_sd = 1.)
+            const Prior &rho_prior)
         {
             double rho_old = model.dobs.par2;
             double logp_old = R::dgamma(rho_old, rho_prior.par1, 1. / rho_prior.par2, true);
@@ -289,7 +286,7 @@ namespace MCMC
             unsigned int cnt = 0;
             while (!success && cnt < MAX_ITER)
             {
-                rho_new = R::rnorm(rho_old, mh_sd * rho_old); // mh_sd here is the coefficient of variation, i.e., sd/mean.
+                rho_new = R::rnorm(rho_old, rho_prior.mh_sd * rho_old); // mh_sd here is the coefficient of variation, i.e., sd/mean.
                 success = (rho_new > 0) ? true : false;
                 cnt++;
             }
@@ -453,8 +450,8 @@ namespace MCMC
             Model &model,
             const arma::vec &y,
             const arma::vec &hpsi,
-            const Dist &par1_prior,
-            const Dist &par2_prior,
+            const Prior &par1_prior,
+            const Prior &par2_prior,
             const double &epsilon = 0.01,
             const unsigned int &L = 10,
             const Rcpp::NumericVector &m = Rcpp::NumericVector::create(1., 1.),
@@ -645,73 +642,27 @@ namespace MCMC
 
             ntotal = nburnin + nthin * nsample + 1;
 
-            W_prior.init("invgamma", 0.01, 0.01);
+            Static::init_prior(
+                param_selected, nparam,
+                W_prior, seas_prior, rho_prior,
+                par1_prior, par2_prior,
+                zintercept_infer, zzcoef_infer,
+                opts, model);
+
             W_stored.set_size(nsample);
             W_accept = 0.;
-            if (opts.containsElementNamed("W"))
-            {
-                Rcpp::List Wopts = Rcpp::as<Rcpp::List>(opts["W"]);
-                W_prior.init(Wopts);
-            }
 
-            seas_prior.init("gaussian", 0., 10.);
             seas_stored.set_size(model.seas.period, nsample);
             seas_accept = 0.;
-            seas_mh_sd = 1.;
-            if (opts.containsElementNamed("seas"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["seas"]);
-                seas_prior.init(param_opts);
-
-                if (param_opts.containsElementNamed("mh_sd"))
-                {
-                    seas_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
-                }
-            }
 
             rho_stored.set_size(nsample);
-            rho_prior.init("gamma", 0.1, 0.1);
             rho_accept = 0.;
-            rho_mh_sd = 0.1;
-            if (opts.containsElementNamed("rho"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["rho"]);
-                rho_prior.init(param_opts);
-                if (param_opts.containsElementNamed("mh_sd"))
-                {
-                    rho_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
-                }
-            }
 
             par1_stored.set_size(nsample);
-            par1_prior.init("gamma", 0.1, 0.1);
             par1_accept = 0.;
-            par1_mh_sd = 0.1;
-            if (opts.containsElementNamed("par1"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par1"]);
-                par1_prior.init(param_opts);
-                if (param_opts.containsElementNamed("mh_sd"))
-                {
-                    par1_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
-                }
-            }
 
             par2_stored.set_size(nsample);
-            par2_prior.init("gamma", 0.1, 0.1);
             par2_accept = 0.;
-            par2_mh_sd = 0.1;
-            if (opts.containsElementNamed("par2"))
-            {
-                Rcpp::List param_opts = Rcpp::as<Rcpp::List>(opts["par2"]);
-                par2_prior.init(param_opts);
-                if (param_opts.containsElementNamed("mh_sd"))
-                {
-                    par2_mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
-                }
-            }
-
-            w0_prior.init("gaussian", 0., model.derr.par1);
 
             return;
         }
@@ -864,7 +815,7 @@ namespace MCMC
                 Rcpp::checkUserInterrupt();
 
                 approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
-                Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, w0_prior, mh_sd);
+                Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd);
                 arma::vec psi = arma::cumsum(wt);
 
                 // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
@@ -874,7 +825,6 @@ namespace MCMC
                 {
                     // arma::vec wt = arma::diff(psi);
                     Posterior::update_W(W_accept, model, wt, W_prior, mh_sd);
-                    w0_prior.par2 = model.derr.par1;
                 }
 
                 if (par1_prior.infer || par2_prior.infer)
@@ -890,12 +840,12 @@ namespace MCMC
 
                 if (seas_prior.infer)
                 {
-                    Posterior::update_seas(seas_accept, model, y, hpsi, seas_prior, seas_mh_sd);
+                    Posterior::update_seas(seas_accept, model, y, hpsi, seas_prior);
                 }
 
                 if (rho_prior.infer)
                 {
-                    Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior, rho_mh_sd);
+                    Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior);
                 }
 
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
@@ -948,10 +898,17 @@ namespace MCMC
         unsigned int nthin = 1;
         unsigned int nsample = 100;
         unsigned int ntotal = 200;
-
         unsigned int max_lag = 50;
 
-        Prior w0_prior;
+        bool update_static = true;
+        unsigned int nparam = 1; // number of unknown static parameters
+        std::vector<std::string> param_selected = {"W"};
+
+        arma::mat z_stored; // (nT + 1) x nsample
+        arma::mat prob_stored; // (nT + 1) x nsample
+        bool zintercept_infer = false;
+        bool zzcoef_infer = false;
+
         arma::vec wt;
         arma::vec wt_accept; // nsample x 1
         arma::mat wt_stored; // (nT + 1) x nsample
@@ -959,22 +916,18 @@ namespace MCMC
         Prior seas_prior;
         arma::mat seas_stored; // period x nsample
         double seas_accept = 0.;
-        double seas_mh_sd = 1.;
 
         Prior rho_prior;
         arma::vec rho_stored;
         double rho_accept = 0.;
-        double rho_mh_sd = 1.;
 
         Prior par1_prior;
         arma::vec par1_stored;
         double par1_accept = 0.;
-        double par1_mh_sd = 1.;
 
         Prior par2_prior;
         arma::vec par2_stored;
         double par2_accept = 0.;
-        double par2_mh_sd = 1.;
 
         Prior W_prior;
         arma::vec W_stored;
