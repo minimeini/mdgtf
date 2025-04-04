@@ -15,6 +15,71 @@
 
 namespace MCMC
 {
+    class Leapfrog
+    {
+    public:
+        /**
+         * @brief Calculate gradient of the potential energery. The potential energy is the negative log joint probability of the model.
+         * 
+         * @param q 
+         * @param model 
+         * @param param_selected 
+         * @param W_prior 
+         * @param seas_prior 
+         * @param rho_prior 
+         * @param par1_prior 
+         * @param par2_prior 
+         * @param zintercept_infer 
+         * @param zzcoef_infer 
+         * @return arma::vec 
+         */
+        static arma::vec grad_U(
+            arma::vec &params,
+            arma::vec &lambda,
+            Model &model,
+            const arma::vec &q, 
+            const arma::vec &y,
+            const arma::vec &hpsi,
+            const arma::mat &Theta,
+            const std::vector<std::string> &param_selected,
+            const Prior &W_prior, 
+            const Prior &seas_prior, 
+            const Prior &rho_prior, 
+            const Prior &par1_prior, 
+            const Prior &par2_prior, 
+            const bool &zintercept_infer, 
+            const bool &zzcoef_infer)
+        {
+            params = Static::tilde2eta(
+                q, param_selected, W_prior.name, par1_prior.name,
+                model.dlag.name, model.seas.period, model.seas.in_state);
+            Static::update_params(model, param_selected, params);
+
+            if (seas_prior.infer || par1_prior.infer || par2_prior.infer)
+            {
+                for (unsigned int t = 1; t < y.n_elem; t++)
+                {
+                    double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                    if (model.seas.period > 0)
+                    {
+                        eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    }
+                    lambda.at(t) = LinkFunc::ft2mu(eta, model.flink);
+                }
+            }
+
+            arma::vec dloglik_dlag = Model::dloglik_dlag(
+                y, hpsi, model.dlag.nL, model.dlag.name, model.dlag.par1, model.dlag.par2,
+                model.dobs, model.seas, model.zero, model.flink);
+
+            arma::vec gd_U = Static::dlogJoint_deta(
+                y, Theta, lambda, dloglik_dlag, params, param_selected,
+                W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model);
+
+            return gd_U;
+        }
+    }; // class Leapfrog
+
     class Posterior
     {
     public:
@@ -444,14 +509,19 @@ namespace MCMC
 
         } // update_lag
 
-        static arma::vec update_dlag_hmc(
-            double &par1_accept,
-            double &par2_accept,
-            Model &model,
+        static Model update_dlag_hmc(
+            double &lag_accept,
+            const Model &model,
             const arma::vec &y,
-            const arma::vec &hpsi,
+            const arma::vec &psi,
+            const std::vector<std::string> &param_selected,
+            const Prior &W_prior,
+            const Prior &seas_prior,
+            const Prior &rho_prior,
             const Prior &par1_prior,
             const Prior &par2_prior,
+            const bool zintercept_infer = false,
+            const bool zzcoef_infer = false,
             const double &epsilon = 0.01,
             const unsigned int &L = 10,
             const Rcpp::NumericVector &m = Rcpp::NumericVector::create(1., 1.),
@@ -459,9 +529,11 @@ namespace MCMC
         {
             std::string lag_dist = model.dlag.name;
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+            arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+            Model mod = model;
 
-            double par1_old = model.dlag.par1;
-            double par2_old = model.dlag.par2;
+            double par1_old = mod.dlag.par1;
+            double par2_old = mod.dlag.par2;
 
             // log of conditional posterior of lag parameters.
             double logp_old = 0.;
@@ -470,13 +542,13 @@ namespace MCMC
 
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                if (model.seas.period > 0)
+                double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
+                if (mod.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
                 }
-                double lambda = LinkFunc::ft2mu(eta, model.flink);
-                logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+                double lambda = LinkFunc::ft2mu(eta, mod.flink);
+                logp_old += ObsDist::loglike(y.at(t), mod.dobs.name, lambda, mod.dobs.par2, true);
             }
 
             double current_U = -logp_old;
@@ -496,12 +568,12 @@ namespace MCMC
             current_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
 
             // half step update of momentum
-            unsigned int nlag = model.dlag.nL;
+            unsigned int nlag = mod.dlag.nL;
 
             arma::vec grad_U = Model::dloglik_dlag(
                 y, hpsi, nlag,
                 lag_dist, par1_old, par2_old,
-                model.dobs, model.seas, model.zero, model.flink);
+                mod.dobs, mod.seas, mod.zero, mod.flink);
 
             grad_U.at(0) += Prior::dlogprior_dpar(par1_old, par1_prior, true);
             grad_U.at(0) *= -1.;
@@ -523,7 +595,7 @@ namespace MCMC
                 grad_U = Model::dloglik_dlag(
                     y, hpsi, nlag,
                     lag_dist, par1_new, par2_new,
-                    model.dobs, model.seas, model.zero, model.flink);
+                    mod.dobs, mod.seas, mod.zero, mod.flink);
                 grad_U.at(0) += Prior::dlogprior_dpar(par1_new, par1_prior, true);
                 grad_U.at(0) *= -1.;
                 grad_U.at(1) += Prior::dlogprior_dpar(par2_new, par2_prior, true);
@@ -546,12 +618,12 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
-                if (model.seas.period > 0)
+                if (mod.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
                 }
-                double lambda = LinkFunc::ft2mu(eta, model.flink);
-                logp_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
+                double lambda = LinkFunc::ft2mu(eta, mod.flink);
+                logp_new += ObsDist::loglike(y.at(t), mod.dobs.name, lambda, mod.dobs.par2, true);
             }
             logp_new += Prior::dprior(par1_new, par1_prior, true, true);
             logp_new += Prior::dprior(par2_new, par2_prior, true, true);
@@ -567,21 +639,21 @@ namespace MCMC
             arma::vec par = {par1_old, par2_old};
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
-                par1_accept += 1;
-                par2_accept += 1;
+                lag_accept += 1;
 
-                model.dlag.par1 = par1_new;
-                model.dlag.par2 = par2_new;
-                model.dlag.nL = LagDist::get_nlag(model.dlag);
-                model.dlag.Fphi = LagDist::get_Fphi(model.dlag);
+                mod.dlag.par1 = par1_new;
+                mod.dlag.par2 = par2_new;
+                mod.dlag.nL = LagDist::get_nlag(mod.dlag);
+                mod.dlag.Fphi = LagDist::get_Fphi(mod.dlag);
 
-                par.at(0) = par1_new;
-                par.at(1) = par2_new;
+                return mod;
 
                 // logp_mu0 = logp_new;
             }
-
-            return par;
+            else
+            {
+                return model;
+            }
         }
 
     }; // class Posterior
@@ -659,10 +731,9 @@ namespace MCMC
             rho_accept = 0.;
 
             par1_stored.set_size(nsample);
-            par1_accept = 0.;
 
             par2_stored.set_size(nsample);
-            par2_accept = 0.;
+            lag_accept = 0.;
 
             return;
         }
@@ -747,11 +818,10 @@ namespace MCMC
 
             output["infer_par1"] = par1_prior.infer;
             output["par1"] = Rcpp::wrap(par1_stored);
-            output["par1_accept"] = par1_accept / ntotal;
 
             output["infer_par2"] = par2_prior.infer;
             output["par2"] = Rcpp::wrap(par2_stored);
-            output["par2_accept"] = par2_accept / ntotal;
+            output["lag_accept"] = lag_accept / ntotal;
 
             return output;
         }
@@ -833,9 +903,12 @@ namespace MCMC
                     //     par1_accept, par2_accept, model,
                     //     y, hpsi, par1_prior, par2_prior,
                     //     par1_mh_sd, par2_mh_sd, max_lag);
-                    arma::vec out = Posterior::update_dlag_hmc(
-                        par1_accept, par2_accept, model, y, hpsi,
-                        par1_prior, par2_prior, epsilon, L, m, max_lag);
+                    Model mod = model;
+                    model = Posterior::update_dlag_hmc(
+                        lag_accept, mod, y, psi, param_selected,
+                        W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
+                        zintercept_infer, zzcoef_infer,
+                        epsilon, L, m, max_lag);
                 }
 
                 if (seas_prior.infer)
@@ -923,11 +996,10 @@ namespace MCMC
 
         Prior par1_prior;
         arma::vec par1_stored;
-        double par1_accept = 0.;
+        double lag_accept = 0.;
 
         Prior par2_prior;
         arma::vec par2_stored;
-        double par2_accept = 0.;
 
         Prior W_prior;
         arma::vec W_stored;
