@@ -506,8 +506,8 @@ namespace MCMC
 
         } // update_lag
 
-        static Model update_dlag_hmc(
-            double &lag_accept,
+        static Model update_static_hmc(
+            double &accept,
             const Model &model,
             const arma::vec &y,
             const arma::vec &psi,
@@ -521,8 +521,7 @@ namespace MCMC
             const bool zzcoef_infer = false,
             const double &epsilon = 0.01,
             const unsigned int &L = 10,
-            const Rcpp::NumericVector &m = Rcpp::NumericVector::create(1., 1.),
-            const unsigned int &max_lag = 50)
+            const double &kinetic_sd = 1.)
         {
             arma::mat Theta(model.nP, y.n_elem, arma::fill::zeros);
             Theta.row(0) = psi.t();
@@ -553,15 +552,13 @@ namespace MCMC
                 params, param_selected, W_prior.name, par1_prior.name,
                 mod.seas.period, mod.seas.in_state); // Checked. OK.
 
-
             // sample an initial momentum
             arma::vec p = arma::randn(q.n_elem);
-            p.at(0) *= std::sqrt(m[0]);
-            p.at(1) *= std::sqrt(m[1]);
+            p.for_each([&kinetic_sd](arma::vec::elem_type &val)
+                       { val *= kinetic_sd; });
 
             // Kinetic: negative logprob of the momentum distribution
-            double current_K = 0.5 * (std::pow(p.at(0), 2.) / m[0]);
-            current_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
+            double current_K = 0.5 * arma::accu(arma::pow(p / kinetic_sd, 2.));
 
             // half step update of momentum
             arma::vec grad_U = Leapfrog::grad_U(
@@ -618,8 +615,7 @@ namespace MCMC
             double proposed_U = -logp_new;
 
             // Kinetic energy
-            double proposed_K = 0.5 * (std::pow(p.at(0), 2.) / m[0]);
-            proposed_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
+            double proposed_K = 0.5 * arma::accu(arma::pow(p / kinetic_sd, 2.));
 
             // accept / reject
             double logratio = current_U + current_K;
@@ -627,7 +623,7 @@ namespace MCMC
 
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
-                lag_accept += 1;
+                accept += 1;
                 return mod;
 
                 // logp_mu0 = logp_new;
@@ -659,10 +655,10 @@ namespace MCMC
                 L = Rcpp::as<unsigned int>(opts["L"]);
             }
 
-            m = Rcpp::NumericVector::create(1., 1.);
-            if (opts.containsElementNamed("m"))
+            kinetic_sd = 1.;
+            if (opts.containsElementNamed("hmc_kinetic_sd"))
             {
-                m = Rcpp::as<Rcpp::NumericVector>(opts["m"]);
+                kinetic_sd = Rcpp::as<double>(opts["hmc_kinetic_sd"]);
             }
 
             max_lag = 50;
@@ -703,64 +699,65 @@ namespace MCMC
                 zintercept_infer, zzcoef_infer,
                 opts, model);
 
+            hmc_accept = 0.;
+
             W_stored.set_size(nsample);
-            W_accept = 0.;
+            // W_accept = 0.;
 
             seas_stored.set_size(model.seas.period, nsample);
-            seas_accept = 0.;
+            // seas_accept = 0.;
 
             rho_stored.set_size(nsample);
-            rho_accept = 0.;
+            // rho_accept = 0.;
 
             par1_stored.set_size(nsample);
-
             par2_stored.set_size(nsample);
-            lag_accept = 0.;
+            // lag_accept = 0.;
 
             return;
         }
 
         static Rcpp::List default_settings()
         {
-            Rcpp::List Wopts;
-            Wopts["infer"] = true;
-            Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
-            Wopts["prior_name"] = "invgamma";
+            // Rcpp::List Wopts;
+            // Wopts["infer"] = true;
+            // Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
+            // Wopts["prior_name"] = "invgamma";
 
-            Rcpp::List seas_opts;
-            seas_opts["infer"] = false;
-            seas_opts["mh_sd"] = 1.;
-            seas_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
-            seas_opts["prior_name"] = "gaussian";
+            // Rcpp::List seas_opts;
+            // seas_opts["infer"] = false;
+            // seas_opts["mh_sd"] = 1.;
+            // seas_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
+            // seas_opts["prior_name"] = "gaussian";
 
-            Rcpp::List rho_opts;
-            rho_opts["infer"] = false;
-            rho_opts["mh_sd"] = 1.;
-            rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            rho_opts["prior_name"] = "gamma";
+            // Rcpp::List rho_opts;
+            // rho_opts["infer"] = false;
+            // rho_opts["mh_sd"] = 1.;
+            // rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            // rho_opts["prior_name"] = "invgamma";
 
-            Rcpp::List par1_opts;
-            par1_opts["infer"] = false;
-            par1_opts["mh_sd"] = 1.;
-            par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            par1_opts["prior_name"] = "gamma";
+            // Rcpp::List par1_opts;
+            // par1_opts["infer"] = false;
+            // par1_opts["mh_sd"] = 1.;
+            // par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            // par1_opts["prior_name"] = "gaussian";
 
-            Rcpp::List par2_opts;
-            par2_opts["infer"] = false;
-            par2_opts["mh_sd"] = 1.;
-            par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            par2_opts["prior_name"] = "gamma";
+            // Rcpp::List par2_opts;
+            // par2_opts["infer"] = false;
+            // par2_opts["mh_sd"] = 1.;
+            // par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
+            // par2_opts["prior_name"] = "invgamma";
 
-            Rcpp::List opts;
-            opts["W"] = Wopts;
-            opts["seas"] = seas_opts;
-            opts["rho"] = rho_opts;
-            opts["par1"] = par1_opts;
-            opts["par2"] = par2_opts;
+            Rcpp::List opts = Static::default_settings();
+            // opts["W"] = Wopts;
+            // opts["seas"] = seas_opts;
+            // opts["rho"] = rho_opts;
+            // opts["par1"] = par1_opts;
+            // opts["par2"] = par2_opts;
 
             opts["epsilon"] = 0.01;
             opts["L"] = 10;
-            opts["m"] = Rcpp::NumericVector::create(1., 1.);
+            opts["hmc_kinetic_sd"] = 1.;
             opts["max_lag"] = 50;
 
             opts["mh_sd"] = 0.1;
@@ -788,22 +785,24 @@ namespace MCMC
 
             output["infer_W"] = W_prior.infer;
             output["W"] = Rcpp::wrap(W_stored);
-            output["W_accept"] = W_accept / ntotal;
+            // output["W_accept"] = W_accept / ntotal;
 
             output["infer_seas"] = seas_prior.infer;
             output["seas"] = Rcpp::wrap(seas_stored);
-            output["seas_accept"] = static_cast<double>(seas_accept / ntotal);
+            // output["seas_accept"] = static_cast<double>(seas_accept / ntotal);
 
             output["infer_rho"] = rho_prior.infer;
             output["rho"] = Rcpp::wrap(rho_stored);
-            output["rho_accept"] = rho_accept / ntotal;
+            // output["rho_accept"] = rho_accept / ntotal;
 
             output["infer_par1"] = par1_prior.infer;
             output["par1"] = Rcpp::wrap(par1_stored);
 
             output["infer_par2"] = par2_prior.infer;
             output["par2"] = Rcpp::wrap(par2_stored);
-            output["lag_accept"] = lag_accept / ntotal;
+            // output["lag_accept"] = lag_accept / ntotal;
+
+            output["hmc_accept"] = hmc_accept / ntotal;
 
             return output;
         }
@@ -873,35 +872,35 @@ namespace MCMC
                 // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
 
-                if (W_prior.infer)
-                {
-                    // arma::vec wt = arma::diff(psi);
-                    Posterior::update_W(W_accept, model, wt, W_prior, mh_sd);
-                }
+                // if (W_prior.infer)
+                // {
+                //     // arma::vec wt = arma::diff(psi);
+                //     Posterior::update_W(W_accept, model, wt, W_prior, mh_sd);
+                // }
 
-                if (par1_prior.infer || par2_prior.infer)
-                {
+                // if (par1_prior.infer || par2_prior.infer)
+                // {
                     // Posterior::update_dlag(
                     //     par1_accept, par2_accept, model,
                     //     y, hpsi, par1_prior, par2_prior,
                     //     par1_mh_sd, par2_mh_sd, max_lag);
                     Model mod = model;
-                    model = Posterior::update_dlag_hmc(
-                        lag_accept, mod, y, psi, param_selected,
+                    model = Posterior::update_static_hmc(
+                        hmc_accept, mod, y, psi, param_selected,
                         W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
                         zintercept_infer, zzcoef_infer,
-                        epsilon, L, m, max_lag);
-                }
+                        epsilon, L, kinetic_sd);
+                // }
 
-                if (seas_prior.infer)
-                {
-                    Posterior::update_seas(seas_accept, model, y, hpsi, seas_prior);
-                }
+                // if (seas_prior.infer)
+                // {
+                //     Posterior::update_seas(seas_accept, model, y, hpsi, seas_prior);
+                // }
 
-                if (rho_prior.infer)
-                {
-                    Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior);
-                }
+                // if (rho_prior.infer)
+                // {
+                //     Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior);
+                // }
 
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 if (saveiter || b == (ntotal - 1))
@@ -946,7 +945,7 @@ namespace MCMC
 
         double epsilon = 0.01;
         unsigned int L = 10;
-        Rcpp::NumericVector m;
+        double kinetic_sd = 1.;
 
         double mh_sd = 0.1;
         unsigned int nburnin = 100;
@@ -956,6 +955,7 @@ namespace MCMC
         unsigned int max_lag = 50;
 
         bool update_static = true;
+        double hmc_accept = 0.;
         unsigned int nparam = 1; // number of unknown static parameters
         std::vector<std::string> param_selected = {"W"};
 
@@ -970,22 +970,22 @@ namespace MCMC
 
         Prior seas_prior;
         arma::mat seas_stored; // period x nsample
-        double seas_accept = 0.;
+        // double seas_accept = 0.;
 
         Prior rho_prior;
         arma::vec rho_stored;
-        double rho_accept = 0.;
+        // double rho_accept = 0.;
 
         Prior par1_prior;
         arma::vec par1_stored;
-        double lag_accept = 0.;
+        // double lag_accept = 0.;
 
         Prior par2_prior;
         arma::vec par2_stored;
 
         Prior W_prior;
         arma::vec W_stored;
-        double W_accept = 0.;
+        // double W_accept = 0.;
     };
 }
 
