@@ -34,10 +34,8 @@ namespace MCMC
          * @return arma::vec 
          */
         static arma::vec grad_U(
-            arma::vec &params,
-            arma::vec &lambda,
-            Model &model,
-            const arma::vec &q, 
+            const Model &model,
+            const arma::vec &params, 
             const arma::vec &y,
             const arma::vec &hpsi,
             const arma::mat &Theta,
@@ -50,31 +48,30 @@ namespace MCMC
             const bool &zintercept_infer, 
             const bool &zzcoef_infer)
         {
-            params = Static::tilde2eta(
-                q, param_selected, W_prior.name, par1_prior.name,
-                model.dlag.name, model.seas.period, model.seas.in_state);
-            Static::update_params(model, param_selected, params);
-
-            if (seas_prior.infer || par1_prior.infer || par2_prior.infer)
+            arma::vec lambda(y.n_elem, arma::fill::zeros);
+            for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                for (unsigned int t = 1; t < y.n_elem; t++)
+                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                if (model.seas.period > 0)
                 {
-                    double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
-                    if (model.seas.period > 0)
-                    {
-                        eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
-                    }
-                    lambda.at(t) = LinkFunc::ft2mu(eta, model.flink);
+                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
                 }
+                lambda.at(t) = LinkFunc::ft2mu(eta, model.flink);
             }
 
             arma::vec dloglik_dlag = Model::dloglik_dlag(
                 y, hpsi, model.dlag.nL, model.dlag.name, model.dlag.par1, model.dlag.par2,
                 model.dobs, model.seas, model.zero, model.flink);
 
+            // dloglik_dlag.t().print("\n Leapfrog dloglik_dlag:");
+
             arma::vec gd_U = Static::dlogJoint_deta(
                 y, Theta, lambda, dloglik_dlag, params, param_selected,
                 W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model);
+            
+            // negate it because U = -log(p) and what we calculate above is the gradient of log(p)
+            gd_U.for_each([](arma::vec::elem_type &val)
+                          { val *= -1.; });
 
             return gd_U;
         }
@@ -527,19 +524,13 @@ namespace MCMC
             const Rcpp::NumericVector &m = Rcpp::NumericVector::create(1., 1.),
             const unsigned int &max_lag = 50)
         {
-            std::string lag_dist = model.dlag.name;
-            std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
+            arma::mat Theta(model.nP, y.n_elem, arma::fill::zeros);
+            Theta.row(0) = psi.t();
             arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
             Model mod = model;
 
-            double par1_old = mod.dlag.par1;
-            double par2_old = mod.dlag.par2;
-
-            // log of conditional posterior of lag parameters.
-            double logp_old = 0.;
-            logp_old += Prior::dprior(par1_old, par1_prior, true, true); // TODO: check it
-            logp_old += Prior::dprior(par2_old, par2_prior, true, true); // TODO: check it
-
+            // Calculate log of joint probability
+            arma::vec lambda(y.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
@@ -547,19 +538,24 @@ namespace MCMC
                 {
                     eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
                 }
-                double lambda = LinkFunc::ft2mu(eta, mod.flink);
-                logp_old += ObsDist::loglike(y.at(t), mod.dobs.name, lambda, mod.dobs.par2, true);
+                lambda.at(t) = LinkFunc::ft2mu(eta, mod.flink);
             }
 
+            double logp_old = Static::logJoint(
+                y, Theta, lambda, W_prior, par1_prior, par2_prior, rho_prior, seas_prior, mod); // Checked. OK.
+            
+            // Potential energy: negative log joint probability.
             double current_U = -logp_old;
 
             // map parameters of the lag distribution to the whole real line
-            arma::vec q(2, arma::fill::zeros);
-            q.at(0) = Prior::val2real(par1_old, par1_prior.name, false);
-            q.at(1) = Prior::val2real(par2_old, par2_prior.name, false);
+            arma::vec params = Static::init_eta(param_selected, mod, true);
+            arma::vec q = Static::eta2tilde(
+                params, param_selected, W_prior.name, par1_prior.name,
+                mod.seas.period, mod.seas.in_state); // Checked. OK.
+
 
             // sample an initial momentum
-            arma::vec p = arma::randn(2);
+            arma::vec p = arma::randn(q.n_elem);
             p.at(0) *= std::sqrt(m[0]);
             p.at(1) *= std::sqrt(m[1]);
 
@@ -568,67 +564,60 @@ namespace MCMC
             current_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
 
             // half step update of momentum
-            unsigned int nlag = mod.dlag.nL;
+            arma::vec grad_U = Leapfrog::grad_U(
+                mod, params, y, hpsi, Theta, param_selected,
+                W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
+                zintercept_infer, zzcoef_infer); // Checked. OK.
 
-            arma::vec grad_U = Model::dloglik_dlag(
-                y, hpsi, nlag,
-                lag_dist, par1_old, par2_old,
-                mod.dobs, mod.seas, mod.zero, mod.flink);
-
-            grad_U.at(0) += Prior::dlogprior_dpar(par1_old, par1_prior, true);
-            grad_U.at(0) *= -1.;
-            grad_U.at(1) += Prior::dlogprior_dpar(par2_old, par2_prior, true);
-            grad_U.at(1) *= -1;
-
-            double par1_new = 0.;
-            double par2_new = 0.;
-            p = p - (0.5 * epsilon) * grad_U;
+            p -= (0.5 * epsilon) * grad_U;
 
             for (unsigned int i = 1; i <= L; i++)
             {
                 // full step update for position
-                q = q + epsilon * p;
-                par1_new = Prior::val2real(q.at(0), par1_prior.name, true);
-                par2_new = Prior::val2real(q.at(1), par2_prior.name, true);
+                q += epsilon * p;
 
-                nlag = LagDist::get_nlag(lag_dist, par1_new, par2_new, 0.99, max_lag);
-                grad_U = Model::dloglik_dlag(
-                    y, hpsi, nlag,
-                    lag_dist, par1_new, par2_new,
-                    mod.dobs, mod.seas, mod.zero, mod.flink);
-                grad_U.at(0) += Prior::dlogprior_dpar(par1_new, par1_prior, true);
-                grad_U.at(0) *= -1.;
-                grad_U.at(1) += Prior::dlogprior_dpar(par2_new, par2_prior, true);
-                grad_U.at(1) *= -1;
+                params = Static::tilde2eta(
+                    q, param_selected, W_prior.name, par1_prior.name,
+                    mod.dlag.name, mod.seas.period, mod.seas.in_state); // Checked. OK.
+                Static::update_params(mod, param_selected, params);
+
+                // Gradient of the potential energy given updated "q"
+                grad_U = Leapfrog::grad_U(
+                    mod, params, y, hpsi, Theta, param_selected, 
+                    W_prior, seas_prior, rho_prior, par1_prior, par2_prior, 
+                    zintercept_infer, zzcoef_infer);
 
                 // full step update for momentum
                 if (i != L)
                 {
-                    p = p - epsilon * grad_U;
+                    p -= epsilon * grad_U;
                 }
             }
 
-            // half step update for momentum
-            p = p - (0.5 * epsilon) * grad_U;
-            p = -p; // negate momentum for symmetry
+            // Leapfrog: final half step update for momentum
+            p -= (0.5 * epsilon) * grad_U;
 
-            // log of conditional posterior for the proposed lag parameters.
-            double logp_new = 0.;
-            arma::vec Fphi_new = LagDist::get_Fphi(nlag, lag_dist, par1_new, par2_new);
+            // Leapfrog: negate trajectory to make proposal symmetric
+            p *= -1.;
+
+            // Calculate log of joint probability with new proposal
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi_new, hpsi);
+                double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
                 if (mod.seas.period > 0)
                 {
                     eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
                 }
-                double lambda = LinkFunc::ft2mu(eta, mod.flink);
-                logp_new += ObsDist::loglike(y.at(t), mod.dobs.name, lambda, mod.dobs.par2, true);
+                lambda.at(t) = LinkFunc::ft2mu(eta, mod.flink);
             }
-            logp_new += Prior::dprior(par1_new, par1_prior, true, true);
-            logp_new += Prior::dprior(par2_new, par2_prior, true, true);
 
+            double logp_new = Static::logJoint(
+                y, Theta, lambda, W_prior, par1_prior, par2_prior, rho_prior, seas_prior, mod);
+            
+            // Potential energy: negative log joint probability
             double proposed_U = -logp_new;
+
+            // Kinetic energy
             double proposed_K = 0.5 * (std::pow(p.at(0), 2.) / m[0]);
             proposed_K += 0.5 * (std::pow(p.at(1), 2.) / m[1]);
 
@@ -636,16 +625,9 @@ namespace MCMC
             double logratio = current_U + current_K;
             logratio -= (proposed_U + proposed_K);
 
-            arma::vec par = {par1_old, par2_old};
             if (std::log(R::runif(0., 1.)) < logratio)
             { // accept
                 lag_accept += 1;
-
-                mod.dlag.par1 = par1_new;
-                mod.dlag.par2 = par2_new;
-                mod.dlag.nL = LagDist::get_nlag(mod.dlag);
-                mod.dlag.Fphi = LagDist::get_Fphi(mod.dlag);
-
                 return mod;
 
                 // logp_mu0 = logp_new;
