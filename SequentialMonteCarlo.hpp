@@ -603,6 +603,7 @@ namespace SMC
                 }
 
 
+                // One-step-ahead forecasting density: q(y[t+1] | theta[t], z[t], gamma)
                 arma::vec logq;
                 if (model.derr.full_rank)
                 {
@@ -617,17 +618,36 @@ namespace SMC
                 {
                     logq = qforecast0(model, t + 1, Theta.slice(t), y);
                 }
-                // @TODO do we need to adapt qforecast to the zero-inflated model?
-
-                
-                
 
                 arma::vec tau = logq;
                 double tmax = tau.max();
                 tau.for_each([&tmax](arma::vec::elem_type &val)
                              { val = std::exp(val - tmax); });
+                
 
-                tau = weights % tau; 
+                /*
+                If zero-inflated, the one-step-ahead forecasting density becomes:
+                    p(z[t+1]=1 | z[t], gamma) * q(y[t+1] | theta[t], z[t], gamma) 
+                  + (1. - p(z[t+1]=1 | z[t], gamma)) * (y[t+1] == 0)
+                */
+                if (model.zero.inflated)
+                {
+                    double val = model.zero.intercept;
+                    if (!model.zero.X.is_empty())
+                    {
+                        val += arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                    }
+                    arma::vec zval = z.col(t) * model.zero.coef + val; // N x 1
+                    arma::vec prob = logistic(zval);
+
+                    tau %= prob;
+                    if (std::abs(y.at(t + 1)) < EPS)
+                    {
+                        tau += 1. - prob;
+                    }
+                }
+
+                tau %= weights; 
                 // resample by w[t-1] * q(y[t] | theta[t-1]) 
                 // so w[t-1] is canceled out in the calculation of w[t]
                 // in both forward filter and the two-filter smoother
@@ -694,7 +714,7 @@ namespace SMC
                     }
 
                     arma::vec zval = z.col(t) * model.zero.coef + val;
-                    prob.col(t + 1) = logistic(zval);
+                    prob.col(t + 1) = logistic(zval); // p(z[t+1]=1 | z[t], gamma)
 
                 }
 
