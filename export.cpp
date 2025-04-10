@@ -390,7 +390,25 @@ Rcpp::List dgtf_posterior_predictive(
     bool use_theta = false;
     if (output.containsElementNamed("Theta"))
     {
+        // Theta_stored: nP x (nT + 1) x nsample
         Theta_stored = Rcpp::as<arma::cube>(output["Theta"]);
+        use_theta = true;
+    } 
+    else if (output.containsElementNamed("mt"))
+    {
+        arma::mat mt = Rcpp::as<arma::mat>(output["mt"]); // np x (nT + 1)
+        arma::cube Ct = Rcpp::as<arma::cube>(output["Ct"]); // np x np x (nT + 1)
+
+        Theta_stored.set_size(mt.n_rows, mt.n_cols, 3);
+        Theta_stored.zeros();
+        for (unsigned int t = 0; t < mt.n_cols; t++)
+        {
+            arma::vec mt_sd = arma::sqrt(arma::vectorise(Ct.slice(t).diag()));
+            Theta_stored.slice(0).col(t) = mt.col(t) - 2. * mt_sd;
+            Theta_stored.slice(1).col(t) = mt.col(t);
+            Theta_stored.slice(2).col(t) = mt.col(t) + 2. * mt_sd;
+        }
+
         use_theta = true;
     }
     else if (output.containsElementNamed("psi_stored"))
@@ -531,10 +549,10 @@ Rcpp::List dgtf_posterior_predictive(
                 }
             }
 
-            double lambda = LinkFunc::ft2mu(eta, model.flink);
-            double var = nbinomm::var(lambda, model.dobs.par2);
-            yres2.at(t) = 2. * std::log(std::abs(y.at(t) - lambda));
-            yvar.at(t) = std::log(var);
+            double lambda = std::abs(LinkFunc::ft2mu(eta, model.flink));
+            double var = std::abs(nbinomm::var(lambda, model.dobs.par2));
+            yres2.at(t) = 2. * std::log(std::abs(y.at(t) - lambda) + EPS);
+            yvar.at(t) = std::log(var + EPS);
 
             if (nrep > 0)
             {
@@ -559,8 +577,16 @@ Rcpp::List dgtf_posterior_predictive(
         arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
         arma::mat yhat2 = ytmp.slice(0);
         arma::vec prob = {0.025, 0.5, 0.975};
-        arma::mat yqt = arma::quantile(yhat2, prob, 1);
-        output2["yhat"] = Rcpp::wrap(yqt);
+        try
+        {
+            arma::mat yqt = arma::quantile(yhat2, prob, 1);
+            output2["yhat"] = Rcpp::wrap(yqt);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << '\n';
+            output2["yhat"] = Rcpp::wrap(yhat2);
+        }
     }
 
 
