@@ -998,20 +998,20 @@ public:
      * @brief This one is for HMC. Parameter must be first mapped to real line.
      * 
      * @param y 
-     * @param eta 
-     * @param psi 
+     * @param hpsi 
      * @param nlag 
      * @param lag_dist 
      * @param lag_par1 
      * @param lag_par2 
      * @param dobs 
+     * @param seas
+     * @param zero
      * @param link_func 
      * @return arma::vec 
      * 
      * @note For iterative transfer function, we must use its EXACT sliding form.
      */
     static arma::vec dloglik_dlag(
-        arma::vec &Fphi,
         const arma::vec &y, // (ntime + 1) x 1
         const arma::vec &hpsi, // (ntime + 1) x 1
         const unsigned int &nlag,
@@ -1023,19 +1023,14 @@ public:
         const ZeroInflation &zero,
         const std::string &link_func)
     {
-        Fphi.clear();
-        Fphi = LagDist::get_Fphi(nlag, lag_dist, lag_par1, lag_par2);
+        arma::vec Fphi = LagDist::get_Fphi(nlag, lag_dist, lag_par1, lag_par2);
         arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, lag_dist, lag_par1, lag_par2);
 
-        arma::mat grad(y.n_elem, 2, arma::fill::zeros);
+        arma::vec dll_dlag(2, arma::fill::zeros);
+
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            if (zero.inflated && zero.z.at(t) < EPS)
-            {
-                grad.at(t, 0) = 0.;
-                grad.at(t, 1) = 0.;
-            }
-            else
+            if (!zero.inflated || zero.z.at(t) > EPS)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
                 if (seas.period > 0)
@@ -1047,16 +1042,15 @@ public:
                 double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
                 double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
 
-                grad.at(t, 0) = dll_deta * deta_dpar1;
-                grad.at(t, 1) = dll_deta * deta_dpar2;
+                dll_dlag.at(0) += dll_deta * deta_dpar1;
+                dll_dlag.at(1) += dll_deta * deta_dpar2;
             }
         }
 
         #ifdef DGTF_DO_BOUND_CHECK
-            bound_check<arma::mat>(grad, "Model::dloglik_dlag: grad");
+            bound_check<arma::mat>(dll_dlag, "Model::dloglik_dlag: grad");
         #endif
-        arma::vec grad_out = arma::vectorise(arma::sum(grad, 0));
-        return grad_out;
+        return dll_dlag;
     }
 
 
@@ -1080,6 +1074,39 @@ public:
         }
 
         return out;
+    }
+
+
+    /**
+     * @brief Forward evolution: theta[t+1] ~ N(func_gt(theta[t]), W[t+1])
+     * 
+     * @param model 
+     * @param theta_next 
+     * @param theta_cur 
+     * @param Wt_next 
+     * @return double 
+     */
+    static double logp_forward_evolution(
+        const Model &model,
+        const arma::vec &theta_next, // theta[t+1]
+        const arma::vec &theta_cur // theta[t]
+    )
+    {
+        if (model.derr.full_rank)
+        {
+            // model.derr.var: W[t+1], the derived W[t+1], either derived from discount factor or equal to model.derr.var
+            return MVNorm::dmvnorm(theta_next, theta_cur, model.derr.var, true);
+        }
+        else if (model.derr.par1 > EPS)
+        {
+            double sigma = std::sqrt(model.derr.par1);
+            double eps = theta_next.at(0) - theta_cur.at(0);
+            return R::dnorm4(eps, 0., sigma, true);
+        }
+        else
+        {
+            throw std::invalid_argument("logp_forward_evolution: variance matrix W[t+1] must be at least non-zero in its first diagonal element.");
+        }
     }
 
 private:
