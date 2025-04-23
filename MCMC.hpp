@@ -844,20 +844,6 @@ namespace MCMC
                 W_prior.par2 = nSw;
             }
 
-            // LBA::LinearBayes linear_bayes(model, y);
-            // linear_bayes.filter();
-            // linear_bayes.smoother();
-            // arma::mat psi_tmp = LBA::get_psi(linear_bayes.atilde, linear_bayes.Rtilde);
-            // arma::vec wt_init = arma::diff(psi_tmp.col(1));
-
-            // wt.tail(wt_init.n_elem) = wt_init;
-
-            // arma::vec psi = wt;
-            // double log_marg = -9999;
-            // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
-            // W_accept = 0.;
-            // log_marg_stored.set_size(nsample);
-            // log_marg_stored.zeros();
 
             ApproxDisturbance approx_dlm(nT, model.fgain);
 
@@ -868,8 +854,6 @@ namespace MCMC
                 approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
                 Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd);
                 arma::vec psi = arma::cumsum(wt);
-
-                // Posterior::update_psi(psi, W_accept, log_marg, y, model, 5000);
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
 
                 // if (W_prior.infer)
@@ -916,7 +900,6 @@ namespace MCMC
                     }
 
                     // log_marg_stored.at(idx_run) = log_marg;
-                    // wt_stored.col(idx_run) = psi;
                     wt_stored.col(idx_run) = wt;
                     W_stored.at(idx_run) = model.derr.par1;
                     seas_stored.col(idx_run) = model.seas.val;
