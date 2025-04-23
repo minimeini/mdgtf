@@ -699,6 +699,15 @@ namespace MCMC
                 zintercept_infer, zzcoef_infer,
                 opts, model);
 
+            if (nparam > 0)
+            {
+                update_static = true;
+            }
+            else
+            {
+                update_static = false;
+            }
+
             hmc_accept = 0.;
 
             W_stored.set_size(nsample);
@@ -777,6 +786,11 @@ namespace MCMC
             output["psi_stored"] = Rcpp::wrap(psi_stored);
             output["psi"] = Rcpp::wrap(psi_quantile);
             output["wt_accept"] = Rcpp::wrap(wt_accept / ntotal);
+
+            if (!z_stored.is_empty())
+            {
+                output["z_stored"] = Rcpp::wrap(arma::vectorise(arma::mean(z_stored, 1)));
+            }
             
             // arma::mat psi_quantile = arma::quantile(wt_stored, qprob, 1); // (nT + 1) x 3
             // output["psi"] = Rcpp::wrap(psi_quantile);
@@ -844,6 +858,21 @@ namespace MCMC
                 W_prior.par2 = nSw;
             }
 
+            if (model.zero.inflated)
+            {
+                z_stored.set_size(nT + 1, nsample);
+                z_stored.ones();
+                arma::vec ztmp(nT + 1, arma::fill::zeros);
+                for (unsigned int t = 1; t < y.n_elem; t++)
+                {
+                    if (y.at(t) > EPS)
+                    {
+                        ztmp.at(t) = 1.;
+                    }
+                }
+
+                model.zero.setZ(ztmp, nT);
+            }
 
             ApproxDisturbance approx_dlm(nT, model.fgain);
 
@@ -862,8 +891,8 @@ namespace MCMC
                 //     Posterior::update_W(W_accept, model, wt, W_prior, mh_sd);
                 // }
 
-                // if (par1_prior.infer || par2_prior.infer)
-                // {
+                if (update_static)
+                {
                     // Posterior::update_dlag(
                     //     par1_accept, par2_accept, model,
                     //     y, hpsi, par1_prior, par2_prior,
@@ -874,7 +903,7 @@ namespace MCMC
                         W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
                         zintercept_infer, zzcoef_infer,
                         epsilon, L, kinetic_sd);
-                // }
+                }
 
                 // if (seas_prior.infer)
                 // {
@@ -901,6 +930,11 @@ namespace MCMC
 
                     // log_marg_stored.at(idx_run) = log_marg;
                     wt_stored.col(idx_run) = wt;
+                    if (model.zero.inflated)
+                    {
+                        z_stored.col(idx_run) = model.zero.z;
+                    }
+
                     W_stored.at(idx_run) = model.derr.par1;
                     seas_stored.col(idx_run) = model.seas.val;
                     rho_stored.at(idx_run) = model.dobs.par2;
