@@ -373,9 +373,8 @@ namespace VB
                 // You MUST set initial_resample_all = true (MCS smoothing) and final_resample_by_weights = false (reduce degeneracy) to make this algorithm work.
                 arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::mat ztmp(N, y.n_elem, arma::fill::ones);
-                arma::mat ptmp(N, y.n_elem, arma::fill::randu);
                 double marg_loglik = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                    Theta_tmp, ztmp, ptmp, model, y, N, 
+                    Theta_tmp, ztmp, model, y, N, 
                     true, false, use_discount, discount_factor);
                 arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
 
@@ -383,7 +382,7 @@ namespace VB
 
                 if (model.zero.inflated)
                 {
-                    model.zero.prob = arma::vectorise(arma::mean(ptmp, 0)); // (nT + 1) x 1
+                    model.zero.prob = arma::vectorise(arma::mean(ztmp, 0)); // (nT + 1) x 1
                     for (unsigned int t = 0; t < model.zero.z.n_elem; t++)
                     {
                         model.zero.z.at(t) = (R::runif(0., 1.) < model.zero.prob.at(t)) ? 1. : 0.;
@@ -586,15 +585,14 @@ namespace VB
             {
                 arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::mat ztmp(N, y.n_elem, arma::fill::ones);
-                arma::mat ptmp(N, y.n_elem, arma::fill::randu);
                 double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                    Theta_tmp, ztmp, ptmp, model, y, N, 
+                    Theta_tmp, ztmp, model, y, N, 
                     true, false, use_discount, discount_factor);
                 arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
 
                 if (model.zero.inflated)
                 {
-                    prob_stored.col(i) = arma::vectorise(arma::mean(ptmp, 0)); // (nT + 1) x 1
+                    prob_stored.col(i) = arma::vectorise(arma::mean(ztmp, 0)); // (nT + 1) x 1
                     for (unsigned int t = 0; t < model.zero.z.n_elem; t++)
                     {
                         z_stored.at(t, i) = (R::runif(0., 1.) < prob_stored.at(t, i)) ? 1. : 0.;

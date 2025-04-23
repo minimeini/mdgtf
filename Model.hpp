@@ -1065,12 +1065,10 @@ public:
         double out = 0.;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            if (model.zero.inflated && model.zero.z.at(t) < EPS)
+            if (!(model.zero.inflated && model.zero.z.at(t) < EPS))
             {
-                continue;
+                out += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), model.dobs.par2, jacobian);
             }
-            
-            out += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), model.dobs.par2, jacobian);
         }
 
         return out;
