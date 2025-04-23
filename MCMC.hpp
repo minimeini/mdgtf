@@ -80,6 +80,84 @@ namespace MCMC
     class Posterior
     {
     public:
+        /**
+         * @brief Gibbs sampler for zero-inflated indicator z[t]
+         * 
+         * @param model 
+         * @param y 
+         * @param wt 
+         */
+        static void update_zt(
+            Model &model, 
+            const arma::vec &y, // (nT + 1) x 1
+            const arma::vec &wt) // (nT + 1) x 1
+        {
+            // lambda: (nT + 1) x 1, conditional expectation of y[t] if z[t] = 1
+            arma::vec lambda = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val);
+
+            arma::vec p01(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | z[t-1] = 0, gamma)
+            p01.at(0) = logistic(model.zero.intercept);
+            arma::vec p11(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | z[t-1] = 1, gamma)
+            p11.at(0) = logistic(model.zero.intercept + model.zero.coef);
+
+            arma::vec prob_filter(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | y[1:t], gamma)
+            prob_filter.at(0) = p01.at(0);
+            for (unsigned int t = 1; t < y.n_elem; t++)
+            {
+                double p0 = model.zero.intercept;
+                double p1 = model.zero.intercept + model.zero.coef;
+                if (!model.zero.X.is_empty())
+                {
+                    double val = arma::accu(model.zero.X.col(t) % model.zero.beta);
+                    p0 += val;
+                    p1 += val;
+                }
+                p01.at(t) = logistic(p0); // p(z[t] = 1 | z[t-1] = 0, gamma)
+                p11.at(t) = logistic(p1); // p(z[t] = 1 | z[t-1] = 1, gamma)
+
+                if (y.at(t) > EPS)
+                {
+                    // If y[t] > 0
+                    // We must have p(z[t] = 1 | y[t] > 0) = 1
+                    prob_filter.at(t) = 1.;
+                }
+                else
+                {
+                    double prob_yzero = ObsDist::loglike(
+                        0., model.dobs.name, lambda.at(t), model.dobs.par2, false);
+
+                    double pp1 = prob_filter.at(t - 1) * p11.at(t); // p(z[t-1] = 1) * p(z[t] = 1 | z[t-1] = 1)
+                    pp1 += std::abs(1. - prob_filter.at(t - 1)) * p01.at(t); // p(z[t-1] = 0) * p(z[t] = 1 | z[t-1] = 0)
+                    pp1 *= prob_yzero; // p(y[t] = 0 | z[t] = 1)
+
+                    double pp0 = prob_filter.at(t - 1) * std::abs(1. - p11.at(t)); // p(z[t-1] = 1) * p(z[t] = 0 | z[t-1] = 1)
+                    pp0 += std::abs(1. - prob_filter.at(t - 1) * std::abs(1. - p01.at(t))); // p(z[t-1] = 0) * p(z[t] = 0 | z[t-1] = 0)
+
+                    prob_filter.at(t) = pp1 / (pp1 + pp0 + EPS);
+                }
+            } // Forward filtering loop
+
+            model.zero.z.at(y.n_elem - 1) = (R::runif(0., 1.) < prob_filter.at(y.n_elem - 1)) ? 1. : 0.;
+            for (unsigned int t = y.n_elem - 2; t > 0; t--)
+            {
+                if (y.at(t) > EPS)
+                {
+                    model.zero.z.at(t) = 1.;
+                }
+                else
+                {
+                    double p1 = model.zero.z.at(t + 1) > EPS ? p11.at(t + 1) : (1. - p11.at(t + 1)); // p(z[t+1] | z[t] = 1)
+                    double prob_backward1 = prob_filter.at(t) * std::abs(p1); // p(z[t] = 1 | y[t] = 0) * p(z[t+1] | z[t] = 1)
+                    double p0 = model.zero.z.at(t + 1) > EPS ? p01.at(t + 1) : (1. - p01.at(t + 1)); // p(z[t+1] | z[t] = 0)
+                    double prob_backward0 = std::abs(1. - prob_filter.at(t)) * std::abs(p0); // p(z[t] = 0 | y[t] = 0) * p(z[t+1] | z[t] = 0)
+
+                    prob_backward1 = prob_backward1 / (prob_backward1 + prob_backward0 + EPS);
+                    model.zero.z.at(t) = (R::runif(0., 1.) < prob_backward1) ? 1. : 0.;
+                }
+            }
+
+        } // update_zt
+
         static void update_wt( // Checked. OK.
             arma::vec &wt,     // (nT + 1) x 1
             arma::vec &wt_accept,
@@ -99,7 +177,11 @@ namespace MCMC
                 double logp_old = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
                 {
-                    logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+                    if (!(model.zero.inflated && (model.zero.z.at(i) < EPS)))
+                    {
+                        // For zero-inflated model, only the y[t] that is not missing taken into account
+                        logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+                    }
                 } // Checked. OK.
 
                 logp_old += R::dnorm4(wt_old, 0., prior_sd, true);
@@ -114,11 +196,15 @@ namespace MCMC
                     lambda, model.dobs, model.flink); // nT x 1
 
                 arma::mat Fn = approx_dlm.get_Fn(); // nT x nT
-                arma::vec Fnt = Fn.col(t - 1);
+                arma::vec Fnt = Fn.col(t - 1); // nT x 1
                 arma::vec Fnt2 = Fnt % Fnt;
 
-                arma::vec tmp = Fnt2 / Vt_hat;
-                double mh_prec = arma::accu(tmp);
+                arma::vec tmp = Fnt2 / Vt_hat; // nT x 1, element-wise division
+                if (model.zero.inflated)
+                {
+                    tmp %= model.zero.z.subvec(1, tmp.n_elem); // If y[t] is missing (z[t] = 0), F[t]*F[t]'/V[t] is removed from the posterior variance of the proposal
+                }
+                double mh_prec = arma::accu(tmp) + EPS8;
                 // mh_prec = std::abs(mh_prec) + 1. / w0_prior.par2 + EPS;
 
                 double Bs = 1. / mh_prec;
@@ -139,7 +225,10 @@ namespace MCMC
                 double logp_new = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
                 {
-                    logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+                    if (!(model.zero.inflated && (model.zero.z.at(i) == 0)))
+                    {
+                        logp_new += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+                    }
                 } // Checked. OK.
 
                 logp_new += R::dnorm4(wt_new, 0., prior_sd, true); // prior
@@ -884,6 +973,11 @@ namespace MCMC
                 Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd);
                 arma::vec psi = arma::cumsum(wt);
                 arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+
+                if (model.zero.inflated)
+                {
+                    Posterior::update_zt(model, y, wt);
+                }
 
                 // if (W_prior.infer)
                 // {

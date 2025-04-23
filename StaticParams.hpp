@@ -868,31 +868,66 @@ namespace Static
         return deriv;
     }
 
-
     inline double logJoint(
-        const arma::vec &y, // (nT + 1) x 1
-        const arma::mat &Theta, // nP x (nT + 1)
+        const arma::vec &y,      // (nT + 1) x 1
+        const arma::mat &Theta,  // nP x (nT + 1)
         const arma::vec &lambda, // (nT + 1) x 1
         const Prior &W_prior,
         const Prior &par1_prior,
         const Prior &par2_prior,
         const Prior &rho_prior,
         const Prior &seas_prior,
-        const Model &model
-    )
+        const Model &model)
     {
         double logp = 0.;
         double Wchol = std::sqrt(model.derr.par1);
 
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+            // Add likelihood of y[t]
+            if (model.zero.inflated && model.zero.z.at(t) < EPS)
+            {
+                // p(y[t] = 0 | theta[t], z[t] = 0, gamma) = 1
+                logp += y.at(t) < EPS ? 0. : -9e16; // numerically exp(-9e16) = 0
+            }
+            else
+            {
+                // When z[t] = 1
+                // Likelihood p(y[t] | theta[t], z[t] = 1, gamma) is NB(y[t] | lambda[t], rho)
+                logp += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+            }
+
+            // Add evolution from theta[t-1] to theta[t]
             if (W_prior.infer && !model.derr.full_rank)
             {
+                // logp(theta[t] | theta[t-1], gamma)
                 logp += R::dnorm4(Theta.at(0, t), Theta.at(0, t - 1), Wchol, true);
             }
-        }
 
+            // Add evolution from z[t-1] to z[t] for zero-inflated model
+            if (model.zero.inflated)
+            {
+                double val = model.zero.intercept + model.zero.coef * model.zero.z.at(t - 1);
+                if (!model.zero.X.is_empty())
+                {
+                    val += arma::accu(model.zero.X.col(t) % model.zero.beta);
+                }
+                double prob = logistic(val); // p(z[t] = 1 | z[t-1], gamma)
+
+                if (model.zero.z.at(t) > EPS)
+                {
+                    // z[t] = 1 with probability `prob`
+                    logp += std::log(prob);
+                }
+                else
+                {
+                    // z[t] = 0 with probability `1 - prob`
+                    logp += std::log(std::abs(1. - prob) + EPS);
+                }
+            }
+        } // End loop over time `t`
+
+        // Add priors
         if (par1_prior.infer)
         {
             logp += Prior::dprior(model.dlag.par1, par1_prior, true, true); // TODO: check it
