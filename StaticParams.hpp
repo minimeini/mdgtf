@@ -744,18 +744,46 @@ namespace Static
         return logp;
     }
 
-
     inline double dlogJoint_dzintercept(
         const ZeroInflation &zero
     ){
-        arma::vec diff = zero.z - zero.prob;
-        return arma::accu(diff);
+        // The derivative of joint probability w.r.t to intercept is
+        // sum(z[t] - p[t])
+        double grad = 0.;
+        for (unsigned int t = 1; t < zero.z.n_elem; t++)
+        {
+            // logit(p[t]) = a + c * (z[t-1] == 1)
+            double val = zero.intercept + zero.coef * zero.z.at(t - 1);
+            if (!zero.X.is_empty())
+            {
+                val += arma::accu(zero.X.col(t) % zero.beta);
+            }
+            double prob = logistic(val); // This is p[t]
+            grad += zero.z.at(t) - prob;
+        }
+        return grad;
     }
 
     inline double dlogJoint_dzzcoef(const ZeroInflation& zero)
     {
-        arma::vec diff = zero.z - zero.prob;
-        return arma::accu(diff % zero.z);
+        // The derivative of joint probability w.r.t to slope is
+        // sum((z[t] - p[t]) * (z[t-1] == 1))
+        double grad = 0.;
+        for (unsigned int t = 1; t < zero.z.n_elem; t++)
+        {
+            if (zero.z.at(t - 1) > EPS)
+            {
+                // If z[t-1] == 1
+                double val = zero.intercept + zero.coef;
+                if (!zero.X.is_empty())
+                {
+                    val += arma::accu(zero.X.col(t) % zero.beta);
+                }
+                double prob = logistic(val); // This is p[t]
+                grad += zero.z.at(t) - prob;
+            }
+        }
+        return grad;
     }
 
     /**

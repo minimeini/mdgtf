@@ -727,7 +727,7 @@ namespace VB
 
             if (!z_stored.is_empty() && !prob_stored.is_empty())
             {
-                output["z"] = Rcpp::wrap(z_stored);
+                output["z"] = Rcpp::wrap(arma::vectorise(arma::mean(z_stored, 1)));
                 output["prob"] = Rcpp::wrap(prob_stored);
             }
 

@@ -812,6 +812,9 @@ namespace MCMC
             par2_stored.set_size(nsample);
             // lag_accept = 0.;
 
+            zintercept_stored.set_size(nsample);
+            zzcoef_stored.set_size(nsample);
+
             return;
         }
 
@@ -904,6 +907,18 @@ namespace MCMC
             output["infer_par2"] = par2_prior.infer;
             output["par2"] = Rcpp::wrap(par2_stored);
             // output["lag_accept"] = lag_accept / ntotal;
+
+            output["infer_zintercept"] = zintercept_infer;
+            if (zintercept_infer)
+            {
+                output["zintercept"] = Rcpp::wrap(zintercept_stored);
+            }
+
+            output["infer_zzcoef"] = zzcoef_infer;
+            if (zzcoef_infer)
+            {
+                output["zzcoef"] = Rcpp::wrap(zzcoef_stored);
+            }
 
             output["hmc_accept"] = hmc_accept / ntotal;
 
@@ -1034,6 +1049,8 @@ namespace MCMC
                     rho_stored.at(idx_run) = model.dobs.par2;
                     par1_stored.at(idx_run) = model.dlag.par1;
                     par2_stored.at(idx_run) = model.dlag.par2;
+                    zintercept_stored.at(idx_run) = model.zero.intercept;
+                    zzcoef_stored.at(idx_run) = model.zero.coef;
                 }
 
                 if (verbose)
@@ -1071,9 +1088,10 @@ namespace MCMC
         std::vector<std::string> param_selected = {"W"};
 
         arma::mat z_stored; // (nT + 1) x nsample
-        arma::mat prob_stored; // (nT + 1) x nsample
         bool zintercept_infer = false;
         bool zzcoef_infer = false;
+        arma::vec zintercept_stored;
+        arma::vec zzcoef_stored;
 
         arma::vec wt;
         arma::vec wt_accept; // nsample x 1
