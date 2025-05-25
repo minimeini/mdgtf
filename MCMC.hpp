@@ -21,6 +21,12 @@ namespace MCMC
         /**
          * @brief Calculate gradient of the potential energery. The potential energy is the negative log joint probability of the model.
          * 
+         * @note Duane et al. (1987): https://www.sciencedirect.com/science/article/abs/pii/037026938791197X
+         * @note Neal (2011): https://arxiv.org/pdf/1206.1901
+         * @note Betancourt (2018): https://arxiv.org/abs/1701.02434
+         * @note How people introduce their use of HMC - Patel et al. (2021): https://arxiv.org/pdf/2110.08363
+         * @note Practical guide to HMC: https://bjlkeng.io/posts/hamiltonian-monte-carlo/
+         * 
          * @param q 
          * @param model 
          * @param param_selected 

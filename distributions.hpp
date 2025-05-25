@@ -1185,8 +1185,8 @@ public:
         double dv_dmu = -1. / sig;
 
         double v = (std::log(lag + EPS) - mu) / sig;
-        double dlag_dv = R::dnorm4(v, 0., 1., false);
-        double dv_dlogsig2 = -0.5 * v;
+        double dlag_dv = R::dnorm4(v, 0., 1., false); // phi(v(l,mu,sigma))
+        double dv_dlogsig2 = -0.5 * v; // dv/dlog(sigma2) = dv/dsigma * dsigma/dlog(sigma2) = - 0.5 * v
 
         double dlag_dmu = dlag_dv * dv_dmu;
         double dlag_dlogsig2 = dlag_dv * dv_dlogsig2;

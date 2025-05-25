@@ -652,12 +652,12 @@ namespace Static
         double deriv;
         if (dist_list[W_prior.name] == AVAIL::Dist::invgamma)
         {
-            double bnew = bw + 0.5 * res;
+            double bnew = bw + 0.5 * res; // IG prior on W
             double log_bnew_W = std::log(std::abs(bnew) + EPS) - std::log(std::abs(W) + EPS);
             log_bnew_W = std::min(log_bnew_W, UPBND);
             deriv = -std::exp(log_bnew_W);
 
-            double a_new = aw;
+            double a_new = aw; // IG prior on W
             a_new += 0.5 * cnt * p;
             a_new += 1.;
             deriv += a_new;
