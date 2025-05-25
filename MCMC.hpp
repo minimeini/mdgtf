@@ -133,12 +133,12 @@ namespace MCMC
                         0., model.dobs.name, lambda.at(t), model.dobs.par2, false);
 
                     double pp1 = prob_filter.at(t - 1) * p11.at(t); // p(z[t-1] = 1) * p(z[t] = 1 | z[t-1] = 1)
-                    pp1 += std::abs(1. - prob_filter.at(t - 1)) * p01.at(t); // p(z[t-1] = 0) * p(z[t] = 1 | z[t-1] = 0)
-                    pp1 *= prob_yzero; // p(y[t] = 0 | z[t] = 1)
-
                     double pp0 = prob_filter.at(t - 1) * std::abs(1. - p11.at(t)); // p(z[t-1] = 1) * p(z[t] = 0 | z[t-1] = 1)
-                    pp0 += std::abs(1. - prob_filter.at(t - 1) * std::abs(1. - p01.at(t))); // p(z[t-1] = 0) * p(z[t] = 0 | z[t-1] = 0)
 
+                    pp1 += std::abs(1. - prob_filter.at(t - 1)) * p01.at(t); // p(z[t-1] = 0) * p(z[t] = 1 | z[t-1] = 0)
+                    pp0 += std::abs(1. - prob_filter.at(t - 1)) * std::abs(1. - p01.at(t)); // p(z[t-1] = 0) * p(z[t] = 0 | z[t-1] = 0)
+
+                    pp1 *= prob_yzero; // p(y[t] = 0 | z[t] = 1)
                     prob_filter.at(t) = pp1 / (pp1 + pp0 + EPS);
                 }
             } // Forward filtering loop
