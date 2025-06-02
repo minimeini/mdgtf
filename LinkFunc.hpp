@@ -53,6 +53,11 @@ public:
             mu = std::exp(eta);
             break;
         }
+        case LinkFunc::Func::logistic:
+        {
+            mu = 1. / (1. + std::exp(-eta));
+            break;
+        }
         default:
         {
             // Identity gain
@@ -76,6 +81,10 @@ public:
         {
             mu = arma::exp(eta);
             break;
+        }
+        case LinkFunc::Func::logistic:
+        {
+            mu = 1. / (1. + arma::exp(-eta));
         }
         default:
         {
@@ -116,6 +125,10 @@ public:
             eta = arma::log(mu);
             break;
         }
+        case LinkFunc::Func::logistic:
+        {
+            eta = logit<T>(mu);
+        }
         default:
         {
             // Identity link
@@ -143,6 +156,10 @@ public:
         {
             eta = std::log(mu);
             break;
+        }
+        case LinkFunc::Func::logistic:
+        {
+            eta = logit(mu);
         }
         default:
         {

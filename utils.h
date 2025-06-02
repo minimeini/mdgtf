@@ -320,7 +320,7 @@ inline double logit(const double &p)
 {
 	double val = p / (1. - p);
 	#ifdef DGTF_DO_BOUND_CHECK
-	bound_check(val, "logit", true, true);
+	bound_check(val, "logit");
 	#endif
 	return std::log(val);
 }
@@ -331,6 +331,9 @@ inline T logit(const T&x)
 {
 	T val = x / (1. - x);
 	T out = arma::log(val);
+	#ifdef DGTF_DO_BOUND_CHECK
+	bound_check(val, "logit");
+	#endif
 	return out;
 }
 
@@ -338,7 +341,7 @@ inline double logistic(const double &x)
 {
 	double val = 1. / (1. + std::exp(-x));
 	#ifdef DGTF_DO_BOUND_CHECK
-	bound_check(val, "logistic");
+	bound_check(val, "logistic", true, true);
 	#endif
 	return val;
 }
@@ -349,7 +352,9 @@ inline T logistic(const T& x)
 {
 	T val = arma::exp(-x) + 1.;
 	T out = 1. / val;
+	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check<T>(out, "logistic", true, true);
+	#endif
 	return out;
 }
 
