@@ -965,6 +965,14 @@ public:
         return output;
     }
 
+    /**
+     * @brief When the negative-binomial distribution is used as a lag distribution.
+     * 
+     * @param y 
+     * @param kappa 
+     * @param r 
+     * @return double 
+     */
     static double dlag_dlogitkappa(const double &y, const double &kappa, const double &r)
     {
         if (r < 1)
@@ -986,6 +994,19 @@ public:
             bound_check(out, "nbinom::dlag_dlogitkappa: out");
         #endif
         return out;
+    }
+
+    /**
+     * @brief When the negative-binomial distribution is used as a likelihood.
+     * 
+     * @param lambda 
+     * @param yt 
+     * @param par2 
+     * @return double 
+     */
+    static double dlogp_dlambda(const double &lambda, const double &yt, const double &par2)
+    {
+        return yt / (std::abs(lambda) + EPS) - par2 / (std::abs(1. - lambda) + EPS);
     }
 
     double sample()
