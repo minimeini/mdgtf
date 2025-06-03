@@ -85,6 +85,7 @@ public:
         case LinkFunc::Func::logistic:
         {
             mu = 1. / (1. + arma::exp(-eta));
+            break;
         }
         default:
         {
@@ -128,6 +129,7 @@ public:
         case LinkFunc::Func::logistic:
         {
             eta = logit<T>(mu);
+            break;
         }
         default:
         {
@@ -160,6 +162,7 @@ public:
         case LinkFunc::Func::logistic:
         {
             eta = logit(mu);
+            break;
         }
         default:
         {
@@ -175,6 +178,14 @@ public:
     }
 
 
+    /**
+     * @brief Given eta, calculate lambda and the derivative of lambda w.r.t eta.
+     * 
+     * @param lambda 
+     * @param eta 
+     * @param link_func 
+     * @return double 
+     */
     static double dlambda_deta(double &lambda, const double &eta, const std::string &link_func)
     {
         double deriv = 0.;
@@ -184,7 +195,7 @@ public:
         {
         case LinkFunc::Func::exponential:
         {
-            lambda = std::exp(lambda);
+            lambda = std::exp(eta);
             deriv = lambda;
             break;
         }
@@ -193,6 +204,7 @@ public:
             double tmp = std::exp(eta);
             lambda = tmp / (1. + tmp);
             deriv = tmp / std::pow(1. + tmp, 2.);
+            break;
         }
         default:
         {
