@@ -448,9 +448,9 @@ namespace LBA
             }
             else
             {
-                arma::mat psi = get_psi(atilde, Rtilde);
+                // arma::mat psi = get_psi(atilde, Rtilde);
                 arma::mat psi_filter = get_psi(mt, Ct);
-                output["psi"] = Rcpp::wrap(psi);
+                // output["psi"] = Rcpp::wrap(psi);
                 output["psi_filter"] = Rcpp::wrap(psi_filter);
             }
             
@@ -538,9 +538,11 @@ namespace LBA
             const double &discount_factor,
             const std::string &discount_type)
         {
+            std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+
             at_new = SysEq::func_gt(
-                model.fsys, model.fgain, model.dlag, 
-                mt_old, y.at(t - 1), 
+                model.fsys, model.fgain, model.dlag,
+                mt_old, y.at(t - 1),
                 model.seas.period, model.seas.in_state); // Checked. OK.
 
             SysEq::func_Gt(Gt, model.fsys, model.fgain, model.dlag, mt_old, y.at(t - 1));
@@ -553,15 +555,22 @@ namespace LBA
             qt_prior = 0.;
             func_prior_ft(ft_prior, qt_prior, Ft, t, model, y, at_new, Rt_new);
 
-            double alpha = 0.;
-            double beta = 0.;
-            func_alpha_beta(alpha, beta, model, ft_prior, qt_prior, y.at(t), true);
-            arma::mat At = func_At(Rt_new, Ft, qt_prior);
-
-            ft_posterior = 0.;
+            ft_posterior = y.at(t);
             qt_posterior = 0.;
-            func_posterior_ft(ft_posterior, qt_posterior, model, alpha, beta);
 
+            if (obs_list[model.dobs.name] != AVAIL::Dist::gaussian)
+            {
+                double alpha = 0.;
+                double beta = 0.;
+                func_alpha_beta(alpha, beta, model, ft_prior, qt_prior, y.at(t), true);
+                func_posterior_ft(ft_posterior, qt_posterior, model, alpha, beta);
+            }
+            else
+            {
+                qt_prior += model.dobs.par2;
+            }
+
+            arma::mat At = func_At(Rt_new, Ft, qt_prior);
             mt_new = func_mt(at_new, At, ft_prior, ft_posterior);
             Ct_new = func_Ct(Rt_new, At, qt_prior, qt_posterior);
             return;

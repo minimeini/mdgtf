@@ -981,6 +981,11 @@ public:
             dloglik_dlam = Poisson::dlogp_dlambda(lambda, yt);
             break;
         }
+        case AVAIL::Dist::gaussian:
+        {
+            dloglik_dlam = (yt - lambda) / obs_par2;
+            break;
+        }
         default:
         {
             throw std::invalid_argument("Model::dloglik_deta: observation distribution must be nbinomm or poisson.");
