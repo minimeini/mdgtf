@@ -448,9 +448,9 @@ namespace LBA
             }
             else
             {
-                // arma::mat psi = get_psi(atilde, Rtilde);
+                arma::mat psi = get_psi(atilde, Rtilde);
                 arma::mat psi_filter = get_psi(mt, Ct);
-                // output["psi"] = Rcpp::wrap(psi);
+                output["psi"] = Rcpp::wrap(psi);
                 output["psi_filter"] = Rcpp::wrap(psi_filter);
             }
             
