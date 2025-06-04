@@ -1140,6 +1140,7 @@ public:
         const bool &full_rank = false)
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         if (!model.dlag.truncated)
         {
@@ -1204,6 +1205,14 @@ public:
                 arma::mat var_chol = arma::chol(model.derr.var);
                 Theta.col(t) = Theta.col(t) + var_chol.t() * eps;
                 psi.at(psi_idx) = Theta.at(0, t);
+            }
+
+            arma::vec ytmp = y;
+            if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomp)
+            {
+                double p2 = model.dobs.par2;
+                ytmp.for_each([&p2](arma::vec::elem_type &val)
+                              { val /= p2; });
             }
 
             ft.at(t) = TransFunc::func_ft(

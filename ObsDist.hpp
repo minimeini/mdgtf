@@ -113,6 +113,11 @@ public:
             y = nbinomm::sample(lambda, par2);
             break;
         }
+        case AVAIL::Dist::nbinomp:
+        {
+            y = nbinom::sample(lambda, par2);
+            break;
+        }
         default:
         {
             // Poisson observation distribution

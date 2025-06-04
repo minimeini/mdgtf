@@ -56,6 +56,8 @@ public:
         case LinkFunc::Func::logistic:
         {
             mu = 1. / (1. + std::exp(-eta));
+            mu = std::min(mu, 0.99);
+            mu = std::max(EPS8, mu);
             break;
         }
         default:
@@ -85,6 +87,7 @@ public:
         case LinkFunc::Func::logistic:
         {
             mu = 1. / (1. + arma::exp(-eta));
+            mu.clamp(EPS8, 0.99);
             break;
         }
         default:
