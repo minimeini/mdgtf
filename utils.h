@@ -232,7 +232,7 @@ inline arma::mat inverse(
 	{
 		try
 		{
-			arma::mat mat_R = arma::chol(matrice);
+			arma::mat mat_R = arma::chol(arma::symmatu(matrice));
 			arma::mat mat_Rinv = arma::inv(arma::trimatu(mat_R));
 			mat_inv = mat_Rinv * mat_Rinv.t();
 		}

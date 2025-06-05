@@ -733,44 +733,26 @@ namespace MCMC
         }
 
 
-        /**
-         * @brief 
-         * @note The model is:
-         * @note y[t] ~ NB(z[t]*lambda[t], par2) w. lambda[t] as the probability of failure and par2 as the # of successes.
-         * @note z[t] ~ Bern(p[t])
-         * @note logit(lambda[t]) = x[t]'seas + f(theta[t])
-         * @note logit(p[t]) = a + c * z[t-1]
-         * @note theta[t] ~ N(theta[t-1], W)
-         * 
-         * @param lambda 
-         * @param omega 
-         * @param model 
-         * @param y 
-         */
-        static void update_pg_lambda(
-            arma::vec &lambda, 
-            arma::vec &omega, 
-            const Model &model, 
-            const arma::vec &y)
-        {
-            for (unsigned int t = 0; t < lambda.n_elem; t++)
-            {
-                omega.at(t) = pg::rpg_scalar_hybrid(y.at(t) + model.dobs.par2, lambda.at(t));
-                lambda.at(t) = 0.5 * (y.at(t) - model.dobs.par2) / omega.at(t) + R::rnorm(0., 1.) / std::sqrt(omega.at(t));
-            }
-
-            return;
-        }
-
         static arma::mat update_ffbs_theta(
             const Model &model, 
             const arma::vec &y, 
-            const arma::vec &omega)
+            const arma::vec &omega
+        )
         {
             const unsigned int nP = model.nP;
             const unsigned int nT = y.n_elem - 1;
             Model normal_dlm = model;
             normal_dlm.dobs.name = "gaussian";
+            normal_dlm.flink = "identity";
+            normal_dlm.fgain = "identity";
+
+            arma::vec ytmp = y;
+            double npop = model.dobs.par2;
+            ytmp.for_each([&npop](arma::vec::elem_type &val)
+                          { val /= npop; });
+
+            arma::vec ktmp = 0.5 * (y - npop) / omega;
+            // arma::vec ktmp = y;
 
             // Forward filtering
             arma::mat mt(nP, nT + 1);
@@ -779,24 +761,29 @@ namespace MCMC
             arma::mat at = mt;
             arma::cube Rt = Ct;
 
-            arma::vec Ft = TransFunc::init_Ft(nP, model.ftrans, model.seas.period, model.seas.in_state); // set F[0]
-            arma::mat Gt = SysEq::init_Gt(nP, model.dlag, model.fsys, model.seas.period, model.seas.in_state); // set G[0]
+            arma::vec Ft = TransFunc::init_Ft(nP, model.ftrans, model.seas.period, model.seas.in_state);
+            arma::mat Gt = SysEq::init_Gt(nP, model.dlag, model.fsys, model.seas.period, model.seas.in_state);
             for (unsigned int t = 1; t < nT + 1; t++)
             {
                 normal_dlm.dobs.par2 = 1. / omega.at(t);
 
-                arma::vec mt_new, at_new;
-                arma::mat Ct_new, Rt_new;
-                double ft_prior, qt_prior, ft_posterior, qt_posterior;
-                LBA::LinearBayes::filter_single_iter(
-                    mt_new, Ct_new, at_new, Rt_new, Ft, Gt,
-                    ft_prior, qt_prior, ft_posterior, qt_posterior,
-                    t, y, normal_dlm, mt.col(t - 1), Ct.slice(t - 1));
+                at.col(t) = SysEq::func_gt(
+                    model.fsys, model.fgain, model.dlag,
+                    mt.col(t - 1), ytmp.at(t - 1),
+                    model.seas.period, model.seas.in_state);
+                Rt.slice(t) = LBA::func_Rt(Gt, Ct.slice(t - 1), normal_dlm.derr.par1);
 
-                mt.col(t) = mt_new;
-                Ct.slice(t) = Ct_new;
-                at.col(t) = at_new;
-                Rt.slice(t) = Rt_new;
+                double ft_prior = 0.;
+                double qt_prior = 0.;
+                LBA::func_prior_ft(ft_prior, qt_prior, Ft, t, normal_dlm, ytmp, at.col(t), Rt.slice(t));
+                qt_prior += normal_dlm.dobs.par2;
+
+                double ft_posterior = ktmp.at(t);
+                double qt_posterior = 0.;
+
+                arma::mat At = LBA::func_At(Rt.slice(t), Ft, qt_prior);
+                mt.col(t) = LBA::func_mt(at.col(t), At, ft_prior, ft_posterior);
+                Ct.slice(t) = LBA::func_Ct(Rt.slice(t), At, qt_prior, qt_posterior);
             }
 
             arma::mat Theta(nP, nT + 1, arma::fill::zeros);
@@ -814,6 +801,7 @@ namespace MCMC
                 arma::vec ht = mt.col(t) + Bt * (Theta.col(t + 1) - at.col(t + 1));
                 arma::mat Ht = Ct.slice(t) - Bt * Gt * Ct.slice(t);
                 Ht.diag() += EPS8;
+
                 arma::mat Ht_chol = arma::chol(arma::symmatu(Ht));
                 Theta.col(t) = ht + Ht_chol.t() * arma::randn(nP);
             }
