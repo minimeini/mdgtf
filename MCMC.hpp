@@ -6,12 +6,15 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-// #include <chrono>
 #include <RcppArmadillo.h>
+#include <pg.h>
 #include "Model.hpp"
 #include "LinkFunc.hpp"
 #include "LinearBayes.hpp"
 #include "StaticParams.hpp"
+
+// [[Rcpp::plugins(cpp17)]]
+// [[Rcpp::depends(RcppArmadillo,pg)]]
 
 namespace MCMC
 {
@@ -729,6 +732,94 @@ namespace MCMC
             }
         }
 
+
+        /**
+         * @brief 
+         * @note The model is:
+         * @note y[t] ~ NB(z[t]*lambda[t], par2) w. lambda[t] as the probability of failure and par2 as the # of successes.
+         * @note z[t] ~ Bern(p[t])
+         * @note logit(lambda[t]) = x[t]'seas + f(theta[t])
+         * @note logit(p[t]) = a + c * z[t-1]
+         * @note theta[t] ~ N(theta[t-1], W)
+         * 
+         * @param lambda 
+         * @param omega 
+         * @param model 
+         * @param y 
+         */
+        static void update_pg_lambda(
+            arma::vec &lambda, 
+            arma::vec &omega, 
+            const Model &model, 
+            const arma::vec &y)
+        {
+            for (unsigned int t = 0; t < lambda.n_elem; t++)
+            {
+                omega.at(t) = pg::rpg_scalar_hybrid(y.at(t) + model.dobs.par2, lambda.at(t));
+                lambda.at(t) = 0.5 * (y.at(t) - model.dobs.par2) / omega.at(t) + R::rnorm(0., 1.) / std::sqrt(omega.at(t));
+            }
+
+            return;
+        }
+
+        static arma::mat update_ffbs_theta(
+            const Model &model, 
+            const arma::vec &y, 
+            const arma::vec &omega)
+        {
+            const unsigned int nP = model.nP;
+            const unsigned int nT = y.n_elem - 1;
+            Model normal_dlm = model;
+            normal_dlm.dobs.name = "gaussian";
+
+            // Forward filtering
+            arma::mat mt(nP, nT + 1);
+            arma::cube Ct(nP, nP, nT + 1);
+            Ct.slice(0) = 5. * arma::eye<arma::mat>(nP, nP);
+            arma::mat at = mt;
+            arma::cube Rt = Ct;
+
+            arma::vec Ft = TransFunc::init_Ft(nP, model.ftrans, model.seas.period, model.seas.in_state); // set F[0]
+            arma::mat Gt = SysEq::init_Gt(nP, model.dlag, model.fsys, model.seas.period, model.seas.in_state); // set G[0]
+            for (unsigned int t = 1; t < nT + 1; t++)
+            {
+                normal_dlm.dobs.par2 = 1. / omega.at(t);
+
+                arma::vec mt_new, at_new;
+                arma::mat Ct_new, Rt_new;
+                double ft_prior, qt_prior, ft_posterior, qt_posterior;
+                LBA::LinearBayes::filter_single_iter(
+                    mt_new, Ct_new, at_new, Rt_new, Ft, Gt,
+                    ft_prior, qt_prior, ft_posterior, qt_posterior,
+                    t, y, normal_dlm, mt.col(t - 1), Ct.slice(t - 1));
+
+                mt.col(t) = mt_new;
+                Ct.slice(t) = Ct_new;
+                at.col(t) = at_new;
+                Rt.slice(t) = Rt_new;
+            }
+
+            arma::mat Theta(nP, nT + 1, arma::fill::zeros);
+            // Backward sampling
+            {
+                arma::mat Ct_chol = arma::chol(arma::symmatu(Ct.slice(nT)));
+                Theta.col(nT) = mt.col(nT) + Ct_chol.t() * arma::randn(nP);
+            }
+
+            for (unsigned int t = nT - 1; t > 0; t--)
+            {
+                arma::mat Rt_inv = inverse(Rt.slice(t + 1));
+                arma::mat Bt = Ct.slice(t) * Gt.t() * Rt_inv;
+
+                arma::vec ht = mt.col(t) + Bt * (Theta.col(t + 1) - at.col(t + 1));
+                arma::mat Ht = Ct.slice(t) - Bt * Gt * Ct.slice(t);
+                Ht.diag() += EPS8;
+                arma::mat Ht_chol = arma::chol(arma::symmatu(Ht));
+                Theta.col(t) = ht + Ht_chol.t() * arma::randn(nP);
+            }
+
+            return Theta;
+        }
     }; // class Posterior
 
     class Disturbance

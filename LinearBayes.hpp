@@ -534,9 +534,9 @@ namespace LBA
             const Model &model, 
             const arma::vec &mt_old,
             const arma::mat &Ct_old,
-            const bool &use_discount,
-            const double &discount_factor,
-            const std::string &discount_type)
+            const bool &use_discount = false,
+            const double &discount_factor = 0.95,
+            const std::string &discount_type = "first_elem")
         {
             std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
