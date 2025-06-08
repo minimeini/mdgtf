@@ -166,49 +166,6 @@ Rcpp::List dgtf_simulate(
 
 //' @export
 // [[Rcpp::export]]
-Rcpp::List test_nbinomp(const Rcpp::List &model_settings, const arma::vec &y, const unsigned int nsample)
-{
-    const unsigned int nT = y.n_elem - 1;
-    Model model(model_settings);
-    model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
-
-    arma::mat Omega(nT + 1, nsample, arma::fill::zeros);
-
-    arma::cube Theta(model.nP, nT + 1, nsample);
-    Theta.slice(0).zeros();
-
-    arma::vec ytmp = y;
-    double npop = model.dobs.par2;
-    ytmp.for_each([&npop](arma::vec::elem_type &val)
-                  { val /= npop; });
-
-    for (unsigned int i = 1; i < nsample; i++)
-    {
-        arma::vec omega(nT + 1, arma::fill::zeros);
-        for (unsigned int t = 0; t <= nT; t++)
-        {
-            arma::vec theta = Theta.slice(i - 1).col(t);
-            double eta = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, theta, ytmp);
-            omega.at(t) = pg::rpg_scalar_hybrid(y.at(t) + npop, eta);
-        }
-        Omega.col(i) = omega;
-
-        arma::mat theta = MCMC::Posterior::update_ffbs_theta(model, y, omega);
-        Theta.slice(i) = theta;
-        
-
-        Rcpp::Rcout << "\rProgress: " << i << "/" << nsample;
-    }
-
-    Rcpp::List output;
-    output["Theta"] = Rcpp::wrap(Theta);
-    output["Omega"] = Rcpp::wrap(Omega);
-
-    return output;
-}
-
-//' @export
-// [[Rcpp::export]]
 Rcpp::List dgtf_infer(
     const Rcpp::List &model_settings,
     const arma::vec &y_in,

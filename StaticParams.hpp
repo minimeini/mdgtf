@@ -709,9 +709,11 @@ namespace Static
         const arma::vec &y,           // (nT+1) x 1
         const arma::vec &lambda,          // (n+1) x 1, (f[0],f[1],...,f[nT])
         const ObsDist &dobs,
-        const ZeroInflation & zero,
+        const ZeroInflation &zero,
         const arma::vec &seas,
-        const arma::mat &Xseas)
+        const arma::mat &Xseas,
+        const std::string &flink
+    )
     { // 0 - negative binomial; 1 - poisson
 
         arma::vec deriv(seas.n_elem, arma::fill::zeros);
@@ -723,8 +725,11 @@ namespace Static
             }
 
             double dy_dlambda = ObsDist::dloglike_dlambda(y.at(t), lambda.at(t), dobs);
-            arma::vec dlambda_dlogseas = Xseas.col(t) % seas;
-            deriv = deriv + dy_dlambda * dlambda_dlogseas;
+            double eta = LinkFunc::mu2ft(lambda.at(t), flink);
+            double lam;
+            double dlambda_deta = LinkFunc::dlambda_deta(lam, eta, flink);
+            arma::vec deta_dlogseas = Xseas.col(t) % seas;
+            deriv = deriv + (dy_dlambda * dlambda_deta) * deta_dlogseas;
         }
         return deriv;
     }
@@ -846,7 +851,7 @@ namespace Static
                 arma::vec logseas = arma::log(seas + EPS);
 
                 arma::vec dloglik = dloglike_dlogseas(
-                    y, lambda, model.dobs, model.zero, seas, model.seas.X);
+                    y, lambda, model.dobs, model.zero, seas, model.seas.X, model.flink);
                 arma::vec dlogprior = dlogprior_dlogseas(logseas, seas_prior.par2);
 
                 deriv.subvec(idx, idx + model.seas.period - 1) = dloglik + dlogprior;

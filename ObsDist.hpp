@@ -165,6 +165,11 @@ public:
             density = R::Rf_dnbinom_mu(ys, par2, lambda_s, return_log);
             break;
         }
+        case AVAIL::Dist::nbinomp:
+        {
+            density = R::dnbinom(ys, par2, 1. - lambda, return_log);
+            break;
+        }
         case AVAIL::Dist::poisson:
         {
             density = R::dpois(ys, lambda_s, return_log);
@@ -210,6 +215,11 @@ public:
         {
             deriv = y / lambda;
             deriv -= (y + dobs.par2) / (lambda + dobs.par2);
+            break;
+        }
+        case AVAIL::Dist::nbinomp:
+        {
+            deriv = y / lambda - (y + dobs.par2) / (lambda + 1.);
             break;
         }
         default:

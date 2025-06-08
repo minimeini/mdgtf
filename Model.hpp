@@ -934,7 +934,9 @@ public:
         const arma::vec &wt, // (nT + 1) x 1
         const unsigned int &seasonal_period,
         const arma::mat &X, // period x (nT + 1)
-        const arma::vec &seas) // period x 1, checked. ok.
+        const arma::vec &seas,
+        const double &y_scale = 1.
+    ) // period x 1, checked. ok.
     {
         arma::vec psi = arma::cumsum(wt);
         arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, fgain);
@@ -944,9 +946,10 @@ public:
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans);
+            std::cout << "\n 00";
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans, y_scale);
             double eta = ft.at(t);
-            if (seasonal_period > 0)
+            if (seasonal_period > 0 && !X.is_empty() && !seas.is_empty())
             {
                 eta += arma::as_scalar(X.col(t).t() * seas);
             }
@@ -974,6 +977,11 @@ public:
         case AVAIL::Dist::nbinomm:
         {
             dloglik_dlam = nbinomm::dlogp_dlambda(lambda, yt, obs_par2);
+            break;
+        }
+        case AVAIL::Dist::nbinomp:
+        {
+            dloglik_dlam = yt / lambda - obs_par2 / std::abs(1. - lambda);
             break;
         }
         case AVAIL::Dist::poisson:
@@ -1026,7 +1034,9 @@ public:
         const ObsDist &dobs,
         const Season &seas,
         const ZeroInflation &zero,
-        const std::string &link_func)
+        const std::string &link_func,
+        const double &y_scale = 1.
+    )
     {
         arma::vec Fphi = LagDist::get_Fphi(nlag, lag_dist, lag_par1, lag_par2);
         arma::mat dFphi_grad = LagDist::get_Fphi_grad(nlag, lag_dist, lag_par1, lag_par2);
@@ -1037,15 +1047,14 @@ public:
         {
             if (!zero.inflated || zero.z.at(t) > EPS)
             {
-                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
-                if (seas.period > 0)
-                {
+                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi, y_scale);
+                if (seas.period > 0)              {
                     eta += arma::as_scalar(seas.X.col(t).t() * seas.val);
                 }
                 double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
 
-                double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
-                double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
+                double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi, y_scale);
+                double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi, y_scale);
 
                 dll_dlag.at(0) += dll_deta * deta_dpar1;
                 dll_dlag.at(1) += dll_deta * deta_dpar2;
@@ -1178,6 +1187,12 @@ public:
         lambda = y;
         ft = y;
 
+        double npop = 1.;
+        if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomp)
+        {
+            npop = model.dobs.par2;
+        }
+
         for (unsigned int t = 1; t < (ntime + 1); t++)
         {
             unsigned int psi_idx;
@@ -1207,17 +1222,9 @@ public:
                 psi.at(psi_idx) = Theta.at(0, t);
             }
 
-            arma::vec ytmp = y;
-            if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomp)
-            {
-                double p2 = model.dobs.par2;
-                ytmp.for_each([&p2](arma::vec::elem_type &val)
-                              { val /= p2; });
-            }
-
             ft.at(t) = TransFunc::func_ft(
                 model.ftrans, model.fgain, model.dlag,
-                model.seas, t, Theta.col(t), y);
+                model.seas, t, Theta.col(t), y, npop);
 
             double eta = ft.at(t);
             lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.

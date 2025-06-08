@@ -55,12 +55,14 @@ namespace MCMC
             const Prior &par1_prior, 
             const Prior &par2_prior, 
             const bool &zintercept_infer, 
-            const bool &zzcoef_infer)
+            const bool &zzcoef_infer,
+            const double &y_scale = 1.
+        )
         {
             arma::vec lambda(y.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
+                double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi, y_scale);
                 if (model.seas.period > 0)
                 {
                     eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
@@ -70,7 +72,7 @@ namespace MCMC
 
             arma::vec dloglik_dlag = Model::dloglik_dlag(
                 y, hpsi, model.dlag.nL, model.dlag.name, model.dlag.par1, model.dlag.par2,
-                model.dobs, model.seas, model.zero, model.flink);
+                model.dobs, model.seas, model.zero, model.flink, y_scale);
 
             // dloglik_dlag.t().print("\n Leapfrog dloglik_dlag:");
 
@@ -99,10 +101,12 @@ namespace MCMC
         static void update_zt(
             Model &model, 
             const arma::vec &y, // (nT + 1) x 1
-            const arma::vec &wt) // (nT + 1) x 1
+            const arma::vec &wt,
+            const double &y_scale = 1.
+        ) // (nT + 1) x 1
         {
             // lambda: (nT + 1) x 1, conditional expectation of y[t] if z[t] = 1
-            arma::vec lambda = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val);
+            arma::vec lambda = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val, y_scale);
 
             arma::vec p01(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | z[t-1] = 0, gamma)
             p01.at(0) = logistic(model.zero.intercept);
@@ -245,7 +249,6 @@ namespace MCMC
                 double logratio = logp_new - logp_old;
                 // logratio += logq_old - logq_new;
                 logratio = std::min(0., logratio);
-
                 double logps = 0.;
                 if (std::log(R::runif(0., 1.)) < logratio)
                 {
@@ -619,8 +622,11 @@ namespace MCMC
             const bool zzcoef_infer = false,
             const double &epsilon = 0.01,
             const unsigned int &L = 10,
-            const double &kinetic_sd = 1.)
+            const double &kinetic_sd = 1.,
+            const double &y_scale = 1.
+        )
         {
+            std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
             arma::mat Theta(model.nP, y.n_elem, arma::fill::zeros);
             Theta.row(0) = psi.t();
             arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
@@ -630,7 +636,7 @@ namespace MCMC
             arma::vec lambda(y.n_elem, arma::fill::zeros);
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
+                double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi, y_scale);
                 if (mod.seas.period > 0)
                 {
                     eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
@@ -662,7 +668,7 @@ namespace MCMC
             arma::vec grad_U = Leapfrog::grad_U(
                 mod, params, y, hpsi, Theta, param_selected,
                 W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
-                zintercept_infer, zzcoef_infer); // Checked. OK.
+                zintercept_infer, zzcoef_infer, y_scale); // Checked. OK.
 
             p -= (0.5 * epsilon) * grad_U;
 
@@ -680,7 +686,7 @@ namespace MCMC
                 grad_U = Leapfrog::grad_U(
                     mod, params, y, hpsi, Theta, param_selected, 
                     W_prior, seas_prior, rho_prior, par1_prior, par2_prior, 
-                    zintercept_infer, zzcoef_infer);
+                    zintercept_infer, zzcoef_infer, y_scale);
 
                 // full step update for momentum
                 if (i != L)
@@ -698,7 +704,7 @@ namespace MCMC
             // Calculate log of joint probability with new proposal
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
-                double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
+                double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi, y_scale);
                 if (mod.seas.period > 0)
                 {
                     eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
@@ -723,7 +729,6 @@ namespace MCMC
             { // accept
                 accept += 1;
                 return mod;
-
                 // logp_mu0 = logp_new;
             }
             else
@@ -733,29 +738,38 @@ namespace MCMC
         }
 
 
-        static arma::mat update_ffbs_theta(
+        static arma::vec update_pg_psi(
             const Model &model, 
             const arma::vec &y, 
-            const arma::vec &omega
+            const arma::vec &psi_old // nP x (nT + 1)
         )
         {
             const unsigned int nP = model.nP;
             const unsigned int nT = y.n_elem - 1;
+            const double npop = model.dobs.par2;
+
             Model normal_dlm = model;
             normal_dlm.dobs.name = "gaussian";
             normal_dlm.flink = "identity";
             normal_dlm.fgain = "identity";
 
-            arma::vec ytmp = y;
-            double npop = model.dobs.par2;
-            ytmp.for_each([&npop](arma::vec::elem_type &val)
-                          { val /= npop; });
+            arma::vec omega(nT + 1, arma::fill::ones);
+            arma::mat Theta_old = TransFunc::psi2theta(psi_old, y, model.ftrans, model.fgain, model.dlag, npop);
+            for (unsigned int t = 0; t <= nT; t++)
+            {
+                if (std::abs(model.zero.z.at(t) - 1.) < EPS)
+                {
+                    // If y[t] is not missing
+                    double eta = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, Theta_old.col(t), y, npop);
+                    omega.at(t) = pg::rpg_scalar_hybrid(y.at(t) + npop, eta);
+                }
+            }
 
             arma::vec ktmp = 0.5 * (y - npop) / omega;
             // arma::vec ktmp = y;
 
             // Forward filtering
-            arma::mat mt(nP, nT + 1);
+            arma::mat mt(nP, nT + 1, arma::fill::zeros);
             arma::cube Ct(nP, nP, nT + 1);
             Ct.slice(0) = 5. * arma::eye<arma::mat>(nP, nP);
             arma::mat at = mt;
@@ -765,25 +779,34 @@ namespace MCMC
             arma::mat Gt = SysEq::init_Gt(nP, model.dlag, model.fsys, model.seas.period, model.seas.in_state);
             for (unsigned int t = 1; t < nT + 1; t++)
             {
-                normal_dlm.dobs.par2 = 1. / omega.at(t);
-
                 at.col(t) = SysEq::func_gt(
                     model.fsys, model.fgain, model.dlag,
-                    mt.col(t - 1), ytmp.at(t - 1),
+                    mt.col(t - 1), y.at(t - 1) / npop,
                     model.seas.period, model.seas.in_state);
                 Rt.slice(t) = LBA::func_Rt(Gt, Ct.slice(t - 1), normal_dlm.derr.par1);
 
-                double ft_prior = 0.;
-                double qt_prior = 0.;
-                LBA::func_prior_ft(ft_prior, qt_prior, Ft, t, normal_dlm, ytmp, at.col(t), Rt.slice(t));
-                qt_prior += normal_dlm.dobs.par2;
+                if (std::abs(model.zero.z.at(t) - 1.) < EPS)
+                {
+                    // When y[t] is not missing
+                    normal_dlm.dobs.par2 = 1. / omega.at(t);
+                    double ft_prior = 0.;
+                    double qt_prior = 0.;
+                    LBA::func_prior_ft(ft_prior, qt_prior, Ft, t, normal_dlm, y, at.col(t), Rt.slice(t), npop);
+                    qt_prior += normal_dlm.dobs.par2;
 
-                double ft_posterior = ktmp.at(t);
-                double qt_posterior = 0.;
+                    double ft_posterior = ktmp.at(t);
+                    double qt_posterior = 0.;
 
-                arma::mat At = LBA::func_At(Rt.slice(t), Ft, qt_prior);
-                mt.col(t) = LBA::func_mt(at.col(t), At, ft_prior, ft_posterior);
-                Ct.slice(t) = LBA::func_Ct(Rt.slice(t), At, qt_prior, qt_posterior);
+                    arma::mat At = LBA::func_At(Rt.slice(t), Ft, qt_prior);
+                    mt.col(t) = LBA::func_mt(at.col(t), At, ft_prior, ft_posterior);
+                    Ct.slice(t) = LBA::func_Ct(Rt.slice(t), At, qt_prior, qt_posterior);
+                }
+                else
+                {
+                    // When y[t] is missing
+                    mt.col(t) = at.col(t);
+                    Ct.slice(t) = Rt.slice(t);
+                }
             }
 
             arma::mat Theta(nP, nT + 1, arma::fill::zeros);
@@ -806,7 +829,8 @@ namespace MCMC
                 Theta.col(t) = ht + Ht_chol.t() * arma::randn(nP);
             }
 
-            return Theta;
+            arma::vec psi_new = arma::vectorise(Theta.row(0));
+            return psi_new;
         }
     }; // class Posterior
 
@@ -958,7 +982,6 @@ namespace MCMC
             arma::vec qprob = {0.025, 0.5, 0.975};
             Rcpp::List output;
 
-            arma::mat psi_stored = arma::cumsum(wt_stored, 0); // (nT + 1) x nsample
             arma::mat psi_quantile = arma::quantile(psi_stored, qprob, 1); // (nT + 1) x 3
             output["psi_stored"] = Rcpp::wrap(psi_stored);
             output["psi"] = Rcpp::wrap(psi_quantile);
@@ -974,38 +997,41 @@ namespace MCMC
             // output["wt_accept"] = Rcpp::wrap(W_accept / ntotal);
             // output["log_marg"] = Rcpp::wrap(log_marg_stored.t());
 
-            output["infer_W"] = W_prior.infer;
-            output["W"] = Rcpp::wrap(W_stored);
-            // output["W_accept"] = W_accept / ntotal;
-
-            output["infer_seas"] = seas_prior.infer;
-            output["seas"] = Rcpp::wrap(seas_stored);
-            // output["seas_accept"] = static_cast<double>(seas_accept / ntotal);
-
-            output["infer_rho"] = rho_prior.infer;
-            output["rho"] = Rcpp::wrap(rho_stored);
-            // output["rho_accept"] = rho_accept / ntotal;
-
-            output["infer_par1"] = par1_prior.infer;
-            output["par1"] = Rcpp::wrap(par1_stored);
-
-            output["infer_par2"] = par2_prior.infer;
-            output["par2"] = Rcpp::wrap(par2_stored);
-            // output["lag_accept"] = lag_accept / ntotal;
-
-            output["infer_zintercept"] = zintercept_infer;
-            if (zintercept_infer)
+            if (update_static)
             {
-                output["zintercept"] = Rcpp::wrap(zintercept_stored);
-            }
+                output["infer_W"] = W_prior.infer;
+                output["W"] = Rcpp::wrap(W_stored);
+                // output["W_accept"] = W_accept / ntotal;
 
-            output["infer_zzcoef"] = zzcoef_infer;
-            if (zzcoef_infer)
-            {
-                output["zzcoef"] = Rcpp::wrap(zzcoef_stored);
-            }
+                output["infer_seas"] = seas_prior.infer;
+                output["seas"] = Rcpp::wrap(seas_stored);
+                // output["seas_accept"] = static_cast<double>(seas_accept / ntotal);
 
-            output["hmc_accept"] = hmc_accept / ntotal;
+                output["infer_rho"] = rho_prior.infer;
+                output["rho"] = Rcpp::wrap(rho_stored);
+                // output["rho_accept"] = rho_accept / ntotal;
+
+                output["infer_par1"] = par1_prior.infer;
+                output["par1"] = Rcpp::wrap(par1_stored);
+
+                output["infer_par2"] = par2_prior.infer;
+                output["par2"] = Rcpp::wrap(par2_stored);
+                // output["lag_accept"] = lag_accept / ntotal;
+
+                output["infer_zintercept"] = zintercept_infer;
+                if (zintercept_infer)
+                {
+                    output["zintercept"] = Rcpp::wrap(zintercept_stored);
+                }
+
+                output["infer_zzcoef"] = zzcoef_infer;
+                if (zzcoef_infer)
+                {
+                    output["zzcoef"] = Rcpp::wrap(zzcoef_stored);
+                }
+
+                output["hmc_accept"] = hmc_accept / ntotal;
+            }
 
             return output;
         }
@@ -1015,6 +1041,21 @@ namespace MCMC
         {
             const unsigned int nT = y.n_elem - 1;
             model.seas.X = Season::setX(nT, model.seas.period, model.seas.P);
+            arma::vec ztmp(nT + 1, arma::fill::ones);
+            if (model.zero.inflated)
+            {
+                z_stored.set_size(nT + 1, nsample);
+                z_stored.ones();
+                ztmp.zeros();
+                for (unsigned int t = 1; t < y.n_elem; t++)
+                {
+                    if (y.at(t) > EPS)
+                    {
+                        ztmp.at(t) = 1.;
+                    }
+                }
+            }
+            model.zero.setZ(ztmp, nT);
 
             std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
             if (!model.dlag.truncated && lag_list[model.dlag.name] == AVAIL::Dist::nbinomp)
@@ -1025,17 +1066,26 @@ namespace MCMC
                 model.dlag.truncated = true;
             }
 
+            std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+            double y_scale = 1.;
+            if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomp)
+            {
+                y_scale = model.dobs.par2;
+            }
+
             wt = arma::randn(nT + 1) * 0.01;
             wt.at(0) = 0.;
             wt.subvec(1, model.nP) = arma::abs(wt.subvec(1, model.nP));
+            psi = arma::cumsum(wt);
+            wt_accept.set_size(nT + 1);
+            wt_accept.zeros();
 
             #ifdef DGTF_DO_BOUND_CHECK
             bound_check(wt, "Disturbance::init");
             #endif
 
-            wt_stored.set_size(nT + 1, nsample);
-            wt_accept.set_size(nT + 1);
-            wt_accept.zeros();
+            psi_stored.set_size(nT + 1, nsample);
+            psi_stored.zeros();
 
             std::map<std::string, AVAIL::Dist> prior_dist = AVAIL::dist_list;
             if ((prior_dist[W_prior.name] == AVAIL::Dist::invgamma) && W_prior.infer)
@@ -1047,36 +1097,27 @@ namespace MCMC
                 W_prior.par2 = nSw;
             }
 
-            if (model.zero.inflated)
-            {
-                z_stored.set_size(nT + 1, nsample);
-                z_stored.ones();
-                arma::vec ztmp(nT + 1, arma::fill::zeros);
-                for (unsigned int t = 1; t < y.n_elem; t++)
-                {
-                    if (y.at(t) > EPS)
-                    {
-                        ztmp.at(t) = 1.;
-                    }
-                }
-
-                model.zero.setZ(ztmp, nT);
-            }
-
             ApproxDisturbance approx_dlm(nT, model.fgain);
-
             for (unsigned int b = 0; b < ntotal; b++)
             {
                 Rcpp::checkUserInterrupt();
 
-                approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
-                Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd);
-                arma::vec psi = arma::cumsum(wt);
-                arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+                if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomp)
+                {
+                    arma::vec psi_old = psi;
+                    psi = Posterior::update_pg_psi(model, y, psi_old);
+                    wt.subvec(1, nT) = arma::diff(psi);
+                }
+                else
+                {
+                    approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
+                    Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd);
+                    psi = arma::cumsum(wt);
+                }
 
                 if (model.zero.inflated)
                 {
-                    Posterior::update_zt(model, y, wt);
+                    Posterior::update_zt(model, y, wt, y_scale);
                 }
 
                 // if (W_prior.infer)
@@ -1096,7 +1137,7 @@ namespace MCMC
                         hmc_accept, mod, y, psi, param_selected,
                         W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
                         zintercept_infer, zzcoef_infer,
-                        epsilon, L, kinetic_sd);
+                        epsilon, L, kinetic_sd, y_scale);
                 }
 
                 // if (seas_prior.infer)
@@ -1123,19 +1164,22 @@ namespace MCMC
                     }
 
                     // log_marg_stored.at(idx_run) = log_marg;
-                    wt_stored.col(idx_run) = wt;
+                    psi_stored.col(idx_run) = psi;
                     if (model.zero.inflated)
                     {
                         z_stored.col(idx_run) = model.zero.z;
                     }
 
-                    W_stored.at(idx_run) = model.derr.par1;
-                    seas_stored.col(idx_run) = model.seas.val;
-                    rho_stored.at(idx_run) = model.dobs.par2;
-                    par1_stored.at(idx_run) = model.dlag.par1;
-                    par2_stored.at(idx_run) = model.dlag.par2;
-                    zintercept_stored.at(idx_run) = model.zero.intercept;
-                    zzcoef_stored.at(idx_run) = model.zero.coef;
+                    if (update_static)
+                    {
+                        W_stored.at(idx_run) = model.derr.par1;
+                        seas_stored.col(idx_run) = model.seas.val;
+                        rho_stored.at(idx_run) = model.dobs.par2;
+                        par1_stored.at(idx_run) = model.dlag.par1;
+                        par2_stored.at(idx_run) = model.dlag.par2;
+                        zintercept_stored.at(idx_run) = model.zero.intercept;
+                        zzcoef_stored.at(idx_run) = model.zero.coef;
+                    }
                 }
 
                 if (verbose)
@@ -1178,9 +1222,9 @@ namespace MCMC
         arma::vec zintercept_stored;
         arma::vec zzcoef_stored;
 
-        arma::vec wt;
+        arma::vec wt, psi;
         arma::vec wt_accept; // nsample x 1
-        arma::mat wt_stored; // (nT + 1) x nsample
+        arma::mat psi_stored; // (nT + 1) x nsample
 
         Prior seas_prior;
         arma::mat seas_stored; // period x nsample

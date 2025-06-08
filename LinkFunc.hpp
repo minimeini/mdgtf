@@ -56,8 +56,8 @@ public:
         case LinkFunc::Func::logistic:
         {
             mu = 1. / (1. + std::exp(-eta));
-            mu = std::min(mu, 0.99);
-            mu = std::max(EPS8, mu);
+            mu = std::min(mu, 0.999);
+            mu = std::max(EPS, mu);
             break;
         }
         default:
@@ -87,7 +87,7 @@ public:
         case LinkFunc::Func::logistic:
         {
             mu = 1. / (1. + arma::exp(-eta));
-            mu.clamp(EPS8, 0.99);
+            mu.clamp(EPS, 0.999);
             break;
         }
         default:
@@ -206,7 +206,7 @@ public:
         {
             double tmp = std::exp(eta);
             lambda = tmp / (1. + tmp);
-            deriv = tmp / std::pow(1. + tmp, 2.);
+            deriv = lambda * (1. - lambda);
             break;
         }
         default:
