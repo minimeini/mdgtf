@@ -177,7 +177,9 @@ namespace MCMC
             ApproxDisturbance &approx_dlm,
             const arma::vec &y, // (nT + 1) x 1
             Model &model,
-            const double &mh_sd = 0.1)
+            const double &mh_sd = 0.1,
+            const double &y_scale = 1.
+        )
         {
             arma::vec ft(y.n_elem, arma::fill::zeros);
             double prior_sd = std::sqrt(model.derr.par1);
@@ -185,7 +187,7 @@ namespace MCMC
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double wt_old = wt.at(t);
-                arma::vec lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val);
+                arma::vec lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val, y_scale);
 
                 double logp_old = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
@@ -202,7 +204,7 @@ namespace MCMC
                 /*
                 Metropolis-Hastings
                 */
-                approx_dlm.update_by_wt(y, wt);
+                approx_dlm.update_by_wt(y / y_scale, wt);
                 arma::vec eta = approx_dlm.get_eta_approx(model.seas); // nT x 1, f0, Fn and psi is updated
                 arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink); // nT x 1
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
@@ -233,7 +235,7 @@ namespace MCMC
                 */
 
                 wt.at(t) = wt_new;
-                lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val); // Checked. OK.
+                lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val, y_scale); // Checked. OK.
 
                 double logp_new = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
@@ -1111,7 +1113,7 @@ namespace MCMC
                 else
                 {
                     approx_dlm.set_Fphi(model.dlag, model.dlag.nL);
-                    Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd);
+                    Posterior::update_wt(wt, wt_accept, approx_dlm, y, model, mh_sd, y_scale);
                     psi = arma::cumsum(wt);
                 }
 
