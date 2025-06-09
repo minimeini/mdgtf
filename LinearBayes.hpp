@@ -153,12 +153,11 @@ namespace LBA
         const Model &model,
         const arma::vec &yall,
         const arma::vec &at,
-        const arma::mat &Rt,
-        const double &y_scale = 1.
+        const arma::mat &Rt
     )
     {
-        mean_ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall, y_scale);
-        _Ft = TransFunc::func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, model.seas.period, model.seas.in_state, y_scale);
+        mean_ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t, at, yall);
+        _Ft = TransFunc::func_Ft(model.ftrans, model.fgain, model.dlag, t, at, yall, model.seas.period, model.seas.in_state);
         var_ft = arma::as_scalar(_Ft.t() * Rt * _Ft);
 
         #ifdef DGTF_DO_BOUND_CHECK

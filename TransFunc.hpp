@@ -37,7 +37,11 @@ public:
      *
      * @note Non-transfer function part, i.e., seasonal component is also added to F0.
      */
-    static arma::vec init_Ft(const unsigned int &nP, const std::string &trans_func = "sliding", const unsigned int &seasonal_period = 0, const bool &season_in_state = false)
+    static arma::vec init_Ft(
+        const unsigned int &nP, 
+        const std::string &trans_func = "sliding", 
+        const unsigned int &seasonal_period = 0, 
+        const bool &season_in_state = false)
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
         arma::vec F0(nP, arma::fill::zeros);
@@ -70,8 +74,7 @@ public:
         const unsigned int &nlag,
         const arma::vec &y,    // (nT + 1) x 1: y[0], y[1], ..., y[nT]
         const arma::vec &Fphi, // Fphi[t]      = (phi[1], ..., phi[nL])'
-        const arma::vec &hpsi, // (nT + 1) x 1: h(psi[0]), h(psi[1]), ..., h(psi[nT])
-        const double &y_scale = 1.
+        const arma::vec &hpsi // (nT + 1) x 1: h(psi[0]), h(psi[1]), ..., h(psi[nT])
     )
     {
         unsigned int nelem = std::min(t, nlag);
@@ -79,7 +82,7 @@ public:
         arma::vec Fphi_t = Fphi.subvec(0, nelem - 1); // Fphi[t] = (phi[1], ..., phi[nL])'
         Fphi_t = arma::reverse(Fphi_t);
 
-        arma::vec Fy_t = y.subvec(t - nelem, t - 1) / y_scale;       // Fy[t] = (y[t-nL], ..., y[t-1])'
+        arma::vec Fy_t = y.subvec(t - nelem, t - 1);       // Fy[t] = (y[t-nL], ..., y[t-1])'
         arma::vec Fhpsi_t = hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t] = (h(psi[t+1-nL]), ..., h(psi[t]))'
 
         arma::vec Fast_t = Fy_t % Fhpsi_t;
@@ -103,8 +106,7 @@ public:
         const double &hpsi_now,        // psi[t]
         const double &y_prev,         // y[t-1]
         const double &lag_par1,
-        const double &lag_par2,
-        const double &y_scale = 1.
+        const double &lag_par2
     )
     {
         // iter_coef: c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
@@ -112,7 +114,7 @@ public:
         double ft = arma::accu(ft_prev_rev % iter_coef); // sum[k] f[t-k]c(r,k)(-kappa)^k
 
         // double hpsi_now = GainFunc::psi2hpsi(psi_now, gain_func);
-        double Fast_now = hpsi_now * y_prev / y_scale;
+        double Fast_now = hpsi_now * y_prev;
         ft += nbinom::coef_now(lag_par1, lag_par2) * Fast_now; // (1-kappa)^r y[t-1] * h(psi[t])
 
         #ifdef DGTF_DO_BOUND_CHECK
@@ -144,8 +146,7 @@ public:
         const arma::vec &ft,   // At least (f[0], f[1], ..., f[t-1]), could be longer including current and future values.
         const arma::vec &hpsi,  // At least (hpsi[0], hpsi[1], ..., hpsi[t]), could be longer including future values.
         const LagDist &dlag,
-        const std::string &trans_func,
-        const double &y_scale = 1.
+        const std::string &trans_func
     )
     {
         double ft_now = 0.;
@@ -162,7 +163,7 @@ public:
             phi[1], ..., phi[nL]
             */
             arma::vec Fphi = LagDist::get_Fphi(dlag.nL, dlag.name, dlag.par1, dlag.par2);
-            ft_now = TransFunc::transfer_sliding(t, dlag.nL, y, Fphi, hpsi, y_scale);
+            ft_now = TransFunc::transfer_sliding(t, dlag.nL, y, Fphi, hpsi);
             break;
         }
         case Transfer::iterative:
@@ -190,7 +191,7 @@ public:
             arma::vec ft_prev_rev = arma::reverse(ft_prev);
             ft_now = TransFunc::transfer_iterative(
                 ft_prev_rev, hpsi.at(t), y.at(t - 1),
-                dlag.par1, dlag.par2, y_scale);
+                dlag.par1, dlag.par2);
             break;
         }
         default:
@@ -222,8 +223,7 @@ public:
         const Season &seas,
         const int &t,               // t = 0, y[0] = 0, theta[0] = 0; t = 1, y[1], theta[1]; ...;  yold.tail(nelem) = yall.subvec(t - nelem, t - 1);
         const arma::vec &theta_cur, // theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
-        const arma::vec &yall,      // We use y[t - nelem], ..., y[t-1]
-        const double &y_scale = 1.
+        const arma::vec &yall      // We use y[t - nelem], ..., y[t-1]
     )
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
@@ -241,7 +241,7 @@ public:
                 yold.at(dlag.nL - 1) = yall.at(t - 1);
             }
 
-            yold = arma::reverse(yold) / y_scale; // y[t-1], ..., y[t-min(t,nL)]
+            yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
             arma::vec ft_vec = dlag.Fphi; // nL x 1
 
@@ -294,8 +294,7 @@ public:
         const arma::vec &theta_cur, // nP x 1, theta[t] = (psi[t], ..., psi[t+1 - nL]) or (psi[t+1], f[t], ..., f[t+1-r])
         const arma::vec &yall,      // y[0], y[1], ..., y[nT]
         const unsigned int &seasonal_period = 0,
-        const bool &season_in_state = false,
-        const double &y_scale = 1.
+        const bool &season_in_state = false
     )
     {
         std::map<std::string, TransFunc::Transfer> trans_list = TransFunc::trans_list;
@@ -310,7 +309,7 @@ public:
             arma::vec yold(dlag.nL, arma::fill::zeros);
             yold.tail(nelem) = yall.subvec(nstart, nend);
             yold.elem(arma::find(yold <= EPS)).fill(0.01 / static_cast<double>(dlag.nL));
-            yold = arma::reverse(yold) / y_scale;
+            yold = arma::reverse(yold);
 
             arma::vec th = theta_cur.head(dlag.nL); // nL x 1
             arma::vec dhpsi_cur = GainFunc::psi2dhpsi<arma::vec>(th, fgain); // (h'(psi[t]), ..., h'(psi[t+1 - nL]))
@@ -340,8 +339,7 @@ public:
         const arma::vec &y, // (nT + 1) x 1
         const std::string &ftrans,
         const std::string &fgain,
-        const LagDist &dlag,
-        const double &y_scale = 1.
+        const LagDist &dlag
     )
     {
         std::map<std::string, Transfer> trans_list = TransFunc::trans_list;
@@ -373,7 +371,7 @@ public:
         {
             // int tlen = t - nlag + 1;
             // unsigned int tstart = (tlen < 0) ? 0 : (unsigned int)tlen;
-            ft.at(t) = func_ft(t, y, ft, hpsi, dlag, ftrans, y_scale);
+            ft.at(t) = func_ft(t, y, ft, hpsi, dlag, ftrans);
             Theta.col(t) = psi2theta(t, psi, ft, ftrans, dlag, true);
 
             // if (trans_list[ftrans] == Transfer::sliding)

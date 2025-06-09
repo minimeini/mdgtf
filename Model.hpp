@@ -934,8 +934,7 @@ public:
         const arma::vec &wt, // (nT + 1) x 1
         const unsigned int &seasonal_period,
         const arma::mat &X, // period x (nT + 1)
-        const arma::vec &seas,
-        const double &y_scale = 1.
+        const arma::vec &seas
     ) // period x 1, checked. ok.
     {
         arma::vec psi = arma::cumsum(wt);
@@ -947,7 +946,7 @@ public:
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
             std::cout << "\n 00";
-            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans, y_scale);
+            ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans);
             double eta = ft.at(t);
             if (seasonal_period > 0 && !X.is_empty() && !seas.is_empty())
             {
@@ -1034,8 +1033,7 @@ public:
         const ObsDist &dobs,
         const Season &seas,
         const ZeroInflation &zero,
-        const std::string &link_func,
-        const double &y_scale = 1.
+        const std::string &link_func
     )
     {
         arma::vec Fphi = LagDist::get_Fphi(nlag, lag_dist, lag_par1, lag_par2);
@@ -1047,14 +1045,14 @@ public:
         {
             if (!zero.inflated || zero.z.at(t) > EPS)
             {
-                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi, y_scale);
+                double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
                 if (seas.period > 0)              {
                     eta += arma::as_scalar(seas.X.col(t).t() * seas.val);
                 }
                 double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
 
-                double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi, y_scale);
-                double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi, y_scale);
+                double deta_dpar1 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(0), hpsi);
+                double deta_dpar2 = TransFunc::transfer_sliding(t, nlag, y, dFphi_grad.col(1), hpsi);
 
                 dll_dlag.at(0) += dll_deta * deta_dpar1;
                 dll_dlag.at(1) += dll_deta * deta_dpar2;
@@ -1224,7 +1222,7 @@ public:
 
             ft.at(t) = TransFunc::func_ft(
                 model.ftrans, model.fgain, model.dlag,
-                model.seas, t, Theta.col(t), y, npop);
+                model.seas, t, Theta.col(t), y);
 
             double eta = ft.at(t);
             lambda.at(t) = LinkFunc::ft2mu(eta, model.flink); // Checked. OK.
