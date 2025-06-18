@@ -945,7 +945,6 @@ public:
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
             // ft.at(t) = _transfer.func_ft(t, y, ft);
-            std::cout << "\n 00";
             ft.at(t) = TransFunc::func_ft(t, y, ft, hpsi, dlag, ftrans);
             double eta = ft.at(t);
             if (seasonal_period > 0 && !X.is_empty() && !seas.is_empty())
