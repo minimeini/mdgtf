@@ -175,6 +175,28 @@ namespace SMC
             return ess;
         }
 
+        static inline void gather_cols(
+            arma::mat &out, 
+            const arma::mat &in, 
+            const arma::uvec &idx)
+        {
+            const arma::uword N = idx.n_elem;
+            out.set_size(in.n_rows, N);
+            for (arma::uword j = 0; j < N; ++j)
+                out.col(j) = in.col(idx[j]);
+        }
+
+        static inline void gather_vec(
+            arma::vec &out, 
+            const arma::vec &in, 
+            const arma::uvec &idx)
+        {
+            const arma::uword N = idx.n_elem;
+            out.set_size(N);
+            for (arma::uword j = 0; j < N; ++j)
+                out[j] = in[idx[j]];
+        }
+
         // static arma::uvec get_resample_index(const arma::vec &weights)
         // {
         //     unsigned int N = weights.n_elem;
