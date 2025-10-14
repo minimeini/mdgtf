@@ -136,49 +136,47 @@ inline arma::vec tYJinv(
 
 // Transform gamma in (0,2) to the real line, denoted by tau
 // Ref: `eta2tau.m`
-inline double gamma2tau(const double gamma)
-{
-    double output = std::log(gamma + EPS);
-    output -= std::log(2. - gamma + EPS);
-    #ifdef DGTF_DO_BOUND_CHECK
-        bound_check(output, "gamma2tau");
-    #endif
-    return output;
-} // Status: Checked. OK.
-
 inline arma::vec gamma2tau(const arma::vec &gamma)
 {
-    const unsigned int m = gamma.n_elem;
-    arma::vec tau(m);
-    for (unsigned int i = 0; i < m; i++)
-    {
-        tau.at(i) = gamma2tau(gamma.at(i));
-    }
-    return tau;
+    return arma::log(gamma + EPS) - arma::log(2.0 - gamma + EPS);
 } // Status: Checked. OK.
 
 // Transform tau in real line to (0,2), denoted by gamma
 // Ref: `tau2eta.m`
-inline double tau2gamma(const double tau)
-{
-    double neg_tau = std::min(-tau, UPBND);
-    double output = 2. / (std::exp(neg_tau) + 1.);
-    #ifdef DGTF_DO_BOUND_CHECK
-        bound_check(output, "tau2gamma: gamma", 0., 2.);
-    #endif
-    return output;
-} // Status: Checked. OK.
+// inline double tau2gamma(const double tau)
+// {
+//     double neg_tau = std::min(-tau, UPBND);
+//     double output = 2. / (std::exp(neg_tau) + 1.);
+//     #ifdef DGTF_DO_BOUND_CHECK
+//         bound_check(output, "tau2gamma: gamma", 0., 2.);
+//     #endif
+//     return output;
+// } // Status: Checked. OK.
 
-inline arma::vec tau2gamma(const arma::vec &tau)
-{ // m x 1
-    const unsigned int m = tau.n_elem;
-    arma::vec gamma(m);
-    for (unsigned int i = 0; i < m; i++)
+// inline arma::vec tau2gamma(const arma::vec &tau)
+// { // m x 1
+//     const unsigned int m = tau.n_elem;
+//     arma::vec gamma(m);
+//     for (unsigned int i = 0; i < m; i++)
+//     {
+//         gamma.at(i) = tau2gamma(tau.at(i));
+//     }
+//     return gamma;
+// } // Status: Checked. OK.
+
+inline void tau2gamma(const arma::vec &tau, arma::vec &gamma_out)
+{
+    if (gamma_out.is_empty() || gamma_out.n_elem != tau.n_elem)
     {
-        gamma.at(i) = tau2gamma(tau.at(i));
+        gamma_out.set_size(tau.n_elem);
     }
-    return gamma;
-} // Status: Checked. OK.
+    arma::vec clamped = arma::clamp(tau, -UPBND, arma::datum::inf);
+    gamma_out = 2.0 / (1.0 + arma::exp(-clamped));
+    #ifdef DGTF_DO_BOUND_CHECK
+    bound_check<arma::vec>(gamma_out, "tau2gamma");
+    #endif
+}
+
 
 // (Element-wise)
 // First-order derivative of gamma with respect to tau
@@ -276,27 +274,8 @@ inline double dtYJ_dgamma(const double theta, const double gamma)
 }
 
 // Ref: line 24-27 of `grad_theta_logq.m`
-inline double dlogdYJ_dtheta(const double theta, const double gamma)
-{
-    double output = (gamma - 1.) / (1. + std::abs(theta));
-    #ifdef DGTF_DO_BOUND_CHECK
-        bound_check(output, "dlogdYJ_dtheta");
-    #endif
-    return output;
-}
-
-// Element-wise
-inline arma::vec dlogdYJ_dtheta(
-    const arma::vec &theta, // m x 1
-    const arma::vec &gamma)
-{ // m x 1
-    const unsigned int m = theta.n_elem;
-    arma::vec deriv(m);
-    for (unsigned int i = 0; i < m; i++)
-    {
-        deriv.at(i) = dlogdYJ_dtheta(theta.at(i), gamma.at(i));
-    }
-    return deriv;
+inline arma::vec dlogdYJ_dtheta(const arma::vec& theta, const arma::vec& gamma) {
+    return (gamma - 1.0) / (1.0 + arma::abs(theta));
 }
 
 /*
@@ -390,56 +369,22 @@ inline arma::vec dYJinv_dtau_diag(const arma::vec& nu, const arma::vec& gamma) {
 }
 
 
-/*
-Appendix B.2 equation (ii)
-*/
-inline arma::mat dYJinv_dB_times_ddiff(
-    const arma::vec& nu,     // m
-    const arma::vec& gamma,  // m
-    const arma::vec& xi,     // k
-    const arma::vec& ddiff)  // m
-{
-    // v_i = (d theta_i / d nu_i) * ddiff_i
-    arma::vec v = dYJinv_dnu_diag(nu, gamma) % ddiff; // m
-    // L_B = v * xi^T  (m x k)
-    return v * xi.t();
-}
-// ...existing code...
-
-/*
-Section B.2 equation (iii)
-Ref: `dtheta_dBDelta.m`
-*/
-inline arma::mat dYJinv_dD(
-    const arma::vec &nu,    // m x 1
-    const arma::vec &gamma, // m x 1
-    const arma::vec &eps)
-{ // m x 1
-
-    arma::vec dtheta_dnu = dYJinv_dnu_diag(nu, gamma);     // m x m
-    arma::mat dtheta_dd = arma::diagmat(eps % dtheta_dnu); // m x m
-
-    return dtheta_dd;
-} // Status: Checked. OK.
-
 inline arma::mat get_sigma_inv(
     const arma::mat &B, // m x k
     const arma::vec &d,
     const unsigned int k)
 {
-    arma::vec dinv = 1. / arma::pow(d,2.);
+    arma::vec dinv = 1. / arma::square(d);
     arma::mat Dm2 = arma::diagmat(dinv); // m x m, D^{-2}
-    arma::mat Ik(k, k, arma::fill::eye);
-    arma::mat tmp = Ik + B.t() * Dm2 * B;                     // k x k
+    arma::mat tmp = B.t() * Dm2 * B; // k x k
+    tmp.diag() += 1.0;
     arma::mat SigInv = Dm2 - Dm2 * B * tmp.i() * B.t() * Dm2; // Woodbury formula
-    SigInv = arma::symmatu(SigInv);                           // m x m
     
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::mat>(SigInv, "get_sigma_inv: SigInv");
     #endif
-    return SigInv;
+    return arma::symmatu(SigInv);
 }
-
 
 
 // Ref: `grad_theta_logq.m`
@@ -456,12 +401,7 @@ inline arma::vec dlogq_dtheta(
     arma::vec d1 = dtYJ_dtheta_diag(theta, gamma, false);
     arma::vec deriv = -(d1 % v);
     arma::vec deriv2 = dlogdYJ_dtheta(theta, gamma);
-    arma::vec output = deriv + deriv2;
-
-    #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::vec>(output, "dlogq_dtheta: output");
-    #endif
-    return output;
+    return deriv + deriv2;
 }
 
 
@@ -495,6 +435,34 @@ inline void rtheta(
 
     // elementwise inverse transform
     theta = tYJinv(nu, gamma);
+}
+
+
+inline arma::mat rtheta_batch(
+    const arma::vec &gamma, // m
+    const arma::vec &mu,    // m
+    const arma::mat &B,     // m x k
+    const arma::vec &d,     // m
+    const arma::uword S)
+{
+    const arma::uword m = gamma.n_elem;
+    const arma::uword k = B.n_cols;
+
+    arma::mat Theta(m, S, arma::fill::zeros);
+    arma::mat Nu(m, S, arma::fill::zeros);
+    arma::mat Xi(k, S, arma::fill::randn);
+    arma::mat Eps(m, S, arma::fill::randn);
+
+    // Nu = mu*1^T + B*Xi + (d*1^T) % Eps
+    Nu.each_col() = mu;
+    Nu += B * Xi;                       // gemm
+    Nu += arma::repmat(d, 1, S) % Eps;  // broadcast d
+
+    // Columnwise transform (nu_i -> theta_i)
+    for (arma::uword s = 0; s < S; ++s)
+        Theta.col(s) = tYJinv(Nu.col(s), gamma);
+    
+    return Theta;
 }
 
 #endif

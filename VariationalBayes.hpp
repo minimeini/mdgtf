@@ -333,15 +333,6 @@ namespace VB
 
             xi.set_size(k);
             xi.zeros();
-
-            if (m > 1 && k > 1)
-            {
-                B_uptri_idx = arma::trimatu_ind(arma::size(B), 1);
-            }
-            else
-            {
-                B_uptri_idx = {0};
-            }
         }
 
 
@@ -482,52 +473,69 @@ namespace VB
                     arma::vec ddiff = dlogJoint - dlogq;
 
                     // mu
-                    arma::vec L_mu = dYJinv_dnu_diag(nu, gamma) % ddiff;
+                    arma::vec dyji_dnu = dYJinv_dnu_diag(nu, gamma); // m x 1
+                    arma::vec L_mu = dyji_dnu % ddiff;
                     grad_mu.update_grad(L_mu);
-                    mu = mu + grad_mu.change;
+                    mu += grad_mu.change;
 
                     // grad_stored.at(b) += arma::accu(arma::abs(grad_mu.change));
 
                     if (m > 1)
                     {
-                        // B
-                        arma::mat L_B = dYJinv_dB_times_ddiff(nu, gamma, xi, ddiff); // m x k
+                        arma::mat L_B(m, k, arma::fill::zeros);
                         if (k > 1)
                         {
-                            L_B.elem(B_uptri_idx).zeros();
+                            L_B = L_mu * xi.t(); // m x k, Appendix B.2 equation (ii)
+
+                            // Enforce lower-triangular (or diagonal) constraint
+                            for (unsigned int col = 0; col < k; ++col) {
+                                for (unsigned int row = 0; row < col; ++row) { // strict upper
+                                    L_B(row, col) = 0.0;
+                                }
+                            }
+                            
+                        }
+                        else
+                        {
+                            L_B.col(0) = L_mu * xi[0];
                         }
 
-                        arma::vec vecL_B = arma::vectorise(L_B); // mk x 1
-                        grad_vecB.update_grad(vecL_B);
 
-                        arma::mat B_change2 = arma::reshape(
-                            grad_vecB.change, B.n_rows, B.n_cols); // m x k
-                        if (k > 1)
-                        {
-                            B_change2.elem(B_uptri_idx).zeros();
-                        }
+                        // Non‑owning view over memory (no copy)
+                        arma::vec L_B_view(const_cast<double*>(L_B.memptr()), m * k, false, true);
+                        grad_vecB.update_grad(L_B_view);
 
-                        B = B + B_change2;
-                        if (k > 1)
-                        {
-                            B.elem(B_uptri_idx).zeros();
+                        // Apply update (reshape view of change)
+                        arma::mat B_change2(const_cast<double*>(grad_vecB.change.memptr()), m, k, false, true);
+                        if (k == 1) {
+                            B.col(0) += B_change2.col(0);
+                        } else {
+                            for (unsigned int col = 0; col < k; ++col) {
+                                for (unsigned int row = 0; row < m; ++row) {
+                                    if (row < col) {
+                                        B(row, col) = 0.0; // strict upper -> zero
+                                    } else {
+                                        B(row, col) += B_change2(row, col); // lower/diag -> add
+                                    }
+                                }
+                            }
                         }
 
                         // grad_stored.at(b) += arma::accu(arma::abs(grad_vecB.change));
                     }
 
                     // d
-                    arma::vec L_d = dYJinv_dD(nu, gamma, eps) * ddiff; // m x 1
+                    arma::vec L_d = (eps % dyji_dnu) % ddiff; // m x 1, Section B.2 equation (iii), Ref: `dtheta_dBDelta.m`
                     grad_d.update_grad(L_d);
-                    d = d + grad_d.change;
+                    d += grad_d.change;
                     // grad_stored.at(b) += arma::accu(arma::abs(grad_d.change));
 
                     // tau
                     arma::vec tau = gamma2tau(gamma);
                     arma::vec L_tau = dYJinv_dtau_diag(nu, gamma) % ddiff;
                     grad_tau.update_grad(L_tau);
-                    tau = tau + grad_tau.change;
-                    gamma = tau2gamma(tau);
+                    tau += grad_tau.change;
+                    tau2gamma(tau, gamma);
                     // grad_stored.at(b) += arma::accu(arma::abs(grad_tau.change));
 
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
@@ -585,10 +593,18 @@ namespace VB
             //     psi_stored = Theta_tmp.row_as_mat(0); // (nT + 1) x nsample
             // }
 
-            
+            arma::mat eta_tilde = rtheta_batch(gamma, mu, B, d, nsample); // m x nsample
 
             for (unsigned int i = 0; i < nsample; i++)
             {
+                eta = Static::tilde2eta(
+                    eta_tilde.col(i), param_selected, 
+                    W_prior.name, par1_prior.name, 
+                    model.dlag.name, model.dobs.name,
+                    model.seas.period, model.seas.in_state);
+                
+                Static::update_params(model, param_selected, eta);
+
                 arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::mat ztmp(N, y.n_elem, arma::fill::ones);
                 double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
@@ -627,15 +643,6 @@ namespace VB
                 {
                     psi_stored.col(i) = arma::vectorise(Theta.row(0));
                 }
-
-                rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
-                eta = Static::tilde2eta(
-                    eta_tilde, param_selected, 
-                    W_prior.name, par1_prior.name, 
-                    model.dlag.name, model.dobs.name,
-                    model.seas.period, model.seas.in_state);
-                
-                Static::update_params(model, param_selected, eta);
 
                 unsigned int idx = 0;
                 for (unsigned int k = 0; k < param_selected.size(); k++)
@@ -789,8 +796,6 @@ namespace VB
 
         arma::vec xi;                                    // k x 1
         arma::mat B;                                     // m x k
-        arma::vec vecL_B;                                // mk x 1
-        arma::uvec B_uptri_idx;
     }; // class Hybrid
 }
 
