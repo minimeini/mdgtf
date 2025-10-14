@@ -6,7 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-// #include <chrono>
+#include <chrono>
 #include <RcppArmadillo.h>
 #ifdef DGTF_USE_OPENMP
 #include <omp.h>
@@ -529,23 +529,38 @@ namespace SMC
 
                     if (initial_resample_all)
                     {
-                        for (unsigned int k = 0; k <= t; k++)
+                        // Parallelize across history slices if many slices to touch
+                        #ifdef DGTF_USE_OPENMP
+                        #pragma omp parallel for schedule(static) if (t >= 8)
+                        #endif
+                        for (unsigned int k = 0; k <= t; ++k)
                         {
-                            Theta.slice(k) = Theta.slice(k).cols(resample_idx);
+                            // Theta
+                            arma::mat local_buf;               // thread-local
+                            local_buf.copy_size(resample_buf); // just shape; data unused
+                            gather_cols(local_buf, Theta.slice(k), resample_idx);
+                            // swap into place
+                            #pragma omp critical
+                            Theta.slice(k).swap(local_buf);
+
+                            // z (serial write per column; safe due to distinct k)
                             if (model.zero.inflated)
                             {
-                                arma::vec tmp = z.col(k);
-                                z.col(k) = tmp.elem(resample_idx);
+                                arma::vec zv;
+                                gather_vec(zv, z.col(k), resample_idx);
+                                z.col(k) = zv;
                             }
                         }
                     }
                     else
                     {
-                        Theta.slice(t) = Theta.slice(t).cols(resample_idx);
+                        gather_cols(resample_buf, Theta.slice(t), resample_idx);
+                        Theta.slice(t).swap(resample_buf);
+
                         if (model.zero.inflated)
                         {
-                            arma::vec tmp = z.col(t);
-                            z.col(t) = tmp.elem(resample_idx);
+                            gather_vec(zbuf, z.col(t), resample_idx);
+                            z.col(t) = zbuf;
                         }
                     }
 
@@ -729,11 +744,12 @@ namespace SMC
                     if (eff < 0.95 * N)
                     {
                         arma::uvec resample_idx = get_resample_index(weights);
-                        Theta.slice(t + 1) = Theta.slice(t + 1).cols(resample_idx);
-                        if (model.zero.inflated)
-                        {
-                            arma::vec tmp = z.col(t + 1);
-                            z.col(t + 1) = tmp.elem(resample_idx);
+                        gather_cols(resample_buf, Theta.slice(t + 1), resample_idx);
+                        Theta.slice(t + 1).swap(resample_buf);
+
+                        if (model.zero.inflated) {
+                            gather_vec(zbuf, z.col(t + 1), resample_idx);
+                            z.col(t + 1) = zbuf;
                         }
                         weights.ones();
                     }
