@@ -14,14 +14,12 @@
     #define ARMA_64BIT_WORD
 #endif
 
-#ifdef _OPENMP
-    #if !defined(DGTF_USE_OPENMP)
-        #define DGTF_USE_OPENMP
-    #endif
+#if !defined(DGTF_USE_OPENMP)
+    #define DGTF_USE_OPENMP
+#endif
 
-    #if !defined(ARMA_USE_OPENMP)
-        #define ARMA_USE_OPENMP
-    #endif
+#if !defined(ARMA_USE_OPENMP)
+    #define ARMA_USE_OPENMP
 #endif
 
 // #if !defined(DGTF_DO_BOUND_CHECK)
@@ -33,7 +31,7 @@
 // #endif
 
 
-inline constexpr unsigned int NUM_THREADS = 16;
+inline constexpr unsigned int NUM_THREADS = 8;
 
 inline constexpr double EPS = 2.220446e-16;
 inline constexpr double EPS8 = 1.e-8;

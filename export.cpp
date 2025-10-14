@@ -382,6 +382,8 @@ Rcpp::List dgtf_posterior_predictive(
     const unsigned int &nrep = 0,
     const Rcpp::Nullable<Rcpp::NumericVector> &Rt = R_NilValue)
 {
+    std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+
     const unsigned int ntime = y.n_elem - 1;
     Model model(model_opts);
     model.seas.X = Season::setX(ntime, model.seas.period, model.seas.P);
@@ -484,6 +486,7 @@ Rcpp::List dgtf_posterior_predictive(
 
     arma::vec hpsi_true;
     arma::mat hpsi_res(ntime + 1, nsample, arma::fill::zeros);
+    arma::mat hpsi_stored(ntime + 1, nsample, arma::fill::zeros);
     if (Rt.isNotNull())
     {
         hpsi_true = Rcpp::as<arma::vec>(Rt);
@@ -512,6 +515,7 @@ Rcpp::List dgtf_posterior_predictive(
         {
             arma::vec psi = psi_stored.col(i);
             hpsi = GainFunc::psi2hpsi<arma::vec>(psi, model.fgain);
+            hpsi_stored.col(i) = hpsi;
             if (Rt.isNotNull())
             {
                 hpsi_res.col(i) = arma::abs(hpsi - hpsi_true);
@@ -546,12 +550,40 @@ Rcpp::List dgtf_posterior_predictive(
                 eta = ft.at(t);
                 if (mod.seas.period > 0)
                 {
-                    eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
+                    eta += arma::dot(mod.seas.X.col(t), mod.seas.val);
                 }
             }
 
             double lambda = std::abs(LinkFunc::ft2mu(eta, model.flink));
-            double var = std::abs(nbinomm::var(lambda, model.dobs.par2));
+            double mean, var;
+            switch (obs_list[model.dobs.name])
+            {
+            case AVAIL::Dist::nbinomm:
+            {
+                mean = lambda;
+                var = std::abs(nbinomm::var(lambda, model.dobs.par2));
+                break;
+            }
+            case AVAIL::Dist::nbinomp:
+            {
+                mean = nbinom::mean(lambda, model.dobs.par2);
+                var = nbinom::var(lambda, model.dobs.par2);
+                break;
+            }
+            case AVAIL::Dist::poisson:
+            {
+                mean = lambda;
+                var = lambda;
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument("Unknown observation distribution.");
+                break;
+            }
+            }
+
+
             yres2.at(t) = 2. * std::log(std::abs(y.at(t) - lambda) + EPS);
             yvar.at(t) = std::log(var + EPS);
 
@@ -564,20 +596,21 @@ Rcpp::List dgtf_posterior_predictive(
             }
 
             p.increment(); 
-        }
+        } // End iterations over time
 
         chi_sqr.at(i) = arma::mean(arma::exp(yres2 - yvar));
-    }
+    } // End iterations over posterior samples
 
 
     Rcpp::List output2;
     output2["chi"] = arma::mean(chi_sqr);
 
+    arma::vec prob = {0.025, 0.5, 0.975};
     if (nrep > 0)
     {
         arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
         arma::mat yhat2 = ytmp.slice(0);
-        arma::vec prob = {0.025, 0.5, 0.975};
+        
         try
         {
             arma::mat yqt = arma::quantile(yhat2, prob, 1);
@@ -590,6 +623,8 @@ Rcpp::List dgtf_posterior_predictive(
         }
     }
 
+    arma::mat hpsi_qt = arma::quantile(hpsi_stored, prob, 1);
+    output2["Rt"] = Rcpp::wrap(hpsi_qt);
 
     if (!use_theta && Rt.isNotNull())
     {
@@ -717,7 +752,7 @@ Rcpp::List dgtf_forecast(
                 double eta = ft.at(tidx, s);
                 if (mod.seas.period > 0)
                 {
-                    eta += arma::as_scalar(mod.seas.X.col(tidx).t() * mod.seas.val);
+                    eta += arma::dot(mod.seas.X.col(tidx), mod.seas.val);
                 }
 
                 double lambda = LinkFunc::ft2mu(eta, model.flink);

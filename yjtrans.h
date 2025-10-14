@@ -521,33 +521,4 @@ inline void rtheta(
     return; // m x 1, static parameters
 }
 
-
-
-/**
- * Logarithm of the proposal density
-*/
-inline double logq0(
-    const arma::vec &nu,        // m x 1
-    const arma::vec &eta_tilde, // m x 1
-    const arma::vec &gamma,     // m x 1
-    const arma::vec &mu,        // m x 1
-    const arma::mat &SigInv,    // m x m
-    const unsigned int m)
-{
-    const double m_ = static_cast<double>(m);
-    double logq = -0.5 * m_ * std::log(2 * arma::datum::pi);
-    logq += 0.5 * arma::log_det_sympd(arma::symmatu(SigInv));
-    logq -= 0.5 * arma::as_scalar((nu.t() - mu.t()) * SigInv * (nu - mu));
-
-    for (unsigned int i = 0; i < m; i++)
-    {
-        logq += dtYJ_dtheta(eta_tilde.at(i), gamma.at(i), true);
-    }
-    
-    #ifdef DGTF_DO_BOUND_CHECK
-        bound_check(logq, "logq0");
-    #endif
-    return logq;
-}
-
 #endif

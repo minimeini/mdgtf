@@ -13,8 +13,11 @@
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 #include "StaticParams.hpp"
+
+
 // #include "MCMC.hpp"
 
+// [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
 namespace VB
@@ -296,11 +299,11 @@ namespace VB
             marglike_stored.set_size(niter);
             marglike_stored.zeros();
 
-            condlike_stored.set_size(niter);
-            condlike_stored.zeros();
+            // condlike_stored.set_size(niter);
+            // condlike_stored.zeros();
 
-            grad_stored.set_size(niter);
-            grad_stored.zeros();
+            // grad_stored.set_size(niter);
+            // grad_stored.zeros();
 
             gamma.set_size(m);
             gamma.ones();
@@ -317,7 +320,10 @@ namespace VB
             eps = d;
 
             eta = Static::init_eta(param_selected, model_in, update_static); // Checked. OK.
-            eta_tilde = Static::eta2tilde(eta, param_selected, W_prior.name, par1_prior.name, model_in.seas.period, model_in.seas.in_state);
+            eta_tilde = Static::eta2tilde(
+                eta, param_selected, W_prior.name, 
+                par1_prior.name, model_in.dobs.name,
+                model_in.seas.period, model_in.seas.in_state);
 
             nu = tYJ(eta_tilde, gamma);
 
@@ -371,6 +377,7 @@ namespace VB
                 // TFS sampler
                 // ------------------
                 // You MUST set initial_resample_all = true (MCS smoothing) and final_resample_by_weights = false (reduce degeneracy) to make this algorithm work.
+                // arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 arma::mat ztmp(N, y.n_elem, arma::fill::ones);
                 double marg_loglik = SMC::SequentialMonteCarlo::auxiliary_filter0(
@@ -417,7 +424,7 @@ namespace VB
                 }
 
                 arma::vec lambda(y.n_elem, arma::fill::zeros);
-                for (unsigned int t = 1; t < lambda.n_elem; t++)
+                for (unsigned int t = 1; t < y.n_elem; t++)
                 {
                     if (model.zero.z.at(t) < EPS)
                     {
@@ -446,8 +453,8 @@ namespace VB
                     }
                     lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
 
-                    condlike_stored.at(b) += ObsDist::loglike(
-                        y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
+                    // condlike_stored.at(b) += ObsDist::loglike(
+                    //     y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
 
                     if (par1_prior.infer || par2_prior.infer)
                     {
@@ -464,7 +471,6 @@ namespace VB
                     }
                 }
 
-
                 if (update_static)
                 {
                     arma::vec dlogJoint = Static::dlogJoint_deta(
@@ -480,7 +486,7 @@ namespace VB
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
 
-                    grad_stored.at(b) += arma::accu(arma::abs(grad_mu.change));
+                    // grad_stored.at(b) += arma::accu(arma::abs(grad_mu.change));
 
                     if (m > 1)
                     {
@@ -508,14 +514,14 @@ namespace VB
                             B.elem(B_uptri_idx).zeros();
                         }
 
-                        grad_stored.at(b) += arma::accu(arma::abs(grad_vecB.change));
+                        // grad_stored.at(b) += arma::accu(arma::abs(grad_vecB.change));
                     }
 
                     // d
                     arma::vec L_d = dYJinv_dD(nu, gamma, eps) * ddiff; // m x 1
                     grad_d.update_grad(L_d);
                     d = d + grad_d.change;
-                    grad_stored.at(b) += arma::accu(arma::abs(grad_d.change));
+                    // grad_stored.at(b) += arma::accu(arma::abs(grad_d.change));
 
                     // tau
                     arma::vec tau = gamma2tau(gamma);
@@ -523,12 +529,13 @@ namespace VB
                     grad_tau.update_grad(L_tau);
                     tau = tau + grad_tau.change;
                     gamma = tau2gamma(tau);
-                    grad_stored.at(b) += arma::accu(arma::abs(grad_tau.change));
+                    // grad_stored.at(b) += arma::accu(arma::abs(grad_tau.change));
 
                     rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
                     eta = Static::tilde2eta(
                         eta_tilde, param_selected, 
-                        W_prior.name, par1_prior.name, model.dlag.name, 
+                        W_prior.name, par1_prior.name, 
+                        model.dlag.name, model.dobs.name,
                         model.seas.period, model.seas.in_state);
                     Static::update_params(model, param_selected, eta);
                 } // end update_static
@@ -625,7 +632,8 @@ namespace VB
                 rtheta(nu, eta_tilde, xi, eps, gamma, mu, B, d);
                 eta = Static::tilde2eta(
                     eta_tilde, param_selected, 
-                    W_prior.name, par1_prior.name, model.dlag.name, 
+                    W_prior.name, par1_prior.name, 
+                    model.dlag.name, model.dobs.name,
                     model.seas.period, model.seas.in_state);
                 
                 Static::update_params(model, param_selected, eta);
@@ -711,8 +719,8 @@ namespace VB
         {
             Rcpp::List output;
             output["marglik"] = Rcpp::wrap(marglike_stored);
-            output["condlik"] = Rcpp::wrap(condlike_stored);
-            output["grad_norm"] = Rcpp::wrap(grad_stored);
+            // output["condlik"] = Rcpp::wrap(condlike_stored);
+            // output["grad_norm"] = Rcpp::wrap(grad_stored);
 
             output["psi_stored"] = Rcpp::wrap(psi_stored);
             arma::vec qprob = {0.025, 0.5, 0.975};
@@ -778,7 +786,7 @@ namespace VB
         // StaticParam W, mu0, delta, kappa, r;
         HybridParams grad_mu, grad_vecB, grad_d, grad_tau;
         arma::vec mu, d, gamma, nu, eps, eta, eta_tilde; // m x 1
-        arma::vec marglike_stored, condlike_stored, grad_stored; // niter x 1
+        arma::vec marglike_stored; //, condlike_stored, grad_stored; // niter x 1
 
         arma::vec xi;                                    // k x 1
         arma::mat B;                                     // m x k

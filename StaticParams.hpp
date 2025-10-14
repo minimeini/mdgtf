@@ -331,9 +331,11 @@ namespace Static
         const std::vector<std::string> &param_selected,
         const std::string &W_prior = "invgamma",
         const std::string &lag_par1_prior = "gaussian",
+        const std::string &obs_dist = "nbinom",
         const unsigned int &seasonal_period = 1,
         const bool &season_in_state = false)
     {
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
         std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
@@ -379,7 +381,16 @@ namespace Static
                     bound_check<arma::vec>(seas, "VB::Hybrid::eta2tilde: seas", false, true);
                     #endif
 
-                    eta_tilde.subvec(idx, idx + seasonal_period - 1) = arma::log(seas + EPS);
+                    if (obs_list[obs_dist] == AVAIL::Dist::nbinomm)
+                    {
+                        eta_tilde.subvec(idx, idx + seasonal_period - 1) = arma::log(arma::abs(seas) + EPS);
+                    }
+                    else
+                    {
+                        eta_tilde.subvec(idx, idx + seasonal_period - 1) = seas;
+                    }
+
+                    
                     idx += seasonal_period;
                 }
                 break;
@@ -463,11 +474,13 @@ namespace Static
         const std::string &W_prior = "invgamma",
         const std::string &lag_par1_prior = "gaussian",
         const std::string &lag_dist = "lognorm",
+        const std::string &obs_dist = "nbinom",
         const unsigned int &seasonal_period = 1,
         const bool &season_in_state = false)
     {
         std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
         std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
 
         arma::vec eta = eta_tilde;
@@ -507,9 +520,17 @@ namespace Static
             {
                 if (!season_in_state)
                 {
-                    arma::vec log_seas = eta_tilde.subvec(idx, idx + seasonal_period - 1);
-                    log_seas.clamp(log_seas.min(), UPBND);
-                    eta.subvec(idx, idx + seasonal_period - 1) = arma::exp(log_seas);
+                    arma::vec seas_tilde = eta_tilde.subvec(idx, idx + seasonal_period - 1);
+                    if (obs_list[obs_dist] == AVAIL::Dist::nbinomm)
+                    {
+                        seas_tilde.clamp(seas_tilde.min(), UPBND);
+                        eta.subvec(idx, idx + seasonal_period - 1) = arma::exp(seas_tilde);
+                    }
+                    else
+                    {
+                        eta.subvec(idx, idx + seasonal_period - 1) = seas_tilde;
+                    }
+                    
                     idx += seasonal_period;
                 }
                 break;
@@ -638,7 +659,7 @@ namespace Static
             if (full_rank)
             {
                 arma::vec err = Theta.col(t) - Theta.col(t - 1);
-                tmp = arma::as_scalar(err.t() * err);
+                tmp = arma::dot(err, err);
             }
             else
             {
@@ -697,15 +718,12 @@ namespace Static
 
 
     /*
-    ------ dlogJoint_dlogmu0 ------
-    The derivative of the full joint density with respect to logmu0=log(mu0), where mu0
-    is the baseline intensity such that:
-        y[t] ~ EFM(lambda[t]=mu[0]+lambda[t])
-
-    mu0 > 0 has a Gamma prior:
-        mu[0] ~ Gamma(amu,bmu)
+    ------ dlogJoint_dseas ------
+    The derivative of the full joint density with respect to seasonality term:
+        In a linear NB model, it is a derivative w.r.t. log(seas) since seas > 0
+        In a nonlinear NB model, it is a derivative w.r.t. seas directly since seas in R.
     */
-    inline arma::vec dloglike_dlogseas( // Checked. OK.
+    inline arma::vec dloglike_dseas( // Checked. OK.
         const arma::vec &y,           // (nT+1) x 1
         const arma::vec &lambda,          // (n+1) x 1, (f[0],f[1],...,f[nT])
         const ObsDist &dobs,
@@ -715,6 +733,7 @@ namespace Static
         const std::string &flink
     )
     { // 0 - negative binomial; 1 - poisson
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
 
         arma::vec deriv(seas.n_elem, arma::fill::zeros);
         for (unsigned int t = 1; t < y.n_elem; t++)
@@ -728,21 +747,27 @@ namespace Static
             double eta = LinkFunc::mu2ft(lambda.at(t), flink);
             double lam;
             double dlambda_deta = LinkFunc::dlambda_deta(lam, eta, flink);
-            arma::vec deta_dlogseas = Xseas.col(t) % seas;
-            deriv = deriv + (dy_dlambda * dlambda_deta) * deta_dlogseas;
+            arma::vec deta_dseas = Xseas.col(t);
+            if (obs_list[dobs.name] == AVAIL::Dist::nbinomm)
+            {
+                // seas is restricted to be nonnegative
+                arma::vec dseas_dlogseas = seas;
+                deta_dseas %= dseas_dlogseas;
+            }
+            deriv = deriv + (dy_dlambda * dlambda_deta) * deta_dseas;
         }
         return deriv;
     }
 
 
-    inline arma::vec dlogprior_dlogseas(
-        const arma::vec &logseas, // evolution variance conditional on V
+    inline arma::vec dlogprior_dseas(
+        const arma::vec &seas, // evolution variance conditional on V
         const double &sig2_mu0 = 10.)
     {
         /*
         log(mu0) ~ N(0,sig2_mu0)
         */
-        arma::vec logp = - logseas / sig2_mu0;
+        arma::vec logp = - seas / sig2_mu0;
         #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(logp, "logprior_logseas: logp");
         #endif
@@ -820,6 +845,7 @@ namespace Static
         const Prior &seas_prior,
         const Model &model)
     {
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
         unsigned int nelem = param_selected.size();
         for (unsigned int i = 0; i < param_selected.size(); i++)
@@ -848,11 +874,15 @@ namespace Static
             case AVAIL::Param::seas:
             {
                 arma::vec seas = arma::abs(eta.subvec(idx, idx + model.seas.period - 1));
-                arma::vec logseas = arma::log(seas + EPS);
+                arma::vec seas_tilde = seas;
+                if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomm)
+                {
+                    seas_tilde = arma::log(arma::abs(seas) + EPS);
+                }
 
-                arma::vec dloglik = dloglike_dlogseas(
+                arma::vec dloglik = dloglike_dseas(
                     y, lambda, model.dobs, model.zero, seas, model.seas.X, model.flink);
-                arma::vec dlogprior = dlogprior_dlogseas(logseas, seas_prior.par2);
+                arma::vec dlogprior = dlogprior_dseas(seas_tilde, seas_prior.par2);
 
                 deriv.subvec(idx, idx + model.seas.period - 1) = dloglik + dlogprior;
                 idx += model.seas.period;
@@ -912,6 +942,7 @@ namespace Static
         const Prior &seas_prior,
         const Model &model)
     {
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         double logp = 0.;
         double Wchol = std::sqrt(model.derr.par1);
 
@@ -985,7 +1016,12 @@ namespace Static
         {
             for (unsigned int i = 0; i < model.seas.period; i++)
             {
-                logp += Prior::dprior(model.seas.val.at(i), seas_prior, true, true);
+                double seas = model.seas.val.at(i);
+                if (obs_list[model.dobs.name] == AVAIL::Dist::nbinomm)
+                {
+                    seas = std::log(std::abs(seas) + EPS);
+                }
+                logp += Prior::dprior(seas, seas_prior, true, true);
             }
         }
 

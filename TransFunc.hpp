@@ -266,7 +266,7 @@ public:
             }
             else if (!seas.X.is_empty() && !seas.val.is_empty())
             {
-                ft_cur += arma::as_scalar(seas.X.col(t).t() * seas.val);
+                ft_cur += arma::dot(seas.X.col(t), seas.val);
             }
         }
 

@@ -64,7 +64,7 @@ namespace MCMC
                 double eta = TransFunc::transfer_sliding(t, model.dlag.nL, y, model.dlag.Fphi, hpsi);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t), model.seas.val);
                 }
                 lambda.at(t) = LinkFunc::ft2mu(eta, model.flink);
             }
@@ -339,7 +339,7 @@ namespace MCMC
                 eta.at(t) = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta.at(t) += arma::as_scalar(model.seas.X.col(t).t() * seas_old);
+                    eta.at(t) += arma::dot(model.seas.X.col(t), seas_old);
                 }
 
                 lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink);
@@ -374,7 +374,7 @@ namespace MCMC
                 eta.at(t) = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta.at(t) += arma::as_scalar(model.seas.X.col(t).t() * seas_new);
+                    eta.at(t) += arma::dot(model.seas.X.col(t), seas_new);
                 }
                 lambda.at(t) = LinkFunc::ft2mu(eta.at(t), model.flink);
                 if (y.at(t) < EPS)
@@ -425,7 +425,7 @@ namespace MCMC
                 double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t), model.seas.val);
                 }
                 lambda.at(t) = LinkFunc::ft2mu(eta, model.flink);
                 logp_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda.at(t), rho_old, true);
@@ -501,7 +501,7 @@ namespace MCMC
                 double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t), model.seas.val);
                 }
                 double lambda = LinkFunc::ft2mu(eta, model.flink);
                 loglik_old += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
@@ -584,7 +584,7 @@ namespace MCMC
                 double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t), model.seas.val);
                 }
                 double lambda = LinkFunc::ft2mu(eta, model.flink);
                 loglik_new += ObsDist::loglike(y.at(t), model.dobs.name, lambda, model.dobs.par2, true);
@@ -617,9 +617,9 @@ namespace MCMC
             const Prior &rho_prior,
             const Prior &par1_prior,
             const Prior &par2_prior,
+            const arma::vec &epsilon,
             const bool zintercept_infer = false,
             const bool zzcoef_infer = false,
-            const double &epsilon = 0.01,
             const unsigned int &L = 10,
             const double &kinetic_sd = 1.
         )
@@ -637,7 +637,7 @@ namespace MCMC
                 double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
                 if (mod.seas.period > 0)
                 {
-                    eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
+                    eta += arma::dot(mod.seas.X.col(t), mod.seas.val);
                 }
                 lambda.at(t) = LinkFunc::ft2mu(eta, mod.flink);
             }
@@ -651,8 +651,8 @@ namespace MCMC
             // map parameters of the lag distribution to the whole real line
             arma::vec params = Static::init_eta(param_selected, mod, true);
             arma::vec q = Static::eta2tilde(
-                params, param_selected, W_prior.name, par1_prior.name,
-                mod.seas.period, mod.seas.in_state); // Checked. OK.
+                params, param_selected, W_prior.name, par1_prior.name, 
+                mod.dobs.name, mod.seas.period, mod.seas.in_state); // Checked. OK.
 
             // sample an initial momentum
             arma::vec p = arma::randn(q.n_elem);
@@ -668,16 +668,17 @@ namespace MCMC
                 W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
                 zintercept_infer, zzcoef_infer); // Checked. OK.
 
-            p -= (0.5 * epsilon) * grad_U;
+            p -= 0.5 * (epsilon % grad_U);
 
             for (unsigned int i = 1; i <= L; i++)
             {
                 // full step update for position
-                q += epsilon * p;
+                q += epsilon % p;
 
                 params = Static::tilde2eta(
                     q, param_selected, W_prior.name, par1_prior.name,
-                    mod.dlag.name, mod.seas.period, mod.seas.in_state); // Checked. OK.
+                    mod.dlag.name, mod.dobs.name,
+                    mod.seas.period, mod.seas.in_state); // Checked. OK.
                 Static::update_params(mod, param_selected, params);
 
                 // Gradient of the potential energy given updated "q"
@@ -689,12 +690,12 @@ namespace MCMC
                 // full step update for momentum
                 if (i != L)
                 {
-                    p -= epsilon * grad_U;
+                    p -= epsilon % grad_U;
                 }
             }
 
             // Leapfrog: final half step update for momentum
-            p -= (0.5 * epsilon) * grad_U;
+            p -= 0.5 * (epsilon % grad_U);
 
             // Leapfrog: negate trajectory to make proposal symmetric
             p *= -1.;
@@ -705,7 +706,7 @@ namespace MCMC
                 double eta = TransFunc::transfer_sliding(t, mod.dlag.nL, y, mod.dlag.Fphi, hpsi);
                 if (mod.seas.period > 0)
                 {
-                    eta += arma::as_scalar(mod.seas.X.col(t).t() * mod.seas.val);
+                    eta += arma::dot(mod.seas.X.col(t), mod.seas.val);
                 }
                 lambda.at(t) = LinkFunc::ft2mu(eta, mod.flink);
             }
@@ -839,12 +840,6 @@ namespace MCMC
         {
             Rcpp::List opts = mcmc_settings;
 
-            epsilon = 0.01;
-            if (opts.containsElementNamed("epsilon"))
-            {
-                epsilon = Rcpp::as<double>(opts["epsilon"]);
-            }
-
             L = 10;
             if (opts.containsElementNamed("L"))
             {
@@ -898,13 +893,27 @@ namespace MCMC
             if (nparam > 0)
             {
                 update_static = true;
+                hmc_accept = 0.;
+                epsilon.set_size(nparam);
+                epsilon.fill(0.01);
+                if (opts.containsElementNamed("epsilon"))
+                {
+                    arma::vec eps = Rcpp::as<arma::vec>(opts["epsilon"]);
+                    if (epsilon.n_elem <= eps.n_elem)
+                    {
+                        epsilon = eps.subvec(0, epsilon.n_elem - 1);
+                    }
+                    else
+                    {
+                        epsilon.subvec(0, eps.n_elem - 1) = eps;
+                        epsilon.subvec(eps.n_elem, epsilon.n_elem - 1).fill(epsilon.at(eps.n_elem - 1));
+                    }
+                }
             }
             else
             {
                 update_static = false;
             }
-
-            hmc_accept = 0.;
 
             W_stored.set_size(nsample);
             // W_accept = 0.;
@@ -927,41 +936,7 @@ namespace MCMC
 
         static Rcpp::List default_settings()
         {
-            // Rcpp::List Wopts;
-            // Wopts["infer"] = true;
-            // Wopts["prior_param"] = Rcpp::NumericVector::create(0.01, 0.01);
-            // Wopts["prior_name"] = "invgamma";
-
-            // Rcpp::List seas_opts;
-            // seas_opts["infer"] = false;
-            // seas_opts["mh_sd"] = 1.;
-            // seas_opts["prior_param"] = Rcpp::NumericVector::create(0., 10.);
-            // seas_opts["prior_name"] = "gaussian";
-
-            // Rcpp::List rho_opts;
-            // rho_opts["infer"] = false;
-            // rho_opts["mh_sd"] = 1.;
-            // rho_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            // rho_opts["prior_name"] = "invgamma";
-
-            // Rcpp::List par1_opts;
-            // par1_opts["infer"] = false;
-            // par1_opts["mh_sd"] = 1.;
-            // par1_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            // par1_opts["prior_name"] = "gaussian";
-
-            // Rcpp::List par2_opts;
-            // par2_opts["infer"] = false;
-            // par2_opts["mh_sd"] = 1.;
-            // par2_opts["prior_param"] = Rcpp::NumericVector::create(0.1, 0.1);
-            // par2_opts["prior_name"] = "invgamma";
-
             Rcpp::List opts = Static::default_settings();
-            // opts["W"] = Wopts;
-            // opts["seas"] = seas_opts;
-            // opts["rho"] = rho_opts;
-            // opts["par1"] = par1_opts;
-            // opts["par2"] = par2_opts;
 
             opts["epsilon"] = 0.01;
             opts["L"] = 10;
@@ -1134,8 +1109,7 @@ namespace MCMC
                     model = Posterior::update_static_hmc(
                         hmc_accept, mod, y, psi, param_selected,
                         W_prior, seas_prior, rho_prior, par1_prior, par2_prior,
-                        zintercept_infer, zzcoef_infer,
-                        epsilon, L, kinetic_sd);
+                        epsilon, zintercept_infer, zzcoef_infer, L, kinetic_sd);
                 }
 
                 // if (seas_prior.infer)
@@ -1180,17 +1154,17 @@ namespace MCMC
                     }
                 }
 
-                if (verbose)
-                {
-                    Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
-                }
+                // if (verbose)
+                // {
+                //     Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+                // }
 
             } // end a single iteration
 
-            if (verbose)
-            {
-                Rcpp::Rcout << std::endl;
-            }
+            // if (verbose)
+            // {
+            //     Rcpp::Rcout << std::endl;
+            // }
 
             return;
         }
@@ -1198,7 +1172,7 @@ namespace MCMC
     private:
         arma::vec log_marg_stored;
 
-        double epsilon = 0.01;
+        arma::vec epsilon;
         unsigned int L = 10;
         double kinetic_sd = 1.;
 

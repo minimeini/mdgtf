@@ -7,12 +7,14 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#ifdef _OPENMP
+#ifdef DGTF_USE_OPENMP
     #include <omp.h>
 #endif
 #include "Model.hpp"
 #include "LinearBayes.hpp"
 
+// [[Rcpp::plugins(cpp17)]]
+// [[Rcpp::depends(RcppArmadillo)]]
 
 /**
  * @brief State only
@@ -43,16 +45,20 @@ static arma::vec qforecast0(
             model.fsys, model.fgain, model.dlag, Theta_old.col(i), y_old, 
             model.seas.period, model.seas.in_state); // gt(theta[t-1, i])
         
-        double ft_gtheta = TransFunc::func_ft(
+        double eta = TransFunc::func_ft(
             model.ftrans, model.fgain, model.dlag, model.seas, t_new, gtheta_old_i, y); // ft( gt(theta[t-1,i]) )
         
-        double eta = ft_gtheta;
         double lambda = LinkFunc::ft2mu(eta, model.flink); // (eq 3.10)
         lambda = (t_new == 1 && lambda < EPS) ? 1. : lambda;
         double Vt = ApproxDisturbance::func_Vt_approx(
             lambda, model.dobs, model.flink); // (eq 3.11)
+        Vt = std::abs(Vt) + EPS; // guard
         
-        logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
+        // logq.at(i) = R::dnorm4(yhat_new, eta, std::sqrt(Vt), true);
+        // logq.at(i) = dnorm_cpp(yhat_new, eta, std::sqrt(Vt), true);
+        // Fast normal log-density using variance (no sqrt/divide)
+        const double diff = (yhat_new - eta);
+        logq.at(i) = -0.5 * (LOG2PI + std::log(Vt) + (diff * diff) / Vt);
     }
 
 
@@ -202,7 +208,7 @@ static arma::vec qforecast(
             double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.; // ldetSigma = - ldetPrec
             Prec_chol_inv.slice(i) = prec_chol_inv;
 
-            double delta = yhat_new - ft_gtheta + arma::as_scalar(Ft_gtheta.t() * gtheta_old_i); // (eq 3.16)
+            double delta = yhat_new - ft_gtheta + arma::dot(Ft_gtheta, gtheta_old_i); // (eq 3.16)
             loc.col(i) = Ft_gtheta * (delta / Vt) + Winv * gtheta_old_i; // (eq 3.20)
 
             double ldetV = std::log(std::abs(Vt) + EPS);
@@ -558,7 +564,7 @@ static arma::vec qbackcast(
             double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.;
             Prec_chol_inv.slice(i) = prec_chol_inv;
 
-            double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * ut.col(i));
+            double delta = yhat_cur - eta + arma::dot(F_cur, ut.col(i));
             loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * ut.col(i);
 
             double ldetV = std::log(Vtilde);
@@ -668,7 +674,7 @@ static arma::vec qbackcast(
             double ldetPrec = arma::accu(arma::log(prec_chol.diag())) * 2.;
             Prec_chol_inv.slice(i) = prec_chol_inv;
 
-            double delta = yhat_cur - eta + arma::as_scalar(F_cur.t() * ut.col(i));
+            double delta = yhat_cur - eta + arma::dot(F_cur, ut.col(i));
             loc.col(i) = F_cur * (delta / Vtilde) + Uprec_cur * ut.col(i);
 
             double ldetV = std::log(Vtilde);

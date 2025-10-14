@@ -40,7 +40,12 @@ public:
      * Exponential link:
      *      mu[t] = exp( eta[t] ) = exp( mu0 + f[t] )
      */
-    static double ft2mu(const double &ft, const std::string &link_func, const double &mu0 = 0.)
+    static double ft2mu(
+        const double &ft, 
+        const std::string &link_func, 
+        const double &mu0 = 0.,
+        const double &m = 1.
+    )
     {
         std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
 
@@ -55,7 +60,7 @@ public:
         }
         case LinkFunc::Func::logistic:
         {
-            mu = 1. / (1. + std::exp(-eta));
+            mu = 1. / (1. + std::exp(- eta / m));
             mu = std::min(mu, 0.999);
             mu = std::max(EPS, mu);
             break;
@@ -63,7 +68,7 @@ public:
         default:
         {
             // Identity gain
-            mu = eta;
+            mu = eta / m;
             break;
         }
         }
@@ -71,7 +76,12 @@ public:
     }
 
     template <class T>
-    static T ft2mu(const T &ft, const std::string &link_func, const double &mu0 = 0.)
+    static T ft2mu(
+        const T &ft, 
+        const std::string &link_func, 
+        const double &mu0 = 0.,
+        const double &m = 1.
+    )
     {
         std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
 
@@ -86,14 +96,14 @@ public:
         }
         case LinkFunc::Func::logistic:
         {
-            mu = 1. / (1. + arma::exp(-eta));
+            mu = 1. / (1. + arma::exp(- eta / m));
             mu.clamp(EPS, 0.999);
             break;
         }
         default:
         {
             // Identity gain
-            mu = eta;
+            mu = eta / m;
             break;
         }
         }
@@ -117,7 +127,9 @@ public:
     static T mu2ft(
         const T &mu,
         const std::string &link_func,
-        const double &mu0 = 0.)
+        const double &mu0 = 0.,
+        const double &m = 1.
+    )
     {
         T eta;
 
@@ -131,13 +143,13 @@ public:
         }
         case LinkFunc::Func::logistic:
         {
-            eta = logit<T>(mu);
+            eta = logit<T>(mu, m);
             break;
         }
         default:
         {
             // Identity link
-            eta = mu;
+            eta = m * mu;
             break;
         }
         }
@@ -150,7 +162,9 @@ public:
     static double mu2ft(
         const double &mu,
         const std::string &link_func,
-        const double &mu0 = 0.)
+        const double &mu0 = 0.,
+        const double &m = 1.
+    )
     {
         double eta = 0.;
 
@@ -164,13 +178,13 @@ public:
         }
         case LinkFunc::Func::logistic:
         {
-            eta = logit(mu);
+            eta = logit(mu, m);
             break;
         }
         default:
         {
             // Identity link
-            eta = mu;
+            eta = m * mu;
             break;
         }
         }
@@ -189,7 +203,12 @@ public:
      * @param link_func 
      * @return double 
      */
-    static double dlambda_deta(double &lambda, const double &eta, const std::string &link_func)
+    static double dlambda_deta(
+        double &lambda, 
+        const double &eta, 
+        const std::string &link_func,
+        const double &m = 1.
+    )
     {
         double deriv = 0.;
         lambda = 0.;
@@ -204,16 +223,17 @@ public:
         }
         case LinkFunc::Func::logistic:
         {
-            double tmp = std::exp(eta);
+            double tmp = std::exp(eta / m);
             lambda = tmp / (1. + tmp);
             deriv = lambda * (1. - lambda);
+            deriv /= m;
             break;
         }
         default:
         {
             // Identity link
-            lambda = eta;
-            deriv = 1.;
+            lambda = eta / m;
+            deriv = 1. / m;
             break;
         }
         }

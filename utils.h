@@ -27,6 +27,7 @@
 #include <RcppArmadillo.h>
 #include "definition.h"
 
+// [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
 inline void tolower(std::string &S)
@@ -316,30 +317,30 @@ arma::vec logp_shifted(const arma::vec &logp)
 
 
 
-inline double logit(const double &p)
+inline double logit(const double &p, const double &m = 1.)
 {
 	double val = p / (1. - p);
 	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check(val, "logit");
 	#endif
-	return std::log(val);
+	return std::log(val) * m;
 }
 
 
 template <typename T>
-inline T logit(const T&x)
+inline T logit(const T&x, const double &m = 1.)
 {
 	T val = x / (1. - x);
-	T out = arma::log(val);
+	T out = arma::log(val) * m;
 	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check(val, "logit");
 	#endif
 	return out;
 }
 
-inline double logistic(const double &x)
+inline double logistic(const double &x, const double &m = 1.)
 {
-	double val = 1. / (1. + std::exp(-x));
+	double val = 1. / (1. + std::exp(- x / m));
 	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check(val, "logistic", true, true);
 	#endif
@@ -348,14 +349,23 @@ inline double logistic(const double &x)
 
 
 template <typename T>
-inline T logistic(const T& x)
+inline T logistic(const T& x, const double &m = 1.)
 {
-	T val = arma::exp(-x) + 1.;
+	T val = arma::exp(- x / m) + 1.;
 	T out = 1. / val;
 	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check<T>(out, "logistic", true, true);
 	#endif
 	return out;
 }
+
+
+inline double dnorm_cpp(double x, double mu, double sd, bool logd=true) {
+    const double z = (x - mu) / sd;
+    const double logc = -0.5*std::log(2.0*M_PI) - std::log(sd);
+    double val = logc - 0.5*z*z;
+    return logd ? val : std::exp(val);
+}
+
 
 #endif

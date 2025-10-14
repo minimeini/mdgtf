@@ -351,7 +351,7 @@ public:
                 double eta = ft_vec.at(idx + 1);
                 if (seass.period > 0)
                 {
-                    eta += arma::as_scalar(seass.X.col(idx + 1).t() * seass.val);
+                    eta += arma::dot(seass.X.col(idx + 1), seass.val);
                 }
 
 
@@ -435,7 +435,7 @@ public:
                 double eta = ft_vec.at(idx + 1);
                 if (seas.period > 0)
                 {
-                    eta += arma::as_scalar(seas.X.col(idx + 1).t() * seas.val);
+                    eta += arma::dot(seas.X.col(idx + 1), seas.val);
                 }
 
                 double lambda = LinkFunc::ft2mu(eta, model.flink);
@@ -546,7 +546,7 @@ public:
                     double eta = ft_tmp.at(t + j);
                     if (model.seas.period > 0)
                     {
-                        eta += arma::as_scalar(model.seas.X.col(t + j).t() * model.seas.val);
+                        eta += arma::dot(model.seas.X.col(t + j), model.seas.val);
                     }
                     ytmp.at(t + j) = LinkFunc::ft2mu(eta, model.flink);
 
@@ -693,7 +693,7 @@ public:
                 double eta = ft_tmp.at(t + 1);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t + 1).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t + 1), model.seas.val);
                 }
                 // ft_cast.at(t + 1, i) = ft_tmp.at(t + 1);
 
@@ -798,7 +798,7 @@ public:
                 double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t), model.seas.val);
                 }
 
                 yhat.at(t, i) = LinkFunc::ft2mu(eta, model.flink);
@@ -882,7 +882,7 @@ public:
                 double eta = ft.at(t);
                 if (model.seas.period > 0)
                 {
-                    eta += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                    eta += arma::dot(model.seas.X.col(t), model.seas.val);
                 }
 
                 yhat.at(t, i) = LinkFunc::ft2mu(eta, model.flink);
@@ -949,7 +949,7 @@ public:
             double eta = ft.at(t);
             if (seasonal_period > 0 && !X.is_empty() && !seas.is_empty())
             {
-                eta += arma::as_scalar(X.col(t).t() * seas);
+                eta += arma::dot(X.col(t), seas);
             }
             lambda.at(t) = LinkFunc::ft2mu(eta, flink);
         }
@@ -1045,8 +1045,9 @@ public:
             if (!zero.inflated || zero.z.at(t) > EPS)
             {
                 double eta = TransFunc::transfer_sliding(t, nlag, y, Fphi, hpsi);
-                if (seas.period > 0)              {
-                    eta += arma::as_scalar(seas.X.col(t).t() * seas.val);
+                if (seas.period > 0)
+                {
+                    eta += arma::dot(seas.X.col(t), seas.val);
                 }
                 double dll_deta = dloglik_deta(eta, y.at(t), dobs.par2, dobs.name, link_func);
 
@@ -1986,7 +1987,8 @@ public:
         #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(Vt, "func_Vt_approx: Vt", true, true);
         #endif
-        Vt.clamp(EPS8, Vt.max());
+        // Vt.clamp(EPS8, Vt.max());
+        Vt += EPS8;
         return Vt;
     }
 
