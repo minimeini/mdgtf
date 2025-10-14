@@ -416,51 +416,73 @@ namespace VB
 
                 arma::vec lambda(y.n_elem, arma::fill::zeros);
                 double dpar1_acc = 0.0, dpar2_acc = 0.0;
+                // Precompute seasonal X^T * val once per iteration (val changes across b, not within)
+                arma::vec seas_xt;
+                const bool add_seas =
+                    (model.seas.period > 0) && (!model.seas.in_state) &&
+                    (!model.seas.X.is_empty()) && (!model.seas.val.is_empty());
+                if (add_seas) {
+                    seas_xt = model.seas.X.t() * model.seas.val; // (nT+1) x 1
+                }
+
+                // Fast access to Fphi and (optional) its gradients
+                const double* Fphi_ptr = model.dlag.Fphi.memptr();
+                const bool need_lag_grad = (par1_prior.infer || par2_prior.infer);
+                const double* dF1_ptr = nullptr;
+                const double* dF2_ptr = nullptr;
+                if (need_lag_grad) {
+                    dF1_ptr = dFphi_grad.colptr(0);
+                    dF2_ptr = dFphi_grad.colptr(1);
+                }
+
                 #ifdef DGTF_USE_OPENMP
                 #pragma omp parallel for schedule(static) reduction(+:dpar1_acc,dpar2_acc)
-        #       endif
+                #endif
                 for (unsigned int t = 1; t < y.n_elem; t++)
                 {
-                    if (model.zero.z.at(t) < EPS)
+                    if (model.zero.z.at(t) < EPS) continue;
+
+                    // Number of effective lags at time t
+                    const unsigned int nelem = std::min(t, model.dlag.nL);
+
+                    // Column pointer to Theta(:, t)
+                    const double* theta_col = Theta.colptr(t);
+
+                    // Accumulate ft and (optionally) lag-parameter derivatives in one pass
+                    double ft = 0.0;
+                    double dpar1_sum = 0.0, dpar2_sum = 0.0;
+
+                    for (unsigned int i = 0; i < nelem; ++i)
                     {
-                        continue;
+                        const double ylag = y.at(t - 1 - i);
+                        if (std::abs(ylag) <= 0.0) continue; // cheap skip when many zeros
+
+                        const double psi  = theta_col[i];                  // theta[i] at time t
+                        const double hpsi = GainFunc::psi2hpsi(psi, model.fgain);
+
+                        const double common = hpsi * ylag;
+                        ft += Fphi_ptr[i] * common;
+
+                        if (need_lag_grad) {
+                            dpar1_sum += dF1_ptr[i] * common;
+                            dpar2_sum += dF2_ptr[i] * common;
+                        }
                     }
 
-                    unsigned int nelem = std::min(t, model.dlag.nL); // min(t,nL)
-                    arma::vec yold(model.dlag.nL, arma::fill::zeros);
-                    if (nelem > 1)
-                    {
-                        yold.tail(nelem) = y.subvec(t - nelem, t - 1);
+                    // Seasonal term
+                    if (add_seas) {
+                        ft += seas_xt.at(t);
                     }
-                    else if (t > 0) // nelem = 1 at t = 1
-                    {
-                        yold.at(model.dlag.nL - 1) = y.at(t - 1);
-                    }
-                    yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
-                    const arma::vec theta = Theta.col(t).rows(0, model.dlag.nL - 1);
-                    const arma::vec htheta = GainFunc::psi2hpsi<arma::vec>(theta, model.fgain);
-                    const arma::vec yhth = yold % htheta;
-
-                    double ft = arma::dot(model.dlag.Fphi, yhth);
-                    if ((model.seas.period > 0) && (!model.seas.in_state))
-                    {
-                        ft += arma::dot(model.seas.X.col(t), model.seas.val);
-                    }
                     lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
 
-                    // condlike_stored.at(b) += ObsDist::loglike(
-                    //     y.at(t), model.dobs.name, lambda.at(t), model.dobs.par2, true);
-
-                    if (par1_prior.infer || par2_prior.infer)
+                    if (need_lag_grad)
                     {
-                        double dll_deta = Model::dloglik_deta(
+                        const double dll_deta = Model::dloglik_deta(
                             ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
-                        double deta_dpar1 = arma::dot(dFphi_grad.col(0), yhth);
-                        double deta_dpar2 = arma::dot(dFphi_grad.col(1), yhth);
 
-                        dpar1_acc += dll_deta * deta_dpar1;
-                        dpar2_acc += dll_deta * deta_dpar2;
+                        dpar1_acc += dll_deta * dpar1_sum;
+                        dpar2_acc += dll_deta * dpar2_sum;
                     }
                 }
 
