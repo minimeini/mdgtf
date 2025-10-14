@@ -1133,7 +1133,7 @@ public:
     {
         double m2 = m * m;
         double mu = std::log(m2 / std::sqrt(s2 + m2));
-        double sd2 = std::log(1. + s2 / m2);
+        double sd2 = std::log1p(s2 / m2);
 
         Rcpp::NumericVector out = {mu, sd2};
         return out;
