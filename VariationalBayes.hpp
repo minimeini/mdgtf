@@ -415,6 +415,10 @@ namespace VB
                 }
 
                 arma::vec lambda(y.n_elem, arma::fill::zeros);
+                double dpar1_acc = 0.0, dpar2_acc = 0.0;
+                #ifdef DGTF_USE_OPENMP
+                #pragma omp parallel for schedule(static) reduction(+:dpar1_acc,dpar2_acc)
+        #       endif
                 for (unsigned int t = 1; t < y.n_elem; t++)
                 {
                     if (model.zero.z.at(t) < EPS)
@@ -434,9 +438,9 @@ namespace VB
                     }
                     yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
-                    arma::vec theta = Theta.col(t).rows(0, model.dlag.nL - 1);
-                    arma::vec htheta = GainFunc::psi2hpsi<arma::vec>(theta, model.fgain);
-                    arma::vec yhth = yold % htheta;
+                    const arma::vec theta = Theta.col(t).rows(0, model.dlag.nL - 1);
+                    const arma::vec htheta = GainFunc::psi2hpsi<arma::vec>(theta, model.fgain);
+                    const arma::vec yhth = yold % htheta;
 
                     double ft = arma::dot(model.dlag.Fphi, yhth);
                     if ((model.seas.period > 0) && (!model.seas.in_state))
@@ -455,10 +459,17 @@ namespace VB
                         double deta_dpar1 = arma::dot(dFphi_grad.col(0), yhth);
                         double deta_dpar2 = arma::dot(dFphi_grad.col(1), yhth);
 
-                        dloglik_dlag.at(0) += dll_deta * deta_dpar1;
-                        dloglik_dlag.at(1) += dll_deta * deta_dpar2;
+                        dpar1_acc += dll_deta * deta_dpar1;
+                        dpar2_acc += dll_deta * deta_dpar2;
                     }
                 }
+
+                if (par1_prior.infer || par2_prior.infer)
+                {
+                    dloglik_dlag.at(0) = dpar1_acc;
+                    dloglik_dlag.at(1) = dpar2_acc;
+                }
+
 
                 if (update_static)
                 {
