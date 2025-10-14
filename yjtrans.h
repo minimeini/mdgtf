@@ -239,19 +239,15 @@ inline double dtYJ_dtheta(
     return output;
 } // Status: Checked. OK.
 
-inline arma::mat dtYJ_dtheta(
-    const arma::vec &theta, // m x 1
-    const arma::vec &gamma)
-{ // m x 1
 
-    const unsigned int m = theta.n_elem;
-    arma::mat grad(m, m, arma::fill::zeros);
-    for (unsigned int i = 0; i < m; i++)
-    {
-        grad.at(i, i) = dtYJ_dtheta(theta.at(i), gamma.at(i), false);
+inline arma::vec dtYJ_dtheta_diag(const arma::vec& theta, const arma::vec& gamma, bool log=false) {
+    const arma::uword m = theta.n_elem;
+    arma::vec v(m);
+    for (arma::uword i = 0; i < m; ++i) {
+        v[i] = dtYJ_dtheta(theta[i], gamma[i], log);
     }
-    return grad;
-} // Status: Checked. OK.
+    return v;
+}
 
 /*
 Loaiza-Maya et al., PDF, bottom of p26
@@ -334,18 +330,14 @@ inline double dYJinv_dnu(const double nu, const double gamma)
     return res;
 } // Status: Checked. OK.
 
-inline arma::mat dYJinv_dnu(
-    const arma::vec &nu, // m x 1
-    const arma::vec &gamma)
-{ // m x 1
-    const unsigned int m = nu.n_elem;
-    arma::mat grad(m, m, arma::fill::zeros);
-    for (unsigned int i = 0; i < m; i++)
-    {
-        grad.at(i, i) = dYJinv_dnu(nu.at(i), gamma.at(i));
+inline arma::vec dYJinv_dnu_diag(const arma::vec& nu, const arma::vec& gamma) {
+    const arma::uword m = nu.n_elem;
+    arma::vec v(m);
+    for (arma::uword i = 0; i < m; ++i) {
+        v[i] = dYJinv_dnu(nu[i], gamma[i]);
     }
-    return grad;
-} // Status: Checked. OK.
+    return v;
+}
 
 /*
 --- dYJinv_dgamma ---
@@ -388,38 +380,31 @@ inline double dYJinv_dtau(const double nu, const double gamma)
     return dYJinv_dgamma(nu, gamma) * dgm_dtau_gm(gamma);
 } // Status: Checked. OK.
 
-inline arma::mat dYJinv_dtau(
-    const arma::vec &nu, // m x 1
-    const arma::vec &gamma)
-{ // m x 1
-    const unsigned int m = nu.n_elem;
-    arma::mat grad(m, m, arma::fill::zeros);
-    for (unsigned int i = 0; i < m; i++)
-    {
-        grad.at(i, i) = dYJinv_dtau(nu.at(i), gamma.at(i));
+inline arma::vec dYJinv_dtau_diag(const arma::vec& nu, const arma::vec& gamma) {
+    const arma::uword m = nu.n_elem;
+    arma::vec v(m);
+    for (arma::uword i = 0; i < m; ++i) {
+        v[i] = dYJinv_dtau(nu[i], gamma[i]);
     }
-    return grad;
-} // Status: Checked. OK.
+    return v;
+}
 
 
 /*
 Appendix B.2 equation (ii)
 */
-inline arma::mat dYJinv_dB(
-    const arma::vec &nu,    // m x 1
-    const arma::vec &gamma, // m x 1
-    const arma::vec &xi)    // k x 1
-{ // k x 1
-
-    const unsigned int m = nu.n_elem;
-
-    arma::mat dtheta_dnu = dYJinv_dnu(nu, gamma); // m x m
-    arma::mat Im(m, m, arma::fill::eye);
-    arma::mat dnu_dB = arma::kron(xi.t(),Im); // (1 x k) and (m x m)
-    arma::mat dtheta_dB = dtheta_dnu * dnu_dB; // m x mk
-
-    return dtheta_dB; // m x mk
-} // Status: Checked. OK.
+inline arma::mat dYJinv_dB_times_ddiff(
+    const arma::vec& nu,     // m
+    const arma::vec& gamma,  // m
+    const arma::vec& xi,     // k
+    const arma::vec& ddiff)  // m
+{
+    // v_i = (d theta_i / d nu_i) * ddiff_i
+    arma::vec v = dYJinv_dnu_diag(nu, gamma) % ddiff; // m
+    // L_B = v * xi^T  (m x k)
+    return v * xi.t();
+}
+// ...existing code...
 
 /*
 Section B.2 equation (iii)
@@ -431,9 +416,8 @@ inline arma::mat dYJinv_dD(
     const arma::vec &eps)
 { // m x 1
 
-    arma::mat dtheta_dnu = dYJinv_dnu(nu, gamma);     // m x m
-    arma::mat dnu_dd = arma::diagmat(eps);
-    arma::mat dtheta_dd = dtheta_dnu * dnu_dd; // m x m
+    arma::vec dtheta_dnu = dYJinv_dnu_diag(nu, gamma);     // m x m
+    arma::mat dtheta_dd = arma::diagmat(eps % dtheta_dnu); // m x m
 
     return dtheta_dd;
 } // Status: Checked. OK.
@@ -460,45 +444,57 @@ inline arma::mat get_sigma_inv(
 
 // Ref: `grad_theta_logq.m`
 inline arma::vec dlogq_dtheta(
-    const arma::mat &SigInv, // m x m
-    const arma::vec &nu,     // m x 1
-    const arma::vec &theta,  // m x 1
-    const arma::vec &gamma,  // m x 1
+    const arma::mat &SigInv,
+    const arma::vec &nu,
+    const arma::vec &theta,
+    const arma::vec &gamma,
     const arma::vec &mu)
-{ // m x 1
-
-    arma::mat dnu_dtheta = dtYJ_dtheta(theta, gamma);       // m x m
-    arma::vec deriv = -dnu_dtheta.t() * SigInv * (nu - mu); // m x 1
-    arma::vec deriv2 = dlogdYJ_dtheta(theta, gamma);        // m x 1
+{
+    // v = SigInv * (nu - mu)
+    arma::vec v = SigInv * (nu - mu);
+    // element-wise scale by diagonal of dtYJ_dtheta
+    arma::vec d1 = dtYJ_dtheta_diag(theta, gamma, false);
+    arma::vec deriv = -(d1 % v);
+    arma::vec deriv2 = dlogdYJ_dtheta(theta, gamma);
     arma::vec output = deriv + deriv2;
-    
+
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check<arma::vec>(output, "dlogq_dtheta: output");
     #endif
-    
-    return output;                                  // m x 1
-} // Status: Checked. OK.
+    return output;
+}
+
 
 inline void rtheta(
     arma::vec &nu,
     arma::vec &theta,
-    arma::vec &xi,          // k x 1
-    arma::vec &eps,         // m x 1
+    arma::vec &xi,          // k x 1 (output)
+    arma::vec &eps,         // m x 1 (output)
     const arma::vec &gamma, // m x 1
     const arma::vec &mu,    // m x 1
     const arma::mat &B,     // m x k
-    const arma::vec &d)
-{ // m x 1
+    const arma::vec &d)     // m x 1
+{
+    const arma::uword m = gamma.n_elem;
+    const arma::uword k = B.n_cols;
 
-    const unsigned int m = gamma.n_elem;
-    const unsigned int k = B.n_cols;
+    // ensure sizes; avoids realloc per call if already sized
+    if (xi.n_elem != k) xi.set_size(k);
+    if (eps.n_elem != m) eps.set_size(m);
+    if (nu.n_elem != m)  nu.set_size(m);
+    if (theta.n_elem != m) theta.set_size(m);
 
-    xi = arma::randn(k, 1);
-    eps = arma::randn(m, 1);
+    // in-place RNG (faster than assigning arma::randn(k,1))
+    xi.randn();     // ~ N(0,I_k)
+    eps.randn();    // ~ N(0,I_m)
 
-    nu = mu + B * xi + d % eps;
+    // nu = mu + B*xi + d%eps  (BLAS gemv + two axpy)
+    nu = mu;
+    nu += B * xi;
+    nu += d % eps;
+
+    // elementwise inverse transform
     theta = tYJinv(nu, gamma);
-    return; // m x 1, static parameters
 }
 
 #endif

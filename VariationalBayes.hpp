@@ -482,7 +482,7 @@ namespace VB
                     arma::vec ddiff = dlogJoint - dlogq;
 
                     // mu
-                    arma::vec L_mu = dYJinv_dnu(nu, gamma) * ddiff;
+                    arma::vec L_mu = dYJinv_dnu_diag(nu, gamma) % ddiff;
                     grad_mu.update_grad(L_mu);
                     mu = mu + grad_mu.change;
 
@@ -491,8 +491,7 @@ namespace VB
                     if (m > 1)
                     {
                         // B
-                        arma::mat dtheta_dB = dYJinv_dB(nu, gamma, xi); // m x mk
-                        arma::mat L_B = arma::reshape(dtheta_dB.t() * ddiff, m, k); // m x k
+                        arma::mat L_B = dYJinv_dB_times_ddiff(nu, gamma, xi, ddiff); // m x k
                         if (k > 1)
                         {
                             L_B.elem(B_uptri_idx).zeros();
@@ -525,7 +524,7 @@ namespace VB
 
                     // tau
                     arma::vec tau = gamma2tau(gamma);
-                    arma::vec L_tau = dYJinv_dtau(nu, gamma) * ddiff;
+                    arma::vec L_tau = dYJinv_dtau_diag(nu, gamma) % ddiff;
                     grad_tau.update_grad(L_tau);
                     tau = tau + grad_tau.change;
                     gamma = tau2gamma(tau);
