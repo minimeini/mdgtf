@@ -57,8 +57,7 @@ public:
         break;
         case AVAIL::Func::exponential:
         {
-            hpsi.elem(arma::find(hpsi > UPBND)).fill(UPBND);
-            hpsi = arma::exp(hpsi);
+            hpsi = arma::trunc_exp(hpsi);
         }
         break;
         case AVAIL::Func::identity:
@@ -68,9 +67,8 @@ public:
         break;
         case AVAIL::Func::softplus:
         {
-            hpsi.clamp(hpsi.min(), UPBND);
-            T hpsi_tmp = arma::exp(hpsi);
-            hpsi = arma::log(1. + hpsi_tmp);
+            T hpsi_tmp = arma::trunc_exp(hpsi);
+            hpsi = arma::log1p(hpsi_tmp);
         }
         break;
         default:
@@ -156,7 +154,7 @@ public:
         break;
         case AVAIL::Func::softplus:
         {
-            psi = std::log(std::exp(hpsi) - 1.);
+            psi = std::log(std::expm1(hpsi));
         }
         break;
         default:
@@ -195,9 +193,7 @@ public:
         break;
         case AVAIL::Func::exponential: // Exponential
         {
-            T tmp = psi;
-            tmp.elem(arma::find(tmp > UPBND)).fill(UPBND);
-            dhpsi = arma::exp(tmp);
+            dhpsi = arma::trunc_exp(psi);
         }
         break;
         case AVAIL::Func::identity: // Identity
@@ -207,9 +203,7 @@ public:
         break;
         case AVAIL::Func::softplus: // Softplus
         {
-            T tmp = -psi;
-            tmp.elem(arma::find(tmp > UPBND)).fill(UPBND);
-            dhpsi = 1. / (1. + arma::exp(tmp));
+            dhpsi = 1. / (1. + arma::trunc_exp(-psi));
         }
         break;
         default:

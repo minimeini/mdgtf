@@ -1987,7 +1987,6 @@ public:
         #ifdef DGTF_DO_BOUND_CHECK
             bound_check<arma::vec>(Vt, "func_Vt_approx: Vt", true, true);
         #endif
-        // Vt.clamp(EPS8, Vt.max());
         Vt += EPS8;
         return Vt;
     }

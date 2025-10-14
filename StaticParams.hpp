@@ -523,8 +523,7 @@ namespace Static
                     arma::vec seas_tilde = eta_tilde.subvec(idx, idx + seasonal_period - 1);
                     if (obs_list[obs_dist] == AVAIL::Dist::nbinomm)
                     {
-                        seas_tilde.clamp(seas_tilde.min(), UPBND);
-                        eta.subvec(idx, idx + seasonal_period - 1) = arma::exp(seas_tilde);
+                        eta.subvec(idx, idx + seasonal_period - 1) = arma::trunc_exp(seas_tilde);
                     }
                     else
                     {
