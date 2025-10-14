@@ -434,13 +434,14 @@ namespace VB
                     }
                     yold = arma::reverse(yold); // y[t-1], ..., y[t-min(t,nL)]
 
-                    arma::vec theta = arma::vectorise(Theta.submat(0, t, model.dlag.nL - 1, t));
+                    arma::vec theta = Theta.col(t).rows(0, model.dlag.nL - 1);
                     arma::vec htheta = GainFunc::psi2hpsi<arma::vec>(theta, model.fgain);
+                    arma::vec yhth = yold % htheta;
 
-                    double ft = arma::accu(model.dlag.Fphi % yold % htheta);
+                    double ft = arma::dot(model.dlag.Fphi, yhth);
                     if ((model.seas.period > 0) && (!model.seas.in_state))
                     {
-                        ft += arma::as_scalar(model.seas.X.col(t).t() * model.seas.val);
+                        ft += arma::dot(model.seas.X.col(t), model.seas.val);
                     }
                     lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
 
@@ -449,16 +450,13 @@ namespace VB
 
                     if (par1_prior.infer || par2_prior.infer)
                     {
-                        if (!model.zero.inflated || model.zero.z.at(t) > EPS)
-                        {
-                            double dll_deta = Model::dloglik_deta(
-                                ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
-                            double deta_dpar1 = arma::accu(dFphi_grad.col(0) % yold % htheta);
-                            double deta_dpar2 = arma::accu(dFphi_grad.col(1) % yold % htheta);
+                        double dll_deta = Model::dloglik_deta(
+                            ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
+                        double deta_dpar1 = arma::dot(dFphi_grad.col(0), yhth);
+                        double deta_dpar2 = arma::dot(dFphi_grad.col(1), yhth);
 
-                            dloglik_dlag.at(0) += dll_deta * deta_dpar1;
-                            dloglik_dlag.at(1) += dll_deta * deta_dpar2;
-                        }
+                        dloglik_dlag.at(0) += dll_deta * deta_dpar1;
+                        dloglik_dlag.at(1) += dll_deta * deta_dpar2;
                     }
                 }
 
