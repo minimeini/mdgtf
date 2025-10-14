@@ -52,26 +52,22 @@ Yeo-Johnson Transformation
 Yeo-Johnson Transform
 Ref: `tYJ.m`
 */
-inline double tYJ(
-    const double theta,
-    const double gamma)
+inline double tYJ(const double theta, const double gamma)
 {
-    double sgn = (theta < 0.) ? -1. : 1.;
-    double gmt = (theta < 0.) ? (2. - gamma) : gamma;
+    const double sgn = (theta < 0.) ? -1. : 1.;
+    const double gmt = (theta < 0.) ? (2. - gamma) : gamma;
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check(gmt, "tYJ: gmt", false, true);
     #endif
 
+    const double a = std::abs(theta);
     double nu;
-    double tmp = std::abs(theta);
-    if (gmt < EPS8)
-    {
-        nu = std::log(tmp + 1.);
-    }
-    else
-    {
-        nu = std::pow(tmp + 1., gmt) - 1.;
-        nu /= gmt;
+    if (gmt < EPS8) {
+        // log1p(a)
+        nu = std::log1p(a);
+    } else {
+        // ( (1+a)^gmt - 1 ) / gmt  -> expm1(gmt*log1p(a))/gmt
+        nu = std::expm1(gmt * std::log1p(a)) / gmt;
     }
     nu *= sgn;
 
@@ -79,7 +75,7 @@ inline double tYJ(
         bound_check(nu, "tYJ: nu");
     #endif
     return nu;
-} // Status: Checked. OK.
+}
 
 inline arma::vec tYJ(
     const arma::vec &theta, // m x 1
@@ -99,36 +95,31 @@ inline arma::vec tYJ(
 Inverse of Yeo-Johnson Transformation
 Ref: `tYJi.m`
 */
-inline double tYJinv(
-    const double nu,
-    const double gamma)
+inline double tYJinv(const double nu, const double gamma)
 {
-    double sgn = (nu < 0.) ? -1. : 1.;
-    double gmt = (nu < 0.) ? (2. - gamma) : gamma;
+    const double sgn = (nu < 0.) ? -1. : 1.;
+    const double gmt = (nu < 0.) ? (2. - gamma) : gamma;
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check(nu, "tYJinv: nu");
         bound_check(gmt, "tYJinv: gmt", false, true);
     #endif
 
-    double tmp, theta;
-    if (gmt < EPS8)
-    {
-        tmp = std::abs(nu);
-        tmp = std::min(tmp,UPBND);
-        theta = std::exp(tmp) - 1.;
-    }
-    else
-    {
-        tmp = std::abs(nu*gmt);
-        theta = std::pow(1. + tmp, 1. / gmt) - 1.;
+    double theta;
+    if (gmt < EPS8) {
+        const double a = std::min(std::abs(nu), UPBND);
+        theta = std::expm1(a); // exp(a) - 1
+    } else {
+        const double a = std::abs(gmt * nu);
+        // (1+a)^(1/gmt) - 1  -> expm1(log1p(a)/gmt)
+        theta = std::expm1(std::log1p(a) / gmt);
     }
     theta *= sgn;
 
     #ifdef DGTF_DO_BOUND_CHECK
-        bound_check(theta, "tYJinv: " + std::to_string(gmt < EPS8) + " theta");
+        bound_check(theta, "tYJinv: theta");
     #endif
     return theta;
-} // Status: Checked. OK.
+}
 
 inline arma::vec tYJinv(
     const arma::vec &nu, // m x 1
@@ -228,11 +219,11 @@ inline double dtYJ_dtheta(
     double sgn = (theta < 0.) ? -1 : 1;
     if ((std::abs(gamma) < EPS8) || (std::abs(2 - gamma) < EPS8))
     {
-        output = - std::log(th_abs + 1.);
+        output = - std::log1p(th_abs);
     }
     else
     {
-        output = std::log(th_abs + 1.);
+        output = std::log1p(th_abs);
         output *= sgn * (gamma - 1.);
     }
 
@@ -267,32 +258,26 @@ Loaiza-Maya et al., PDF, bottom of p26
 */
 inline double dtYJ_dgamma(const double theta, const double gamma)
 {
-    double sgn = (theta < 0.) ? -1. : 1.;
-    double gmt = (theta < 0.) ? (2. - gamma) : gamma;
+    const double sgn = (theta < 0.) ? -1. : 1.;
+    const double gmt = (theta < 0.) ? (2. - gamma) : gamma;
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check(gmt, "dtYJ_dgamma", false, true);
     #endif
-    
 
-    double res;
-    if (gmt < EPS8)
-    {
-        res = 0.;
-    }
-    else
-    {
-        double th_abs = std::abs(theta);
-        res = std::pow(1. + th_abs, gmt);
-        res *= std::log(1. + th_abs) * gmt - 1.;
-        res += 1.;
-        res *= std::pow(gmt, -2.);
-    }
-    
+    if (gmt < EPS8) return 0.0;
+
+    const double a = std::abs(theta);
+    // ((1+a)^gmt) * (log(1+a)*gmt - 1) + 1
+    const double t1 = std::exp(gmt * std::log1p(a));
+    const double num = t1 * (std::log1p(a) * gmt - 1.0) + 1.0;
+    const double g2inv = 1.0 / (gmt * gmt); // pow(gmt,-2)
+    double res = num * g2inv;
+
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check(res, "dtYJ_dgamma: res");
     #endif
     return res;
-} // Check -- Correct
+}
 
 // Ref: line 24-27 of `grad_theta_logq.m`
 inline double dlogdYJ_dtheta(const double theta, const double gamma)
@@ -378,29 +363,24 @@ dYJinv_dgamma(nu,gm)
 */
 inline double dYJinv_dgamma(const double nu, const double gamma)
 {
-    double gmt = (nu < 0.) ? (2. - gamma) : gamma;
+    const double gmt = (nu < 0.) ? (2. - gamma) : gamma;
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check(gmt, "dYJinv_dgamma: gmt", false, true);
     #endif
+    if (std::abs(gmt) < EPS8) return 0.0;
 
-    double res;
-    if (std::abs(gmt) < EPS8)
-    {
-        res = 0.;
-    }
-    else 
-    {
-        double tmp = std::abs(gmt * nu);
-        res = std::log(1. + tmp) + gmt * nu / (1. + tmp);
-        res *= std::pow(gmt, -2.);
-        res *= -std::pow(1. + tmp, 1. / gmt);
-    }
+    const double a = std::abs(gmt * nu);
+    const double g2inv = 1.0 / (gmt * gmt);
+    // [log1p(a) + gmt*nu/(1+a)] * gmt^-2 * -(1+a)^(1/gmt)
+    const double bracket = std::log1p(a) + (gmt * nu) / (1.0 + a);
+    const double expo = std::exp(std::log1p(a) / gmt);
+    double res = - bracket * g2inv * expo;
 
     #ifdef DGTF_DO_BOUND_CHECK
         bound_check(res, "dYJinv_dgamma: res");
     #endif
     return res;
-} // Status: Checked. OK.
+}
 
 // Ref: `dtheta_dtau.m`
 inline double dYJinv_dtau(const double nu, const double gamma)
