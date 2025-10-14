@@ -440,8 +440,18 @@ namespace SMC
             arma::vec logq(N, arma::fill::zeros);
             arma::vec tau(N, arma::fill::zeros);
 
+            // One-time buffers for final materialization
+            arma::mat resample_buf(model.nP, N, arma::fill::none);
+            arma::vec zbuf(N, arma::fill::none);
+
+            // Cumulative ancestry to apply to all past slices at the end
+            arma::uvec comp = arma::regspace<arma::uvec>(0, 1, N - 1);
+
             for (unsigned int t = 0; t < nT; t++)
             {
+                // Per-time ancestry (maps current particles to columns of Theta.slice(t)/z.col(t))
+                arma::uvec anc = arma::regspace<arma::uvec>(0, 1, N - 1);
+
                 if (use_discount)
                 {
                     // Update Wt
@@ -487,7 +497,7 @@ namespace SMC
                     double val = model.zero.intercept;
                     if (!model.zero.X.is_empty())
                     {
-                        val += arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                        val += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
                     }
                     arma::vec zval = z.col(t) * model.zero.coef + val; // N x 1
                     arma::vec prob = logistic(zval);                   // p(z[t+1] = 1 | z[t], gamma)
@@ -621,7 +631,7 @@ namespace SMC
                         double prob = model.zero.intercept + model.zero.coef * z.at(i, t);
                         if (!model.zero.X.is_empty())
                         {
-                            prob += arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                            prob += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
                         }
                         prob = logistic(prob);
 
@@ -830,7 +840,7 @@ namespace SMC
                     double val = model.zero.intercept;
                     if (!model.zero.X.is_empty())
                     {
-                        val += arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                        val += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
                     }
                     arma::vec zval = z.col(t) * model.zero.coef + val; // N x 1
                     arma::vec prob = logistic(zval);                   // p(z[t+1] = 1 | z[t], gamma)
@@ -948,7 +958,7 @@ namespace SMC
                         double prob = model.zero.intercept + model.zero.coef * z.at(i, t);
                         if (!model.zero.X.is_empty())
                         {
-                            prob += arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                            prob += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
                         }
 
                         prob = logistic(prob);
@@ -1377,7 +1387,7 @@ namespace SMC
                 double prob = model.zero.intercept;
                 if (!model.zero.X.is_empty() && !model.zero.beta.is_empty())
                 {
-                    prob += arma::accu(model.zero.X.col(0) % model.zero.beta);
+                    prob += arma::dot(model.zero.X.col(0), model.zero.beta);
                 }
                 prob = logistic(prob);
                 z.set_size(N, y.n_elem);
@@ -1577,7 +1587,7 @@ namespace SMC
                     double val = model.zero.intercept;
                     if (!model.zero.X.is_empty())
                     {
-                        val += arma::accu(model.zero.X.col(t) % model.zero.beta);
+                        val += arma::dot(model.zero.X.col(t), model.zero.beta);
                     }
 
                     arma::vec zval = z_backward.col(t + 1) * model.zero.coef + val;
@@ -1693,7 +1703,7 @@ namespace SMC
                         double prob_back = model.zero.intercept + model.zero.coef * z_backward.at(i, t + 1);
                         if (!model.zero.X.is_empty())
                         {
-                            prob_back += arma::accu(model.zero.X.col(t) % model.zero.beta);
+                            prob_back += arma::dot(model.zero.X.col(t), model.zero.beta);
                         }
                         prob_back = logistic(prob_back);
 
@@ -1703,7 +1713,7 @@ namespace SMC
                         double prob_forward0 = model.zero.intercept;
                         if (!model.zero.X.is_empty())
                         {
-                            double reg = arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                            double reg = arma::dot(model.zero.X.col(t + 1), model.zero.beta);
                             prob_forward1 += reg;
                             prob_forward0 += reg;
                         }
@@ -2094,7 +2104,7 @@ namespace SMC
                         double p1 = model.zero.intercept + model.zero.coef * z.at(i, t - 1);
                         if (!model.zero.X.is_empty())
                         {
-                            p1 += arma::accu(model.zero.X.col(t) % model.zero.beta);
+                            p1 += arma::dot(model.zero.X.col(t), model.zero.beta);
                         }
                         p1 = logistic(p1);
 
@@ -2104,7 +2114,7 @@ namespace SMC
                         double p20 = model.zero.intercept;
                         if (!model.zero.X.is_empty())
                         {
-                            double tmp = arma::accu(model.zero.X.col(t + 1) % model.zero.beta);
+                            double tmp = arma::dot(model.zero.X.col(t + 1), model.zero.beta);
                             p21 += tmp;
                             p20 += tmp;
                         }
@@ -2232,7 +2242,7 @@ namespace SMC
                 double prob = model.zero.intercept;
                 if (!model.zero.X.is_empty() && !model.zero.beta.is_empty())
                 {
-                    prob += arma::accu(model.zero.X.col(0) % model.zero.beta);
+                    prob += arma::dot(model.zero.X.col(0), model.zero.beta);
                 }
                 prob = logistic(prob);
 

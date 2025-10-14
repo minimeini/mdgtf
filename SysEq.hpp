@@ -253,7 +253,7 @@ public:
 
             arma::vec iter_coef = nbinom::iter_coef(dlag.par1, dlag.par2, true);
             iter_coef = arma::reverse(iter_coef); // r x 1, r = nP - 1
-            double ctmp = arma::accu(iter_coef % theta.subvec(1, nP - 1));
+            double ctmp = arma::dot(iter_coef, theta.subvec(1, nP - 1));
             double coef_now = std::pow((dlag.par1 - 1) / dlag.par1, dlag.par2);
 
             double hpsi_bnd = -ctmp / yprev;

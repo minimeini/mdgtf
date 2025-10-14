@@ -261,7 +261,7 @@ public:
 
                 if (!X.is_empty())
                 {
-                    val += arma::accu(beta % X.col(t));
+                    val += arma::dot(beta, X.col(t));
                 }
 
                 prob.at(t) = logistic(val);

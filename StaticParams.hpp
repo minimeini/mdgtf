@@ -786,7 +786,7 @@ namespace Static
             double val = zero.intercept + zero.coef * zero.z.at(t - 1);
             if (!zero.X.is_empty())
             {
-                val += arma::accu(zero.X.col(t) % zero.beta);
+                val += arma::dot(zero.X.col(t), zero.beta);
             }
             double prob = logistic(val); // This is p[t]
             grad += zero.z.at(t) - prob;
@@ -807,7 +807,7 @@ namespace Static
                 double val = zero.intercept + zero.coef;
                 if (!zero.X.is_empty())
                 {
-                    val += arma::accu(zero.X.col(t) % zero.beta);
+                    val += arma::dot(zero.X.col(t), zero.beta);
                 }
                 double prob = logistic(val); // This is p[t]
                 grad += zero.z.at(t) - prob;
@@ -974,7 +974,7 @@ namespace Static
                 double val = model.zero.intercept + model.zero.coef * model.zero.z.at(t - 1);
                 if (!model.zero.X.is_empty())
                 {
-                    val += arma::accu(model.zero.X.col(t) % model.zero.beta);
+                    val += arma::dot(model.zero.X.col(t), model.zero.beta);
                 }
                 double prob = logistic(val); // p(z[t] = 1 | z[t-1], gamma)
 

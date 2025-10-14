@@ -86,7 +86,7 @@ public:
         arma::vec Fhpsi_t = hpsi.subvec(t + 1 - nelem, t); // Fhpsi[t] = (h(psi[t+1-nL]), ..., h(psi[t]))'
 
         arma::vec Fast_t = Fy_t % Fhpsi_t;
-        double ft = arma::accu(Fphi_t % Fast_t);
+        double ft = arma::dot(Fphi_t, Fast_t);
         return ft;
     }
 
@@ -111,7 +111,7 @@ public:
     {
         // iter_coef: c(r,1)(-kappa)^1, ..., c(r,r)(-kappa)^r
         arma::vec iter_coef = nbinom::iter_coef(lag_par1, lag_par2);
-        double ft = arma::accu(ft_prev_rev % iter_coef); // sum[k] f[t-k]c(r,k)(-kappa)^k
+        double ft = arma::dot(ft_prev_rev, iter_coef); // sum[k] f[t-k]c(r,k)(-kappa)^k
 
         // double hpsi_now = GainFunc::psi2hpsi(psi_now, gain_func);
         double Fast_now = hpsi_now * y_prev;
@@ -248,8 +248,7 @@ public:
             arma::vec th = theta_cur.head(dlag.nL);
             arma::vec hpsi_cur = GainFunc::psi2hpsi<arma::vec>(th, fgain); // (h(psi[t]), ..., h(psi[t+1 - nL])), nL x 1
             arma::vec ftmp = yold % hpsi_cur; // nL x 1
-            ft_vec = ft_vec % ftmp;
-            ft_cur = arma::accu(ft_vec);
+            ft_cur = arma::dot(ft_vec, ftmp);
         } // sliding
         else
         {

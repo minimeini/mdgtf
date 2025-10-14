@@ -119,7 +119,7 @@ namespace MCMC
                 double p1 = model.zero.intercept + model.zero.coef;
                 if (!model.zero.X.is_empty())
                 {
-                    double val = arma::accu(model.zero.X.col(t) % model.zero.beta);
+                    double val = arma::dot(model.zero.X.col(t), model.zero.beta);
                     p0 += val;
                     p1 += val;
                 }
@@ -272,7 +272,7 @@ namespace MCMC
             const double &mh_sd = 1.)
         {
             double W_old = model.derr.par1;
-            double res = arma::accu(arma::pow(wt.tail(wt.n_elem - 2), 2.));
+            double res = arma::accu(arma::square(wt.tail(wt.n_elem - 2)));
 
             // double bw_prior = prior_params.at(1); // eta_prior_val.at(1, 0)
             std::map<std::string, AVAIL::Dist> dist_list = AVAIL::dist_list;
@@ -660,7 +660,7 @@ namespace MCMC
                        { val *= kinetic_sd; });
 
             // Kinetic: negative logprob of the momentum distribution
-            double current_K = 0.5 * arma::accu(arma::pow(p / kinetic_sd, 2.));
+            double current_K = 0.5 * arma::accu(arma::square(p / kinetic_sd));
 
             // half step update of momentum
             arma::vec grad_U = Leapfrog::grad_U(
@@ -718,7 +718,7 @@ namespace MCMC
             double proposed_U = -logp_new;
 
             // Kinetic energy
-            double proposed_K = 0.5 * arma::accu(arma::pow(p / kinetic_sd, 2.));
+            double proposed_K = 0.5 * arma::accu(arma::square(p / kinetic_sd));
 
             // accept / reject
             double logratio = current_U + current_K;
