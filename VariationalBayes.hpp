@@ -382,11 +382,9 @@ namespace VB
                 if (model.zero.inflated)
                 {
                     model.zero.prob = arma::vectorise(arma::mean(ztmp, 0)); // (nT + 1) x 1
-                    for (unsigned int t = 0; t < model.zero.z.n_elem; t++)
-                    {
-                        model.zero.z.at(t) = (R::runif(0., 1.) < model.zero.prob.at(t)) ? 1. : 0.;
-                    }
-                        
+                    // Vectorized Bernoulli using Armadillo RNG (no R::runif loop)
+                    arma::vec u = arma::randu<arma::vec>(model.zero.z.n_elem);
+                    model.zero.z = arma::conv_to<arma::vec>::from(u < model.zero.prob);
                 }
                 // ------------------
 
@@ -647,10 +645,9 @@ namespace VB
                 if (model.zero.inflated)
                 {
                     prob_stored.col(i) = arma::vectorise(arma::mean(ztmp, 0)); // (nT + 1) x 1
-                    for (unsigned int t = 0; t < model.zero.z.n_elem; t++)
-                    {
-                        z_stored.at(t, i) = (R::runif(0., 1.) < prob_stored.at(t, i)) ? 1. : 0.;
-                    }
+                    // Vectorized Bernoulli for storage
+                    arma::vec u = arma::randu<arma::vec>(model.zero.z.n_elem);
+                    z_stored.col(i) = arma::conv_to<arma::vec>::from(u < prob_stored.col(i));
                 }
 
                 // ApproxDisturbance approx_dlm(nT, model.fgain);
