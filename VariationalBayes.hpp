@@ -407,7 +407,8 @@ namespace VB
 
                 arma::mat dFphi_grad;
                 arma::vec dloglik_dlag(2, arma::fill::zeros);
-                if (par1_prior.infer || par2_prior.infer)
+                const bool need_lag_grad = par1_prior.infer || par2_prior.infer;
+                if (need_lag_grad)
                 {
                     dFphi_grad = LagDist::get_Fphi_grad(
                         model.dlag.nL, model.dlag.name, 
@@ -426,64 +427,72 @@ namespace VB
                 }
 
                 // Fast access to Fphi and (optional) its gradients
-                const double* Fphi_ptr = model.dlag.Fphi.memptr();
-                const bool need_lag_grad = (par1_prior.infer || par2_prior.infer);
-                const double* dF1_ptr = nullptr;
-                const double* dF2_ptr = nullptr;
-                if (need_lag_grad) {
-                    dF1_ptr = dFphi_grad.colptr(0);
-                    dF2_ptr = dFphi_grad.colptr(1);
-                }
-
+                const double *dF1_ptr = dFphi_grad.colptr(0);
+                const double *dF2_ptr = dFphi_grad.colptr(1);
+                const double *Fphi_ptr = model.dlag.Fphi.memptr();
                 #ifdef DGTF_USE_OPENMP
-                #pragma omp parallel for schedule(static) reduction(+:dpar1_acc,dpar2_acc)
+                #pragma omp parallel for schedule(static) reduction(+ : dpar1_acc, dpar2_acc)
                 #endif
                 for (unsigned int t = 1; t < y.n_elem; t++)
                 {
-                    if (model.zero.z.at(t) < EPS) continue;
+                    if (model.zero.z.at(t) < EPS)
+                        continue;
 
-                    // Number of effective lags at time t
                     const unsigned int nelem = std::min(t, model.dlag.nL);
+                    const double *theta_col = Theta.colptr(t);
 
-                    // Column pointer to Theta(:, t)
-                    const double* theta_col = Theta.colptr(t);
+                    double ft = 0.0, dpar1_sum = 0.0, dpar2_sum = 0.0;
 
-                    // Accumulate ft and (optionally) lag-parameter derivatives in one pass
-                    double ft = 0.0;
-                    double dpar1_sum = 0.0, dpar2_sum = 0.0;
+                    // Manual loop unrolling for small nelem
+                    unsigned int i = 0;
+                    for (; i + 4 <= nelem; i += 4)
+                    {
+                        // Process 4 at a time
+                        for (int j = 0; j < 4; ++j)
+                        {
+                            const unsigned int idx = i + j;
+                            const double ylag = y.at(t - 1 - idx);
+                            if (std::abs(ylag) > 0.0)
+                            {
+                                const double psi = theta_col[idx];
+                                const double hpsi = GainFunc::psi2hpsi(psi, model.fgain);
+                                const double common = hpsi * ylag;
 
-                    for (unsigned int i = 0; i < nelem; ++i)
+                                ft += Fphi_ptr[idx] * common;
+                                dpar1_sum += dF1_ptr[idx] * common;
+                                dpar2_sum += dF2_ptr[idx] * common;
+                            }
+                        }
+                    }
+
+                    // Handle remainder
+                    for (; i < nelem; ++i)
                     {
                         const double ylag = y.at(t - 1 - i);
-                        if (std::abs(ylag) <= 0.0) continue; // cheap skip when many zeros
+                        if (std::abs(ylag) > 0.0)
+                        {
+                            const double psi = theta_col[i];
+                            const double hpsi = GainFunc::psi2hpsi(psi, model.fgain);
+                            const double common = hpsi * ylag;
 
-                        const double psi  = theta_col[i];                  // theta[i] at time t
-                        const double hpsi = GainFunc::psi2hpsi(psi, model.fgain);
-
-                        const double common = hpsi * ylag;
-                        ft += Fphi_ptr[i] * common;
-
-                        if (need_lag_grad) {
+                            ft += Fphi_ptr[i] * common;
                             dpar1_sum += dF1_ptr[i] * common;
                             dpar2_sum += dF2_ptr[i] * common;
                         }
                     }
 
-                    // Seasonal term
-                    if (add_seas) {
+                    if (add_seas)
+                    {
                         ft += seas_xt.at(t);
                     }
 
                     lambda.at(t) = LinkFunc::ft2mu(ft, model.flink);
 
-                    if (need_lag_grad)
-                    {
-                        const double dll_deta = Model::dloglik_deta(
-                            ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
+                    const double dll_deta = Model::dloglik_deta(
+                        ft, y.at(t), model.dobs.par2, model.dobs.name, model.flink);
 
-                        dpar1_acc += dll_deta * dpar1_sum;
-                        dpar2_acc += dll_deta * dpar2_sum;
-                    }
+                    dpar1_acc += dll_deta * dpar1_sum;
+                    dpar2_acc += dll_deta * dpar2_sum;
                 }
 
                 if (par1_prior.infer || par2_prior.infer)
