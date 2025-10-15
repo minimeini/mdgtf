@@ -444,13 +444,20 @@ namespace SMC
             arma::mat resample_buf(model.nP, N, arma::fill::none);
             arma::vec zbuf(N, arma::fill::none);
 
-            // Cumulative ancestry to apply to all past slices at the end
-            arma::uvec comp = arma::regspace<arma::uvec>(0, 1, N - 1);
+            const arma::uvec idx_id = arma::regspace<arma::uvec>(0, 1, N - 1);
+            auto compose = [](const arma::uvec &a, const arma::uvec &b)
+            { return a.elem(b); };
+
+            std::vector<arma::uvec> res_aux(nT + 1, idx_id);
+            std::vector<arma::uvec> final_idx_slice(y.n_elem, idx_id);
+            arma::uvec anc_seed = idx_id;
 
             for (unsigned int t = 0; t < nT; t++)
             {
+                arma::uvec anc = anc_seed;
+
                 // Per-time ancestry (maps current particles to columns of Theta.slice(t)/z.col(t))
-                arma::uvec anc = arma::regspace<arma::uvec>(0, 1, N - 1);
+                // arma::uvec anc = arma::regspace<arma::uvec>(0, 1, N - 1);
 
                 if (use_discount)
                 {
@@ -468,7 +475,7 @@ namespace SMC
                     }
                 }
 
-                auto start = std::chrono::high_resolution_clock::now();
+                // auto start = std::chrono::high_resolution_clock::now();
 
                 // `qforecast` gives us one-step-ahead forecasting density:
                 //      q(y[t+1] | theta[t], z[t+1] = 1, gamma)
@@ -529,28 +536,8 @@ namespace SMC
 
                     if (initial_resample_all)
                     {
-                        // Parallelize across history slices if many slices to touch
-                        #ifdef DGTF_USE_OPENMP
-                        #pragma omp parallel for schedule(static) if (t >= 8)
-                        #endif
-                        for (unsigned int k = 0; k <= t; ++k)
-                        {
-                            // Theta
-                            arma::mat local_buf;               // thread-local
-                            local_buf.copy_size(resample_buf); // just shape; data unused
-                            gather_cols(local_buf, Theta.slice(k), resample_idx);
-                            // swap into place
-                            #pragma omp critical
-                            Theta.slice(k).swap(local_buf);
-
-                            // z (serial write per column; safe due to distinct k)
-                            if (model.zero.inflated)
-                            {
-                                arma::vec zv;
-                                gather_vec(zv, z.col(k), resample_idx);
-                                z.col(k) = zv;
-                            }
-                        }
+                        res_aux[t] = resample_idx;
+                        anc = anc.elem(resample_idx);
                     }
                     else
                     {
@@ -573,7 +560,6 @@ namespace SMC
 
                 // start = std::chrono::high_resolution_clock::now();
                 // Propagate
-                // const arma::mat Theta_cur = Theta.slice(t); // nP x N
                 const arma::mat& Theta_cur = Theta.slice(t);
                 arma::mat eps_mat;        // nP x N
                 arma::vec eps1, u;        // N
@@ -597,10 +583,12 @@ namespace SMC
                 }
 
                 #ifdef DGTF_USE_OPENMP
-                #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+                #pragma omp parallel for num_threads(NUM_THREADS) schedule(static)
                 #endif
                 for (unsigned int i = 0; i < N; i++)
                 {
+                    const arma::uword parent = anc[i];
+
                     // Propagate theta[t] to theta[t+1]
                     arma::vec eps;
                     if (model.derr.full_rank)
@@ -617,7 +605,7 @@ namespace SMC
                         }
                     }
                     // arma::vec eps = Wt_chol.t() * arma::randn(model.nP);
-                    arma::vec gtheta = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta_cur.col(i), y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec gtheta = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta_cur.col(parent), y.at(t), model.seas.period, model.seas.in_state);
                     arma::vec theta_new = gtheta + eps;
                     Theta_new.col(i) = theta_new;
 
@@ -643,7 +631,7 @@ namespace SMC
                     if (model.zero.inflated)
                     {
                         // Forward evolution probability: p(z[t+1] = 1 | z[t], gamma
-                        double prob = model.zero.intercept + model.zero.coef * z.at(i, t);
+                        double prob = model.zero.intercept + model.zero.coef * z.at(parent, t);
                         if (!model.zero.X.is_empty())
                         {
                             prob += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
@@ -744,15 +732,18 @@ namespace SMC
                     if (eff < 0.95 * N)
                     {
                         arma::uvec resample_idx = get_resample_index(weights);
-                        gather_cols(resample_buf, Theta.slice(t + 1), resample_idx);
-                        Theta.slice(t + 1).swap(resample_buf);
-
-                        if (model.zero.inflated) {
-                            gather_vec(zbuf, z.col(t + 1), resample_idx);
-                            z.col(t + 1) = zbuf;
-                        }
+                        final_idx_slice[t + 1] = resample_idx;            // remember mapping for this slice
+                        anc_seed = anc_seed.elem(resample_idx);           // mapping for next iteration
                         weights.ones();
                     }
+                    else
+                    {
+                        final_idx_slice[t + 1] = idx_id; // identity
+                    }
+                }
+                else
+                {
+                    final_idx_slice[t + 1] = idx_id;
                 }
 
                 log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
@@ -760,6 +751,38 @@ namespace SMC
                 // stop = std::chrono::high_resolution_clock::now();
                 // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
                 // std::cout << "\nResample2: " << duration.count() << " microseconds" << std::endl;
+            }
+
+            arma::uvec suffix = idx_id; // composition of auxiliary resamples for s > k
+            for (int k = static_cast<int>(nT); k >= 0; --k)
+            {
+                // include current-time auxiliary resample for slice k
+                arma::uvec suffix_k = suffix;
+                if (initial_resample_all && k >= 1)
+                {
+                    const arma::uvec &raux = res_aux[static_cast<unsigned int>(k)];
+                    if (raux.n_elem == N)
+                    {
+                        // suffix_k = res_aux[k] ∘ suffix
+                        suffix_k = compose(raux, suffix);
+                    }
+                }
+
+                // mapping_k = final_idx_slice[k] ∘ suffix_k
+                arma::uvec mapping_k = compose(final_idx_slice[k], suffix_k);
+
+                // apply mapping to Theta/z for slice k
+                gather_cols(resample_buf, Theta.slice(k), mapping_k);
+                Theta.slice(k).swap(resample_buf);
+
+                if (model.zero.inflated)
+                {
+                    gather_vec(zbuf, z.col(k), mapping_k);
+                    z.col(k) = zbuf;
+                }
+
+                // carry forward for earlier slices
+                suffix = suffix_k;
             }
 
             return log_cond_marginal;
