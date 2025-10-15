@@ -236,13 +236,14 @@ namespace VB
 
         void update_grad(const arma::vec &dYJinv_dVecPar) // Checked. OK.
         {
-            arma::vec oldEg2 = curEg2;
-            curEg2 = (1. - learning_rate) * oldEg2 + learning_rate * arma::pow(dYJinv_dVecPar, 2.); // m x 1
-            rho = arma::sqrt(curEdelta2 + eps_step_size) / arma::sqrt(curEg2 + eps_step_size);
+            curEg2 *= (1.0 - learning_rate);  // In-place multiply
+            curEg2 += learning_rate * arma::square(dYJinv_dVecPar);  // In-place add
+
+            rho = arma::sqrt((curEdelta2 + eps_step_size) / (curEg2 + eps_step_size));
             par_change = rho % dYJinv_dVecPar;
 
-            arma::vec oldEdelta2 = curEdelta2;
-            curEdelta2 = (1. - learning_rate) * oldEdelta2 + learning_rate * arma::pow(par_change, 2.);
+            curEdelta2 *= (1.0 - learning_rate); // In-place multiply
+            curEdelta2 += learning_rate * arma::square(par_change); // In-place add
 
             #ifdef DGTF_DO_BOUND_CHECK
                 bound_check<arma::vec>(curEg2, "curEg2");

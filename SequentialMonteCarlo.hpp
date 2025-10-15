@@ -422,6 +422,7 @@ namespace SMC
                     Wt_chol.at(0, 0) = std::sqrt(model.derr.par1);
                 }
             }
+            const double s = Wt_chol.at(0, 0);
 
             // Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
             Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
@@ -440,6 +441,24 @@ namespace SMC
             arma::vec logq(N, arma::fill::zeros);
             arma::vec tau(N, arma::fill::zeros);
 
+            // Buffers for propagation
+            arma::mat eps_mat;
+            arma::vec eps1, u;
+            if (model.derr.full_rank)
+            {
+                eps_mat.set_size(model.nP, N);
+            }
+            else
+            {
+                eps1.set_size(N);
+                eps1.zeros();
+            }
+
+            if (model.zero.inflated)
+            {
+                u.set_size(N);
+            }
+
             // One-time buffers for final materialization
             arma::mat resample_buf(model.nP, N, arma::fill::none);
             arma::vec zbuf(N, arma::fill::none);
@@ -451,7 +470,6 @@ namespace SMC
             std::vector<arma::uvec> res_aux(nT + 1, idx_id);
             std::vector<arma::uvec> final_idx_slice(y.n_elem, idx_id);
             arma::uvec anc_seed = idx_id;
-
             for (unsigned int t = 0; t < nT; t++)
             {
                 // Per-time ancestry (maps current particles to columns of Theta.slice(t)/z.col(t))
@@ -550,25 +568,18 @@ namespace SMC
 
                 // Propagate
                 const arma::mat& Theta_cur = Theta.slice(t);
-                arma::mat eps_mat;        // nP x N
-                arma::vec eps1, u;        // N
-                if (model.derr.full_rank) {
+                if (model.derr.full_rank) 
+                {
                     eps_mat = Wt_chol.t() * arma::randn(model.nP, N); // OK: outside omp
-                } else {
-                    double s = Wt_chol.at(0,0);
-                    eps1.set_size(N);
-                    if (s > EPS)
-                    {
-                        eps1 = s * arma::randn<arma::vec>(N);
-                    }
-                    else
-                    {
-                        eps1.zeros();
-                    }
+                } 
+                else if (s > EPS)
+                {
+                    eps1.randn();
+                    eps1 *= s;
                 }
 
                 if (model.zero.inflated) {
-                    u = arma::randu<arma::vec>(N); // for propagating z
+                    u.randu();
                 }
 
                 #ifdef DGTF_USE_OPENMP
@@ -579,23 +590,17 @@ namespace SMC
                     const arma::uword parent = anc[i];
 
                     // Propagate theta[t] to theta[t+1]
-                    arma::vec eps;
+                    arma::vec gtheta = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta_cur.col(parent), y.at(t), model.seas.period, model.seas.in_state);
+                    arma::vec theta_new = gtheta;
                     if (model.derr.full_rank)
                     {
-                        eps = eps_mat.col(i);
+                        theta_new += eps_mat.col(i);
                     }
                     else
                     {
-                        eps.set_size(model.nP);
-                        eps.zeros();
-                        if (!eps1.is_empty())
-                        {
-                            eps.at(0) = eps1.at(i);
-                        }
+                        theta_new.at(0) += eps1.at(i);   
                     }
-                    // arma::vec eps = Wt_chol.t() * arma::randn(model.nP);
-                    arma::vec gtheta = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta_cur.col(parent), y.at(t), model.seas.period, model.seas.in_state);
-                    arma::vec theta_new = gtheta + eps;
+
                     Theta_new.col(i) = theta_new;
 
                     double logp = 0.;
@@ -704,7 +709,7 @@ namespace SMC
 
                     logp += val;
                     weights.at(i) = logp - logq.at(i);
-                }
+                } // for i = 1, ..., N
 
                 Theta.slice(t + 1) = Theta_new;
 
@@ -731,7 +736,7 @@ namespace SMC
                 }
 
                 log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
-            }
+            } // for t = 0, ..., nT-1
 
             arma::uvec suffix = idx_id; // composition of auxiliary resamples for s > k
             for (int k = static_cast<int>(nT); k >= 0; --k)
