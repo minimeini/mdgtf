@@ -1,6 +1,7 @@
 #ifndef _SEQUENTIALMONTECARLO_H
 #define _SEQUENTIALMONTECARLO_H
 
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -454,10 +455,8 @@ namespace SMC
 
             for (unsigned int t = 0; t < nT; t++)
             {
-                arma::uvec anc = anc_seed;
-
                 // Per-time ancestry (maps current particles to columns of Theta.slice(t)/z.col(t))
-                // arma::uvec anc = arma::regspace<arma::uvec>(0, 1, N - 1);
+                arma::uvec anc = anc_seed;
 
                 if (use_discount)
                 {
