@@ -1,7 +1,6 @@
 #ifndef _SEQUENTIALMONTECARLO_H
 #define _SEQUENTIALMONTECARLO_H
 
-#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -474,7 +473,6 @@ namespace SMC
                     }
                 }
 
-                // auto start = std::chrono::high_resolution_clock::now();
 
                 // `qforecast` gives us one-step-ahead forecasting density:
                 //      q(y[t+1] | theta[t], z[t+1] = 1, gamma)
@@ -518,11 +516,7 @@ namespace SMC
                     logq = arma::log(arma::abs(tau) + EPS);
                 }
 
-                // auto stop = std::chrono::high_resolution_clock::now();
-                // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // std::cout << "\nqforecast: " << duration.count() << " microseconds" << std::endl;
 
-                // start = std::chrono::high_resolution_clock::now();
                 if (t > 0)
                 {
                     tau %= weights; // This is w[t] * q(y[t+1] | theta[t], z[t], gamma)
@@ -553,11 +547,7 @@ namespace SMC
                     logq = logq.elem(resample_idx);
                 }
 
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // std::cout << "\nResample1: " << duration.count() << " microseconds" << std::endl;
 
-                // start = std::chrono::high_resolution_clock::now();
                 // Propagate
                 const arma::mat& Theta_cur = Theta.slice(t);
                 arma::mat eps_mat;        // nP x N
@@ -717,14 +707,9 @@ namespace SMC
                 }
 
                 Theta.slice(t + 1) = Theta_new;
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // std::cout << "\nPropagate: " << duration.count() << " microseconds" << std::endl;
 
-                // start = std::chrono::high_resolution_clock::now();
                 double wmax = weights.max();
                 weights = arma::exp(weights - wmax);
-
                 if (final_resample_by_weights || t >= nT - 1)
                 {
                     double eff = effective_sample_size(weights);
@@ -746,10 +731,6 @@ namespace SMC
                 }
 
                 log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
-
-                // stop = std::chrono::high_resolution_clock::now();
-                // duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-                // std::cout << "\nResample2: " << duration.count() << " microseconds" << std::endl;
             }
 
             arma::uvec suffix = idx_id; // composition of auxiliary resamples for s > k
