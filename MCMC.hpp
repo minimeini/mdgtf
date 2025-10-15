@@ -1154,17 +1154,17 @@ namespace MCMC
                     }
                 }
 
-                // if (verbose)
-                // {
-                //     Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
-                // }
+                if (verbose)
+                {
+                    Rcpp::Rcout << "\rProgress: " << b << "/" << ntotal - 1;
+                }
 
             } // end a single iteration
 
-            // if (verbose)
-            // {
-            //     Rcpp::Rcout << std::endl;
-            // }
+            if (verbose)
+            {
+                Rcpp::Rcout << std::endl;
+            }
 
             return;
         }
