@@ -368,4 +368,40 @@ inline double dnorm_cpp(double x, double mu, double sd, bool logd=true) {
 }
 
 
+
+/**
+ * Calculate CRPS for posterior predictive samples
+ * 
+ * @param y Observations vector (nT x 1)
+ * @param Y Posterior predictive samples matrix (nT x nsample)
+ * @return Average CRPS over all time points
+ */
+inline double calculateCRPS(const arma::vec& y, const arma::mat& Y) {
+    arma::uword nT = y.n_elem, nsample = Y.n_cols;
+    if (Y.n_rows != nT) throw std::invalid_argument("Number of rows in Y must match length of y");
+    double total = 0.0;
+
+    for (arma::uword t = 0; t < nT; ++t) {
+        arma::rowvec row = Y.row(t);
+        double obs = y.at(t);
+
+        // term1 = mean |X - y|
+        double term1 = arma::mean(arma::abs(row.t() - obs));
+
+        // term2 = mean |Xi - Xj| using sorted row and linear-time formula
+        arma::rowvec x = arma::sort(row);
+        double sum_weighted = 0.0;
+        for (arma::uword k = 0; k < nsample; ++k) {
+            // with 0-based k, coefficient = 2*k - (nsample - 1)
+            sum_weighted += (2.0 * static_cast<double>(k) - (static_cast<double>(nsample) - 1.0)) * x.at(k);
+        }
+        double mean_abs_diff = 2.0 * sum_weighted / (static_cast<double>(nsample) * static_cast<double>(nsample));
+
+        double crps = term1 - 0.5 * mean_abs_diff;
+        if (crps < 0.0) crps = 0.0; // numerical guard
+        total += crps;
+    }
+    return total / static_cast<double>(nT);
+}
+
 #endif

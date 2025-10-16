@@ -610,6 +610,7 @@ Rcpp::List dgtf_posterior_predictive(
     {
         arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
         arma::mat yhat2 = ytmp.slice(0);
+        output2["crps"] = calculateCRPS(y, yhat2);
         
         try
         {
