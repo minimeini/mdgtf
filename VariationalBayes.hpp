@@ -360,8 +360,9 @@ namespace VB
             model.zero.z.ones();
             model.zero.prob = model.zero.z;
 
-            arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-            arma::mat ztmp(N, y.n_elem, arma::fill::ones);
+            arma::mat Theta(model.nP, y.n_elem, arma::fill::zeros); // nP x (nT + 1)
+            arma::cube Theta_all(model.nP, N, y.n_elem);
+            arma::vec z(y.n_elem, arma::fill::ones);
             for (unsigned int b = 0; b < niter; b++)
             {
                 // bool saveiter = b > niter && ((b - niter - 1) % nthin == 0);
@@ -371,18 +372,19 @@ namespace VB
                 // ------------------
                 // You MUST set initial_resample_all = true (MCS smoothing) and final_resample_by_weights = false (reduce degeneracy) to make this algorithm work.
                 // arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-                Theta_tmp.zeros();
-                ztmp.ones();
+                
+                Theta.zeros();
+                z.ones();
                 double marg_loglik = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                    Theta_tmp, ztmp, model, y, N, 
+                    Theta, Theta_all, z, model, y, N, 
                     true, false, use_discount, discount_factor);
-                arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
+                // arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
 
                 marglike_stored.at(b) = marg_loglik;
 
                 if (model.zero.inflated)
                 {
-                    model.zero.prob = arma::vectorise(arma::mean(ztmp, 0)); // (nT + 1) x 1
+                    model.zero.prob = z; // (nT + 1) x 1
                     // Vectorized Bernoulli using Armadillo RNG (no R::runif loop)
                     arma::vec u = arma::randu<arma::vec>(model.zero.z.n_elem);
                     model.zero.z = arma::conv_to<arma::vec>::from(u < model.zero.prob);
@@ -645,16 +647,16 @@ namespace VB
                 
                 Static::update_params(model, param_selected, eta);
 
-                Theta_tmp.zeros();
-                ztmp.ones();
+                Theta.zeros();
+                z.ones();
                 double log_cond_marg = SMC::SequentialMonteCarlo::auxiliary_filter0(
-                    Theta_tmp, ztmp, model, y, N, 
+                    Theta, Theta_all, z, model, y, N, 
                     true, false, use_discount, discount_factor);
-                arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
+                // arma::mat Theta = arma::mean(Theta_tmp, 1); // nP x (nT + 1)
 
                 if (model.zero.inflated)
                 {
-                    prob_stored.col(i) = arma::vectorise(arma::mean(ztmp, 0)); // (nT + 1) x 1
+                    prob_stored.col(i) = z; // (nT + 1) x 1
                     // Vectorized Bernoulli for storage
                     arma::vec u = arma::randu<arma::vec>(model.zero.z.n_elem);
                     z_stored.col(i) = arma::conv_to<arma::vec>::from(u < prob_stored.col(i));

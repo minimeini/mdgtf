@@ -6,7 +6,6 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include <chrono>
 #include <RcppArmadillo.h>
 #ifdef DGTF_USE_OPENMP
 #include <omp.h>
@@ -386,8 +385,9 @@ namespace SMC
         }
 
         static double auxiliary_filter0(
+            arma::mat &Theta_mean, // p x (nT + 1)
             arma::cube &Theta, // p x N x (nT + 1)
-            arma::mat &z,      // N x (nT + 1)
+            arma::vec &z_mean,      // (nT + 1)
             Model &model,
             const arma::vec &y, // (nT + 1) x 1
             const unsigned int &N = 1000,
@@ -424,17 +424,25 @@ namespace SMC
             }
             const double s = Wt_chol.at(0, 0);
 
-            // Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
-            Theta = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
+            if (Theta_mean.n_rows != model.nP)
+            {
+                Theta_mean.set_size(model.nP, y.n_elem);
+            }
+
+            if (Theta.n_rows != model.nP)
+            {
+                Theta.set_size(model.nP, N, y.n_elem);
+            }
+
             if (sys_list[model.fsys] == SysEq::Evolution::identity)
             {
-                Theta.slice(0) = arma::randu<arma::mat>(Theta.n_rows, Theta.n_cols);
+                Theta.randu();
             }
             else
             {
-                Theta.slice(0) = arma::randn<arma::mat>(Theta.n_rows, Theta.n_cols);
+                Theta.randn();
             }
-            z = arma::ones<arma::mat>(N, y.n_elem);
+            arma::mat z = arma::ones<arma::mat>(N, y.n_elem);
 
             // Reuse buffers to avoid reallocations inside the time loop
             arma::mat Theta_new(model.nP, N, arma::fill::zeros); // reused each t
@@ -738,36 +746,99 @@ namespace SMC
                 log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
             } // for t = 0, ..., nT-1
 
-            arma::uvec suffix = idx_id; // composition of auxiliary resamples for s > k
+
+            const double invN = 1.0 / static_cast<double>(N);
+
+            // final slice: weighted mean with BLAS
+            arma::vec final_weights = weights / arma::accu(weights);
+            Theta_mean.col(nT) = Theta.slice(nT) * final_weights;
+            z_mean.at(nT) = model.zero.inflated ? arma::dot(z.col(nT), final_weights) : 1.0;
+
+            // Reusable buffers
+            arma::Col<uint32_t> counts(N, arma::fill::zeros);
+            arma::vec wk(N, arma::fill::zeros);
+            arma::uvec suffix = idx_id;
+
             for (int k = static_cast<int>(nT); k >= 0; --k)
             {
-                // include current-time auxiliary resample for slice k
+                // compose suffix_k = res_aux[k] ∘ suffix without allocating
                 arma::uvec suffix_k = suffix;
                 if (initial_resample_all && k >= 1)
                 {
                     const arma::uvec &raux = res_aux[static_cast<unsigned int>(k)];
                     if (raux.n_elem == N)
                     {
-                        // suffix_k = res_aux[k] ∘ suffix
-                        suffix_k = compose(raux, suffix);
+                        for (arma::uword i = 0; i < N; ++i)
+                            suffix_k[i] = raux[suffix[i]];
                     }
                 }
 
-                // mapping_k = final_idx_slice[k] ∘ suffix_k
-                arma::uvec mapping_k = compose(final_idx_slice[k], suffix_k);
+                const arma::uvec &fk = final_idx_slice[k];
 
-                // apply mapping to Theta/z for slice k
-                gather_cols(resample_buf, Theta.slice(k), mapping_k);
-                Theta.slice(k).swap(resample_buf);
-
-                if (model.zero.inflated)
+                // Fast-path: identity mapping?
+                bool trivial = true;
+                for (arma::uword i = 0; i < N; ++i)
                 {
-                    gather_vec(zbuf, z.col(k), mapping_k);
-                    z.col(k) = zbuf;
+                    if (fk[suffix_k[i]] != i)
+                    {
+                        trivial = false;
+                        break;
+                    }
+                }
+                if (trivial)
+                {
+                    // simple column mean
+                    Theta_mean.col(k) = arma::mean(Theta.slice(k), 1);
+                    z_mean.at(k) = model.zero.inflated ? arma::mean(z.col(k)) : 1.0;
+                    suffix = std::move(suffix_k);
+                    continue;
                 }
 
-                // carry forward for earlier slices
-                suffix = suffix_k;
+                // Build histogram of mapping_k = fk ∘ suffix_k
+                counts.zeros();
+                for (arma::uword i = 0; i < N; ++i)
+                {
+                    counts[fk[suffix_k[i]]]++;
+                }
+
+                // Decide dense (gemv) vs sparse (few unique columns)
+                arma::uvec nz = arma::find(counts > 0u);
+                if (nz.n_elem <= N / 2)
+                {
+                    // sparse AXPY accumulation over unique columns only
+                    Theta_mean.col(k).zeros();
+                    for (arma::uword jj = 0; jj < nz.n_elem; ++jj)
+                    {
+                        const arma::uword j = nz[jj];
+                        const double w = static_cast<double>(counts[j]) * invN;
+                        Theta_mean.col(k) += w * Theta.slice(k).col(j);
+                    }
+                    if (model.zero.inflated)
+                    {
+                        double zm = 0.0;
+                        for (arma::uword jj = 0; jj < nz.n_elem; ++jj)
+                        {
+                            const arma::uword j = nz[jj];
+                            const double w = static_cast<double>(counts[j]) * invN;
+                            zm += w * z.at(j, k);
+                        }
+                        z_mean.at(k) = zm;
+                    }
+                    else
+                    {
+                        z_mean.at(k) = 1.0;
+                    }
+                }
+                else
+                {
+                    // dense BLAS gemv
+                    for (arma::uword j = 0; j < N; ++j)
+                        wk[j] = static_cast<double>(counts[j]) * invN;
+                    Theta_mean.col(k) = Theta.slice(k) * wk;
+                    z_mean.at(k) = model.zero.inflated ? arma::dot(z.col(k), wk) : 1.0;
+                }
+
+                suffix = std::move(suffix_k);
             }
 
             return log_cond_marginal;
