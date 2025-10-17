@@ -584,12 +584,29 @@ namespace SMC
                 // start = std::chrono::high_resolution_clock::now();
                 // Propagate
                 const arma::mat& Theta_cur = Theta.slice(t);
+
+                // Precompute per-(t+1) constants for fast propagation
+                const bool fast_ok =
+                    (!model.derr.full_rank) &&
+                    (model.ftrans == "sliding") &&
+                    (model.fsys   == "shift")   &&
+                    (!model.seas.in_state);
+
+                const unsigned int nelem = std::min(t + 1, model.dlag.nL);
+                const double* Fphi = model.dlag.Fphi.memptr();
+                const double* yptr = y.memptr();
+                double seas_off = 0.0;
+                if (!model.seas.X.is_empty() && !model.seas.val.is_empty()) {
+                    seas_off = arma::dot(model.seas.X.col(t + 1), model.seas.val);
+                }
+
                 if (model.derr.full_rank) 
                 {
                     eps_mat = Wt_chol.t() * arma::randn(model.nP, N); // OK: outside omp
                 } 
                 else if (s > EPS)
                 {
+                    // eps1: N(0, s^2) added to psi only
                     eps1.randn();
                     eps1 *= s;
                 }
@@ -604,126 +621,77 @@ namespace SMC
                 for (unsigned int i = 0; i < N; i++)
                 {
                     const arma::uword parent = anc[i];
+                    arma::vec theta_new(model.nP, arma::fill::zeros);
 
-                    // Propagate theta[t] to theta[t+1]
-                    arma::vec gtheta = SysEq::func_gt(model.fsys, model.fgain, model.dlag, Theta_cur.col(parent), y.at(t), model.seas.period, model.seas.in_state);
-                    arma::vec theta_new = gtheta;
-                    if (model.derr.full_rank)
-                    {
-                        theta_new += eps_mat.col(i);
+                    if (fast_ok) {
+                        // Shift system (no allocation, no func_gt)
+                        theta_new[0] = Theta_cur(0, parent);
+                        const unsigned int nr = model.nP - 1 - (model.seas.in_state ? model.seas.period : 0);
+                        for (unsigned int r = 1; r <= nr; ++r) {
+                            theta_new[r] = Theta_cur(r - 1, parent);
+                        }
+                        // season-in-state not in fast path
+                    } else {
+                        theta_new = SysEq::func_gt(model.fsys, model.fgain, model.dlag,
+                                                   Theta_cur.col(parent), y.at(t),
+                                                   model.seas.period, model.seas.in_state);
                     }
-                    else
-                    {
-                        theta_new.at(0) += eps1.at(i);   
+
+                    // Add univariate noise to psi only
+                    if (!model.derr.full_rank && (s > EPS)) {
+                        theta_new[0] += eps1[i];
+                    } else if (model.derr.full_rank) {
+                        theta_new += eps_mat.col(i);
                     }
 
                     Theta_new.col(i) = theta_new;
 
-                    double logp = 0.;
-                    // if ((!use_discount))
-                    // {
-                    //     if (!model.derr.full_rank && (Wt_chol.at(0, 0) > EPS))
-                    //     {
-                    //         // logq adds: q(theta[t+1] | theta[t], y[t+1], gamma)
-                    //         // logq.at(i) += R::dnorm4(eps.at(0), 0., Wt_chol.at(0, 0), true);
-                    //         logq.at(i) += dnorm_cpp(eps.at(0), 0.0, Wt_chol.at(0,0), true);
+                    // Fast ft (avoid TransFunc::func_ft)
+                    double ft = 0.0;
+                    if (fast_ok) {
+                        ft = seas_off;
+                        for (unsigned int j = 0; j < nelem; ++j) {
+                            const double psi_lag = theta_new[j]; // in next state, index aligns: j=0 -> psi[t+1]
+                            // softplus
+                            double hpsi;
+                            if (psi_lag > 20.0)       hpsi = psi_lag;
+                            else if (psi_lag < -20.0) hpsi = std::exp(psi_lag);
+                            else                      hpsi = std::log1p(std::exp(psi_lag));
 
-                    //         // logp adds: p(theta[t+1] | theta[t], gamma
-                    //         // logp += R::dnorm4(theta_new.at(0), Theta_cur.at(0, i), Wt_chol.at(0, 0), true);
-                    //         logp += dnorm_cpp(theta_new.at(0), Theta_cur.at(0,i), Wt_chol.at(0,0), true);
-                    //     }
-                    // }
-
-                    double ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
-                    double lambda = LinkFunc::ft2mu(ft, model.flink);
-
-                    // Propagate z[t] to z[t+1]
-                    if (model.zero.inflated)
-                    {
-                        // Forward evolution probability: p(z[t+1] = 1 | z[t], gamma
-                        double prob = model.zero.intercept + model.zero.coef * z.at(parent, t);
-                        if (!model.zero.X.is_empty())
-                        {
-                            prob += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
+                            const double ylag = yptr[t - j];
+                            ft += Fphi[j] * (hpsi * ylag);
                         }
-                        prob = logistic(prob);
-
-                        if (y.at(t + 1) > EPS)
-                        {
-                            /*
-                            When y[t+1] > 0, we must have
-                                p(z[t+1] = 1 | z[t], y[t+1] > 0, gamma) = 1
-                            Therefore z[t+1] = 1
-                            */
-                            z.at(i, t + 1) = 1.;
-
-                            // logp adds p(z[t+1] = 1 | z[t], gamma
-                            logp += std::log(prob);
-
-                            // logq adds p(z[t+1] = 1 | z[t], y[t+1] > 0, gamma) = 1
-                            // which is zero at logarithmic scale
-                        }
-                        else
-                        {
-                            /*
-                            When y[t+1] == 0, it could be z[t+1] = 0 or z[t+1] = 1
-                            and y[t+1] is a zero from the negative-binomial
-                            */
-
-                            // NB(y[t] = 0 | lambda[t], rho)
-                            double llk_zero = ObsDist::loglike(
-                                0., model.dobs.name, lambda,
-                                model.dobs.par2, false);
-
-                            double nom = llk_zero * prob;
-
-                            /*
-                            denom =
-                                p(z[t+1] = 0 | z[t], y[t+1] = 0, gamma)
-                              + p(z[t+1] = 1 | z[t], y[t+1] = 0, gamma)
-
-                            where p(z[t+1] = 0 | z[t], y[t+1] = 0, gamma) = p(z[t+1] = 0 | z[t], gamma)
-                            */
-                            double denom = std::abs(1. - prob) + nom + EPS;
-                            double zprob = nom / denom; // p(z[t+1] = 1 | z[t], y[t+1] = 0, gamma)
-
-                            if (u(i) < zprob)
-                            {
-                                z.at(i, t + 1) = 1.;
-                                logq.at(i) += std::log(zprob);
-                                logp += std::log(prob);
-                            }
-                            else
-                            {
-                                z.at(i, t + 1) = 0.;
-
-                                // logq adds propagation distribution
-                                //      p(z[t+1] = 0 | z[t], y[t+1] = 0, gamma);
-                                logq.at(i) += std::log(std::abs(1. - zprob) + EPS);
-
-                                // logp adds forward evolution
-                                //      p(z[t+1] = 0 | z[t], gamma)
-                                logp += std::log(std::abs(1. - prob) + EPS);
-                            }
-                        }
+                    } else {
+                        ft = TransFunc::func_ft(model.ftrans, model.fgain, model.dlag, model.seas, t + 1, theta_new, y);
                     }
 
-                    // logp adds the likelihood: p(y[t+1] | theta[t+1], z[t+1])
+                    const double lambda = LinkFunc::ft2mu(ft, model.flink);
+
+                    // Propagate z[t] -> z[t+1]
+                    if (model.zero.inflated)
+                    {
+                        double zval = model.zero.intercept;
+                        if (!model.zero.X.is_empty() && !model.zero.beta.is_empty()) {
+                            zval += arma::dot(model.zero.X.col(t + 1), model.zero.beta);
+                        }
+                        const double p1 = 1.0 / (1.0 + std::exp(-zval));
+                        z.at(i, t + 1) = (u.at(i) < p1) ? 1.0 : 0.0;
+                    }
+
+                    // Likelihood
                     double val;
                     if (model.zero.inflated && z.at(i, t + 1) < EPS)
                     {
-                        // When z[t+1] = 0
-                        // We must have p(y[t+1] = 0 | theta[t+1], z[t+1] = 0) = 1
-                        val = y.at(t + 1) < EPS ? 0. : -9e16; // numerically exp(-9e16) = 0
+                        val = (std::abs(y.at(t + 1)) < EPS) ? 0.0 : -INFINITY;
                     }
                     else
                     {
-                        // When z[t+1] = 1
-                        // p(y[t+1] | theta[t+1], z[t+1] = 1) = NB(y[t+1] | lambda[t+1], rho)
                         val = ObsDist::loglike(y.at(t + 1), model.dobs.name, lambda, model.dobs.par2, true);
                     }
 
-                    logp += val;
+                    // weight update
+                    // Note: logq[i] already reflects resampled ancestry
+                    double logp = val;
                     weights.at(i) = logp - logq.at(i);
                 } // for i = 1, ..., N
 
