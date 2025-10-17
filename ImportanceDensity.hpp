@@ -78,94 +78,47 @@ static inline double softplus_fast(double x) {
     return std::log1p(std::exp(x));
 }
 
-// Univariate-noise + sliding + shift fast path
-static arma::vec qforecast0_fast(
+
+struct QForecastFastConsts {
+    unsigned int nelem;
+    const double* Fphi;      // phi[0..nelem-1]
+    const double* yptr;      // y raw pointer
+    double seas_off;
+    bool link_identity;
+    bool obs_nb;
+    bool obs_pois;
+    double yhat_new;
+    // Added: needed to compute Vt correctly
+    ObsDist dobs;
+    std::string flink;
+};
+
+static inline QForecastFastConsts make_qf_consts(
     const Model &model,
-    const unsigned int &t_new,
-    const arma::mat &Theta_old, // p x N at time t_new-1
+    unsigned int t_new,
     const arma::vec &y)
 {
-    const unsigned int N = Theta_old.n_cols;
-    arma::vec logq(N, arma::fill::zeros);
-
-    // Preconditions for fast path
-    const bool fast_ok =
-        (!model.derr.full_rank) &&
-        (model.ftrans == "sliding") &&
-        (model.fsys   == "shift")   &&
-        (!model.seas.in_state);
-
-    if (!fast_ok) {
-        return qforecast0(model, t_new, Theta_old, y); // fallback
+    QForecastFastConsts C{};
+    C.nelem = std::min(t_new, model.dlag.nL);
+    C.Fphi = model.dlag.Fphi.memptr();
+    C.yptr = y.memptr();
+    C.seas_off = 0.0;
+    if (model.seas.period > 0 && !model.seas.in_state &&
+        !model.seas.X.is_empty() && !model.seas.val.is_empty())
+    {
+        C.seas_off = arma::dot(model.seas.X.col(t_new), model.seas.val);
     }
-
-    // Precompute per-t constants
-    const unsigned int nelem = std::min(t_new, model.dlag.nL);
-    const double* Fphi = model.dlag.Fphi.memptr(); // phi[1..nL] at indices [0..nL-1]
-
-    // ylags[j] = y[t_new - 1 - j]
-    // Access y by pointer to reduce bounds checks
-    const double* yptr = y.memptr();
-
-    // Seasonality offset (if any)
-    double seas_off = 0.0;
-    if (model.seas.period > 0 && !model.seas.X.is_empty() && !model.seas.val.is_empty()) {
-        seas_off = arma::dot(model.seas.X.col(t_new), model.seas.val);
-    }
-
-    // Link and obs type (specialize common paths)
-    const bool link_identity = (model.flink == "identity");
-    const bool obs_nb = (model.dobs.name == "nbinom" || model.dobs.name == "nbinomm");
-    const bool obs_pois = (model.dobs.name == "poisson");
-
-    // yhat_new = mu2ft(y[t_new])
-    const double yval_t = yptr[t_new];
-    const double yhat_new = link_identity ? yval_t : LinkFunc::mu2ft(yval_t, model.flink);
-
-    // Main loop (OpenMP safe)
-    #ifdef DGTF_USE_OPENMP
-    #pragma omp parallel for schedule(static)
-    #endif
-    for (unsigned int i = 0; i < N; ++i) {
-        const double* th = Theta_old.colptr(i); // theta[t_new-1] column
-
-        // Compute ft at time t_new using shifted state (no allocation)
-        double ft = seas_off;
-        for (unsigned int j = 0; j < nelem; ++j) {
-            // psi_lag(t_new - j) in next state equals:
-            //   j == 0 -> th[0]; j >= 1 -> th[j-1]
-            const double psi_lag = (j == 0) ? th[0] : th[j - 1];
-            const double hpsi    = softplus_fast(psi_lag); // GainFunc::psi2hpsi(psi)
-            const double ylag    = yptr[t_new - 1 - j];
-            ft += Fphi[j] * (hpsi * ylag);
-        }
-
-        // lambda from link
-        const double lambda = link_identity ? ft : LinkFunc::ft2mu(ft, model.flink);
-
-        // Approx predictive variance Vt (specialize)
-        double Vt;
-        if (obs_nb) {
-            // NB (mean-param) with identity link: Var(g(y)) approx as in func_Vt_approx
-            const double r = model.dobs.par2;
-            Vt = (lambda * (lambda + r)) / (r + EPS);
-        } else if (obs_pois) {
-            Vt = link_identity ? std::max(lambda, EPS) : ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink);
-        } else {
-            Vt = ApproxDisturbance::func_Vt_approx(lambda, model.dobs, model.flink);
-        }
-        Vt = std::abs(Vt) + EPS;
-
-        // Fast normal log-density using variance (no sqrt/divide)
-        const double diff = (yhat_new - ft);
-        logq.at(i) = -0.5 * (LOG2PI + std::log(Vt) + (diff * diff) / Vt);
-    }
-
-    #ifdef DGTF_DO_BOUND_CHECK
-    bound_check<arma::vec>(logq, "qforecast0_fast");
-    #endif
-    return logq;
+    C.link_identity = (model.flink == "identity");
+    C.obs_nb = (model.dobs.name == "nbinom" || model.dobs.name == "nbinomm");
+    C.obs_pois = (model.dobs.name == "poisson");
+    const double yval_t = C.yptr[t_new];
+    C.yhat_new = C.link_identity ? yval_t : LinkFunc::mu2ft(yval_t, model.flink);
+    // Added
+    C.dobs = model.dobs;
+    C.flink = model.flink;
+    return C;
 }
+
 
 
 /**

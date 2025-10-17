@@ -18,6 +18,11 @@
     #define DGTF_USE_OPENMP
 #endif
 
+// #if !defined(DGTF_TIMING)
+//     #define DGTF_TIMING
+// #endif
+
+
 #if !defined(ARMA_USE_OPENMP)
     #define ARMA_USE_OPENMP
 #endif
