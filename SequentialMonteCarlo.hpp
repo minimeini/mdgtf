@@ -1,6 +1,7 @@
 #ifndef _SEQUENTIALMONTECARLO_H
 #define _SEQUENTIALMONTECARLO_H
 
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -499,9 +500,9 @@ namespace SMC
                     }
                 }
 
-
                 // `qforecast` gives us one-step-ahead forecasting density:
                 //      q(y[t+1] | theta[t], z[t+1] = 1, gamma)
+                // auto start = std::chrono::high_resolution_clock::now();
                 if (model.derr.full_rank && use_discount)
                 {
                     arma::vec loc = arma::zeros<arma::mat>(model.nP, N);
@@ -512,7 +513,7 @@ namespace SMC
                 }
                 else
                 {
-                    logq = qforecast0(model, t + 1, Theta.slice(t), y);
+                    logq = qforecast0_fast(model, t + 1, Theta.slice(t), y);
                 }
 
                 tau = arma::exp(logq - logq.max());
@@ -542,6 +543,12 @@ namespace SMC
                     logq = arma::log(arma::abs(tau) + EPS);
                 }
 
+                // auto end = std::chrono::high_resolution_clock::now();
+                // auto micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                // if (t % 50 == 0 && VERBOSE)
+                // {
+                //     Rcpp::Rcout << "  [SMC] Time step " << t << "/" << nT << " - qforecast took " << micros << " microseconds." << std::endl;
+                // }
 
                 if (t > 0)
                 {
@@ -574,6 +581,7 @@ namespace SMC
                 }
 
 
+                // start = std::chrono::high_resolution_clock::now();
                 // Propagate
                 const arma::mat& Theta_cur = Theta.slice(t);
                 if (model.derr.full_rank) 
@@ -720,6 +728,12 @@ namespace SMC
                 } // for i = 1, ..., N
 
                 Theta.slice(t + 1) = Theta_new;
+                // end = std::chrono::high_resolution_clock::now();
+                // micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                // if (t % 50 == 0 && VERBOSE)
+                // {
+                //     Rcpp::Rcout << "  [SMC] Time step " << t << " - propagation took " << micros << " microseconds." << std::endl;
+                // }
 
                 double wmax = weights.max();
                 weights = arma::exp(weights - wmax);
@@ -742,11 +756,10 @@ namespace SMC
                 {
                     final_idx_slice[t + 1] = idx_id;
                 }
-
-                log_cond_marginal += std::log(arma::accu(weights) + EPS) - logN;
             } // for t = 0, ..., nT-1
 
 
+            // auto start = std::chrono::high_resolution_clock::now();
             const double invN = 1.0 / static_cast<double>(N);
 
             // final slice: weighted mean with BLAS
@@ -840,6 +853,10 @@ namespace SMC
 
                 suffix = std::move(suffix_k);
             }
+
+            // auto end = std::chrono::high_resolution_clock::now();
+            // auto micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            // std::cout << "\nSMC::PL::auxiliary_filter0: materialization took " << micros << " microseconds.\n";
 
             return log_cond_marginal;
         }

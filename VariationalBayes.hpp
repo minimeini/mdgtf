@@ -1,6 +1,7 @@
 #ifndef _VARIATIONALBAYES_HPP
 #define _VARIATIONALBAYES_HPP
 
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -373,6 +374,7 @@ namespace VB
                 // You MUST set initial_resample_all = true (MCS smoothing) and final_resample_by_weights = false (reduce degeneracy) to make this algorithm work.
                 // arma::cube Theta_tmp = arma::zeros<arma::cube>(model.nP, N, y.n_elem);
                 
+                // auto start = std::chrono::high_resolution_clock::now();
                 Theta.zeros();
                 z.ones();
                 double marg_loglik = SMC::SequentialMonteCarlo::auxiliary_filter0(
@@ -390,6 +392,9 @@ namespace VB
                     model.zero.z = arma::conv_to<arma::vec>::from(u < model.zero.prob);
                 }
                 // ------------------
+                // auto end = std::chrono::high_resolution_clock::now();
+                // auto micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                // Rcpp::Rcout << "\n  [VB] Iteration " << b << " - SMC took " << micros << " microseconds." << std::endl;
 
                 // // MCMC sampler
                 // // ------------------
@@ -407,6 +412,8 @@ namespace VB
                 // // ------------------
 
 
+                // start = std::chrono::high_resolution_clock::now();
+                // Compute gradient
                 arma::mat dFphi_grad;
                 arma::vec dloglik_dlag(2, arma::fill::zeros);
                 const bool need_lag_grad = par1_prior.infer || par2_prior.infer;
@@ -503,7 +510,12 @@ namespace VB
                     dloglik_dlag.at(1) = dpar2_acc;
                 }
 
+                // end = std::chrono::high_resolution_clock::now();
+                // micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                // Rcpp::Rcout << "  [VB] Iteration " << b << " - Gradient computation took " << micros << " microseconds." << std::endl;
 
+                // start = std::chrono::high_resolution_clock::now();
+                // HVB parameter updates
                 if (update_static)
                 {
                     arma::vec dlogJoint = Static::dlogJoint_deta(
@@ -588,6 +600,10 @@ namespace VB
                         model.seas.period, model.seas.in_state);
                     Static::update_params(model, param_selected, eta);
                 } // end update_static
+
+                // end = std::chrono::high_resolution_clock::now();
+                // micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+                // Rcpp::Rcout << "  [VB] Iteration " << b << " - HVB update took " << micros << " microseconds." << std::endl;
 
 
                 if (verbose)
