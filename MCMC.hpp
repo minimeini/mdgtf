@@ -1092,18 +1092,9 @@ namespace MCMC
                     Posterior::update_zt(model, y, wt);
                 }
 
-                // if (W_prior.infer)
-                // {
-                //     // arma::vec wt = arma::diff(psi);
-                //     Posterior::update_W(W_accept, model, wt, W_prior, mh_sd);
-                // }
 
                 if (update_static)
                 {
-                    // Posterior::update_dlag(
-                    //     par1_accept, par2_accept, model,
-                    //     y, hpsi, par1_prior, par2_prior,
-                    //     par1_mh_sd, par2_mh_sd, max_lag);
                     Model mod = model;
                     model = Posterior::update_static_hmc(
                         hmc_accept, mod, y, psi, param_selected,
@@ -1111,15 +1102,6 @@ namespace MCMC
                         epsilon, zintercept_infer, zzcoef_infer, L, kinetic_sd);
                 }
 
-                // if (seas_prior.infer)
-                // {
-                //     Posterior::update_seas(seas_accept, model, y, hpsi, seas_prior);
-                // }
-
-                // if (rho_prior.infer)
-                // {
-                //     Posterior::update_dispersion(rho_accept, model, y, hpsi, rho_prior);
-                // }
 
                 bool saveiter = b > nburnin && ((b - nburnin - 1) % nthin == 0);
                 if (saveiter || b == (ntotal - 1))
