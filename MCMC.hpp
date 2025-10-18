@@ -80,8 +80,7 @@ namespace MCMC
                 W_prior, par1_prior, par2_prior, rho_prior, seas_prior, model);
             
             // negate it because U = -log(p) and what we calculate above is the gradient of log(p)
-            gd_U.for_each([](arma::vec::elem_type &val)
-                          { val *= -1.; });
+            gd_U *= -1.;
 
             return gd_U;
         }
