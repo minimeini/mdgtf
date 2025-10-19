@@ -201,10 +201,10 @@ namespace MCMC
                 Metropolis-Hastings
                 */
                 approx_dlm.update_by_wt(y, wt);
-                arma::vec eta = approx_dlm.get_eta_approx(model.seas); // nT x 1, f0, Fn and psi is updated
-                arma::vec lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink); // nT x 1
+                arma::vec eta_hat = approx_dlm.get_eta_approx(model.seas); // nT x 1, f0, Fn and psi is updated
+                arma::vec lambda_hat = LinkFunc::ft2mu<arma::vec>(eta_hat, model.flink); // nT x 1
                 arma::vec Vt_hat = ApproxDisturbance::func_Vt_approx(
-                    lambda, model.dobs, model.flink); // nT x 1
+                    lambda_hat, model.dobs, model.flink); // nT x 1
 
                 arma::mat Fn = approx_dlm.get_Fn(); // nT x nT
                 arma::vec Fnt = Fn.col(t - 1); // nT x 1
