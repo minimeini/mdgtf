@@ -146,7 +146,6 @@ Rcpp::List dgtf_simulate(
     StateSpace::simulate(y, lambda, ft, Theta, psi, model, ntime, y0, theta0, model.derr.full_rank);
 
     Rcpp::List output;
-    output["model"] = model.info();
     output["y"] = Rcpp::wrap(y.t());
     output["nlag"] = model.dlag.nL;
     output["psi"] = Rcpp::wrap(psi.t());
