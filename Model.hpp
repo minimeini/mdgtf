@@ -1228,23 +1228,6 @@ public:
         dhpsi = psi;
     }
 
-    void update_dlag(const LagDist &dlag)
-    {
-        unsigned int nlag = dlag.Fphi.n_elem;
-        set_Fphi(dlag, nlag);
-        return;
-    }
-
-    void update_dlag(const LagDist &dlag, const arma::vec &y)
-    {
-        unsigned int nlag = dlag.Fphi.n_elem;
-        set_Fphi(dlag, nlag);
-
-        update_f0(y);
-        update_Fn(y);
-        
-        return;
-    }
 
     void set_Fphi(const LagDist &dlag, const unsigned int &nlag) // (nT + 1)
     {
@@ -1257,54 +1240,15 @@ public:
         Fphi.tail(nT) = tmp; // fill Fphi[1:nT], leave Fphi[0] = 0.
     }
 
-    void set_Fphi(const arma::vec &Fphi_new)
-    {
-        unsigned int n_elem = Fphi_new.n_elem;
-        Fphi.zeros(); // Fphi: (nT + 1) x 1
-        Fphi.subvec(1, n_elem) = Fphi_new;
-    }
 
-    void set_psi(const arma::vec &psi_in)
-    {
-        psi = psi_in;
-        hpsi = GainFunc::psi2hpsi(psi, gain_func);
-        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
-    }
-
-    void set_wt(const arma::vec &wt_in)
-    {
-        wt = wt_in;
-        psi = arma::cumsum(psi);
-        hpsi = GainFunc::psi2hpsi(psi, gain_func);
-        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
-    }
-
-    arma::vec getFphi(){return Fphi;}
     arma::mat get_Fn(){return Fn;}
-    arma::vec get_f0(){return f0;}
-    arma::vec get_psi(){return psi;}
-    arma::vec get_hpsi(){return hpsi;}
-    arma::vec get_dhpsi(){return dhpsi;}
 
-    void update_by_psi(const arma::vec &y, const arma::vec &psi)
-    {
-        hpsi = GainFunc::psi2hpsi(psi, gain_func);
-        dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
-        update_f0(y);
-        update_Fn(y);
-    }
 
     void update_by_wt(const arma::vec &y, const arma::vec &wt)
     {
         psi = arma::cumsum(wt);
         hpsi = GainFunc::psi2hpsi(psi, gain_func);
         dhpsi = GainFunc::psi2dhpsi(psi, gain_func);
-        update_f0(y);
-        update_Fn(y);
-    }
-
-    void update_data(const arma::vec &y)
-    {
         update_f0(y);
         update_Fn(y);
     }
@@ -1396,15 +1340,6 @@ public:
         #endif
         return eta;
     }
-
-
-    void get_lambda_eta_approx(arma::vec &lambda, arma::vec &eta, Model &model, const arma::vec &y)
-    {
-        eta = get_eta_approx(model.seas);
-        lambda = LinkFunc::ft2mu<arma::vec>(eta, model.flink, 0.);
-        return;
-    }
-
 
 
     static arma::vec func_Vt_approx( // Checked. OK.
@@ -1547,36 +1482,6 @@ public:
         return Vt;
     }
 
-    static arma::vec func_yhat(
-        const arma::vec &y,
-        const std::string &link_func)
-    {
-        std::map<std::string, LinkFunc::Func> link_list = LinkFunc::link_list;
-        arma::vec yhat;
-
-        switch (link_list[tolower(link_func)])
-        {
-        case LinkFunc::Func::identity:
-        {
-            yhat = y;
-            break;
-        }
-        case LinkFunc::Func::exponential:
-        {
-            yhat = arma::log(arma::abs(y) + EPS);
-            break;
-        }
-        default:
-        {
-            break;
-        }
-        } // switch by link
-
-        #ifdef DGTF_DO_BOUND_CHECK
-            bound_check(yhat, "func_yhat");
-        #endif
-        return yhat;
-    }
 
 private:
     unsigned int nT = 200;
