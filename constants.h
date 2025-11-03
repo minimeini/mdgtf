@@ -18,8 +18,12 @@
     #define DGTF_USE_OPENMP
 #endif
 
-// #if !defined(DGTF_TIMING)
-//     #define DGTF_TIMING
+// #if !defined(DGTF_TIMING_HVA)
+//     #define DGTF_TIMING_HVA
+// #endif
+
+// #if !defined(DGTF_TIMING_SMC)
+//     #define DGTF_TIMING_SMC
 // #endif
 
 

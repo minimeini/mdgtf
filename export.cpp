@@ -610,7 +610,7 @@ Rcpp::List dgtf_posterior_predictive(
     {
         arma::cube ytmp = yhat.reshape(ntime + 1, nsample * nrep, 1);
         arma::mat yhat2 = ytmp.slice(0);
-        output2["crps"] = calculateCRPS(y, yhat2);
+        output2["crps"] = calculate_crps(y, yhat2);
         
         try
         {
@@ -646,8 +646,12 @@ Rcpp::List dgtf_forecast(
     const arma::vec &y,   // (nT + 1) x 1
     const unsigned int nrep = 100,
     const unsigned int &k = 1, // k-step-ahead forecasting,
-    const bool &verbose = false)
+    const Rcpp::Nullable<Rcpp::NumericVector> &ypred_true = R_NilValue,
+    const bool &only_evaluate_last_one = false,
+    const bool &return_all_samples = false
+)
 {
+    std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
     const unsigned int ntime = y.n_elem - 1;
     Model model(model_settings);
     model.seas.X = Season::setX(ntime + k, model.seas.period, model.seas.P); 
@@ -656,14 +660,17 @@ Rcpp::List dgtf_forecast(
     arma::mat psi_stored;
     if (output.containsElementNamed("psi_stored"))
     {
+        // ntime x nsample
         psi_stored = Rcpp::as<arma::mat>(output["psi_stored"]);
     }
     else if (output.containsElementNamed("psi"))
     {
+        // ntime x 3
         psi_stored = Rcpp::as<arma::mat>(output["psi"]);
     }
     else if (output.containsElementNamed("psi_filter"))
     {
+        
         psi_stored = Rcpp::as<arma::mat>(output["psi_filter"]);
     }
     else
@@ -716,11 +723,14 @@ Rcpp::List dgtf_forecast(
         }
     }
 
-    arma::mat ycast = arma::zeros<arma::mat>(nsample, nrep);
+    arma::cube ypred(ntime + k + 1, nrep, nsample, arma::fill::zeros);
+    arma::cube ymean = ypred;
+    arma::cube yvar = ypred;
+
     Progress p(nsample, true);
-    // #ifdef _OPENMP
-    // #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
-    // #endif
+    #ifdef DGTF_USE_OPENMP
+    #pragma omp parallel for num_threads(NUM_THREADS) schedule(runtime)
+    #endif
     for (unsigned int i = 0; i < nsample; i++)
     {
         arma::mat ytmp(ntime + 1 + k, nrep, arma::fill::zeros);
@@ -757,233 +767,124 @@ Rcpp::List dgtf_forecast(
                 }
 
                 double lambda = LinkFunc::ft2mu(eta, model.flink);
-                ytmp.at(tidx, s) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
+                double mean, var;
+                switch (obs_list[model.dobs.name])
+                {
+                case AVAIL::Dist::nbinomm:
+                {
+                    mean = lambda;
+                    var = std::abs(nbinomm::var(lambda, model.dobs.par2));
+                    break;
+                }
+                case AVAIL::Dist::nbinomp:
+                {
+                    mean = nbinom::mean(lambda, model.dobs.par2);
+                    var = nbinom::var(lambda, model.dobs.par2);
+                    break;
+                }
+                case AVAIL::Dist::poisson:
+                {
+                    mean = lambda;
+                    var = lambda;
+                    break;
+                }
+                default:
+                {
+                    throw std::invalid_argument("Unknown observation distribution.");
+                    break;
+                }
+                }
+
+                ymean.at(tidx, s, i) = mean;
+                yvar.at(tidx, s, i) = var;
+                ypred.at(tidx, s, i) = ObsDist::sample(lambda, mod.dobs.par2, mod.dobs.name);
             }
         }
 
-        ycast.row(i) = ytmp.row(ntime + k);
         p.increment(); 
     }
 
-    arma::vec ycast2 = ycast.as_col();
+
+    arma::mat ypred_mat(
+        ypred.memptr(),
+        ypred.n_rows,
+        ypred.n_cols * ypred.n_slices,
+        /*copy_aux_mem=*/false,
+        /*strict=*/true);
+
+    arma::mat ypred_sub;
+    if (only_evaluate_last_one)
+    {
+        ypred_sub = ypred_mat.tail_rows(1);
+    }
+    else
+    {
+        ypred_sub = ypred_mat.tail_rows(k);
+    }
+
     arma::vec prob = {0.025, 0.5, 0.975};
-    arma::vec yqt = arma::quantile(ycast2, prob);
+    arma::mat yqt = arma::quantile(ypred_sub, prob, 1);
 
     Rcpp::List out;
-    out["ycast"] = Rcpp::wrap(ycast2.t());
-    out["yqt"] = Rcpp::wrap(yqt.t());
+    out["yqt"] = Rcpp::wrap(yqt);
 
-    return out;
-}
-
-//' @export
-// [[Rcpp::export]]
-arma::vec dgtf_evaluate(
-    const arma::vec &yest, // nsample x 1
-    const double &ytrue,
-    const std::string &loss_func = "quadratic",
-    const bool &eval_covarage_width = true,
-    const bool &eval_covarage_pct = true)
-{
-    return evaluate(yest, ytrue, loss_func, eval_covarage_width, eval_covarage_pct);
-}
-
-
-//' @export
-// [[Rcpp::export]]
-arma::mat dgtf_tuning(
-    const Rcpp::List &model_opts,
-    const arma::vec &y_in,
-    const std::string &algo_name,
-    const Rcpp::List &algo_opts,
-    const std::string &param_name,
-    const double &from = 0.7,
-    const double &to = 0.99,
-    const double &delta = 0.01,
-    const Rcpp::Nullable<Rcpp::NumericVector> &grid = R_NilValue,
-    const std::string &loss = "quadratic",
-    const bool &add_y0 = false,
-    const bool &verbose = true)
-{
-    std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
-    std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
-    std::map<std::string, AVAIL::Param> param_list = AVAIL::tuning_param_list;
-
-    arma::vec y;
-    if (add_y0)
+    if (return_all_samples)
     {
-        y.set_size(y_in.n_elem + 1);
-        y.at(0) = 0.;
-        y.tail(y_in.n_elem) = y_in;
-    }
-    else
-    {
-        y = y_in;
+        out["ypred_samples"] = Rcpp::wrap(ypred_sub);
     }
 
-    Model model(model_opts);
-    model.seas.X = Season::setX(y.n_elem - 1, model.seas.period, model.seas.P);
 
-    arma::vec param_grid;
-    if (!grid.isNull())
+    if (!ypred_true.isNull())
     {
-        param_grid = Rcpp::as<arma::vec>(grid);
-    }
-    else
-    {
-        param_grid = arma::regspace<arma::vec>(from, delta, to);
-    }
+        arma::mat ymean_mat(
+            ymean.memptr(),
+            ymean.n_rows,
+            ymean.n_cols * ymean.n_slices,
+            /*copy_aux_mem=*/false,
+            /*strict=*/true);
 
-    arma::mat stats(param_grid.n_elem, 4, arma::fill::zeros);
-    for (unsigned int i = 0; i < param_grid.n_elem; i++)
-    {
-        Rcpp::checkUserInterrupt();
+        arma::mat yvar_mat(
+            yvar.memptr(),
+            yvar.n_rows,
+            yvar.n_cols * yvar.n_slices,
+            /*copy_aux_mem=*/false,
+            /*strict=*/true);
 
-        Rcpp::List algo = algo_opts;
-        algo["do_smoothing"] = false;
-
-        if (param_list[param_name] == AVAIL::Param::discount_factor)
+        arma::vec ypredt;
+        if (only_evaluate_last_one)
         {
-            algo["use_discount"] = true;
-            algo["discount_factor"] = param_grid.at(i);
-        }
-        else if (param_list[param_name] == AVAIL::Param::W)
-        {
-            model.derr.par1 = param_grid.at(i);
-            model.derr.var.at(0, 0) = param_grid.at(i);
-            algo["use_discount"] = false;
-        }
-        else if (param_list[param_name] == AVAIL::Param::num_backward)
-        {
-            algo["num_backward"] = param_grid.at(i);
-        }
-        else if (param_list[param_name] == AVAIL::Param::step_size)
-        {
-            algo["learning_rate"] = param_grid.at(i);
-        }
-        else if (param_list[param_name] == AVAIL::Param::learning_rate)
-        {
-            algo["eps_step_size"] = param_grid.at(i);
-        }
-        else if (param_list[param_name] == AVAIL::Param::k)
-        {
-            algo["k"] = param_grid.at(i);
+            ypredt = Rcpp::as<arma::vec>(ypred_true).tail(1);
         }
         else
         {
-            throw std::invalid_argument("Unknown tuning parameter " + param_name + ".");
+            ypredt = Rcpp::as<arma::vec>(ypred_true).tail(k);
         }
 
+        out["ypred_true"] = Rcpp::wrap(ypredt);
 
-        stats.at(i, 0) = param_grid.at(i);
-        double err_forecast = 0.;
-        double cov_forecast = 0.;
-        double width_forecast = 0.;
+        arma::uvec ypred_mask = (ypredt >= (yqt.col(0) - EPS)) % (ypredt <= (yqt.col(2) + EPS));
+        out["coverage"] = static_cast<double>(arma::accu(ypred_mask)) / static_cast<double>(ypred_mask.n_elem);
 
-        bool success = false;
-        try
+        arma::mat ymean_sub;
+        arma::mat yvar_sub;
+        if (only_evaluate_last_one)
         {
-            switch (algo_list[algo_name])
-            {
-            case AVAIL::Algo::LinearBayes:
-            {
-                y.clamp(0.01 / static_cast<double>(model.nP), y.max());
-                LBA::LinearBayes linear_bayes(algo);
-                linear_bayes.filter(model, y);
-                linear_bayes.forecast_error(model, y, err_forecast, cov_forecast, width_forecast, 1000, loss);
-                break;
-            }
-            case AVAIL::Algo::MCS:
-            {
-                SMC::MCS mcs(model, algo);
-                mcs.infer(model, y, false);
-                arma::cube theta_tmp = mcs.Theta.tail_slices(y.n_elem);
-                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
-                break;
-            }
-            case AVAIL::Algo::FFBS:
-            {
-                SMC::FFBS ffbs(model, algo);
-                ffbs.infer(model, y, false);
-                arma::cube theta_tmp = ffbs.Theta.tail_slices(y.n_elem);
-                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
-                break;
-            }
-            case AVAIL::Algo::TFS:
-            {
-                SMC::TFS tfs(model, algo);
-                tfs.infer(model, y, false);
-                arma::cube theta_tmp = tfs.Theta.tail_slices(y.n_elem);
-                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
-                break;
-            }
-            case AVAIL::Algo::ParticleLearning:
-            {
-                if (param_list[param_name] == AVAIL::Param::W)
-                {
-                    Rcpp::List W_opts;
-                    if (algo.containsElementNamed("W"))
-                    {
-                        Rcpp::List W_opts = Rcpp::as<Rcpp::List>(algo["W"]);
-                    }
-                    W_opts["infer"] = false;
-                    algo["W"] = W_opts;
-                }
-                SMC::PL pl(model, algo);
-                pl.infer(model, y, false);
-                arma::cube theta_tmp = pl.Theta.tail_slices(y.n_elem);
-                StateSpace::forecast_error(err_forecast, cov_forecast, width_forecast, theta_tmp, y, model, loss, false);
-                break;
-            }
-            case AVAIL::Algo::HybridVariation:
-            {
-                Rcpp::List W_opts;
-                if (algo.containsElementNamed("W"))
-                {
-                    Rcpp::List W_opts = Rcpp::as<Rcpp::List>(algo["W"]);
-                }
-                W_opts["infer"] = false;
-                algo["W"] = W_opts;
-
-                VB::Hybrid hvb(model, algo);
-                hvb.infer(model, y, false);
-                Model::forecast_error(
-                    err_forecast, cov_forecast, width_forecast, 
-                    hvb.psi_stored, y, model, loss, false);
-                break;
-            }
-            default:
-            {
-                throw std::invalid_argument("Unknown algorithm: " + algo_name + ".");
-            }
-            }
-
-            success = true;
+            ymean_sub = ymean_mat.tail_rows(1);
+            yvar_sub = yvar_mat.tail_rows(1);
         }
-        catch (const std::exception &e)
+        else
         {
-            success = false;
-            std::cerr << std::endl;
-            std::cerr << e.what() << ' - failed at delta = ' << param_grid.at(i) << std::endl;
+            ymean_sub = ymean_mat.tail_rows(k);
+            yvar_sub = yvar_mat.tail_rows(k);
         }
+        arma::mat log_diff = arma::log(arma::abs(ymean_sub.each_col() - ypredt) + EPS);
+        arma::mat log_var = arma::log(yvar_sub + EPS);
+        double chi_sqr = arma::mean(arma::mean(arma::exp(log_diff - log_var)));
+        out["chi"] = chi_sqr;
 
-        if (success)
-        {
-            stats.at(i, 1) = err_forecast;
-            stats.at(i, 2) = cov_forecast;
-            stats.at(i, 3) = width_forecast;
-        }
-
-        if (verbose)
-        {
-            Rcpp::Rcout << "\rProgress: " << i + 1 << "/" << param_grid.n_elem;
-        }
+        double crps = calculate_crps(ypredt, ypred_sub);
+        out["crps"] = crps;
     }
 
-    if (verbose)
-    {
-        Rcpp::Rcout << std::endl;
-    }
-
-    return stats;
+    return out;
 }

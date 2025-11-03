@@ -1,7 +1,6 @@
 #ifndef _VARIATIONALBAYES_HPP
 #define _VARIATIONALBAYES_HPP
 
-#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -15,8 +14,12 @@
 #include "SequentialMonteCarlo.hpp"
 #include "StaticParams.hpp"
 
+#ifdef DGTF_TIMING_HVA
+#include <chrono>
+#define T_NOW() std::chrono::high_resolution_clock::now()
+#define T_US(dt) std::chrono::duration_cast<std::chrono::microseconds>(dt).count()
+#endif
 
-// #include "MCMC.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -353,6 +356,10 @@ namespace VB
             const arma::vec &y,
             const bool &verbose = VERBOSE)
         {
+            #ifdef DGTF_TIMING_HVA
+            auto start = std::chrono::high_resolution_clock::now();
+            #endif
+
             std::map<std::string, SysEq::Evolution> sys_list = SysEq::sys_list;
             fsys = model.fsys;
             const unsigned int nT = y.n_elem - 1;
@@ -364,6 +371,7 @@ namespace VB
             arma::mat Theta(model.nP, y.n_elem, arma::fill::zeros); // nP x (nT + 1)
             arma::cube Theta_all(model.nP, N, y.n_elem);
             arma::vec z(y.n_elem, arma::fill::ones);
+
             for (unsigned int b = 0; b < niter; b++)
             {
                 // bool saveiter = b > niter && ((b - niter - 1) % nthin == 0);
@@ -618,6 +626,12 @@ namespace VB
                 Rcpp::Rcout << std::endl;
             }
 
+            #ifdef DGTF_TIMING_HVA
+            auto end = std::chrono::high_resolution_clock::now();
+            auto total = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            Rcpp::Rcout << "  [VB] Total SGD time: " << total << " microseconds." << std::endl;
+            #endif
+
 
             if (model.zero.inflated)
             {
@@ -650,6 +664,10 @@ namespace VB
             // {
             //     psi_stored = Theta_tmp.row_as_mat(0); // (nT + 1) x nsample
             // }
+
+            #ifdef DGTF_TIMING_HVA
+            start = std::chrono::high_resolution_clock::now();
+            #endif
 
             arma::mat eta_tilde = rtheta_batch(gamma, mu, B, d, nsample); // m x nsample
 
@@ -775,6 +793,12 @@ namespace VB
             {
                 Rcpp::Rcout << std::endl;
             }
+
+            #ifdef DGTF_TIMING_HVA
+            end = std::chrono::high_resolution_clock::now();
+            total = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            Rcpp::Rcout << "  [VB] Total sampling time: " << total << " microseconds." << std::endl;
+            #endif
 
         }
 

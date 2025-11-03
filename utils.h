@@ -255,57 +255,6 @@ inline arma::mat inverse(
 }
 
 
-/**
- * @brief Evaluate forecasting performance with a specific loss function, calculate the width of credible interval and the covarage rate of credible interval.
- *
- * @param yest
- * @param ytrue
- * @param loss_func
- * @param eval_covarage_width
- * @param eval_covarage_pct
- * @return arma::vec
- */
-arma::vec evaluate(
-	const arma::vec &yest, // nsample x 1
-	const double &ytrue,
-	const std::string &loss_func = "quadratic",
-	const bool &eval_covarage_width = true,
-	const bool &eval_covarage_pct = true)
-{
-	std::map<std::string, AVAIL::Loss> loss_list = AVAIL::loss_list;
-
-	double ymin = arma::min(yest);
-	double ymax = arma::max(yest);
-	double ywidth = std::abs(ymax - ymin);
-	double ycov = (ytrue >= ymin && ytrue <= ymax) ? 1. : 0.;
-
-	arma::vec yerr = arma::abs(ytrue - yest);
-	double yloss = 0.;
-	switch (loss_list[tolower(loss_func)])
-	{
-	case AVAIL::L1:
-	{
-		yloss = arma::mean(yerr);
-		break;
-	}
-	case AVAIL::L2:
-	{
-		yerr = arma::square(yerr);
-		yloss = arma::mean(yerr);
-		break;
-	}
-	default:
-	{
-		throw std::invalid_argument("evaluate: undefined loss function");
-		break;
-	}
-	}
-
-	arma::vec out = {yloss, ywidth, ycov};
-	return out;
-}
-
-
 arma::vec logp_shifted(const arma::vec &logp)
 {
 	arma::vec logp_new = logp;
@@ -376,7 +325,7 @@ inline double dnorm_cpp(double x, double mu, double sd, bool logd=true) {
  * @param Y Posterior predictive samples matrix (nT x nsample)
  * @return Average CRPS over all time points
  */
-inline double calculateCRPS(const arma::vec& y, const arma::mat& Y) {
+inline double calculate_crps(const arma::vec& y, const arma::mat& Y) {
     arma::uword nT = y.n_elem, nsample = Y.n_cols;
     if (Y.n_rows != nT) throw std::invalid_argument("Number of rows in Y must match length of y");
     double total = 0.0;
@@ -403,5 +352,53 @@ inline double calculateCRPS(const arma::vec& y, const arma::mat& Y) {
     }
     return total / static_cast<double>(nT);
 }
+
+inline double calculate_mae(
+	const arma::vec &y_true,
+	const arma::mat &Y,
+	bool posterior_expected = true)
+{
+
+	// Y: k x nsample, y_true: k
+	if (Y.n_rows != y_true.n_elem)
+		throw std::invalid_argument("calculateMAE: Y must be k x nsample; y_true must have length k.");
+
+	if (posterior_expected)
+	{
+		// E[(Y - y_true)^2 | posterior] per time, then average over time
+		arma::mat diff = Y.each_col() - y_true;				 // k x nsample
+		arma::vec mse_t = arma::mean(arma::square(diff), 1); // k x 1
+		return arma::mean(mse_t);
+	}
+	else
+	{
+		// Squared error of posterior mean, averaged over time
+		arma::vec yhat = arma::mean(Y, 1); // k x 1
+		arma::vec resid = yhat - y_true;
+		return arma::mean(arma::square(resid));
+	}
+}
+
+
+inline double calculate_chisqr(
+	const arma::mat& Y, 
+	const arma::vec& y_true, 
+	const double eps = 1e-12) {
+  // Y: k x nsample posterior samples; y_true: length k
+  if (Y.n_rows != y_true.n_elem)
+    throw std::invalid_argument("calculate_chisqr: Y must be k x nsample; y_true must have length k.");
+
+  // Row-wise variance across samples (per time point)
+  arma::vec var_t = arma::var(Y, /*norm_type=*/1, /*dim=*/1); // length k
+
+  // Squared standardized residuals with epsilon stabilization
+  arma::mat diff = Y.each_col() - y_true;                 // k x nsample
+  arma::mat num  = arma::square(arma::abs(diff) + eps);   // (|y - mean| + eps)^2
+  arma::mat ratio = num.each_col() / (var_t + eps);       // divide by var_t + eps
+
+  // Average over time, then over samples (equivalently overall mean)
+  return arma::mean(arma::mean(ratio));
+}
+
 
 #endif

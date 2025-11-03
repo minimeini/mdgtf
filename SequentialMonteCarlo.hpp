@@ -1,7 +1,6 @@
 #ifndef _SEQUENTIALMONTECARLO_H
 #define _SEQUENTIALMONTECARLO_H
 
-#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -14,8 +13,8 @@
 #include "Model.hpp"
 #include "ImportanceDensity.hpp"
 
-// Optional: enable with -DDGTF_TIMING
-#ifdef DGTF_TIMING
+// Optional: enable with -DDGTF_TIMING_SMC
+#ifdef DGTF_TIMING_SMC
 #include <chrono>
 #define T_NOW() std::chrono::high_resolution_clock::now()
 #define T_US(dt) std::chrono::duration_cast<std::chrono::microseconds>(dt).count()
@@ -404,7 +403,7 @@ namespace SMC
             const bool &use_discount = false,
             const double &discount_factor = 0.95)
         {
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
             auto smc_start = T_NOW();
             // Per-iteration accumulators
             long long us_qforecast = 0;
@@ -499,7 +498,7 @@ namespace SMC
             {
                 for (unsigned int t = 0; t < nT; ++t)
                 {
-                    // Shared “fast path” constants container
+                    // Shared "fast path" constants container
                     bool fast_ok = false;
                     QForecastFastConsts C;
 
@@ -576,7 +575,7 @@ namespace SMC
                             u.randu();
                     } // omp single
 
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
                     std::chrono::high_resolution_clock::time_point t_qf_beg, t_qf_end;
 #ifdef DGTF_USE_OPENMP
 #pragma omp single
@@ -632,7 +631,7 @@ namespace SMC
                         }
                     }
 
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
 #ifdef DGTF_USE_OPENMP
 #pragma omp barrier
 #pragma omp single
@@ -650,7 +649,7 @@ namespace SMC
 #endif
 
                     // Resampling prep timing
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
                     std::chrono::high_resolution_clock::time_point t_rs_beg, t_rs_end;
 #ifdef DGTF_USE_OPENMP
 #pragma omp single
@@ -718,7 +717,7 @@ namespace SMC
                         }
                     } // omp single (resampling prep)
 
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
 #ifdef DGTF_USE_OPENMP
 #pragma omp single
 #endif
@@ -730,7 +729,7 @@ namespace SMC
 #endif
 
                     // Propagation timing
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
                     std::chrono::high_resolution_clock::time_point t_pr_beg, t_pr_end;
 #ifdef DGTF_USE_OPENMP
 #pragma omp single
@@ -834,7 +833,7 @@ namespace SMC
                         weights.at(i) = val - logq.at(i);
                     } // omp for over particles
 
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
 #ifdef DGTF_USE_OPENMP
 #pragma omp barrier
 #pragma omp single
@@ -852,7 +851,7 @@ namespace SMC
 #endif
 
                     // Commit timing
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
                     std::chrono::high_resolution_clock::time_point t_cm_beg, t_cm_end;
 #ifdef DGTF_USE_OPENMP
 #pragma omp single
@@ -894,7 +893,7 @@ namespace SMC
                         }
                     } // omp single commit
 
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
 #ifdef DGTF_USE_OPENMP
 #pragma omp single
 #endif
@@ -906,7 +905,7 @@ namespace SMC
                 } // for t
             } // omp parallel (persistent team)
 
-#ifdef DGTF_TIMING
+#ifdef DGTF_TIMING_SMC
             auto smc_end = T_NOW();
             auto smc_total = T_US(smc_end - smc_start);
             std::cout << "  [VB] SMC took " << smc_total << " microseconds.\n"
