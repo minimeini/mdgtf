@@ -180,10 +180,11 @@ namespace MCMC
             arma::vec ft(y.n_elem, arma::fill::zeros);
             double prior_sd = std::sqrt(model.derr.par1);
 
+            arma::vec lam_old = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val);
+
             for (unsigned int t = 1; t < y.n_elem; t++)
             {
                 double wt_old = wt.at(t);
-                arma::vec lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val);
 
                 double logp_old = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
@@ -191,7 +192,7 @@ namespace MCMC
                     if (!(model.zero.inflated && (model.zero.z.at(i) < EPS)))
                     {
                         // For zero-inflated model, only the y[t] that is not missing taken into account
-                        logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam.at(i), model.dobs.par2, true);
+                        logp_old += ObsDist::loglike(y.at(i), model.dobs.name, lam_old.at(i), model.dobs.par2, true);
                     }
                 } // Checked. OK.
 
@@ -231,7 +232,7 @@ namespace MCMC
                 */
 
                 wt.at(t) = wt_new;
-                lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val); // Checked. OK.
+                arma::vec lam = model.wt2lambda(y, wt, model.seas.period, model.seas.X, model.seas.val); // Checked. OK.
 
                 double logp_new = 0.;
                 for (unsigned int i = t; i < y.n_elem; i++)
@@ -253,6 +254,7 @@ namespace MCMC
                     // accept
                     logps = logp_new;
                     wt_accept.at(t) += 1.;
+                    lam_old = lam;
                 }
                 else
                 {
