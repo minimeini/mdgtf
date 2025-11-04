@@ -1,6 +1,5 @@
 #include <chrono>
 #include "Model.hpp"
-#include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 #include "MCMC.hpp"
 #include "VariationalBayes.hpp"
@@ -61,31 +60,6 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     Rcpp::List opts = SMC::SequentialMonteCarlo::default_settings();
     switch (algo_list[method_name])
     {
-    case AVAIL::Algo::LinearBayes:
-    {
-        opts = LBA::LinearBayes::default_settings();
-        break;
-    }
-    case AVAIL::Algo::MCS:
-    {
-        opts = SMC::MCS::default_settings();
-        break;
-    }
-    case AVAIL::Algo::FFBS:
-    {
-        opts = SMC::FFBS::default_settings();
-        break;
-    }
-    case AVAIL::Algo::TFS:
-    {
-        opts = SMC::TFS::default_settings();
-        break;
-    }
-    case AVAIL::Algo::ParticleLearning:
-    {
-        opts = SMC::PL::default_settings();
-        break;
-    }
     case AVAIL::Algo::MCMC:
     {
         opts = MCMC::Disturbance::default_settings();
@@ -210,125 +184,6 @@ Rcpp::List dgtf_infer(
 
     switch (algo_list[algo_name])
     {
-    case AVAIL::Algo::LinearBayes:
-    {
-        y.clamp(0.01 / static_cast<double>(model.nP), y.max());
-        LBA::LinearBayes linear_bayes(method_settings);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        linear_bayes.filter(model, y);
-        linear_bayes.smoother(model, y);
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-
-        output = linear_bayes.get_output(model);
-
-        {
-            Rcpp::List tmp = linear_bayes.forecast_error(model, y, 1000, loss_func, k, tstart_forecast, tend_forecast);
-            error["forecast"] = tmp;
-        }
-
-        {
-            Rcpp::List tmp = linear_bayes.fitted_error(model, y, 1000, loss_func);
-            error["fitted"] = tmp;
-        }
-
-        break;
-    } // case Linear Bayes
-    case AVAIL::Algo::MCS:
-    {
-        SMC::MCS mcs(model, method_settings);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        mcs.infer(model, y);
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-
-        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-
-        output = mcs.get_output();
-
-        {
-            Rcpp::List tmp = mcs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-            error["forecast"] = tmp;
-        }
-
-        {
-            Rcpp::List tmp = mcs.fitted_error(model, y, loss_func);
-            error["fitted"] = tmp;
-        }
-
-        break;
-    } // case MCS
-    case AVAIL::Algo::FFBS:
-    {
-        SMC::FFBS ffbs(model, method_settings);
-        auto start = std::chrono::high_resolution_clock::now();
-        ffbs.infer(model, y);
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-        output = ffbs.get_output();
-
-        {
-            Rcpp::List tmp = ffbs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-            error["forecast"] = tmp;
-        }
-
-        {
-            Rcpp::List tmp = ffbs.fitted_error(model, y, loss_func);
-            error["fitted"] = tmp;
-        }
-        break;
-    } // case FFBS
-    case AVAIL::Algo::TFS:
-    {
-        SMC::TFS tfs(model, method_settings);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        tfs.infer(model, y);
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-
-        output = tfs.get_output();
-
-        {
-            Rcpp::List tmp = tfs.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-            error["forecast"] = tmp;
-        }
-        
-        {
-            Rcpp::List tmp = tfs.fitted_error(model, y, loss_func);
-            error["fitted"] = tmp;
-        }
-
-        break;
-    } // case TFS
-    case AVAIL::Algo::ParticleLearning:
-    {
-        SMC::PL pl(model, method_settings);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        pl.infer(model, y);
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-
-        output = pl.get_output();
-
-        {
-            Rcpp::List tmp = pl.forecast_error(model, y, loss_func, k, tstart_forecast, tend_forecast);
-            error["forecast"] = tmp;
-        }
-        
-        {
-            Rcpp::List tmp = pl.fitted_error(model, y, loss_func);
-            error["fitted"] = tmp;
-        }
-        break;
-    } // case particle learning
     case AVAIL::Algo::MCMC:
     {
         MCMC::Disturbance mcmc(model, method_settings);
