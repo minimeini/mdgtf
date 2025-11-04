@@ -89,50 +89,6 @@ namespace LBA
         return Rt;
     }
 
-    static arma::mat Rt2Wt(
-        const arma::mat &Rt,
-        const double &W = 0.01,
-        const bool &use_discount = false,
-        const double &delta_discount = 0.95,
-        const std::string &discount_type = "all_lag_elems")
-    {
-        arma::mat Wt(Rt.n_rows, Rt.n_cols, arma::fill::zeros);
-        std::map<std::string, DiscountType> discount_list = map_discount_type();
-
-        if (use_discount)
-        {
-            switch (discount_list[tolower(discount_type)])
-            {
-            case DiscountType::first_elem:
-            {
-                Wt.at(0, 0) = (1. - delta_discount) * Rt.at(0, 0);
-                break;
-            }
-            case DiscountType::all_elems:
-            {
-                // A unknown but general W[t] (could have non-zero off-diagonal values) with discount factor
-                Wt = (1. - delta_discount) * Rt;
-                break;
-            }
-            default:
-            {
-                Wt = (1. - delta_discount) * Rt;
-                break;
-            }
-            }
-        }
-        else
-        {
-            // W[t] = diag(W, 0, ..., 0)
-            Wt.at(0, 0) = W;
-        }
-
-        #ifdef DGTF_DO_BOUND_CHECK
-        bound_check<arma::mat>(Wt, "Rt2Wt: Wt");
-        #endif
-        return Wt;
-    }
-
 
     /**
      * @brief From (a[t], R[t]) to (f[t], q[t]).
