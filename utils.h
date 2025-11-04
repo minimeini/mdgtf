@@ -255,17 +255,6 @@ inline arma::mat inverse(
 }
 
 
-arma::vec logp_shifted(const arma::vec &logp)
-{
-	arma::vec logp_new = logp;
-	double logp_max = logp.max();
-	logp_new.for_each([&logp_max](arma::vec::elem_type &val)
-					  { val -= logp_max; });
-	return logp_new;
-}
-
-
-
 inline double logit(const double &p, const double &m = 1.)
 {
 	double val = p / (1. - p);

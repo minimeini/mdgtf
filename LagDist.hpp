@@ -91,21 +91,6 @@ public:
         return;
     }
 
-    void update_param(const double &par1_new, const double &par2_new, const bool &update_num_lag = true, const unsigned int &max_lag = 50)
-    {
-        par1 = par1_new;
-        par2 = par2_new;
-
-        if (update_num_lag)
-        {
-            nL = get_nlag(name, par1, par2, 0.99, max_lag);
-        }
-
-        Fphi = LagDist::get_Fphi(nL, name, par1, par2);
-
-        return;
-    }
-
     /**
      * @brief Get P.M.F of the lag distribution. [Checked. OK.s]
      *
