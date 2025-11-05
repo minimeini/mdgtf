@@ -7,7 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include "../core/Model.hpp"
+#include "Model.hpp"
 
 
 /**

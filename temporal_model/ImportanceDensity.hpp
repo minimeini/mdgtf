@@ -10,7 +10,7 @@
 #ifdef DGTF_USE_OPENMP
     #include <omp.h>
 #endif
-#include "../core/Model.hpp"
+#include "Model.hpp"
 #include "LinearBayes.hpp"
 
 // [[Rcpp::plugins(cpp17)]]

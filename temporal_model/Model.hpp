@@ -3,12 +3,12 @@
 #define MODEL_H
 
 #include <RcppArmadillo.h>
-#include "ErrDist.hpp"
-#include "SysEq.hpp"
-#include "TransFunc.hpp"
-#include "ObsDist.hpp"
-#include "LinkFunc.hpp"
-#include "Regression.hpp"
+#include "../core/ErrDist.hpp"
+#include "../core/SysEq.hpp"
+#include "../core/TransFunc.hpp"
+#include "../core/ObsDist.hpp"
+#include "../core/LinkFunc.hpp"
+#include "../core/Regression.hpp"
 #include "../utils/utils.h"
 
 // [[Rcpp::plugins(cpp17)]]

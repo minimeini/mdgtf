@@ -7,10 +7,10 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include "../core/Model.hpp"
 #include "../core/LinkFunc.hpp"
 #include "../utils/yjtrans.h"
-#include "../utils/StaticParams.hpp"
+#include "Model.hpp"
+#include "StaticParams.hpp"
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
 
