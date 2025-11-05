@@ -1,8 +1,8 @@
 #include <chrono>
-#include "core/Model.hpp"
-#include "inference/SequentialMonteCarlo.hpp"
-#include "inference/MCMC.hpp"
-#include "inference/VariationalBayes.hpp"
+#include "temporal_model/Model.hpp"
+#include "temporal_model/SequentialMonteCarlo.hpp"
+#include "temporal_model/MCMC.hpp"
+#include "temporal_model/VariationalBayes.hpp"
 
 #include <progress.hpp>
 #include <progress_bar.hpp>
