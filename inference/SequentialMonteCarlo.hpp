@@ -10,7 +10,7 @@
 #ifdef DGTF_USE_OPENMP
 #include <omp.h>
 #endif
-#include "Model.hpp"
+#include "../core/Model.hpp"
 #include "LinearBayes.hpp"
 #include "ImportanceDensity.hpp"
 

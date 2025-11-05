@@ -9,7 +9,7 @@
 #include "ObsDist.hpp"
 #include "LinkFunc.hpp"
 #include "Regression.hpp"
-#include "utils.h"
+#include "../utils/utils.h"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]

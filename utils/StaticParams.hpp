@@ -7,8 +7,8 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include "Model.hpp"
-#include "LinkFunc.hpp"
+#include "../core/Model.hpp"
+#include "../core/LinkFunc.hpp"
 #include "yjtrans.h"
 
 // [[Rcpp::depends(RcppArmadillo)]]

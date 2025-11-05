@@ -3,7 +3,7 @@
 #define REGRESSION_H
 
 #include <RcppArmadillo.h>
-#include "utils.h"
+#include "../utils/utils.h"
 
 
 /**

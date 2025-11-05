@@ -7,12 +7,12 @@
 #include <cmath>
 #include <algorithm>
 #include <RcppArmadillo.h>
-#include "Model.hpp"
-#include "LinkFunc.hpp"
-#include "yjtrans.h"
+#include "../core/Model.hpp"
+#include "../core/LinkFunc.hpp"
+#include "../utils/yjtrans.h"
+#include "../utils/StaticParams.hpp"
 #include "LinearBayes.hpp"
 #include "SequentialMonteCarlo.hpp"
-#include "StaticParams.hpp"
 
 #ifdef DGTF_TIMING_HVA
 #include <chrono>

@@ -4,8 +4,8 @@
 
 
 #include <RcppArmadillo.h>
-#include "utils.h"
-#include "distributions.hpp"
+#include "../utils/utils.h"
+#include "../utils/distributions.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]

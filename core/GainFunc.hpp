@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <RcppArmadillo.h>
 // #include <nlopt.h>
-#include "utils.h"
+#include "../utils/utils.h"
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 

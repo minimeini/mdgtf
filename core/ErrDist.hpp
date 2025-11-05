@@ -3,7 +3,7 @@
 #define ERRDIST_H
 
 #include <RcppArmadillo.h>
-#include "distributions.hpp"
+#include "../utils/distributions.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]

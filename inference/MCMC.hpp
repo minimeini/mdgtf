@@ -8,10 +8,10 @@
 #include <algorithm>
 #include <RcppArmadillo.h>
 #include <pg.h>
-#include "Model.hpp"
-#include "LinkFunc.hpp"
+#include "../core/Model.hpp"
+#include "../core/LinkFunc.hpp"
+#include "../utils/StaticParams.hpp"
 #include "LinearBayes.hpp"
-#include "StaticParams.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,pg)]]
