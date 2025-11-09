@@ -498,7 +498,7 @@ public:
                 unconstrained_params.at(i) = std::log(std::max(dlag.par2, EPS));
                 break;
             }
-            case AVAIL::Param::sp_beta:
+            case AVAIL::Param::cnst_beta:
             {
                 unconstrained_params.at(i) = std::log(std::max(beta, EPS));
                 break;
@@ -539,7 +539,7 @@ public:
                 lag_updated = true;
                 break;
             }
-            case AVAIL::Param::sp_beta:
+            case AVAIL::Param::cnst_beta:
             {
                 beta = std::exp(std::min(unconstrained_params.at(i), UPBND));
                 break;
@@ -619,7 +619,7 @@ public:
                 grad.at(i) = dlag_grad.at(1) + Prior::dlogprior_dpar(dlag.par2, lag_par2_prior, true);
                 break;
             }
-            case AVAIL::Param::sp_beta:
+            case AVAIL::Param::cnst_beta:
             {
                 // dloglik_dlogbeta: gradient of loglike w.r.t. log(beta)
                 // dlogprior_dpar: gradient of log prior w.r.t. log(beta).

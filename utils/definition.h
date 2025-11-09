@@ -64,7 +64,7 @@ public:
         mh_sd,
         lag_par1,
         lag_par2,
-        sp_beta, // cross-regional transmission parameter
+        cnst_beta, // cross-regional transmission parameter
         zintercept,
         zzcoef
     };
@@ -200,10 +200,8 @@ private:
         map["zintercept"] = Param::zintercept;
         map["zzcoef"] = Param::zzcoef;
     
-        map["cross_beta"] = Param::sp_beta;
-        map["sp_beta"] = Param::sp_beta;
-        map["spbeta"] = Param::sp_beta;
-        map["beta"] = Param::sp_beta;
+        map["cnst_beta"] = Param::cnst_beta;
+        map["beta"] = Param::cnst_beta;
 
         return map;
     }
