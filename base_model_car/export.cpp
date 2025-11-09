@@ -48,15 +48,13 @@ Rcpp::List mdgtf_simulate(
 )
 {
     Model model(settings);
-    arma::mat Y;
-    arma::mat Lambda;
-    arma::mat Psi;
-
-    model.simulate(Y, Lambda, Psi, ntime);
+    arma::mat Y, Lambda, wt, Psi;
+    model.simulate(Y, Lambda, wt, Psi, ntime);
 
     return Rcpp::List::create(
         Rcpp::Named("Y") = Y,
         Rcpp::Named("Lambda") = Lambda,
+        Rcpp::Named("wt") = wt,
         Rcpp::Named("Psi") = Psi,
         Rcpp::Named("Rt") = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain),
         Rcpp::Named("model") = settings
@@ -69,6 +67,7 @@ Rcpp::List mdgtf_simulate(
 Rcpp::List mdgtf_infer(
     const Rcpp::List &model_settings,
     const arma::mat &Y_in,
+    const arma::mat &wt_in,
     const std::string &method,
     const Rcpp::List &method_settings
 )
@@ -84,7 +83,7 @@ Rcpp::List mdgtf_infer(
     case AVAIL::Algo::MCMC:
     {
         MCMC mcmc(method_settings);
-        mcmc.infer(model, Y_in);
+        mcmc.infer(model, Y_in, wt_in);
         output = mcmc.get_output();
         break;
     }

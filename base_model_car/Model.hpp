@@ -255,6 +255,7 @@ public:
     void simulate(
         arma::mat &Y, 
         arma::mat &Lambda, 
+        arma::mat &wt,
         arma::mat &Psi, 
         const unsigned int &ntime)
     {
@@ -264,10 +265,10 @@ public:
         Y.zeros();
         Lambda.set_size(nS, ntime + 1);
 
-        Psi.set_size(nS, ntime + 1);
-        Psi.randn();
-        Psi.each_col() %= arma::sqrt(W);
-        Psi = arma::cumsum(Psi, 1);
+        wt.set_size(nS, ntime + 1);
+        wt.randn();
+        wt.each_col() %= arma::sqrt(W);
+        Psi = arma::cumsum(wt, 1);
 
         for (unsigned int t = 1; t <= ntime; t++)
         {
@@ -333,7 +334,7 @@ public:
             Lambda.at(t) = LinkFunc::ft2mu(eta, flink);
         }
 
-        return Lambda;
+        return Lambda; // (nT + 1) x 1
     } // end of compute_intensity_iterative()
 
 
@@ -450,6 +451,33 @@ public:
 
         return dll_dlogbeta;
     } // end of dloglik_dlogbeta()
+
+
+    double dloglik_dlogrho(const unsigned int &s, const arma::vec &y, const arma::vec &lambda)
+    {
+        double dll_dlogrho = 0.0;
+        for (unsigned int t = 1; t < y.n_elem; t++)
+        {
+            dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
+        }
+
+        return dll_dlogrho;
+    } // end of dloglik_dlogrho()
+
+
+    double dloglik_dlogW(const unsigned int &s, const arma::vec &y, const arma::vec &wt)
+    {
+        double dll_dlogW = 0.0;
+        double ntime = 0.0;
+        double res2 = 0.0;
+        for (unsigned int t = 1; t < y.n_elem; t++)
+        {
+            ntime += 1.0;
+            res2 += wt.at(t) * wt.at(t);
+        }
+
+        return - 0.5 * ntime + 0.5 * res2 / std::max(W.at(s), EPS);
+    } // end of dloglik_dlogW()
 
 
     arma::vec get_global_params_unconstrained(const std::vector<std::string> &global_params)
@@ -610,6 +638,111 @@ public:
 
         return grad;
     } // end of dloglik_dglobal_unconstrained()
+
+    arma::vec get_local_params_unconstrained(const unsigned int &s, const std::vector<std::string> &local_params)
+    {
+        std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
+        arma::vec unconstrained_params(local_params.size(), arma::fill::zeros);
+        for (unsigned int i = 0; i < local_params.size(); i++)
+        {
+            switch (static_param_list[tolower(local_params[i])])
+            {
+            case AVAIL::Param::rho:
+            {
+                unconstrained_params.at(i) = std::log(std::max(rho.at(s), EPS));
+                break;
+            }
+            case AVAIL::Param::W:
+            {
+                unconstrained_params.at(i) = std::log(std::max(W.at(s), EPS));
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument(
+                    "Model::get_local_params_unconstrained: unrecognized local parameter name.");
+            }
+            }
+        }
+
+        return unconstrained_params;
+    } // end of get_local_params_unconstrained()
+
+    void update_local_params_unconstrained(
+        const unsigned int &s,
+        const std::vector<std::string> &local_params,
+        const arma::vec &unconstrained_params
+    )
+    {
+        std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
+        for (unsigned int i = 0; i < local_params.size(); i++)
+        {
+            switch (static_param_list[tolower(local_params[i])])
+            {
+            case AVAIL::Param::rho:
+            {
+                rho.at(s) = std::exp(std::min(unconstrained_params.at(i), UPBND));
+                break;
+            }
+            case AVAIL::Param::W:
+            {
+                W.at(s) = std::exp(std::min(unconstrained_params.at(i), UPBND));
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument(
+                    "Model::update_local_params_unconstrained: unrecognized local parameter name.");
+            }
+            }
+        }
+
+        return;
+    } // end of update_local_params_unconstrained()
+
+
+    arma::vec dloglik_dlocal_unconstrained(
+        const unsigned int &s,
+        const std::vector<std::string> &local_params,
+        const arma::vec &y,    // (nT + 1) x 1
+        const arma::vec &lambda,   // (nT + 1) x 1
+        const arma::vec &wt, // (nT + 1) x 1
+        const Prior &rho_prior,
+        const Prior &W_prior
+    )
+    {
+        std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
+        arma::vec grad(local_params.size(), arma::fill::zeros);
+        for (unsigned int i = 0; i < local_params.size(); i++)
+        {
+            switch (static_param_list[tolower(local_params[i])])
+            {
+            case AVAIL::Param::rho:
+            {
+                // dloglik_dlogrho: gradient of loglike w.r.t. log(rho)
+                // dlogprior_dpar: gradient of log prior w.r.t. log(rho).
+                // The inv-gamma prior is placed on rho
+                grad.at(i) = dloglik_dlogrho(s, y, lambda) + Prior::dlogprior_dpar(rho.at(s), rho_prior, true);
+                break;
+            }
+            case AVAIL::Param::W:
+            {
+                // dloglik_dlogW: gradient of loglike w.r.t. log(W)
+                // dlogprior_dpar: gradient of log prior w.r.t. log(W).
+                // The inv-gamma prior is placed on W
+                grad.at(i) = dloglik_dlogW(s, y, wt) + Prior::dlogprior_dpar(W.at(s), W_prior, true);
+                break;
+            }
+            default:
+            {
+                throw std::invalid_argument(
+                    "Model::dloglik_dlocal_unconstrained: unrecognized local parameter name.");
+            }
+            }
+        }
+
+        return grad;
+    } // end of dloglik_dlocal_unconstrained()
 };
 
 #endif
