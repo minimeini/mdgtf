@@ -64,7 +64,9 @@ public:
         mh_sd,
         lag_par1,
         lag_par2,
-        cnst_beta, // cross-regional transmission parameter
+        car_alpha, // spatial effect parameter (CAR)
+        cnst_beta, // cross-regional transmission parameter (constant)
+        car_beta, // cross-regional transmission parameter (CAR)
         zintercept,
         zzcoef
     };
@@ -199,9 +201,13 @@ private:
 
         map["zintercept"] = Param::zintercept;
         map["zzcoef"] = Param::zzcoef;
+
+        map["car_alpha"] = Param::car_alpha;
     
         map["cnst_beta"] = Param::cnst_beta;
         map["beta"] = Param::cnst_beta;
+
+        map["car_beta"] = Param::car_beta;
 
         return map;
     }

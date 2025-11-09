@@ -465,6 +465,26 @@ public:
     } // end of dloglik_dlogrho()
 
 
+    arma::vec dloglik_dlogalpha(const arma::mat &Y, const arma::mat &dll_deta)
+    {
+        // Gradient of the log likelihood w.r.t. log_alpha
+        arma::vec grad(nS, arma::fill::zeros);
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            double spatial_effect = std::exp(log_alpha.at(s));
+            for (unsigned int t = 1; t < Y.n_cols; t++)
+            {
+                grad.at(s) += dll_deta.at(s, t) * spatial_effect;
+            }
+        }
+
+        // Gradient of the CAR prior w.r.t. log_alpha
+        grad -= spatial.car_tau2 * spatial.Q * (log_alpha - spatial.car_mu);
+
+        return grad;
+    } // end of dloglik_dlogalpha()
+
+
     double dloglik_dlogW(const unsigned int &s, const arma::vec &y, const arma::vec &wt)
     {
         double dll_dlogW = 0.0;

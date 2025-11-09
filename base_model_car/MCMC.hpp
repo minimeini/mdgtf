@@ -29,6 +29,8 @@ private:
     unsigned int nburnin = 1000;
     unsigned int nthin = 1;
 
+    bool infer_log_alpha = false;
+
     double car_rho_accept_count = 0.0;
 
     // HMC settings for global parameters
@@ -55,6 +57,16 @@ private:
     // Larger T gives better exploration but higher cost.
     double local_T_target = 1.0;
 
+    // HMC settings for log_alpha
+    bool logalpha_dual_averaging = false;
+    bool logalpha_diagnostics = true;
+    bool logalpha_verbose = false;
+    unsigned int logalpha_nleapfrog = 10;
+    double logalpha_leapfrog_step_size = 0.01;
+    // global_T_target: integration time T = n_leapfrog * epsilon ~= 1-2 (rough heuristic). 
+    // Larger T gives better exploration but higher cost.
+    double logalpha_T_target = 1.0;
+
     // Prior for disturbance wt
     Prior wt_prior;
 
@@ -72,9 +84,11 @@ private:
     arma::vec lag_par1_stored; // nsample x 1
     arma::vec lag_par2_stored;
     arma::vec sp_beta_stored;
+
     arma::vec car_mu_stored;
     arma::vec car_tau2_stored;
     arma::vec car_rho_stored;
+    arma::mat car_alpha_stored; // nS x nsample
 
     // Storage for local parameter samples
     arma::mat rho_stored; // nS x nsample
@@ -97,6 +111,13 @@ private:
     arma::mat local_grad_norm; // nS x niter
     arma::mat local_nleapfrog_stored; // nS x nburnin
     arma::mat local_leapfrog_step_size_stored; // nS x nburnin
+
+    // Store log_alpha diagnostics
+    double logalpha_accept_count = 0.0;
+    arma::vec logalpha_energy_diff; // niter x 1
+    arma::vec logalpha_grad_norm; // niter x 1
+    arma::vec logalpha_nleapfrog_stored; // nburnin x 1
+    arma::vec logalpha_leapfrog_step_size_stored; // nburnin x 1
 
 public:
     
@@ -140,6 +161,13 @@ public:
         if (opts.containsElementNamed("nthin"))
         {
             nthin = Rcpp::as<unsigned int>(opts["nthin"]);
+        }
+
+        logalpha_accept_count = 0.0;
+        infer_log_alpha = false;
+        if (opts.containsElementNamed("infer_log_alpha"))
+        {
+            infer_log_alpha = Rcpp::as<bool>(opts["infer_log_alpha"]);
         }
         
         if (opts.containsElementNamed("wt"))
@@ -312,6 +340,47 @@ public:
             }
         }
 
+        if (opts.containsElementNamed("logalpha_hmc"))
+        {
+            Rcpp::List logalpha_hmc_opts = Rcpp::as<Rcpp::List>(opts["logalpha_hmc"]);
+
+            logalpha_nleapfrog = 10;
+            if (logalpha_hmc_opts.containsElementNamed("nleapfrog"))
+            {
+                logalpha_nleapfrog = Rcpp::as<unsigned int>(logalpha_hmc_opts["nleapfrog"]);
+            }
+
+            logalpha_leapfrog_step_size = 0.01;
+            if (logalpha_hmc_opts.containsElementNamed("leapfrog_step_size"))
+            {
+                logalpha_leapfrog_step_size = Rcpp::as<double>(logalpha_hmc_opts["leapfrog_step_size"]);
+            }
+
+            logalpha_dual_averaging = false;
+            if (logalpha_hmc_opts.containsElementNamed("dual_averaging"))
+            {
+                logalpha_dual_averaging = Rcpp::as<bool>(logalpha_hmc_opts["dual_averaging"]);
+            }
+
+            logalpha_diagnostics = true;
+            if (logalpha_hmc_opts.containsElementNamed("diagnostics"))
+            {
+                logalpha_diagnostics = Rcpp::as<bool>(logalpha_hmc_opts["diagnostics"]);
+            }
+
+            logalpha_verbose = false;
+            if (logalpha_hmc_opts.containsElementNamed("verbose"))
+            {
+                logalpha_verbose = Rcpp::as<bool>(logalpha_hmc_opts["verbose"]);
+            }
+
+            logalpha_T_target = 1.0;
+            if (logalpha_hmc_opts.containsElementNamed("T_target"))
+            {
+                logalpha_T_target = Rcpp::as<double>(logalpha_hmc_opts["T_target"]);
+            }
+        }
+
         return;
     } // end of constructor from Rcpp::List
 
@@ -382,10 +451,20 @@ public:
             Rcpp::Named("T_target") = 1.0
         );
 
+        Rcpp::List logalpha_hmc_opts = Rcpp::List::create(
+            Rcpp::Named("nleapfrog") = 10,
+            Rcpp::Named("leapfrog_step_size") = 0.01,
+            Rcpp::Named("dual_averaging") = false,
+            Rcpp::Named("diagnostics") = true,
+            Rcpp::Named("verbose") = false,
+            Rcpp::Named("T_target") = 1.0
+        );
+
         Rcpp::List mcmc_opts = Rcpp::List::create(
             Rcpp::Named("nsample") = 1000,
             Rcpp::Named("nburnin") = 1000,
             Rcpp::Named("nthin") = 1,
+            Rcpp::Named("infer_log_alpha") = false,
             Rcpp::Named("wt") = wt_opts,
             Rcpp::Named("car") = car_opts,
             Rcpp::Named("rho") = rho_opts,
@@ -394,7 +473,8 @@ public:
             Rcpp::Named("lag_par2") = lag_par2_opts,
             Rcpp::Named("beta") = beta_opts,
             Rcpp::Named("global_hmc") = global_hmc_opts,
-            Rcpp::Named("local_hmc") = local_hmc_opts
+            Rcpp::Named("local_hmc") = local_hmc_opts,
+            Rcpp::Named("logalpha_hmc") = logalpha_hmc_opts
         );
 
         return mcmc_opts;
@@ -563,6 +643,33 @@ public:
         } // end of s loop
     } // end of update_wt()
 
+    double compute_log_joint_logalpha(
+        const Model &model, 
+        const arma::mat &Y, 
+        const arma::mat &wt
+    )
+    {
+        double logp = 0.0;
+        for (unsigned int s = 0; s < model.nS; s++)
+        {
+            arma::vec psi_s = arma::cumsum(wt.row(s).t());
+            arma::vec lam_s = model.compute_intensity_iterative(s, Y, psi_s);
+            for (unsigned int t = 1; t <= Y.n_cols - 1; t++)
+            {
+                // Compute loglikelihood of y[s, t]
+                logp += ObsDist::loglike(
+                    Y.at(s, t), model.dobs, lam_s.at(t), model.rho.at(s), true
+                );
+            }
+        }
+
+        // Add CAR prior for log_alpha
+        arma::vec alpha_diff = model.log_alpha - model.spatial.car_mu;
+        logp += - 0.5 * model.spatial.car_tau2 * arma::dot(alpha_diff, model.spatial.Q * alpha_diff);
+
+        return logp;
+    }
+
     double compute_log_joint_global(
         const Model &model, 
         const arma::mat &Y, 
@@ -632,6 +739,86 @@ public:
         }
 
         return logp;
+    }
+
+    double update_log_alpha(
+        Model &model,
+        double &energy_diff,
+        double &grad_norm_out,
+        const arma::mat &Y, 
+        const arma::mat &wt,
+        const double &leapfrog_step_size,
+        const unsigned int &n_leapfrog = 10
+    )
+    {
+        // Precompute hPsi (depends only on wt)
+        arma::mat Psi = arma::cumsum(wt, 1);
+        arma::mat hPsi = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain);
+        arma::mat dll_deta = model.dloglik_deta(Y, hPsi); // nS x (nT + 1)
+
+        double logp_current = compute_log_joint_logalpha(model, Y, wt);
+        double energy_current = -logp_current;
+
+        arma::vec log_alpha_current = model.log_alpha;
+        arma::vec q = log_alpha_current;
+
+        // sample an initial momentum
+        arma::vec p = arma::randn(q.n_elem);
+        double kinetic_current = 0.5 * arma::dot(p, p);
+
+        arma::vec grad = model.dloglik_dlogalpha(Y, dll_deta);
+        grad *= -1.0; // Convert to gradient of potential energy
+        grad_norm_out = arma::norm(grad, 2);
+
+        // Make a half step for momentum at the beginning
+        p -= 0.5 * leapfrog_step_size * grad;
+        for (unsigned int i = 0; i < n_leapfrog; i++)
+        {
+            // Make a full step for the position
+            q += leapfrog_step_size * p;
+            model.log_alpha = q;
+
+            // Compute the new gradient
+            dll_deta = model.dloglik_deta(Y, hPsi); // nS x (nT + 1)
+            grad = model.dloglik_dlogalpha(Y, dll_deta);
+            grad *= -1.0; // Convert to gradient of potential energy
+
+            // Make a full step for the momentum, except at the end of trajectory
+            if (i != n_leapfrog - 1)
+            {
+                p -= leapfrog_step_size * grad;
+            }
+        } // end of leapfrog steps
+
+        p -= 0.5 * leapfrog_step_size * grad; // Make a half step for momentum at the end
+        p *= -1; // Negate momentum to make the proposal symmetric
+
+        double logp_proposed = compute_log_joint_logalpha(model, Y, wt);
+        double energy_proposed = -logp_proposed;
+        double kinetic_proposed = 0.5 * arma::dot(p, p);
+
+        double H_proposed = energy_proposed + kinetic_proposed;
+        double H_current = energy_current + kinetic_current;
+        energy_diff = H_proposed - H_current;
+
+        if (!std::isfinite(H_current) || !std::isfinite(H_proposed) || std::abs(energy_diff) > 100.0)
+        {
+            // Reject if either log probability is not finite or HMC diverged
+            model.log_alpha = log_alpha_current;
+            return 0.0;
+        }
+        else
+        {
+            double log_accept_ratio = H_current - H_proposed;
+            if (std::log(runif()) >= log_accept_ratio)
+            {
+                // Reject: revert to current parameters
+                model.log_alpha = log_alpha_current;
+            }
+
+            double accept_prob = std::min(1.0, std::exp(log_accept_ratio));
+            return accept_prob;
+        }
     }
 
 
@@ -879,8 +1066,13 @@ public:
         }
     }
 
-    void check_grad_local(Model &model, const unsigned int &s, const arma::vec &y, const arma::vec &lambda, const arma::vec &wt,
-                    const std::vector<std::string> &names)
+    void check_grad_local(
+        Model &model, 
+        const unsigned int &s, 
+        const arma::vec &y, 
+        const arma::vec &lambda, 
+        const arma::vec &wt,
+        const std::vector<std::string> &names)
     {
         arma::vec q = model.get_local_params_unconstrained(s, names);
         arma::vec g = model.dloglik_dlocal_unconstrained(s, names, y, lambda, wt, rho_prior, W_prior);
@@ -899,6 +1091,34 @@ public:
                         << " rel.err=" << std::fabs(g[i] - fd) / std::max(1.0, std::fabs(fd)) << "\n";
             model.update_local_params_unconstrained(s, names, q); // restore
         }
+    }
+
+    void check_grad_logalpha(Model &model, const arma::mat &Y, const arma::mat &wt)
+    {
+        arma::mat Psi = arma::cumsum(wt, 1);
+        arma::mat hPsi = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain);
+        arma::mat dll_deta = model.dloglik_deta(Y, hPsi); // nS x (nT + 1)
+
+        arma::vec q = model.log_alpha;
+        arma::vec g = model.dloglik_dlogalpha(Y, dll_deta);
+        double eps_fd = 1e-5;
+        for (unsigned int i = 0; i < q.n_elem; i++)
+        {
+            arma::vec q1 = q, q2 = q;
+            q1[i] += eps_fd;
+            q2[i] -= eps_fd;
+            model.log_alpha = q1;
+            double lp1 = compute_log_joint_logalpha(model, Y, wt);
+            model.log_alpha = q2;
+            double lp2 = compute_log_joint_logalpha(model, Y, wt);
+            double fd = (lp1 - lp2) / (2 * eps_fd);
+            Rcpp::Rcout << "log_alpha " << i << " analytic=" << g[i] << " fd=" << fd
+                        << " rel.err=" << std::fabs(g[i] - fd) / std::max(1.0, std::fabs(fd)) << "\n";
+
+            model.log_alpha = q; // restore
+        }
+
+        return;
     }
 
 
@@ -960,6 +1180,34 @@ public:
         arma::vec local_t0_da(local_mu_da.n_elem, arma::fill::value(10.0));
         arma::vec local_kappa_da(local_mu_da.n_elem, arma::fill::value(0.75));
         arma::uvec local_adapt_count(local_mu_da.n_elem, arma::fill::zeros);
+
+        if (infer_log_alpha)
+        {
+            car_alpha_stored = arma::mat(model.nS, nsample, arma::fill::zeros);
+
+            if (logalpha_diagnostics)
+            {
+                logalpha_energy_diff = arma::vec(niter, arma::fill::zeros);
+                logalpha_grad_norm = arma::vec(niter, arma::fill::zeros);
+
+                if (logalpha_dual_averaging)
+                {
+                    logalpha_leapfrog_step_size_stored = arma::vec(nburnin + 1, arma::fill::zeros);
+                    logalpha_nleapfrog_stored = arma::vec(nburnin + 1, arma::fill::zeros);
+                }
+            }
+
+        }
+
+        double logalpha_mu_da = std::log(10.0 * logalpha_leapfrog_step_size); // bias center
+        double logalpha_log_eps = std::log(logalpha_leapfrog_step_size);
+        double logalpha_log_eps_bar = logalpha_log_eps;
+        double logalpha_h_bar = 0.0;
+        double logalpha_gamma_da = 0.05;
+        double logalpha_t0_da = 10.0;
+        double logalpha_kappa_da = 0.75;
+        unsigned int logalpha_adapt_count = 0;
+
 
         if (car_prior.infer)
         {
@@ -1130,6 +1378,53 @@ public:
                 } // end of s loop
             } // end of local params update
 
+            if (infer_log_alpha)
+            {
+                if (logalpha_verbose && iter % 100 == 0 && iter < nburnin)
+                {
+                    check_grad_logalpha(model, Y, wt);
+                }
+
+                double energy_diff, grad_norm;
+                double logalpha_hmc_accept_prob = update_log_alpha(
+                    model, energy_diff, grad_norm, Y, wt, 
+                    logalpha_leapfrog_step_size, logalpha_nleapfrog
+                );
+                logalpha_accept_count += logalpha_hmc_accept_prob;
+
+                if (logalpha_diagnostics)
+                {
+                    logalpha_energy_diff.at(iter) = energy_diff;
+                    logalpha_grad_norm.at(iter) = grad_norm;
+                }
+
+                if (logalpha_dual_averaging)
+                {
+                    if (iter < nburnin)
+                    {
+                        logalpha_adapt_count++;
+                        double t = (double)logalpha_adapt_count;
+                        logalpha_h_bar = (1.0 - 1.0 / (t + logalpha_t0_da)) * logalpha_h_bar + (1.0 / (t + logalpha_t0_da)) * (target_accept - logalpha_hmc_accept_prob);
+                        logalpha_log_eps = logalpha_mu_da - (std::sqrt(t) / logalpha_gamma_da) * logalpha_h_bar;
+                        logalpha_leapfrog_step_size = clamp_eps(std::exp(logalpha_log_eps));
+                        double w = std::pow(t, -logalpha_kappa_da);
+                        logalpha_log_eps_bar = w * std::log(logalpha_leapfrog_step_size) + (1.0 - w) * logalpha_log_eps_bar;
+                    }
+                    else if (iter == nburnin)
+                    {
+                        logalpha_leapfrog_step_size = clamp_eps(std::exp(logalpha_log_eps_bar));
+                        unsigned nlf = (unsigned)std::lround(logalpha_T_target / logalpha_leapfrog_step_size);
+                        logalpha_nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
+                    }
+
+                    if (logalpha_diagnostics && iter <= nburnin)
+                    {
+                        logalpha_nleapfrog_stored.at(iter) = logalpha_nleapfrog;
+                        logalpha_leapfrog_step_size_stored.at(iter) = logalpha_leapfrog_step_size;
+                    }
+                } // end of dual averaging
+            } // end of infer_log_alpha
+
 
 
             // Store samples after burn-in and thinning
@@ -1177,6 +1472,11 @@ public:
                     {
                         W_stored(s, sample_idx) = model.W.at(s);
                     }
+                }
+
+                if (infer_log_alpha)
+                {
+                    car_alpha_stored.col(sample_idx) = model.log_alpha;
                 }
             } // end of store samples
 
@@ -1275,6 +1575,33 @@ public:
                 );
             }
         } // end of local params output
+
+        if (infer_log_alpha)
+        {
+            output["log_alpha"] = Rcpp::wrap(car_alpha_stored);
+            output["logalpha_accept_rate"] = logalpha_accept_count / (nburnin + nsample * nthin);
+            output["logalpha_hmc_settings"] = Rcpp::List::create(
+                Rcpp::Named("nleapfrog") = logalpha_nleapfrog,
+                Rcpp::Named("leapfrog_step_size") = logalpha_leapfrog_step_size
+            );
+
+            if (logalpha_diagnostics && logalpha_dual_averaging)
+            {
+                output["logalpha_diagnostics"] = Rcpp::List::create(
+                    Rcpp::Named("energy_diff") = logalpha_energy_diff,
+                    Rcpp::Named("grad_norm") = logalpha_grad_norm,
+                    Rcpp::Named("n_leapfrog") = logalpha_nleapfrog_stored,
+                    Rcpp::Named("step_size") = logalpha_leapfrog_step_size_stored
+                );
+            }
+            else if (logalpha_diagnostics)
+            {
+                output["logalpha_diagnostics"] = Rcpp::List::create(
+                    Rcpp::Named("energy_diff") = logalpha_energy_diff,
+                    Rcpp::Named("grad_norm") = logalpha_grad_norm
+                );
+            }
+        }
 
         return output;
     } // end of get_output()
