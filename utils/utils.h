@@ -254,6 +254,23 @@ inline arma::mat inverse(
 	return mat_inv;
 }
 
+/**
+ * @brief Standardize a value from [min_val, max_val] to [0, 1]
+ * 
+ * @param val 
+ * @param min_val 
+ * @param max_val 
+ */
+inline double standardize(
+	const double &val, 
+	const double &min_val, 
+	const double &max_val, 
+	const bool &clamp = true)
+{
+	double val_new = (val - min_val) / (max_val - min_val);
+	return clamp ? std::min(std::max(val_new, EPS), 1.0 - EPS) : val_new;
+}
+
 
 inline double logit(const double &p, const double &m = 1.)
 {

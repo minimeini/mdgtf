@@ -9,6 +9,7 @@
 #include <RcppArmadillo.h>
 #include <pg.h>
 #include "../core/LinkFunc.hpp"
+#include "../core/ApproxDisturbance.hpp"
 #include "Model.hpp"
 #include "StaticParams.hpp"
 #include "LinearBayes.hpp"

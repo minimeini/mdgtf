@@ -268,6 +268,99 @@ public:
         return get_nlag(dlag.name, dlag.par1, dlag.par2);
     }
 
+    void update_nlag(
+        const double &prob = 0.995,
+        const unsigned int &max_lag = 50,
+        const unsigned int &min_lag = MIN_LAG)
+    {
+        if (prob < 0 || prob > 1)
+        {
+            throw std::invalid_argument("LagDist::get_nlag: probability must in (0, 1).");
+        }
+        double nlag_ = (double)min_lag;
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
+
+        switch (lag_list[name])
+        {
+        case AVAIL::Dist::lognorm:
+        {
+            nlag_ = R::qlnorm(prob, par1, std::sqrt(par2), 1, 0);
+            break;
+        }
+        case AVAIL::Dist::nbinomp:
+        {
+            // par1: kappa; par2: r
+            nlag_ = R::qnbinom(prob, par1, 1.0 - par1, true, false);
+            break;
+        }
+        case AVAIL::Dist::nbinomm:
+        {
+            // double prob_succ = par2 / (par1 + par2);
+            // return R::rnbinom(par2, prob_succ);
+            double prob_succ = par2 / (par1 + par2);
+            nlag_ = R::qnbinom(prob, par2, prob_succ, true, false);
+            break;
+        }
+        case AVAIL::Dist::gamma:
+        {
+            nlag_ = R::qgamma(prob, par1, 1.0/par2, true, false);
+            break;
+        }
+        case AVAIL::Dist::uniform:
+        {
+            nlag_ = par1;
+            break;
+        }
+        default:
+        {
+            throw std::invalid_argument("LagDist::get_nlag - unknown lag distribution.");
+        }
+        }
+
+        unsigned int nlag = static_cast<unsigned int>(nlag_);
+        nL = std::min(std::max(nlag, min_lag), max_lag);
+        return;
+    }
+
+    void update_Fphi()
+    {
+        Fphi.clear();
+        std::map<std::string, AVAIL::Dist> lag_list = LagDist::lag_list;
+
+        switch (lag_list[name])
+        {
+        case AVAIL::Dist::lognorm:
+        {
+            Fphi = lognorm::dlognorm(nL, par1, par2);
+            break;
+        }
+        case AVAIL::Dist::nbinomp:
+        {
+            Fphi = nbinom::dnbinom(nL, par1, par2);
+            break;
+        }
+        case AVAIL::Dist::uniform:
+        {
+            Fphi.set_size(nL);
+            Fphi.ones();
+            break;
+        }
+        default:
+            throw std::invalid_argument("Supported lag distributions: 'lognorm', 'nbinom'.");
+        }
+        return;
+    }
+
+    void update_params(const double &par1_in, const double &par2_in)
+    {
+        par1 = par1_in;
+        par2 = par2_in;
+        update_nlag();
+        update_Fphi();
+        // Also need to update model.nP if using truncated lag distribution.
+        return;
+    }
+
 private:
     static std::map<std::string, AVAIL::Dist> map_lag_dist()
     {

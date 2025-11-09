@@ -64,6 +64,7 @@ public:
         mh_sd,
         lag_par1,
         lag_par2,
+        sp_beta, // cross-regional transmission parameter
         zintercept,
         zzcoef
     };
@@ -176,19 +177,33 @@ private:
 
         map["W"] = Param::W;
         map["w"] = Param::W;
+
         map["seas"] = Param::seas;
+
         map["rho"] = Param::rho;
         map["delta"] = Param::rho;
+
         map["kappa"] = Param::kappa;
+
         map["r"] = Param::r;
+
         map["mu"] = Param::mu;
+
         map["sd"] = Param::sd;
+
         map["lag_par1"] = Param::lag_par1;
         map["par1"] = Param::lag_par1;
+
         map["lag_par2"] = Param::lag_par2;
         map["par2"] = Param::lag_par2;
+
         map["zintercept"] = Param::zintercept;
         map["zzcoef"] = Param::zzcoef;
+    
+        map["cross_beta"] = Param::sp_beta;
+        map["sp_beta"] = Param::sp_beta;
+        map["spbeta"] = Param::sp_beta;
+        map["beta"] = Param::sp_beta;
 
         return map;
     }
