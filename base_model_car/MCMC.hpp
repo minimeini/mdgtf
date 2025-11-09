@@ -21,10 +21,6 @@
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
 
-#if !defined(MDGTF_MCMC_DEBUG)
-    #define MDGTF_MCMC_DEBUG
-#endif
-
 
 class MCMC
 {
@@ -34,9 +30,13 @@ private:
     unsigned int nthin = 1;
 
     bool do_dual_averaging = false;
-    bool global_diagnostics = false;
+    bool global_diagnostics = true;
+    bool global_verbose = false;
     unsigned int global_nleapfrog = 10;
     double global_leapfrog_step_size = 0.01;
+    // global_T_target: integration time T = n_leapfrog * epsilon ~= 1-2 (rough heuristic). 
+    // Larger T gives better exploration but higher cost.
+    double global_T_target = 1.0;
 
     double rho_accept_count = 0.0;
     double global_accept_count = 0.0;
@@ -228,10 +228,22 @@ public:
                 do_dual_averaging = Rcpp::as<bool>(global_hmc_opts["dual_averaging"]);
             }
 
-            global_diagnostics = false;
+            global_diagnostics = true;
             if (global_hmc_opts.containsElementNamed("diagnostics"))
             {
                 global_diagnostics = Rcpp::as<bool>(global_hmc_opts["diagnostics"]);
+            }
+
+            global_verbose = false;
+            if (global_hmc_opts.containsElementNamed("verbose"))
+            {
+                global_verbose = Rcpp::as<bool>(global_hmc_opts["verbose"]);
+            }
+
+            global_T_target = 1.0;
+            if (global_hmc_opts.containsElementNamed("T_target"))
+            {
+                global_T_target = Rcpp::as<double>(global_hmc_opts["T_target"]);
             }
         }
 
@@ -291,7 +303,9 @@ public:
             Rcpp::Named("nleapfrog") = 10,
             Rcpp::Named("leapfrog_step_size") = 0.01,
             Rcpp::Named("dual_averaging") = false,
-            Rcpp::Named("diagnostics") = false
+            Rcpp::Named("diagnostics") = true,
+            Rcpp::Named("verbose") = false,
+            Rcpp::Named("T_target") = 1.0
         );
 
         Rcpp::List mcmc_opts = Rcpp::List::create(
@@ -652,7 +666,7 @@ public:
         }
     }
 
-    #ifdef MDGTF_MCMC_DEBUG
+
     void check_grad(Model &model, const arma::mat &Y, const arma::mat &wt,
                     const std::vector<std::string> &names)
     {
@@ -677,7 +691,7 @@ public:
             model.update_global_params_unconstrained(names, q); // restore
         }
     }
-    #endif
+
 
     void infer(Model &model, const arma::mat &Y)
     {
@@ -698,7 +712,6 @@ public:
         // Clamp helpers
         auto clamp_eps = [](double x)
         { return std::max(1e-3, std::min(0.1, x)); };
-        double T_target = 1.0;
         unsigned min_leaps = 3, max_leaps = 128;
 
         if (!global_params_selected.empty() && global_diagnostics)
@@ -767,12 +780,11 @@ public:
 
             if (!global_params_selected.empty())
             {
-                #ifdef MDGTF_MCMC_DEBUG
-                if (iter % 100 == 0 && iter < nburnin)
+                if (global_verbose && iter % 100 == 0 && iter < nburnin)
                 {
                     check_grad(model, Y, wt, global_params_selected);
                 }
-                #endif
+
 
                 double energy_diff, grad_norm;
                 double global_hmc_accept_prob = update_global_params(
@@ -805,8 +817,8 @@ public:
                     else if (iter == nburnin)
                     {
                         global_leapfrog_step_size = clamp_eps(std::exp(log_eps_bar));
-                        // unsigned nlf = (unsigned)std::lround(T_target / global_leapfrog_step_size);
-                        // global_nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
+                        unsigned nlf = (unsigned)std::lround(global_T_target / global_leapfrog_step_size);
+                        global_nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
                     }
 
                     if (global_diagnostics && iter <= nburnin)
