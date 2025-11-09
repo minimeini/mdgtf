@@ -481,7 +481,7 @@ public:
         {
             if (jacobian) // plus jacobian
             {
-                out = -prior.par1 + prior.par2 / val;
+                out = -(prior.par1 + 1.0) + prior.par2 / val;
                 if (neg_invgamma)
                 {
                     out *= -1.;
@@ -489,14 +489,13 @@ public:
             }
             else
             {
-                out = -(prior.par1 + 1.) / val;
-                out += prior.par2 / std::pow(val, 2.);
+                out = -(prior.par1 + 1.0) / val + prior.par2 / (val * val);
             }
             break;
         }
         case AVAIL::Dist::gaussian: // whole real line
         {
-            out = -val / prior.par2;
+            out = - (val - prior.par1) / prior.par2;
             break;
         }
         case AVAIL::Dist::gamma: // non-negative
