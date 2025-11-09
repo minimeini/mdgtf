@@ -6,7 +6,6 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include <random>
 
 #ifdef DGTF_USE_OPENMP
   #include <omp.h>
@@ -22,20 +21,9 @@
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
 
-// Thread-local RNG helpers (OpenMP-safe)
-inline double rnorm(double mean, double sd)
-{
-    thread_local std::mt19937_64 eng(std::random_device{}());
-    std::normal_distribution<double> dist(mean, sd);
-    return dist(eng);
-}
-
-inline double runif()
-{
-    thread_local std::mt19937_64 eng(std::random_device{}());
-    std::uniform_real_distribution<double> dist(0.0, 1.0);
-    return dist(eng);
-}
+#if !defined(MDGTF_MCMC_DEBUG)
+    #define MDGTF_MCMC_DEBUG
+#endif
 
 
 class MCMC
@@ -45,6 +33,8 @@ private:
     unsigned int nburnin = 1000;
     unsigned int nthin = 1;
 
+    bool do_dual_averaging = false;
+    bool global_diagnostics = false;
     unsigned int global_nleapfrog = 10;
     double global_leapfrog_step_size = 0.01;
 
@@ -77,6 +67,12 @@ private:
 
     arma::cube wt_stored; // nS x (nT + 1) x nsample
     arma::mat wt_accept; // nS x (nT + 1)
+
+    // Store diagnostics
+    arma::vec global_energy_diff;
+    arma::vec global_grad_norm;
+    arma::vec global_n_leapfrog;
+    arma::vec global_step_size;
 
 public:
     
@@ -225,6 +221,18 @@ public:
             {
                 global_leapfrog_step_size = Rcpp::as<double>(global_hmc_opts["leapfrog_step_size"]);
             }
+
+            do_dual_averaging = false;
+            if (global_hmc_opts.containsElementNamed("dual_averaging"))
+            {
+                do_dual_averaging = Rcpp::as<bool>(global_hmc_opts["dual_averaging"]);
+            }
+
+            global_diagnostics = false;
+            if (global_hmc_opts.containsElementNamed("diagnostics"))
+            {
+                global_diagnostics = Rcpp::as<bool>(global_hmc_opts["diagnostics"]);
+            }
         }
 
         return;
@@ -281,7 +289,9 @@ public:
 
         Rcpp::List global_hmc_opts = Rcpp::List::create(
             Rcpp::Named("nleapfrog") = 10,
-            Rcpp::Named("leapfrog_step_size") = 0.01
+            Rcpp::Named("leapfrog_step_size") = 0.01,
+            Rcpp::Named("dual_averaging") = false,
+            Rcpp::Named("diagnostics") = false
         );
 
         Rcpp::List mcmc_opts = Rcpp::List::create(
@@ -471,7 +481,6 @@ public:
         const bool &global_or_local = true // true for global, false for local
     )
     {
-        
         double logp = 0.0;
         for (unsigned int s = 0; s < model.nS; s++)
         {
@@ -521,7 +530,7 @@ public:
 
             if (beta_prior.infer)
             {
-                logp += Prior::dprior(model.beta, beta_prior, true, true);
+                logp += Prior::dprior(std::log(std::max(model.beta, EPS)), beta_prior, true, true);
             }
         }
 
@@ -538,6 +547,8 @@ public:
      */
     double update_global_params(
         Model &model, 
+        double &energy_diff,
+        double &grad_norm_out,
         const std::vector<std::string> &global_params_selected,
         const arma::mat &Y, 
         const arma::mat &wt,
@@ -569,6 +580,8 @@ public:
         );
 
         grad *= -1.0; // Convert to gradient of potential energy
+
+        grad_norm_out = arma::norm(grad, 2);
 
         // Make a half step for momentum at the beginning
         p -= 0.5 * leapfrog_step_size * grad;
@@ -602,7 +615,11 @@ public:
         double energy_proposed = -logp_proposed;
         double kinetic_proposed = 0.5 * arma::dot(p, p);
 
-        if (!std::isfinite(logp_current) || !std::isfinite(logp_proposed))
+        double H_proposed = energy_proposed + kinetic_proposed;
+        double H_current = energy_current + kinetic_current;
+        energy_diff = H_proposed - H_current;
+
+        if (!std::isfinite(H_current) || !std::isfinite(H_proposed) || std::abs(energy_diff) > 100.0)
         {
             // Reject if either log probability is not finite
             model.update_global_params_unconstrained(global_params_selected, global_params_current);
@@ -610,8 +627,21 @@ public:
         }
         else
         {
-            double log_accept_ratio = energy_current - energy_proposed + kinetic_current - kinetic_proposed;
-            if (std::log(runif()) >= log_accept_ratio)
+            double log_accept_ratio = H_current - H_proposed;
+            if (std::log(runif()) < log_accept_ratio)
+            {
+                // Accept
+                if (lag_par1_prior.infer || lag_par2_prior.infer)
+                {
+                    model.dlag.update_nlag();
+                    model.dlag.update_Fphi();
+                    if (model.dlag.truncated)
+                    {
+                        model.nP = model.dlag.nL;
+                    }
+                }
+            }
+            else
             {
                 // Reject: revert to current parameters
                 model.update_global_params_unconstrained(global_params_selected, global_params_current);
@@ -621,6 +651,33 @@ public:
             return accept_prob;
         }
     }
+
+    #ifdef MDGTF_MCMC_DEBUG
+    void check_grad(Model &model, const arma::mat &Y, const arma::mat &wt,
+                    const std::vector<std::string> &names)
+    {
+        arma::vec q = model.get_global_params_unconstrained(names);
+        arma::mat Psi = arma::cumsum(wt, 1);
+        arma::mat hPsi = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain);
+        arma::vec g = model.dloglik_dglobal_unconstrained(names, Y, hPsi,
+                                                          lag_par1_prior, lag_par2_prior, beta_prior);
+        double eps_fd = 1e-5;
+        for (unsigned int i = 0; i < q.n_elem; i++)
+        {
+            arma::vec q1 = q, q2 = q;
+            q1[i] += eps_fd;
+            q2[i] -= eps_fd;
+            model.update_global_params_unconstrained(names, q1);
+            double lp1 = compute_log_joint(model, Y, wt, true);
+            model.update_global_params_unconstrained(names, q2);
+            double lp2 = compute_log_joint(model, Y, wt, true);
+            double fd = (lp1 - lp2) / (2 * eps_fd);
+            Rcpp::Rcout << "Param " << i << " analytic=" << g[i] << " fd=" << fd
+                        << " rel.err=" << std::fabs(g[i] - fd) / std::max(1.0, std::fabs(fd)) << "\n";
+            model.update_global_params_unconstrained(names, q); // restore
+        }
+    }
+    #endif
 
     void infer(Model &model, const arma::mat &Y)
     {
@@ -643,6 +700,18 @@ public:
         { return std::max(1e-3, std::min(0.1, x)); };
         double T_target = 1.0;
         unsigned min_leaps = 3, max_leaps = 128;
+
+        if (!global_params_selected.empty() && global_diagnostics)
+        {
+            global_energy_diff = arma::vec(niter, arma::fill::zeros);
+            global_grad_norm = arma::vec(niter, arma::fill::zeros);
+            
+            if (do_dual_averaging)
+            {
+                global_n_leapfrog = arma::vec(nburnin + 1, arma::fill::zeros);
+                global_step_size = arma::vec(nburnin + 1, arma::fill::zeros);
+            }
+        }
 
         if (car_prior.infer)
         {
@@ -698,29 +767,53 @@ public:
 
             if (!global_params_selected.empty())
             {
+                #ifdef MDGTF_MCMC_DEBUG
+                if (iter % 100 == 0 && iter < nburnin)
+                {
+                    check_grad(model, Y, wt, global_params_selected);
+                }
+                #endif
+
+                double energy_diff, grad_norm;
                 double global_hmc_accept_prob = update_global_params(
-                    model, global_params_selected, 
-                    Y, wt, 
+                    model, energy_diff, grad_norm, 
+                    global_params_selected, Y, wt, 
                     global_leapfrog_step_size, 
                     global_nleapfrog
                 );
                 global_accept_count += global_hmc_accept_prob;
 
-                if (iter < nburnin)
+                if (global_diagnostics)
                 {
-                    adapt_count++;
-                    double t = (double)adapt_count;
-                    h_bar = (1.0 - 1.0 / (t + t0_da)) * h_bar + (1.0 / (t + t0_da)) * (target_accept - global_hmc_accept_prob);
-                    log_eps = mu_da - (std::sqrt(t) / gamma_da) * h_bar;
-                    global_leapfrog_step_size = clamp_eps(std::exp(log_eps));
-                    double w = std::pow(t, -kappa_da);
-                    log_eps_bar = w * std::log(global_leapfrog_step_size) + (1.0 - w) * log_eps_bar;
+                    global_energy_diff(iter) = energy_diff;
+                    global_grad_norm(iter) = grad_norm;
                 }
-                else if (iter == nburnin)
+
+
+                if (do_dual_averaging)
                 {
-                    global_leapfrog_step_size = clamp_eps(std::exp(log_eps_bar));
-                    unsigned nlf = (unsigned)std::lround(T_target / global_leapfrog_step_size);
-                    global_nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
+                    if (iter < nburnin)
+                    {
+                        adapt_count++;
+                        double t = (double)adapt_count;
+                        h_bar = (1.0 - 1.0 / (t + t0_da)) * h_bar + (1.0 / (t + t0_da)) * (target_accept - global_hmc_accept_prob);
+                        log_eps = mu_da - (std::sqrt(t) / gamma_da) * h_bar;
+                        global_leapfrog_step_size = clamp_eps(std::exp(log_eps));
+                        double w = std::pow(t, -kappa_da);
+                        log_eps_bar = w * std::log(global_leapfrog_step_size) + (1.0 - w) * log_eps_bar;
+                    }
+                    else if (iter == nburnin)
+                    {
+                        global_leapfrog_step_size = clamp_eps(std::exp(log_eps_bar));
+                        // unsigned nlf = (unsigned)std::lround(T_target / global_leapfrog_step_size);
+                        // global_nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
+                    }
+
+                    if (global_diagnostics && iter <= nburnin)
+                    {
+                        global_n_leapfrog(iter) = global_nleapfrog;
+                        global_step_size(iter) = global_leapfrog_step_size;
+                    }
                 }
             }
 
@@ -799,6 +892,23 @@ public:
             if (beta_prior.infer)
             {
                 output["beta"] = Rcpp::wrap(sp_beta_stored);
+            }
+
+            if (global_diagnostics && do_dual_averaging)
+            {
+                output["global_diagnostics"] = Rcpp::List::create(
+                    Rcpp::Named("energy_diff") = global_energy_diff,
+                    Rcpp::Named("grad_norm") = global_grad_norm,
+                    Rcpp::Named("n_leapfrog") = global_n_leapfrog,
+                    Rcpp::Named("step_size") = global_step_size
+                );
+            }
+            else if (global_diagnostics)
+            {
+                output["global_diagnostics"] = Rcpp::List::create(
+                    Rcpp::Named("energy_diff") = global_energy_diff,
+                    Rcpp::Named("grad_norm") = global_grad_norm
+                );
             }
         }
 

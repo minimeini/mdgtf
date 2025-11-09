@@ -401,13 +401,15 @@ public:
         }
         case AVAIL::Dist::invgamma: // non-negative
         {
-            double tau2 = std::abs(1. / val);      // tau2 ~ Gamma
-            double logtau2 = std::log(tau2 + EPS); // log jacobian
-
-            out = R::dgamma(tau2, prior.par1, 1. / prior.par2, true);
             if (jacobian) // plus jacobian
             {
-                out += logtau2;
+                // i.e. log pi(log(sd2)) = log pi(sd2) + log jacobian
+                out = - prior.par1 * std::log(std::max(val, EPS)) - prior.par2 / std::max(val, EPS);
+            }
+            else
+            {
+                // log pi(sd2)
+                out = - (prior.par1 + 1.0) * std::log(std::max(val, EPS)) - prior.par2 / std::max(val, EPS);
             }
 
             if (!return_log)
@@ -481,7 +483,7 @@ public:
         {
             if (jacobian) // plus jacobian
             {
-                out = -(prior.par1 + 1.0) + prior.par2 / val;
+                out = -prior.par1 + prior.par2 / val;
                 if (neg_invgamma)
                 {
                     out *= -1.;

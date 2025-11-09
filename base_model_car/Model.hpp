@@ -527,12 +527,12 @@ public:
 
         if (lag_updated)
         {
-            dlag.update_nlag();
+            // dlag.update_nlag();
             dlag.update_Fphi();
-            if (dlag.truncated)
-            {
-                nP = dlag.nL;
-            }
+            // if (dlag.truncated)
+            // {
+            //     nP = dlag.nL;
+            // }
         }
         return;
     } // end of update_global_params_unconstrained()

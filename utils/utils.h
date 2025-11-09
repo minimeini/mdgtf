@@ -24,6 +24,7 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include <random>
 #include <RcppArmadillo.h>
 #include "definition.h"
 
@@ -322,6 +323,21 @@ inline double dnorm_cpp(double x, double mu, double sd, bool logd=true) {
     return logd ? val : std::exp(val);
 }
 
+
+// Thread-local RNG helpers (OpenMP-safe)
+inline double rnorm(double mean, double sd)
+{
+    thread_local std::mt19937_64 eng(std::random_device{}());
+    std::normal_distribution<double> dist(mean, sd);
+    return dist(eng);
+}
+
+inline double runif()
+{
+    thread_local std::mt19937_64 eng(std::random_device{}());
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(eng);
+}
 
 
 /**
