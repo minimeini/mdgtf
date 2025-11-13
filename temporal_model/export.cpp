@@ -51,7 +51,6 @@ Rcpp::NumericVector dlognorm0(
 
 
 
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::List dgtf_default_algo_settings(const std::string &method)
@@ -73,7 +72,8 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     }
 
     return opts;
-}
+} // end of dgtf_default_algo_settings()
+
 
 //' @export
 // [[Rcpp::export]]
@@ -131,7 +131,7 @@ Rcpp::List dgtf_simulate(
     }
 
     return output;
-}
+} // end of dgtf_simulate()
 
 
 //' @export
@@ -206,7 +206,7 @@ Rcpp::List dgtf_infer(
     out["error"] = error;
 
     return out;
-}
+} // end of dgtf_infer()
 
 
 
@@ -472,7 +472,7 @@ Rcpp::List dgtf_posterior_predictive(
     }
 
     return output2;
-}
+} // end of dgtf_posterior_predictive()
 
 
 
@@ -725,4 +725,4 @@ Rcpp::List dgtf_forecast(
     }
 
     return out;
-}
+} // end of dgtf_forecast()

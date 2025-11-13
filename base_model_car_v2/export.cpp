@@ -37,7 +37,7 @@ Rcpp::List mdgtf_default_algo_settings(const std::string &method)
     }
 
     return opts;
-}
+} // end of mdgtf_default_algo_settings()
 
 
 //' @export
@@ -59,7 +59,7 @@ Rcpp::List mdgtf_simulate(
         Rcpp::Named("Rt") = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain),
         Rcpp::Named("model") = settings
     );
-}
+} // end of mdgtf_simulate()
 
 
 //' @export
@@ -96,7 +96,7 @@ Rcpp::List mdgtf_infer(
     std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
 
     return output;
-}
+} // end of mdgtf_infer()
 
 
 //' @export
@@ -193,4 +193,4 @@ Rcpp::List mdgtf_posterior_predictive(
     }
 
     return stats;
-}
+} // end of mdgtf_posterior_predictive()

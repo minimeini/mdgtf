@@ -3,6 +3,12 @@
 #define MODEL_H
 
 #include <RcppArmadillo.h>
+#include <progress.hpp>
+#include <progress_bar.hpp>
+#ifdef DGTF_USE_OPENMP
+    #include <omp.h>
+#endif
+
 #include "../core/ErrDist.hpp"
 #include "../core/SysEq.hpp"
 #include "../core/TransFunc.hpp"
@@ -13,7 +19,7 @@
 #include "SpatialStructure.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::depends(RcppArmadillo, RcppProgress)]]
 
 class Model
 {
@@ -343,6 +349,221 @@ public:
 
         return;
     } // end of simulate()
+
+
+    double sample_posterior_predictive_y(
+        arma::cube &Y_pred,
+        arma::cube &Y_residual,
+        arma::cube &hPsi,
+        const Rcpp::List &output, 
+        const arma::mat &Y, 
+        const unsigned int &nrep = 1
+    )
+    {
+        std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+
+        arma::cube wt_stored;
+        if (output.containsElementNamed("wt_samples"))
+        {
+            wt_stored = Rcpp::as<arma::cube>(output["wt_samples"]);
+        }
+        else if (output.containsElementNamed("wt"))
+        {
+            wt_stored = Rcpp::as<arma::cube>(output["wt"]);
+        }
+        else
+        {
+            throw std::invalid_argument("Model::sample_posterior_predictive_y - 'wt_samples' or 'wt' is missing in the output.");
+        } // end of loading wt
+
+        const unsigned int nsample = wt_stored.n_slices;
+        const unsigned int ntime = wt_stored.n_cols - 1;
+
+        arma::mat log_alpha_stored;
+        if (output.containsElementNamed("log_alpha"))
+        {
+            log_alpha_stored = Rcpp::as<arma::mat>(output["log_alpha"]);
+        }
+        else if (
+            output.containsElementNamed("car_alpha_mu") && 
+            output.containsElementNamed("car_alpha_tau2") && 
+            output.containsElementNamed("car_alpha_rho")
+        )
+        {
+            arma::vec car_mu = Rcpp::as<arma::vec>(output["car_alpha_mu"]);
+            arma::vec car_tau2 = Rcpp::as<arma::vec>(output["car_alpha_tau2"]);
+            arma::vec car_rho = Rcpp::as<arma::vec>(output["car_alpha_rho"]);
+
+            log_alpha_stored.set_size(nS, nsample);
+            for (unsigned int i = 0; i < nsample; i++)
+            {
+                SpatialStructure spatial_i(spatial_alpha.V, spatial_alpha.npop);
+                spatial_i.update_params(car_mu.at(i), car_tau2.at(i), car_rho.at(i));
+                log_alpha_stored.col(i) = spatial_i.prior_sample_spatial_effects_vec();
+            }
+        }
+        else
+        {
+            log_alpha_stored.set_size(nS, nsample);
+            log_alpha_stored.each_col() = log_alpha;
+        } // end of loading log_alpha
+
+        arma::mat log_beta_stored;
+        if (output.containsElementNamed("log_beta"))
+        {
+            log_beta_stored = Rcpp::as<arma::mat>(output["log_beta"]);
+        }
+        else if (
+            output.containsElementNamed("car_beta_mu") && 
+            output.containsElementNamed("car_beta_tau2") && 
+            output.containsElementNamed("car_beta_rho")
+        )
+        {
+            arma::vec car_mu = Rcpp::as<arma::vec>(output["car_beta_mu"]);
+            arma::vec car_tau2 = Rcpp::as<arma::vec>(output["car_beta_tau2"]);
+            arma::vec car_rho = Rcpp::as<arma::vec>(output["car_beta_rho"]);
+
+            log_beta_stored.set_size(nS, nsample);
+            for (unsigned int i = 0; i < nsample; i++)
+            {
+                SpatialStructure spatial_i(spatial_beta.V, spatial_beta.npop);
+                spatial_i.update_params(car_mu.at(i), car_tau2.at(i), car_rho.at(i));
+                log_beta_stored.col(i) = spatial_i.prior_sample_spatial_effects_vec();
+            }
+        }
+        else
+        {
+            log_beta_stored.set_size(nS, nsample);
+            log_beta_stored.each_col() = log_alpha;
+        } // end of loading log_beta
+
+        arma::mat rho_stored;
+        if (output.containsElementNamed("rho"))
+        {
+            rho_stored = Rcpp::as<arma::mat>(output["rho"]);
+        }
+        else
+        {
+            rho_stored.set_size(nS, nsample);
+            rho_stored.each_col() = rho;
+        } // end of loading rho
+
+        arma::vec lag_par1_stored;
+        if (output.containsElementNamed("lag_par1"))
+        {
+            lag_par1_stored = Rcpp::as<arma::vec>(output["lag_par1"]);
+        }
+        else
+        {
+            lag_par1_stored = arma::vec(nsample, arma::fill::value(dlag.par1));
+        } // end of loading lag_par1
+
+        arma::vec lag_par2_stored;
+        if (output.containsElementNamed("lag_par2"))
+        {
+            lag_par2_stored = Rcpp::as<arma::vec>(output["lag_par2"]);
+        }
+        else
+        {
+            lag_par2_stored = arma::vec(nsample, arma::fill::value(dlag.par2));
+        } // end of loading lag_par2
+
+
+        Y_pred.set_size(nS, ntime + 1, nsample * nrep);
+        Y_pred.zeros();
+        Y_residual.set_size(nS, ntime + 1, nsample);
+        Y_residual.zeros();
+        hPsi.set_size(nS, ntime + 1, nsample);
+        hPsi.zeros();
+
+        arma::vec chi_sqr(nsample, arma::fill::zeros);
+        Progress p(nsample, true);
+        #ifdef DGTF_USE_OPENMP
+        #pragma omp parallel for num_threads(NUM_THREADS) schedule(static)
+        #endif
+        for (unsigned int i = 0; i < nsample; i++)
+        {
+            Model model_i = *this;
+            model_i.log_alpha = log_alpha_stored.col(i);
+            model_i.rho = rho_stored.col(i);
+            model_i.dlag.par1 = lag_par1_stored.at(i);
+            model_i.dlag.par2 = lag_par2_stored.at(i);
+            model_i.log_beta = log_beta_stored.col(i);
+
+            arma::mat Lambda(nS, ntime + 1, arma::fill::zeros);
+            arma::cube Theta(nP, ntime + 1, nS, arma::fill::randn);
+            arma::mat Psi = arma::cumsum(wt_stored.slice(i), 1); // nS x (nT + 1)
+            hPsi.slice(i) = GainFunc::psi2hpsi<arma::mat>(Psi, model_i.fgain);
+            arma::mat ft(Psi.n_rows, Psi.n_cols, arma::fill::zeros);
+
+            arma::mat ytmp(nS, ntime, arma::fill::zeros);
+            for (unsigned int t = 1; t <= ntime; t++)
+            {
+                for (unsigned int s = 0; s < nS; s++)
+                {
+                    double eta = std::exp(model_i.log_alpha.at(s));
+
+                    arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(Psi.row(s).t(), model_i.fgain);
+                    ft.at(s, t) = TransFunc::func_ft(t, Y.row(s).t(), ft.row(s).t(), hpsi, model_i.dlag, model_i.ftrans);
+                    eta += ft.at(s, t);
+
+                    double beta = std::exp(std::min(model_i.log_beta.at(s), UPBND));
+                    eta += model_i.spatial_beta.npop.at(s) * beta * arma::dot(
+                        model_i.spatial_beta.W.row(s).t(), 
+                        Y.col(t-1) / model_i.spatial_beta.npop
+                    );
+
+                    Lambda.at(s, t) = LinkFunc::ft2mu(eta, model_i.flink);
+                    double mean, var;
+                    switch (obs_list[model_i.dobs])
+                    {
+                    case AVAIL::Dist::nbinomm:
+                    {
+                        mean = Lambda.at(s, t);
+                        var = std::abs(nbinomm::var(Lambda.at(s, t), model_i.rho.at(s)));
+                        break;
+                    }
+                    case AVAIL::Dist::nbinomp:
+                    {
+                        mean = nbinom::mean(Lambda.at(s, t), model_i.rho.at(s));
+                        var = nbinom::var(Lambda.at(s, t), model_i.rho.at(s));
+                        break;
+                    }
+                    case AVAIL::Dist::poisson:
+                    {
+                        mean = Lambda.at(s, t);
+                        var = Lambda.at(s, t);
+                        break;
+                    }
+                    default:
+                    {
+                        throw std::invalid_argument("Unknown observation distribution.");
+                        break;
+                    }
+                    } // end of switch by obs_list
+
+                    Y_residual.at(s, t, i) = Lambda.at(s, t) - Y.at(s, t);
+                    double yres2 = 2. * std::log(std::abs(Y_residual.at(s, t, i)) + EPS);
+                    double yvar = std::log(var + EPS);
+                    ytmp.at(s, t - 1) = std::exp(yres2 - yvar);
+
+                    for (unsigned int r = 0; r < nrep; r++)
+                    {
+                        Y_pred.at(s, t, i * nrep + r) = ObsDist::sample(
+                            Lambda.at(s, t), model_i.rho.at(s), model_i.dobs
+                        );
+                    } // end of for r in [0, nrep]
+
+                } // end of for s in [0, nS]
+            } // end of for t in [1, ntime]
+
+            chi_sqr.at(i) = arma::mean(arma::mean(ytmp));
+            p.increment();
+        } // end of for i in [0, nsample]
+
+        return arma::mean(chi_sqr);
+    } // end of sample_posterior_predictive_y()
+
 
     arma::vec compute_intensity_iterative(
         const unsigned int &s,

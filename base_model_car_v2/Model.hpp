@@ -19,7 +19,7 @@
 #include "SpatialStructure.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::depends(RcppArmadillo, RcppProgress)]]
 
 class Model
 {
