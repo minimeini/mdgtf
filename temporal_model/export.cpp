@@ -1,8 +1,6 @@
 #include <chrono>
 #include "Model.hpp"
-#include "SequentialMonteCarlo.hpp"
 #include "MCMC.hpp"
-#include "VariationalBayes.hpp"
 
 #include <progress.hpp>
 #include <progress_bar.hpp>
@@ -57,17 +55,12 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
     std::map<std::string, AVAIL::Algo> algo_list = AVAIL::algo_list;
     std::string method_name = tolower(method);
 
-    Rcpp::List opts = SMC::SequentialMonteCarlo::default_settings();
+    Rcpp::List opts;
     switch (algo_list[method_name])
     {
     case AVAIL::Algo::MCMC:
     {
         opts = MCMC::Disturbance::default_settings();
-        break;
-    }
-    case AVAIL::Algo::HybridVariation:
-    {
-        opts = VB::Hybrid::default_settings();
         break;
     }
     default:
@@ -195,19 +188,6 @@ Rcpp::List dgtf_infer(
         std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
 
         output = mcmc.get_output();
-        break;
-    }
-    case AVAIL::Algo::HybridVariation:
-    {
-        VB::Hybrid hvb(model, method_settings);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        hvb.infer(model, y);
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        std::cout << "\nElapsed time: " << duration.count() << " microseconds" << std::endl;
-
-        output = hvb.get_output();
         break;
     }
     default:

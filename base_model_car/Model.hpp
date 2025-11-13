@@ -307,6 +307,15 @@ public:
         return;
     } // end of simulate()
 
+    arma::mat sample_posterior_predictive_y(
+        const Rcpp::List &output, 
+        const arma::mat &Y, 
+        const unsigned int &nrep
+    )
+    {
+        
+    }
+
     arma::vec compute_intensity_iterative(
         const unsigned int &s,
         const arma::mat &Y, // nS x (nT + 1)
