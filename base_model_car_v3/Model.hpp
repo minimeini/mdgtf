@@ -19,7 +19,7 @@
 #include "SpatialStructure.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
 
 class Model
 {
@@ -431,7 +431,7 @@ public:
         else
         {
             log_beta_stored.set_size(nS, nsample);
-            log_beta_stored.each_col() = log_alpha;
+            log_beta_stored.each_col() = log_beta;
         } // end of loading log_beta
 
         arma::mat rho_stored;
