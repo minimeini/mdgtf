@@ -64,6 +64,7 @@ public:
         mh_sd,
         lag_par1,
         lag_par2,
+        cnst_alpha,
         car_alpha, // spatial effect parameter (CAR)
         cnst_beta, // cross-regional transmission parameter (constant)
         car_beta, // cross-regional transmission parameter (CAR)
@@ -203,6 +204,9 @@ private:
         map["zzcoef"] = Param::zzcoef;
 
         map["car_alpha"] = Param::car_alpha;
+        map["cnst_alpha"] = Param::cnst_alpha;
+        map["alpha"] = Param::cnst_alpha;
+        map["log_alpha"] = Param::cnst_alpha;
     
         map["cnst_beta"] = Param::cnst_beta;
         map["beta"] = Param::cnst_beta;
