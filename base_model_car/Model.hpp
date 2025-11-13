@@ -502,7 +502,7 @@ public:
         } // end of for i in [0, nsample]
 
         return arma::mean(chi_sqr);
-    }
+    } // end of sample_posterior_predictive_y()
 
     arma::vec compute_intensity_iterative(
         const unsigned int &s,
