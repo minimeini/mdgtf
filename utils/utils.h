@@ -25,6 +25,7 @@
 #include <cmath>
 #include <algorithm>
 #include <random>
+#include <limits>
 #include <RcppArmadillo.h>
 #include "definition.h"
 
@@ -375,6 +376,26 @@ inline double calculate_crps(const arma::vec& y, const arma::mat& Y) {
     return total / static_cast<double>(nT);
 }
 
+
+inline arma::vec calculate_crps(
+	const arma::mat& y, // nS x nT
+	const arma::cube& Y // nS x nT x nsample
+) {
+    const unsigned int nS = y.n_rows;
+	const unsigned int nT = y.n_cols;
+	const unsigned int nsample = Y.n_slices;
+	
+    arma::vec total(nS, arma::fill::zeros);
+	for (unsigned int s = 0; s < nS; ++s) {
+		arma::vec y_s = y.row(s).t(); // nT x 1
+		arma::mat Y_s = Y.row_as_mat(s).t(); // nT x nsample
+		total.at(s) = calculate_crps(y_s, Y_s);
+	}
+
+    return total / static_cast<double>(nT);
+}
+
+
 inline double calculate_mae(
 	const arma::vec &y_true,
 	const arma::mat &Y,
@@ -420,6 +441,46 @@ inline double calculate_chisqr(
 
   // Average over time, then over samples (equivalently overall mean)
   return arma::mean(arma::mean(ratio));
+}
+
+
+inline double gelman_rubin(const arma::mat& samples) {
+    const arma::uword nchain  = samples.n_cols; // number of chains
+    if (nchain < 2)
+        throw std::invalid_argument("gelman_rubin: need at least 2 chains (nchain >= 2).");
+
+	// Exclude rows with any non-finite values (Inf/NaN) across chains
+	arma::uvec finite_rows(samples.n_rows);
+	for (arma::uword i = 0; i < samples.n_rows; ++i)
+	{
+		finite_rows.at(i) = arma::is_finite(samples.row(i));
+	}
+	// Find rows that are finite across all chains
+	arma::uvec good_rows = arma::find(finite_rows);
+	if (good_rows.n_elem < 2)
+		throw std::invalid_argument("gelman_rubin: fewer than 2 valid rows after excluding rows with infinite values.");
+
+    arma::mat X = samples.rows(good_rows);
+    const arma::uword nsample = X.n_rows;
+
+    // Per-chain means and unbiased variances (denominator nsample - 1)
+    arma::rowvec chain_means = arma::mean(X, 0);
+    arma::rowvec chain_vars  = arma::var(X, /*norm_type=*/0, /*dim=*/0);
+
+    const double W = arma::mean(chain_vars); // average within-chain variance
+    const double mean_of_means = arma::mean(chain_means);
+    const double B = static_cast<double>(nsample) *
+                     arma::mean(arma::square(chain_means - mean_of_means)); // between-chain
+
+    // Handle degenerate cases
+    if (W <= 0.0) {
+        if (B <= 0.0) return 1.0; // chains identical constants
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const double n = static_cast<double>(nsample);
+    const double var_hat = ((n - 1.0) / n) * W + (1.0 / n) * B;
+    return std::sqrt(var_hat / W);
 }
 
 
