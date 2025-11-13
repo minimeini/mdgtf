@@ -5,6 +5,10 @@
 #include <progress.hpp>
 #include <progress_bar.hpp>
 
+#ifdef DGTF_USE_OPENMP
+    #include <omp.h>
+#endif
+
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,nloptr, BH, RcppProgress)]]
