@@ -69,7 +69,11 @@ public:
         cnst_beta, // cross-regional transmission parameter (constant)
         car_beta, // cross-regional transmission parameter (CAR)
         zintercept,
-        zzcoef
+        zzcoef,
+        ar_intercept_sigma2,
+        ar_intercept_intercept,
+        ar_coef_self_intercept,
+        ar_coef_cross_intercept
     };
 
     enum Loss
@@ -212,6 +216,11 @@ private:
         map["beta"] = Param::cnst_beta;
 
         map["car_beta"] = Param::car_beta;
+
+        map["intercept_sigma2"] = Param::ar_intercept_sigma2;
+        map["intercept_intercept"] = Param::ar_intercept_intercept;
+        map["coef_self_intercept"] = Param::ar_coef_self_intercept;
+        map["coef_cross_intercept"] = Param::ar_coef_cross_intercept;
 
         return map;
     }
