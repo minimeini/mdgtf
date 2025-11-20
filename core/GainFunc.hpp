@@ -168,7 +168,7 @@ public:
         #ifdef DGTF_DO_BOUND_CHECK
             bound_check(hpsi, "hpsi2psi<double>");
         #endif
-        return hpsi;
+        return psi;
     }
 
     /**

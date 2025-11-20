@@ -39,13 +39,13 @@ public:
     std::string fsys = "shift";
     std::string ftrans = "sliding";
     std::string flink = "identity";
-    std::string fgain = "softplus";
+    std::string fgain = "exponential";
     
     Model()
     {
         // no seasonality and no baseline mean in the latent state by default
         flink = "identity";
-        fgain = "softplus";
+        fgain = "exponential";
         fsys = "shift";
         ftrans = "sliding";
 

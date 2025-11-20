@@ -57,6 +57,27 @@ public:
         dhpsi = psi;
     }
 
+    ApproxDisturbance(
+        const arma::vec &psi_in,
+        const arma::vec &hpsi_in,
+        const arma::vec &dhpsi_in,
+        const std::string &gain_func_name = "softplus"
+    )
+    {
+        nT = psi_in.n_elem - 1;
+        gain_func = gain_func_name;
+        psi = psi_in;
+        hpsi = hpsi_in;
+        dhpsi = dhpsi_in;
+
+        Fphi.set_size(nT + 1);
+        Fphi.zeros();
+        Fn.set_size(nT, nT);
+        Fn.zeros();
+        f0.set_size(nT);
+        f0.zeros();
+        return;
+    }
 
     void set_Fphi(const LagDist &dlag, const unsigned int &nlag) // (nT + 1)
     {

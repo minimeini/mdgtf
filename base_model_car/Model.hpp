@@ -684,7 +684,6 @@ public:
 
     double dloglik_dlogW(const unsigned int &s, const arma::vec &y, const arma::vec &wt)
     {
-        double dll_dlogW = 0.0;
         double ntime = 0.0;
         double res2 = 0.0;
         for (unsigned int t = 1; t < y.n_elem; t++)
