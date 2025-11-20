@@ -530,10 +530,6 @@ public:
                 {
                     coef_self_temporal_prior.init = Rcpp::as<arma::vec>(coef_self_temporal_opts["init"]);
                 }
-                else
-                {
-                    coef_self_temporal_prior.init = arma::zeros<arma::vec>(1);
-                }
             } // end of coef_self_temporal options
 
             if (coef_self_opts.containsElementNamed("spatial"))

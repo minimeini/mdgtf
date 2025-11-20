@@ -533,10 +533,6 @@ public:
                 {
                     a_temporal_prior.init = Rcpp::as<arma::mat>(a_temporal_opts["init"]);
                 }
-                else
-                {
-                    a_temporal_prior.init = arma::zeros<arma::mat>(1, 1);
-                }
             } // end of a_temporal options
         } // end of a options
 
@@ -581,10 +577,6 @@ public:
                 if (coef_self_temporal_opts.containsElementNamed("init"))
                 {
                     coef_self_temporal_prior.init = Rcpp::as<arma::vec>(coef_self_temporal_opts["init"]);
-                }
-                else
-                {
-                    coef_self_temporal_prior.init = arma::zeros<arma::vec>(1);
                 }
             } // end of coef_self_temporal options
 
@@ -647,10 +639,6 @@ public:
                 if (coef_cross_temporal_opts.containsElementNamed("init"))
                 {
                     coef_cross_temporal_prior.init = Rcpp::as<arma::vec>(coef_cross_temporal_opts["init"]);
-                }
-                else
-                {
-                    coef_cross_temporal_prior.init = arma::zeros<arma::vec>(1);
                 }
             } // end of coef_cross_temporal options
 
