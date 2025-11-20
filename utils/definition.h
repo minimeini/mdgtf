@@ -70,10 +70,15 @@ public:
         car_beta, // cross-regional transmission parameter (CAR)
         zintercept,
         zzcoef,
-        ar_intercept_sigma2,
-        ar_intercept_intercept,
+        ar_a_sigma2,
+        ar_a_intercept,
+        ar_a_car,
         ar_coef_self_intercept,
-        ar_coef_cross_intercept
+        ar_coef_self_car,
+        ar_coef_self_sigma2,
+        ar_coef_cross_intercept,
+        ar_coef_cross_car,
+        ar_coef_cross_sigma2
     };
 
     enum Loss
@@ -217,10 +222,15 @@ private:
 
         map["car_beta"] = Param::car_beta;
 
-        map["intercept_sigma2"] = Param::ar_intercept_sigma2;
-        map["intercept_intercept"] = Param::ar_intercept_intercept;
+        map["a_sigma2"] = Param::ar_a_sigma2;
+        map["a_intercept"] = Param::ar_a_intercept;
+        map["a_car"] = Param::ar_a_car;
         map["coef_self_intercept"] = Param::ar_coef_self_intercept;
+        map["coef_self_sigma2"] = Param::ar_coef_self_sigma2;
+        map["coef_self_car"] = Param::ar_coef_self_car;
         map["coef_cross_intercept"] = Param::ar_coef_cross_intercept;
+        map["coef_cross_sigma2"] = Param::ar_coef_cross_sigma2;
+        map["coef_cross_car"] = Param::ar_coef_cross_car;
 
         return map;
     }

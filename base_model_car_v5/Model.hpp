@@ -26,13 +26,11 @@ struct Param
 {
     double intercept = 0.0;
     double sigma2 = 0.01;
-    double car_mu = 0.0;
-    double car_tau2 = 0.01;
-    double car_rho = 0.5;
+    SpatialStructure spatial;
 
     bool has_intercept = true;
     bool has_temporal = false;
-    bool has_car = false;
+    bool has_spatial = false;
 
     Param()
     {
@@ -40,11 +38,13 @@ struct Param
         intercept = 0.0;
 
         has_temporal = false;
-        has_car = false;
+        has_spatial = false;
+
+        spatial = SpatialStructure();
         return;
     }
 
-    Param(const Rcpp::List &settings)
+    Param(const Rcpp::List &settings, const arma::mat &V)
     {
         if (settings.containsElementNamed("intercept"))
         {
@@ -68,26 +68,18 @@ struct Param
             sigma2 = 0.01;
         }
 
-        if (settings.containsElementNamed("car_params"))
+        arma::vec car_param = {0.0, 0.01, 0.5}; // default values
+        if (settings.containsElementNamed("car_param"))
         {
-            has_car = true;
-            arma::vec car_params = Rcpp::as<arma::vec>(settings["car_params"]);
-            if (car_params.n_elem != 3)
+            has_spatial = true;
+            car_param = Rcpp::as<arma::vec>(settings["car_param"]);
+            if (car_param.n_elem != 3)
             {
-                throw std::invalid_argument("Param::Param - 'car_params' should be a numeric vector of length 3 (car_mu, car_tau2, car_rho).");
+                throw std::invalid_argument("Param::Param - 'car_param' should have three elements: (car_mu, car_tau2, car_rho).");
             }
+        }
 
-            car_mu = car_params.at(0);
-            car_tau2 = car_params.at(1);
-            car_rho = car_params.at(2);
-        }
-        else
-        {
-            has_car = false;
-            car_mu = 0.0;
-            car_tau2 = 0.01;
-            car_rho = 0.5;
-        }
+        spatial = SpatialStructure(V, car_param.at(0), car_param.at(1), car_param.at(2));
     }
 };
 
@@ -99,7 +91,7 @@ public:
     std::string fgain = "exponential";
 
     unsigned int nS; // number of locations for spatio-temporal model
-    arma::vec rho;
+    arma::vec rho; // nS x 1
     SpatialStructure spatial;
     Param intercept_a, coef_self_b, coef_cross_c;
 
@@ -174,7 +166,7 @@ public:
         if (settings.containsElementNamed("intercept"))
         {
             Rcpp::List opts = settings["intercept"];
-            intercept_a = Param(opts);
+            intercept_a = Param(opts, spatial.V);
         }
         else
         {
@@ -186,7 +178,7 @@ public:
         if (settings.containsElementNamed("coef_self"))
         {
             Rcpp::List opts = settings["coef_self"];
-            coef_self_b = Param(opts);
+            coef_self_b = Param(opts, spatial.V);
         }
         else
         {
@@ -196,7 +188,7 @@ public:
         if (settings.containsElementNamed("coef_cross"))
         {
             Rcpp::List opts = settings["coef_cross"];
-            coef_cross_c = Param(opts);
+            coef_cross_c = Param(opts, spatial.V);
         }
         else
         {
@@ -205,23 +197,51 @@ public:
     } // end of Model(const Rcpp::List &settings)
 
     void simulate(
-        arma::mat &Y,
-        arma::mat &Lambda,
-        arma::mat &log_a,
-        arma::mat &wt,
+        arma::mat &Y, // nS x (nT + 1)
+        arma::mat &Lambda, // nS x (nT + 1)
+        arma::vec &psi2_temporal, // (nT + 1) x 1
+        arma::vec &psi4_temporal, // (nT + 1) x 1
+        arma::vec &psi1_spatial, // nS x 1
+        arma::vec &psi3_spatial, // nS x 1
+        arma::mat &wt, // nS x (nT + 1)
+        arma::mat &a_temporal, // nS x (nT + 1)
         const unsigned int &ntime)
     {
         Y.set_size(nS, ntime + 1);
         Y.zeros();
         Lambda = Y;
 
+        if (coef_self_b.has_spatial)
+        {
+            psi1_spatial = coef_self_b.spatial.prior_sample_spatial_effects_vec();
+        }
+
+        if (coef_self_b.has_temporal)
+        {
+            psi2_temporal.set_size(ntime + 1);
+            psi2_temporal.randn();
+            psi2_temporal *= std::sqrt(coef_self_b.sigma2);
+            psi2_temporal = arma::cumsum(psi2_temporal);
+        }
+
+        if (coef_cross_c.has_spatial)
+        {
+            psi3_spatial = coef_cross_c.spatial.prior_sample_spatial_effects_vec();
+        }
+
+        if (coef_cross_c.has_temporal)
+        {
+            psi4_temporal.set_size(ntime + 1);
+            psi4_temporal.randn();
+            psi4_temporal *= std::sqrt(coef_cross_c.sigma2);
+            psi4_temporal = arma::cumsum(psi4_temporal);
+        }
+
         wt.set_size(nS, ntime + 1);
         wt.randn();
         wt *= std::sqrt(intercept_a.sigma2);
-        log_a = arma::cumsum(wt, 1);
+        a_temporal = arma::cumsum(wt, 1);
 
-        const double coef_self = std::exp(std::min(coef_self_b.intercept, UPBND));
-        const double coef_cross = std::exp(std::min(coef_cross_c.intercept, UPBND));
         const double baseline = intercept_a.has_intercept ? intercept_a.intercept : 0.0;
 
         for (unsigned int t = 1; t <= ntime; t++)
@@ -230,10 +250,20 @@ public:
             // Construct state vectors at time t for all locations
             for (unsigned int s = 0; s < nS; s++)
             {
-                log_a.at(s, t) = intercept_a.has_temporal ? log_a.at(s, t) : 0.0;
-                Lambda.at(s, t) = std::exp(std::min(baseline + log_a.at(s, t), UPBND));
-                Lambda.at(s, t) += coef_self * Y.at(s, t - 1);
-                Lambda.at(s, t) += coef_cross * arma::dot(
+                double log_mu = baseline;
+                log_mu += intercept_a.has_temporal ? a_temporal.at(s, t) : 0.0;
+
+                double log_coef_self = coef_self_b.intercept;
+                log_coef_self += coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0;
+                log_coef_self += coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0;
+
+                double log_coef_cross = coef_cross_c.intercept;
+                log_coef_cross += coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0;
+                log_coef_cross += coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0;
+
+                Lambda.at(s, t) = std::exp(std::min(log_mu, UPBND));
+                Lambda.at(s, t) += std::exp(std::min(log_coef_self, UPBND)) * Y.at(s, t - 1);
+                Lambda.at(s, t) += std::exp(std::min(log_coef_cross, UPBND)) * arma::dot(
                     spatial.W.row(s).t(), Y.col(t-1)
                 );
 
@@ -284,24 +314,24 @@ public:
             rho_stored.each_col() = rho;
         }
 
-        arma::vec intercept_intercept_stored;
-        if (output.containsElementNamed("intercept_intercept"))
+        arma::vec a_intercept_stored;
+        if (output.containsElementNamed("a_intercept"))
         {
-            intercept_intercept_stored = Rcpp::as<arma::vec>(output["intercept_intercept"]);
+            a_intercept_stored = Rcpp::as<arma::vec>(output["a_intercept"]);
         }
         else
         {
-            intercept_intercept_stored = arma::vec(nsample, arma::fill::value(intercept_a.intercept));
+            a_intercept_stored = arma::vec(nsample, arma::fill::value(intercept_a.intercept));
         }
 
-        arma::vec intercept_sigma2_stored;
-        if (output.containsElementNamed("intercept_sigma2"))
+        arma::vec a_sigma2_stored;
+        if (output.containsElementNamed("a_sigma2"))
         {
-            intercept_sigma2_stored = Rcpp::as<arma::vec>(output["intercept_sigma2"]);
+            a_sigma2_stored = Rcpp::as<arma::vec>(output["a_sigma2"]);
         }
         else
         {
-            intercept_sigma2_stored = arma::vec(nsample, arma::fill::value(intercept_a.sigma2));
+            a_sigma2_stored = arma::vec(nsample, arma::fill::value(intercept_a.sigma2));
         }
 
         arma::vec coef_self_intercept_stored;
@@ -339,8 +369,8 @@ public:
         for (unsigned int i = 0; i < nsample; i++)
         {
             Model model_i = *this;
-            model_i.intercept_a.intercept = intercept_intercept_stored.at(i);
-            model_i.intercept_a.sigma2 = intercept_sigma2_stored.at(i);
+            model_i.intercept_a.intercept = a_intercept_stored.at(i);
+            model_i.intercept_a.sigma2 = a_sigma2_stored.at(i);
             model_i.coef_self_b.intercept = coef_self_intercept_stored.at(i);
             model_i.coef_cross_c.intercept = coef_cross_intercept_stored.at(i);
             model_i.rho = rho_stored.col(i);
@@ -416,55 +446,108 @@ public:
     arma::vec compute_intensity_iterative(
         const unsigned int &s,
         const arma::mat &Y, // nS x (nT + 1)
-        const arma::vec &log_a // (nT + 1) x 1
+        const arma::vec &psi1_spatial, // nS x 1
+        const arma::vec &psi2_temporal, // (nT + 1) x 1
+        const arma::vec &psi3_spatial, // nS x 1
+        const arma::vec &psi4_temporal, // (nT + 1) x 1
+        const arma::mat &log_a // nS x (nT + 1)
     ) const
     {
-        arma::vec y = Y.row(s).t();
-        arma::vec neighbor_weights = spatial.W.row(s).t(); // nS x 1
+        const arma::vec neighbor_weights = spatial.W.row(s).t(); // nS x 1
+        const double coef_self_base = coef_self_b.intercept + (coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0);
+        const double coef_cross_base = coef_cross_c.intercept + (coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0);
 
-        arma::vec baseline = arma::exp(intercept_a.intercept + log_a);
-        double coef_self = std::exp(std::min(coef_self_b.intercept, UPBND));
-        double coef_cross = std::exp(std::min(coef_cross_c.intercept, UPBND));
-
-        arma::vec Lambda(log_a.n_elem, arma::fill::zeros);
-        for (unsigned int t = 1; t < y.n_elem; t++)
+        arma::vec Lambda(Y.n_cols, arma::fill::zeros);
+        for (unsigned int t = 1; t < Y.n_cols; t++)
         {
-            Lambda.at(t) = baseline.at(t) + coef_self * y.at(t - 1);
-            Lambda.at(t) += coef_cross * arma::dot(neighbor_weights, Y.col(t - 1));
+            double mu = intercept_a.intercept;
+            mu += intercept_a.has_temporal ? log_a.at(s, t) : 0.0;
+            mu = std::exp(std::min(mu, UPBND));
+
+            double coef_self = coef_self_base + (coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0);
+            coef_self = std::exp(std::min(coef_self, UPBND));
+
+            double coef_cross = coef_cross_base + (coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0);
+            coef_cross = std::exp(std::min(coef_cross, UPBND));
+
+            Lambda.at(t) = mu + coef_self * Y.at(s, t - 1) + coef_cross * arma::dot(neighbor_weights, Y.col(t - 1));
         }
 
         return Lambda; // (nT + 1) x 1
     } // end of compute_intensity_iterative()
 
 
-    double dloglik_deta(const double &eta, const double &y, const double &obs_par2)
+    void compute_intensity_iterative(
+        arma::mat &Lambda, // nS x (nT + 1)
+        const unsigned int &t_start,
+        const arma::mat &Y, // nS x (nT + 1)
+        const arma::vec &psi1_spatial, // nS x 1
+        const arma::vec &psi2_temporal, // (nT + 1) x 1
+        const arma::vec &psi3_spatial, // nS x 1
+        const arma::vec &psi4_temporal, // (nT + 1) x 1
+        const arma::mat &log_a // nS x (nT + 1)
+    )
+    {
+        for (unsigned int t = t_start; t < Y.n_cols; t++)
+        {
+            const double coef_self_base = coef_self_b.intercept + (coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0);
+            const double coef_cross_base = coef_cross_c.intercept + (coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0);
+
+            for (unsigned int s = 0; s < Y.n_rows; s++)
+            {
+                double mu = intercept_a.intercept + (intercept_a.has_temporal ? log_a.at(s, t) : 0.0);
+                mu = std::exp(std::min(mu, UPBND));
+
+                double coef_self = coef_self_base + (coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0);
+                coef_self = std::exp(std::min(coef_self, UPBND));
+
+                double coef_cross = coef_cross_base + (coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0);
+                coef_cross = std::exp(std::min(coef_cross, UPBND));
+
+                Lambda.at(s, t) = mu + coef_self * Y.at(s, t - 1) + coef_cross * arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
+            }
+        }
+
+        return; // (nT + 1) x 1
+    } // end of compute_intensity_iterative()
+
+
+    double dloglik_deta(const double &eta, const double &y, const double &obs_par2) const
     {
         return nbinomm::dlogp_dlambda(eta, y, obs_par2);
     } // end of dloglike_deta()
 
     arma::mat dloglik_deta(
         const arma::mat &Y, // nS x (nT + 1)
+        const arma::vec &psi1_spatial, // nS x 1
+        const arma::vec &psi2_temporal, // (nT + 1) x 1
+        const arma::vec &psi3_spatial, // nS x 1
+        const arma::vec &psi4_temporal, // (nT + 1) x 1
         const arma::mat &log_a // nS x (nT + 1)
-    )
+    ) const
     {
         const unsigned int nT = Y.n_cols - 1;
-        const double coef_self = std::exp(std::min(coef_self_b.intercept, UPBND));
-        const double coef_cross = std::exp(std::min(coef_cross_c.intercept, UPBND));
-
         arma::mat dll_deta(Y.n_rows, Y.n_cols, arma::fill::zeros);
         for (unsigned int s = 0; s < Y.n_rows; s++)
         {
-            const arma::vec ys = Y.row(s).t();
-            const arma::vec intercept = arma::exp(intercept_a.intercept + log_a.row(s).t());
             const arma::vec neighbor_weights = spatial.W.row(s).t();
-            const arma::vec cross_region_effects = coef_cross * Y.head_cols(nT).t() * neighbor_weights; // nT x 1
+            const arma::vec cross_region_effects = Y.head_cols(nT).t() * neighbor_weights; // nT x 1
+            const double coef_self_base = coef_self_b.intercept + (coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0);
+            const double coef_cross_base = coef_cross_c.intercept + (coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0);
 
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                double eta = intercept.at(t) + coef_self * ys.at(t - 1);
-                eta += cross_region_effects.at(t - 1);
+                double mu = intercept_a.intercept + (intercept_a.has_temporal ? log_a.at(s, t) : 0.0);
+                mu = std::exp(std::min(mu, UPBND));
 
-                dll_deta.at(s, t) = dloglik_deta(eta, ys.at(t), rho.at(s));
+                double coef_self = coef_self_base + (coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0);
+                coef_self = std::exp(std::min(coef_self, UPBND));
+
+                double coef_cross = coef_cross_base + (coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0);
+                coef_cross = std::exp(std::min(coef_cross, UPBND));
+
+                double eta = mu + coef_self * Y.at(s, t - 1) + coef_cross * cross_region_effects.at(t - 1);
+                dll_deta.at(s, t) = dloglik_deta(eta, Y.at(s, t), rho.at(s));
             }
         }
 
@@ -492,71 +575,6 @@ public:
     }
 
 
-    double dloglik_dcoef_self(
-        const arma::mat &Y,
-        const arma::mat &dll_deta
-    )
-    {
-        double deriv = 0.0;
-        double coef_self = std::exp(std::min(coef_self_b.intercept, UPBND));
-        for (unsigned int s = 0; s < nS; s++)
-        {
-            for (unsigned int t = 1; t < Y.n_cols; t++)
-            {
-                deriv += dll_deta.at(s, t) * Y.at(s, t - 1) * coef_self;
-            }
-        }
-
-        return deriv;
-    } // end of dloglik_dcoef_self()
-
-
-    double dloglik_dcoef_cross(
-        const arma::mat &Y, // nS x (nT + 1)
-        const arma::mat &dll_deta // nS x (nT + 1)
-    )
-    {
-        double deriv = 0.0;
-        double coef_cross = std::exp(std::min(coef_cross_c.intercept, UPBND));
-        for (unsigned int s = 0; s < nS; s++)
-        {
-            for (unsigned int t = 1; t < Y.n_cols; t++)
-            {
-                double deta_dcoef_cross = arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
-                // double dbeta_dlogbeta = beta;
-                deriv += dll_deta.at(s, t) * deta_dcoef_cross * coef_cross;
-            }
-        }
-
-        return deriv;
-    } // end of dloglik_dcoef_cross()
-
-
-    double dloglik_dlogrho(const unsigned int &s, const arma::vec &y, const arma::vec &lambda)
-    {
-        double dll_dlogrho = 0.0;
-        for (unsigned int t = 1; t < y.n_elem; t++)
-        {
-            dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
-        }
-
-        return dll_dlogrho;
-    } // end of dloglik_dlogrho()
-
-
-    // double dloglik_dlogsig_a(const unsigned int &s, const arma::vec &y, const arma::vec &wt)
-    // {
-    //     double dll_dlogW = 0.0;
-    //     double ntime = 0.0;
-    //     double res2 = 0.0;
-    //     for (unsigned int t = 1; t < y.n_elem; t++)
-    //     {
-    //         ntime += 1.0;
-    //         res2 += wt.at(t) * wt.at(t);
-    //     }
-
-    //     return - 0.5 * ntime + 0.5 * res2 / std::max(W.at(s), EPS);
-    // } // end of dloglik_dlogW()
     double dloglik_dlogsig_a(const arma::mat &Y, const arma::mat &wt)
     {
         double ntime = 0.0;
@@ -570,7 +588,144 @@ public:
             }
         }
         return - 0.5 * ntime + 0.5 * res2 / std::max(intercept_a.sigma2, EPS);
-    } // end of dloglik_dlogW()
+    } // end of dloglik_dlogsig_a()
+
+
+    double dloglik_dintercept_coef_self(
+        const arma::mat &Y,
+        const arma::mat &dll_deta,
+        const arma::vec &psi1_spatial,
+        const arma::vec &psi2_temporal
+    )
+    {
+        double deriv = 0.0;
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            for (unsigned int t = 1; t < Y.n_cols; t++)
+            {
+                double coef_self = coef_self_b.intercept;
+                coef_self += coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0;
+                coef_self += coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0;
+                deriv += dll_deta.at(s, t) * Y.at(s, t - 1) * std::exp(std::min(coef_self, UPBND));
+            }
+        }
+
+        return deriv;
+    } // end of dloglik_dintercept_coef_self()
+
+    arma::vec dloglik_dspatial_coef_self(
+        const arma::mat &Y,
+        const arma::mat &dll_deta,
+        const arma::vec &psi1_spatial,
+        const arma::vec &psi2_temporal
+    )
+    {
+        arma::vec grad(nS, arma::fill::zeros);
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            for (unsigned int t = 1; t < Y.n_cols; t++)
+            {
+                double coef_self = coef_self_b.intercept;
+                coef_self += coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0;
+                coef_self += coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0;
+                grad.at(s) += dll_deta.at(s, t) * Y.at(s, t - 1) * std::exp(std::min(coef_self, UPBND));
+            }
+        }
+
+        grad -= coef_self_b.spatial.car_tau2 * coef_self_b.spatial.Q * (psi1_spatial - coef_self_b.spatial.car_mu);
+        return grad;
+    } // end of dloglik_dspatial_coef_self()
+
+
+    double dloglik_dlogsig_coef_self(const arma::mat &Y, const arma::vec &wt2_temporal)
+    {
+        double ntime = 0.0;
+        double res2 = 0.0;
+        for (unsigned int t = 1; t < Y.n_cols; t++)
+        {
+            ntime += 1.0;
+            res2 += wt2_temporal.at(t) * wt2_temporal.at(t);
+        }
+
+        return - 0.5 * ntime + 0.5 * res2 / std::max(coef_self_b.sigma2, EPS);
+    } // end of dloglik_dlogsig_coef_self()
+
+
+    double dloglik_dintercept_coef_cross(
+        const arma::mat &Y, // nS x (nT + 1)
+        const arma::mat &dll_deta, // nS x (nT + 1)
+        const arma::vec &psi3_spatial,
+        const arma::vec &psi4_temporal
+    )
+    {
+        double deriv = 0.0;
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            for (unsigned int t = 1; t < Y.n_cols; t++)
+            {
+                double coef_cross = coef_cross_c.intercept;
+                coef_cross += coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0;
+                coef_cross += coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0;
+                double deta_dcoef_cross = arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
+                // double dbeta_dlogbeta = beta;
+                deriv += dll_deta.at(s, t) * deta_dcoef_cross * std::exp(std::min(coef_cross, UPBND));
+            }
+        }
+
+        return deriv;
+    } // end of dloglik_dintercept_coef_cross()
+
+
+    arma::vec dloglik_dspatial_coef_cross(
+        const arma::mat &Y, // nS x (nT + 1)
+        const arma::mat &dll_deta, // nS x (nT + 1)
+        const arma::vec &psi3_spatial,
+        const arma::vec &psi4_temporal
+    )
+    {
+        arma::vec grad(nS, arma::fill::zeros);
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            for (unsigned int t = 1; t < Y.n_cols; t++)
+            {
+                double coef_cross = coef_cross_c.intercept;
+                coef_cross += coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0;
+                coef_cross += coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0;
+                double deta_dcoef_cross = arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
+                grad.at(s) += dll_deta.at(s, t) * deta_dcoef_cross * std::exp(std::min(coef_cross, UPBND));
+            }
+        }
+
+        grad -= coef_cross_c.spatial.car_tau2 * coef_cross_c.spatial.Q * (psi3_spatial - coef_cross_c.spatial.car_mu);
+
+        return grad;
+    } // end of dloglik_dspatial_coef_cross()
+
+
+    double dloglik_dlogsig_coef_cross(const arma::mat &Y, const arma::vec &wt4_temporal)
+    {
+        double ntime = 0.0;
+        double res2 = 0.0;
+        for (unsigned int t = 1; t < Y.n_cols; t++)
+        {
+            ntime += 1.0;
+            res2 += wt4_temporal.at(t) * wt4_temporal.at(t);
+        }
+
+        return - 0.5 * ntime + 0.5 * res2 / std::max(coef_cross_c.sigma2, EPS);
+    } // end of dloglik_dlogsig_coef_cross()
+
+
+    double dloglik_dlogrho(const unsigned int &s, const arma::vec &y, const arma::vec &lambda)
+    {
+        double dll_dlogrho = 0.0;
+        for (unsigned int t = 1; t < y.n_elem; t++)
+        {
+            dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
+        }
+
+        return dll_dlogrho;
+    } // end of dloglik_dlogrho()
 
 
     arma::vec get_global_params_unconstrained(const std::vector<std::string> &global_params)
@@ -596,9 +751,19 @@ public:
                 unconstrained_params.at(i) = coef_self_b.intercept;
                 break;
             }
+            case AVAIL::Param::ar_coef_self_sigma2:
+            {
+                unconstrained_params.at(i) = std::log(std::max(coef_self_b.sigma2, EPS));
+                break;
+            }
             case AVAIL::Param::ar_coef_cross_intercept:
             {
                 unconstrained_params.at(i) = coef_cross_c.intercept;
+                break;
+            }
+            case AVAIL::Param::ar_coef_cross_sigma2:
+            {
+                unconstrained_params.at(i) = std::log(std::max(coef_cross_c.sigma2, EPS));
                 break;
             }
             default:
@@ -640,9 +805,19 @@ public:
                 coef_self_b.intercept = std::min(unconstrained_params.at(i), UPBND);
                 break;
             }
+            case AVAIL::Param::ar_coef_self_sigma2:
+            {
+                coef_self_b.sigma2 = std::exp(std::min(unconstrained_params.at(i), UPBND));
+                break;
+            }
             case AVAIL::Param::ar_coef_cross_intercept:
             {
                 coef_cross_c.intercept = std::min(unconstrained_params.at(i), UPBND);
+                break;
+            }
+            case AVAIL::Param::ar_coef_cross_sigma2:
+            {
+                coef_cross_c.sigma2 = std::exp(std::min(unconstrained_params.at(i), UPBND));
                 break;
             }
             default:
@@ -672,18 +847,28 @@ public:
         const std::vector<std::string> &global_params,
         const arma::mat &Y,    // nS x (nT + 1)
         const arma::mat &wt, // nS x (nT + 1)
+        const arma::vec &psi1_spatial,
+        const arma::vec &wt2_temporal,
+        const arma::vec &psi3_spatial,
+        const arma::vec &wt4_temporal,
         const Prior &a_intercept_prior,
         const Prior &a_sigma2_prior,
         const Prior &coef_self_intercept_prior,
-        const Prior &coef_cross_intercept_prior)
+        const Prior &coef_self_sigma2_prior,
+        const Prior &coef_cross_intercept_prior,
+        const Prior &coef_cross_sigma2_prior
+    )
     {
         std::map<std::string, AVAIL::Param> static_param_list = AVAIL::static_param_list;
         arma::vec grad(global_params.size(), arma::fill::zeros);
 
-        arma::mat log_a = arma::cumsum(wt, 1);
-        arma::mat dll_deta = dloglik_deta(Y, log_a);
-        bool dlag_calculated = false;
-        arma::vec dlag_grad;
+        const arma::mat log_a = arma::cumsum(wt, 1);
+        const arma::vec psi2_temporal = arma::cumsum(wt2_temporal);
+        const arma::vec psi4_temporal = arma::cumsum(wt4_temporal);
+
+        arma::mat dll_deta = dloglik_deta(
+            Y, psi1_spatial, psi2_temporal, psi3_spatial, psi4_temporal, log_a
+        );
         for (unsigned int i = 0; i < global_params.size(); i++)
         {
             switch (static_param_list[tolower(global_params[i])])
@@ -706,18 +891,35 @@ public:
             }
             case AVAIL::Param::ar_coef_self_intercept:
             {
-                grad.at(i) = dloglik_dcoef_self(Y, dll_deta);
+                grad.at(i) = dloglik_dintercept_coef_self(Y, dll_deta, psi1_spatial, psi2_temporal);
                 grad.at(i) += Prior::dlogprior_dpar(
                     coef_self_b.intercept, coef_self_intercept_prior, false
                 );
                 break;
             }
+            case AVAIL::Param::ar_coef_self_sigma2:
+            {
+                grad.at(i) = dloglik_dlogsig_coef_self(Y, wt2_temporal);
+                grad.at(i) += Prior::dlogprior_dpar(
+                    coef_self_b.sigma2, coef_self_sigma2_prior, true
+                );
+                break;
+            }
             case AVAIL::Param::ar_coef_cross_intercept:
             {
-                grad.at(i) = dloglik_dcoef_cross(Y, dll_deta);
+                grad.at(i) = dloglik_dintercept_coef_cross(Y, dll_deta, psi3_spatial, psi4_temporal);
                 grad.at(i) += Prior::dlogprior_dpar(
                     coef_cross_c.intercept, 
                     coef_cross_intercept_prior, false
+                );
+                break;
+            }
+            case AVAIL::Param::ar_coef_cross_sigma2:
+            {
+                grad.at(i) = dloglik_dlogsig_coef_cross(Y, wt4_temporal);
+                grad.at(i) += Prior::dlogprior_dpar(
+                    coef_cross_c.sigma2, 
+                    coef_cross_sigma2_prior, true
                 );
                 break;
             }

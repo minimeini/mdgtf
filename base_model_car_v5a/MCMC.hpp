@@ -59,14 +59,14 @@ private:
     Prior rho_prior;
 
     // Priors for global parameters
-    Prior intercept_intercept_prior;
-    Prior intercept_sigma2_prior;
+    Prior a_intercept_prior;
+    Prior a_sigma2_prior;
     Prior coef_self_intercept_prior;
     Prior coef_cross_intercept_prior;
 
     // Storage for global parameter samples
-    arma::vec intercept_intercept_stored; // nsample x 1
-    arma::vec intercept_sigma2_stored; // nsample x 1
+    arma::vec a_intercept_stored; // nsample x 1
+    arma::vec a_sigma2_stored; // nsample x 1
     arma::vec coef_self_intercept_stored; // nsample x 1
     arma::vec coef_cross_intercept_stored; // nsample x 1
 
@@ -155,25 +155,25 @@ public:
             local_params_selected.push_back("rho");
         } // end of rho options
 
-        if (opts.containsElementNamed("intercept_intercept"))
+        if (opts.containsElementNamed("a_intercept"))
         {
-            Rcpp::List intercept_intercept_opts = Rcpp::as<Rcpp::List>(opts["intercept_intercept"]);
-            intercept_intercept_prior.init(intercept_intercept_opts);
+            Rcpp::List a_intercept_opts = Rcpp::as<Rcpp::List>(opts["a_intercept"]);
+            a_intercept_prior.init(a_intercept_opts);
         }
-        if (intercept_intercept_prior.infer)
+        if (a_intercept_prior.infer)
         {
-            global_params_selected.push_back("intercept_intercept");
-        } // end of intercept_intercept options
+            global_params_selected.push_back("a_intercept");
+        } // end of a_intercept options
 
-        if (opts.containsElementNamed("intercept_sigma2"))
+        if (opts.containsElementNamed("a_sigma2"))
         {
-            Rcpp::List W_opts = Rcpp::as<Rcpp::List>(opts["intercept_sigma2"]);
-            intercept_sigma2_prior.init(W_opts);
+            Rcpp::List W_opts = Rcpp::as<Rcpp::List>(opts["a_sigma2"]);
+            a_sigma2_prior.init(W_opts);
         }
-        if (intercept_sigma2_prior.infer)
+        if (a_sigma2_prior.infer)
         {
-            global_params_selected.push_back("intercept_sigma2");
-        } // end of intercept_sigma2 options
+            global_params_selected.push_back("a_sigma2");
+        } // end of a_sigma2 options
 
         if (opts.containsElementNamed("coef_self_intercept"))
         {
@@ -292,13 +292,13 @@ public:
             Rcpp::Named("prior_param") = Rcpp::NumericVector::create(1.0, 1.0)
         );
 
-        Rcpp::List intercept_intercept_opts = Rcpp::List::create(
+        Rcpp::List a_intercept_opts = Rcpp::List::create(
             Rcpp::Named("infer") = false,
             Rcpp::Named("prior_name") = "gaussian",
             Rcpp::Named("prior_param") = Rcpp::NumericVector::create(0.0, 10.0)
         );
 
-        Rcpp::List intercept_sigma2_opts = Rcpp::List::create(
+        Rcpp::List a_sigma2_opts = Rcpp::List::create(
             Rcpp::Named("infer") = false,
             Rcpp::Named("prior_name") = "invgamma",
             Rcpp::Named("prior_param") = Rcpp::NumericVector::create(1.0, 1.0)
@@ -348,8 +348,8 @@ public:
             Rcpp::Named("nburnin") = 1000,
             Rcpp::Named("nthin") = 1,
             Rcpp::Named("wt") = wt_opts,
-            Rcpp::Named("intercept_intercept") = intercept_intercept_opts,
-            Rcpp::Named("intercept_sigma2") = intercept_sigma2_opts,
+            Rcpp::Named("a_intercept") = a_intercept_opts,
+            Rcpp::Named("a_sigma2") = a_sigma2_opts,
             Rcpp::Named("coef_self_intercept") = coef_self_intercept_opts,
             Rcpp::Named("coef_cross_intercept") = coef_cross_intercept_opts,
             Rcpp::Named("rho") = rho_opts,
@@ -564,17 +564,17 @@ public:
             }
         }
 
-        if (intercept_intercept_prior.infer)
+        if (a_intercept_prior.infer)
         {
             // normal prior on the intercept (log scale) of the baseline intensity
-            logp += Prior::dprior(model.intercept_a.intercept, intercept_intercept_prior, true, false);
+            logp += Prior::dprior(model.intercept_a.intercept, a_intercept_prior, true, false);
         }
 
         // Add global parameter priors
-        if (intercept_sigma2_prior.infer)
+        if (a_sigma2_prior.infer)
         {
             // inverse-gamma prior on the variance of the intercept (log scale)
-            logp += Prior::dprior(model.intercept_a.sigma2, intercept_sigma2_prior, true, true);
+            logp += Prior::dprior(model.intercept_a.sigma2, a_sigma2_prior, true, true);
         }
 
         if (coef_self_intercept_prior.infer)
@@ -653,8 +653,8 @@ public:
 
         arma::vec grad = model.dloglik_dglobal_unconstrained(
             global_params_selected, Y, wt, 
-            intercept_intercept_prior,
-            intercept_sigma2_prior,
+            a_intercept_prior,
+            a_sigma2_prior,
             coef_self_intercept_prior,
             coef_cross_intercept_prior
         );
@@ -674,8 +674,8 @@ public:
             // Compute the new gradient
             grad = model.dloglik_dglobal_unconstrained(
                 global_params_selected, Y, wt, 
-                intercept_intercept_prior,
-                intercept_sigma2_prior,
+                a_intercept_prior,
+                a_sigma2_prior,
                 coef_self_intercept_prior,
                 coef_cross_intercept_prior
             );
@@ -833,8 +833,8 @@ public:
         arma::vec q = model.get_global_params_unconstrained(names);
         arma::vec g = model.dloglik_dglobal_unconstrained(
             names, Y, wt, 
-            intercept_intercept_prior,
-            intercept_sigma2_prior,
+            a_intercept_prior,
+            a_sigma2_prior,
             coef_self_intercept_prior,
             coef_cross_intercept_prior
         );
@@ -952,21 +952,21 @@ public:
 
         if (!model.intercept_a.has_intercept)
         {
-            intercept_intercept_prior.infer = false;
+            a_intercept_prior.infer = false;
         }
 
-        if (intercept_intercept_prior.infer)
+        if (a_intercept_prior.infer)
         {
-            intercept_intercept_stored = arma::vec(nsample, arma::fill::zeros);
+            a_intercept_stored = arma::vec(nsample, arma::fill::zeros);
         }
 
         if (!model.intercept_a.has_temporal)
         {
-            intercept_sigma2_prior.infer = false;
+            a_sigma2_prior.infer = false;
         }
-        if (intercept_sigma2_prior.infer)
+        if (a_sigma2_prior.infer)
         {
-            intercept_sigma2_stored = arma::vec(nsample, arma::fill::zeros);
+            a_sigma2_stored = arma::vec(nsample, arma::fill::zeros);
         }
 
         if (!model.coef_self_b.has_intercept)
@@ -1118,14 +1118,14 @@ public:
                     wt_stored.slice(sample_idx) = wt;
                 }
 
-                if (intercept_intercept_prior.infer)
+                if (a_intercept_prior.infer)
                 {
-                    intercept_intercept_stored.at(sample_idx) = model.intercept_a.intercept;
+                    a_intercept_stored.at(sample_idx) = model.intercept_a.intercept;
                 }
 
-                if (intercept_sigma2_prior.infer)
+                if (a_sigma2_prior.infer)
                 {
-                    intercept_sigma2_stored.at(sample_idx) = model.intercept_a.sigma2;
+                    a_sigma2_stored.at(sample_idx) = model.intercept_a.sigma2;
                 }
                 
                 if (coef_self_intercept_prior.infer)
@@ -1170,13 +1170,13 @@ public:
                 Rcpp::Named("leapfrog_step_size") = global_leapfrog_step_size
             );
 
-            if (intercept_intercept_prior.infer)
+            if (a_intercept_prior.infer)
             {
-                output["intercept_intercept"] = Rcpp::wrap(intercept_intercept_stored);
+                output["a_intercept"] = Rcpp::wrap(a_intercept_stored);
             }
-            if (intercept_sigma2_prior.infer)
+            if (a_sigma2_prior.infer)
             {
-                output["intercept_sigma2"] = Rcpp::wrap(intercept_sigma2_stored);
+                output["a_sigma2"] = Rcpp::wrap(a_sigma2_stored);
             }
             if (coef_self_intercept_prior.infer)
             {

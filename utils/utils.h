@@ -341,6 +341,23 @@ inline double runif()
 }
 
 
+inline arma::vec rmvnorm_prec(
+	const arma::vec &mu, 
+	const arma::mat &Q
+)
+{
+    // Sample x ~ N(mu, Q^{-1}) using Cholesky of precision (no covariance inversion).
+    const arma::uword d = mu.n_elem;
+    arma::mat Qsym = arma::symmatu(Q);
+    Qsym.diag() += EPS8;
+    arma::mat L = arma::chol(Qsym, "lower");      // Q = L L^T
+    arma::vec z = arma::randn<arma::vec>(mu.n_elem);      // z ~ N(0, I)
+    // Solve L^T y = z  => y = L^{-T} z  gives covariance L^{-T} (L^{-T})^T = Q^{-1}
+    arma::vec y = arma::solve(arma::trimatu(L.t()), z);
+    return mu + y;
+}
+
+
 /**
  * Calculate CRPS for posterior predictive samples
  * 
