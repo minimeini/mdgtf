@@ -44,7 +44,7 @@ arma::mat sample_bym2(
     spatial.mu = mu;
     spatial.tau_b = tau_b;
     spatial.phi = phi;
-    return spatial.sample_bym2_prior(k);
+    return spatial.sample_spatial_effects(k);
 }
 
 
@@ -59,12 +59,9 @@ Rcpp::List infer_bym2_parameters(
 ) {
     // Set up spatial structure
     SpatialStructureBYM2 spatial(V_adj);
-    
-    // Create MCMC sampler
-    BYM2_MCMC_ObservedEffects mcmc(b_observed, spatial);
-    
+
     // Run MCMC
-    return mcmc.run_mcmc(n_iter, burn_in, thin);
+    return spatial.run_mcmc(b_observed, n_iter, burn_in, thin);
 }
 
 
