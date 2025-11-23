@@ -280,7 +280,7 @@ inline double logit(const double &p, const double &m = 1.)
 	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check(val, "logit");
 	#endif
-	return std::log(val) * m;
+	return std::log(std::abs(val) + EPS) * m;
 }
 
 
@@ -288,7 +288,7 @@ template <typename T>
 inline T logit(const T&x, const double &m = 1.)
 {
 	T val = x / (1. - x);
-	T out = arma::log(val) * m;
+	T out = arma::log(arma::abs(val) + EPS) * m;
 	#ifdef DGTF_DO_BOUND_CHECK
 	bound_check(val, "logit");
 	#endif

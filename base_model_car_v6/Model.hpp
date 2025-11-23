@@ -279,30 +279,16 @@ public:
     double sample_posterior_predictive_y(
         arma::cube &Y_pred, // nS x (nT + 1) x (nsample * nrep)
         arma::cube &Y_residual, // nS x (nT + 1) x nsample
-        arma::cube &log_a, // nS x (nT + 1) x nsample
         const Rcpp::List &output, 
-        const arma::mat &Y, 
+        const Rcpp::List &mcmc_opts,
+        const arma::mat &Y,
+        const unsigned int &nsample,
         const unsigned int &nrep = 1
     )
     {
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
-
-        arma::cube wt_stored; // nS x (nT + 1) x nsample
-        if (output.containsElementNamed("wt_samples"))
-        {
-            wt_stored = Rcpp::as<arma::cube>(output["wt_samples"]);
-        }
-        else if (output.containsElementNamed("wt"))
-        {
-            wt_stored = Rcpp::as<arma::cube>(output["wt"]);
-        }
-        else
-        {
-            throw std::invalid_argument("Model::sample_posterior_predictive_y - 'wt_samples' or 'wt' is missing in the output.");
-        }
-
-        const unsigned int nsample = wt_stored.n_slices;
-        const unsigned int ntime = wt_stored.n_cols - 1;
+        const unsigned int ntime = Y.n_cols - 1;
+        const unsigned int nS = Y.n_rows;
 
         arma::mat rho_stored;
         if (output.containsElementNamed("rho"))
@@ -315,42 +301,120 @@ public:
             rho_stored.each_col() = rho;
         }
 
-        arma::vec a_intercept_stored;
-        if (output.containsElementNamed("a_intercept"))
+        arma::vec lag_par1_stored;
+        if (output.containsElementNamed("lag_par1"))
         {
-            a_intercept_stored = Rcpp::as<arma::vec>(output["a_intercept"]);
+            lag_par1_stored = Rcpp::as<arma::vec>(output["lag_par1"]);
         }
         else
         {
-            a_intercept_stored = arma::vec(nsample, arma::fill::value(intercept_a.intercept));
+            lag_par1_stored = arma::vec(nsample, arma::fill::value(dlag.par1));
         }
 
-        arma::vec a_sigma2_stored;
-        if (output.containsElementNamed("a_sigma2"))
+        arma::vec lag_par2_stored;
+        if (output.containsElementNamed("lag_par2"))
         {
-            a_sigma2_stored = Rcpp::as<arma::vec>(output["a_sigma2"]);
+            lag_par2_stored = Rcpp::as<arma::vec>(output["lag_par2"]);
         }
         else
         {
-            a_sigma2_stored = arma::vec(nsample, arma::fill::value(intercept_a.sigma2));
+            lag_par2_stored = arma::vec(nsample, arma::fill::value(dlag.par2));
         }
 
-        arma::vec coef_self_intercept_stored;
-        if (output.containsElementNamed("coef_self_intercept"))
+        arma::vec a_intercept_stored(nsample, arma::fill::value(intercept_a.intercept));
+        if (output.containsElementNamed("intercept_a"))
         {
-            coef_self_intercept_stored = Rcpp::as<arma::vec>(output["coef_self_intercept"]);
-        }
-        else
+            Rcpp::List intercept_a_opts = output["intercept_a"];
+            if (intercept_a_opts.containsElementNamed("intercept"))
+            {
+                a_intercept_stored = Rcpp::as<arma::vec>(intercept_a_opts["intercept"]);
+            }
+        } // end of if output contains "intercept_a"
+
+        arma::vec coef_self_sigma2_stored(nsample, arma::fill::zeros);
+        arma::mat coef_self_psi2_temporal_stored(ntime + 1, nsample, arma::fill::zeros);
+        arma::mat coef_self_psi1_spatial_stored(nS, nsample, arma::fill::zeros);
+        arma::vec coef_self_car_mu_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_car_tau2_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_car_rho_stored(nsample, arma::fill::zeros);
+        if (output.containsElementNamed("coef_self_b"))
         {
-            coef_self_intercept_stored = arma::vec(nsample, arma::fill::value(coef_self_b.intercept));
-        }
+            Rcpp::List coef_self_b_opts = output["coef_self_b"];
+            Rcpp::List coef_self_b_mcmc_opts = mcmc_opts["coef_self"];
+            if (coef_self_b_opts.containsElementNamed("sigma2"))
+            {
+                coef_self_sigma2_stored = Rcpp::as<arma::vec>(coef_self_b_opts["sigma2"]);
+            }
+            else
+            {
+                coef_self_sigma2_stored = arma::vec(nsample, arma::fill::value(coef_self_b.sigma2));
+            } // end of if coef_self_b_opts contains "sigma2"
+
+            if (coef_self_b_opts.containsElementNamed("psi2_temporal"))
+            {
+                coef_self_psi2_temporal_stored = Rcpp::as<arma::mat>(coef_self_b_opts["psi2_temporal"]);
+            }
+            else if (coef_self_b_mcmc_opts.containsElementNamed("temporal"))
+            {
+                Rcpp::List coef_self_b_temporal_opts = coef_self_b_mcmc_opts["temporal"];
+                if (coef_self_b_temporal_opts.containsElementNamed("init"))
+                {
+                    arma::vec coef_self_psi2_temporal_init = Rcpp::as<arma::vec>(coef_self_b_temporal_opts["init"]);
+                    coef_self_psi2_temporal_stored.each_col() = coef_self_psi2_temporal_init;
+                }
+            } // end of if coef_self_b_opts contains "temporal"
+
+            if (coef_self_b_opts.containsElementNamed("spatial"))
+            {
+                Rcpp::List coef_self_b_spatial_opts = coef_self_b_opts["spatial"];
+                if (coef_self_b_spatial_opts.containsElementNamed("psi1_spatial"))
+                {
+                    coef_self_psi1_spatial_stored = Rcpp::as<arma::mat>(coef_self_b_spatial_opts["psi1_spatial"]);
+                }
+                else if (coef_self_b_mcmc_opts.containsElementNamed("spatial"))
+                {
+                    Rcpp::List coef_self_b_spatial_mcmc_opts = coef_self_b_mcmc_opts["spatial"];
+                    if (coef_self_b_spatial_mcmc_opts.containsElementNamed("init"))
+                    {
+                        arma::vec coef_self_psi1_spatial_init = Rcpp::as<arma::vec>(coef_self_b_spatial_mcmc_opts["init"]);
+                        coef_self_psi1_spatial_stored.each_col() = coef_self_psi1_spatial_init;
+                    }
+                }
+
+                if (coef_self_b_spatial_opts.containsElementNamed("mu"))
+                {
+                    coef_self_car_mu_stored = Rcpp::as<arma::vec>(coef_self_b_spatial_opts["mu"]);
+                }
+                else
+                {
+                    coef_self_car_mu_stored = arma::vec(nsample, arma::fill::value(coef_self_b.spatial.car_mu));
+                }
+
+                if (coef_self_b_spatial_opts.containsElementNamed("tau2"))
+                {
+                    coef_self_car_tau2_stored = Rcpp::as<arma::vec>(coef_self_b_spatial_opts["tau2"]);
+                }
+                else
+                {
+                    coef_self_car_tau2_stored = arma::vec(nsample, arma::fill::value(coef_self_b.spatial.car_tau2));
+                }
+
+                if (coef_self_b_spatial_opts.containsElementNamed("rho"))
+                {
+                    coef_self_car_rho_stored = Rcpp::as<arma::vec>(coef_self_b_spatial_opts["rho"]);
+                }
+                else
+                {
+                    coef_self_car_rho_stored = arma::vec(nsample, arma::fill::value(coef_self_b.spatial.car_rho));
+                }
+            } // end of if coef_self_b_opts contains "spatial"
+        } // end of if output contains "coef_self_b"
+
 
         Y_pred.set_size(nS, ntime + 1, nsample * nrep);
         Y_pred.zeros();
         Y_residual.set_size(nS, ntime + 1, nsample);
         Y_residual.zeros();
-        log_a.set_size(nS, ntime + 1, nsample);
-        log_a.zeros();
 
         arma::vec chi_sqr(nsample, arma::fill::zeros);
         Progress p(nsample, true);
@@ -361,43 +425,53 @@ public:
         {
             Model model_i = *this;
             model_i.intercept_a.intercept = a_intercept_stored.at(i);
-            model_i.intercept_a.sigma2 = a_sigma2_stored.at(i);
-            model_i.coef_self_b.intercept = coef_self_intercept_stored.at(i);
+            model_i.coef_self_b.sigma2 = coef_self_sigma2_stored.at(i);
+            arma::vec psi2_temporal = coef_self_psi2_temporal_stored.col(i);
+            arma::vec psi1_spatial = coef_self_psi1_spatial_stored.col(i);
+            model_i.coef_self_b.spatial = SpatialStructure(
+                spatial.V,
+                coef_self_car_mu_stored.at(i),
+                coef_self_car_tau2_stored.at(i),
+                coef_self_car_rho_stored.at(i)
+            );
+
+            model_i.dlag.par1 = lag_par1_stored.at(i);
+            model_i.dlag.par2 = lag_par2_stored.at(i);
+            model_i.dlag.nL = LagDist::get_nlag(model_i.dlag);
+            model_i.dlag.Fphi = LagDist::get_Fphi(model_i.dlag);
             model_i.rho = rho_stored.col(i);
 
-            const double coef_self = std::exp(std::min(model_i.coef_self_b.intercept, UPBND));
-
-            arma::mat Lambda(nS, ntime + 1, arma::fill::zeros);
-            log_a.slice(i) = arma::cumsum(wt_stored.slice(i), 1); // nS x (nT + 1)
-
+            const double mu = std::exp(std::min(model_i.intercept_a.intercept, UPBND));
             arma::mat ytmp(nS, ntime, arma::fill::zeros);
-            for (unsigned int t = 1; t <= ntime; t++)
+            for (unsigned int s = 0; s < nS; s++)
             {
-                for (unsigned int s = 0; s < nS; s++)
+                arma::vec psi_s = psi1_spatial.at(s) + psi2_temporal;
+                arma::vec hpsi_s = GainFunc::psi2hpsi<arma::vec>(psi_s, fgain);
+                for (unsigned int t = 1; t <= ntime; t++)
                 {
-                    double eta = std::exp(std::min(intercept_a.intercept + log_a.at(s, t, i), UPBND));
-                    eta += coef_self * Y.at(s, t - 1);
+                    double ft = TransFunc::transfer_sliding(
+                        t, model_i.dlag.nL, Y.row(s).t(), model_i.dlag.Fphi, hpsi_s);
+                    double lambda = mu + ft;
 
-                    Lambda.at(s, t) = eta;
                     double mean, var;
                     switch (obs_list[model_i.dobs])
                     {
                     case AVAIL::Dist::nbinomm:
                     {
-                        mean = Lambda.at(s, t);
-                        var = std::abs(nbinomm::var(Lambda.at(s, t), model_i.rho.at(s)));
+                        mean = lambda;
+                        var = std::abs(nbinomm::var(lambda, model_i.rho.at(s)));
                         break;
                     }
                     case AVAIL::Dist::nbinomp:
                     {
-                        mean = nbinom::mean(Lambda.at(s, t), model_i.rho.at(s));
-                        var = nbinom::var(Lambda.at(s, t), model_i.rho.at(s));
+                        mean = nbinom::mean(lambda, model_i.rho.at(s));
+                        var = nbinom::var(lambda, model_i.rho.at(s));
                         break;
                     }
                     case AVAIL::Dist::poisson:
                     {
-                        mean = Lambda.at(s, t);
-                        var = Lambda.at(s, t);
+                        mean = lambda;
+                        var = lambda;
                         break;
                     }
                     default:
@@ -407,7 +481,7 @@ public:
                     }
                     } // end of switch by obs_list
 
-                    Y_residual.at(s, t, i) = Lambda.at(s, t) - Y.at(s, t);
+                    Y_residual.at(s, t, i) = lambda - Y.at(s, t);
                     double yres2 = 2. * std::log(std::abs(Y_residual.at(s, t, i)) + EPS);
                     double yvar = std::log(var + EPS);
                     ytmp.at(s, t - 1) = std::exp(yres2 - yvar);
@@ -415,12 +489,12 @@ public:
                     for (unsigned int r = 0; r < nrep; r++)
                     {
                         Y_pred.at(s, t, i * nrep + r) = ObsDist::sample(
-                            Lambda.at(s, t), model_i.rho.at(s), model_i.dobs
+                            lambda, model_i.rho.at(s), model_i.dobs
                         );
                     } // end of for r in [0, nrep]
+                } // end of loop over time t
 
-                } // end of for s in [0, nS]
-            } // end of for t in [1, ntime]
+            } // end of loop over locations s
 
             chi_sqr.at(i) = arma::mean(arma::mean(ytmp));
             p.increment();

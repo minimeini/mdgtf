@@ -278,15 +278,18 @@ public:
     double sample_posterior_predictive_y(
         arma::cube &Y_pred, // nS x (nT + 1) x (nsample * nrep)
         arma::cube &Y_residual, // nS x (nT + 1) x nsample
-        arma::cube &log_a, // nS x (nT + 1) x nsample
         const Rcpp::List &output, 
+        const Rcpp::List &mcmc_opts,
         const arma::mat &Y, 
+        const unsigned int &nsample,
         const unsigned int &nrep = 1
     )
     {
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
+        const unsigned int ntime = Y.n_cols - 1;
+        const unsigned int nS = Y.n_rows;
 
-        arma::cube wt_stored; // nS x (nT + 1) x nsample
+        arma::cube wt_stored(nS, ntime + 1, nsample);
         if (output.containsElementNamed("wt_samples"))
         {
             wt_stored = Rcpp::as<arma::cube>(output["wt_samples"]);
@@ -295,14 +298,24 @@ public:
         {
             wt_stored = Rcpp::as<arma::cube>(output["wt"]);
         }
+        else if (mcmc_opts.containsElementNamed("a"))
+        {
+            Rcpp::List a_opts = mcmc_opts["a"];
+            if (a_opts.containsElementNamed("temporal"))
+            {
+                Rcpp::List a_temporal_opts = a_opts["temporal"];
+                if (a_temporal_opts.containsElementNamed("init"))
+                {
+                    arma::mat wt = Rcpp::as<arma::mat>(a_temporal_opts["init"]);
+                    wt_stored.each_slice() = wt;
+                }
+            }
+        }
         else
         {
-            throw std::invalid_argument("Model::sample_posterior_predictive_y - 'wt_samples' or 'wt' is missing in the output.");
+            wt_stored.zeros();
         }
-
-        const unsigned int nsample = wt_stored.n_slices;
-        const unsigned int ntime = wt_stored.n_cols - 1;
-
+        
         arma::mat rho_stored;
         if (output.containsElementNamed("rho"))
         {
@@ -334,32 +347,141 @@ public:
             a_sigma2_stored = arma::vec(nsample, arma::fill::value(intercept_a.sigma2));
         }
 
-        arma::vec coef_self_intercept_stored;
-        if (output.containsElementNamed("coef_self_intercept"))
+        arma::vec coef_self_intercept_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_sigma2_stored(nsample, arma::fill::zeros);
+        arma::mat coef_self_temporal_stored(ntime + 1, nsample, arma::fill::zeros);
+        arma::mat coef_self_spatial_stored(nS, nsample, arma::fill::zeros);
+        arma::vec coef_self_car_mu_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_car_tau2_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_car_rho_stored(nsample, arma::fill::zeros);
+        if (output.containsElementNamed("coef_self"))
         {
-            coef_self_intercept_stored = Rcpp::as<arma::vec>(output["coef_self_intercept"]);
-        }
-        else
-        {
-            coef_self_intercept_stored = arma::vec(nsample, arma::fill::value(coef_self_b.intercept));
+            Rcpp::List coef_self_opts = output["coef_self"];
+            Rcpp::List coef_self_mcmc_opts = mcmc_opts["coef_self"];
+            if (coef_self_opts.containsElementNamed("intercept"))
+            {
+                coef_self_intercept_stored = Rcpp::as<arma::vec>(coef_self_opts["intercept"]);
+            }
+            else
+            {
+                coef_self_intercept_stored = arma::vec(nsample, arma::fill::value(coef_self_b.intercept));
+            }
+
+            if (coef_self_opts.containsElementNamed("sigma2"))
+            {
+                coef_self_sigma2_stored = Rcpp::as<arma::vec>(coef_self_opts["sigma2"]);
+            }
+            else
+            {
+                coef_self_sigma2_stored = arma::vec(nsample, arma::fill::value(coef_self_b.sigma2));
+            }
+
+            if (coef_self_opts.containsElementNamed("temporal"))
+            {
+                coef_self_temporal_stored = Rcpp::as<arma::mat>(coef_self_opts["temporal"]);
+            }
+            else if (coef_self_mcmc_opts.containsElementNamed("temporal"))
+            {
+                Rcpp::List coef_self_temporal_opts = coef_self_mcmc_opts["temporal"];
+                if (coef_self_temporal_opts.containsElementNamed("init"))
+                {
+                    arma::vec coef_self_temporal_init = Rcpp::as<arma::vec>(coef_self_temporal_opts["init"]);
+                    coef_self_temporal_stored.each_col() = coef_self_temporal_init;
+                }
+            }
+
+            if (coef_self_opts.containsElementNamed("spatial"))
+            {
+                coef_self_spatial_stored = Rcpp::as<arma::mat>(coef_self_opts["spatial"]);
+                coef_self_car_mu_stored = Rcpp::as<arma::vec>(coef_self_opts["car_mu"]);
+                coef_self_car_tau2_stored = Rcpp::as<arma::vec>(coef_self_opts["car_tau2"]);
+                coef_self_car_rho_stored = Rcpp::as<arma::vec>(coef_self_opts["car_rho"]);
+            }
+            else if (coef_self_mcmc_opts.containsElementNamed("spatial"))
+            {
+                Rcpp::List coef_self_spatial_opts = coef_self_mcmc_opts["spatial"];
+                if (coef_self_spatial_opts.containsElementNamed("init"))
+                {
+                    arma::mat coef_self_spatial_init = Rcpp::as<arma::mat>(coef_self_spatial_opts["init"]);
+                    coef_self_spatial_stored.each_col() = coef_self_spatial_init;
+                }
+
+                coef_self_car_mu_stored.fill(coef_self_b.spatial.car_mu);
+                coef_self_car_tau2_stored.fill(coef_self_b.spatial.car_tau2);
+                coef_self_car_rho_stored.fill(coef_self_b.spatial.car_rho);
+            }
         }
 
-        arma::vec coef_cross_intercept_stored;
-        if (output.containsElementNamed("coef_cross_intercept"))
+
+        arma::vec coef_cross_intercept_stored(nsample, arma::fill::zeros);
+        arma::vec coef_cross_sigma2_stored(nsample, arma::fill::zeros);
+        arma::mat coef_cross_temporal_stored(ntime + 1, nsample, arma::fill::zeros);
+        arma::mat coef_cross_spatial_stored(nS, nsample, arma::fill::zeros);
+        arma::vec coef_cross_car_mu_stored(nsample, arma::fill::zeros);
+        arma::vec coef_cross_car_tau2_stored(nsample, arma::fill::zeros);
+        arma::vec coef_cross_car_rho_stored(nsample, arma::fill::zeros);
+        if (output.containsElementNamed("coef_cross"))
         {
-            coef_cross_intercept_stored = Rcpp::as<arma::vec>(output["coef_cross_intercept"]);
-        }
-        else
-        {
-            coef_cross_intercept_stored = arma::vec(nsample, arma::fill::value(coef_cross_c.intercept));
+            Rcpp::List coef_cross_opts = output["coef_cross"];
+            Rcpp::List coef_cross_mcmc_opts = mcmc_opts["coef_cross"];
+            if (coef_cross_opts.containsElementNamed("intercept"))
+            {
+                coef_cross_intercept_stored = Rcpp::as<arma::vec>(coef_cross_opts["intercept"]);
+            }
+            else
+            {
+                coef_cross_intercept_stored = arma::vec(nsample, arma::fill::value(coef_cross_c.intercept));
+            }
+
+            if (coef_cross_opts.containsElementNamed("sigma2"))
+            {
+                coef_cross_sigma2_stored = Rcpp::as<arma::vec>(coef_cross_opts["sigma2"]);
+            }
+            else
+            {
+                coef_cross_sigma2_stored = arma::vec(nsample, arma::fill::value(coef_cross_c.sigma2));
+            }
+
+            if (coef_cross_opts.containsElementNamed("temporal"))
+            {
+                coef_cross_temporal_stored = Rcpp::as<arma::mat>(coef_cross_opts["temporal"]);
+            }
+            else if (coef_cross_mcmc_opts.containsElementNamed("temporal"))
+            {
+                Rcpp::List coef_cross_temporal_opts = coef_cross_mcmc_opts["temporal"];
+                if (coef_cross_temporal_opts.containsElementNamed("init"))
+                {
+                    arma::vec coef_cross_temporal_init = Rcpp::as<arma::vec>(coef_cross_temporal_opts["init"]);
+                    coef_cross_temporal_stored.each_col() = coef_cross_temporal_init;
+                }
+            }
+
+            if (coef_cross_opts.containsElementNamed("spatial"))
+            {
+                coef_cross_spatial_stored = Rcpp::as<arma::mat>(coef_cross_opts["spatial"]);
+                coef_cross_car_mu_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_mu"]);
+                coef_cross_car_tau2_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_tau2"]);
+                coef_cross_car_rho_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_rho"]);
+            }
+            else if (coef_cross_mcmc_opts.containsElementNamed("spatial"))
+            {
+                Rcpp::List coef_cross_spatial_opts = coef_cross_mcmc_opts["spatial"];
+                if (coef_cross_spatial_opts.containsElementNamed("init"))
+                {
+                    arma::mat coef_cross_spatial_init = Rcpp::as<arma::mat>(coef_cross_spatial_opts["init"]);
+                    coef_cross_spatial_stored.each_col() = coef_cross_spatial_init;
+                }
+
+                coef_cross_car_mu_stored.fill(coef_cross_c.spatial.car_mu);
+                coef_cross_car_tau2_stored.fill(coef_cross_c.spatial.car_tau2);
+                coef_cross_car_rho_stored.fill(coef_cross_c.spatial.car_rho);
+            }
         }
 
         Y_pred.set_size(nS, ntime + 1, nsample * nrep);
         Y_pred.zeros();
         Y_residual.set_size(nS, ntime + 1, nsample);
         Y_residual.zeros();
-        log_a.set_size(nS, ntime + 1, nsample);
-        log_a.zeros();
 
         arma::vec chi_sqr(nsample, arma::fill::zeros);
         Progress p(nsample, true);
@@ -371,24 +493,55 @@ public:
             Model model_i = *this;
             model_i.intercept_a.intercept = a_intercept_stored.at(i);
             model_i.intercept_a.sigma2 = a_sigma2_stored.at(i);
+            arma::mat wt = wt_stored.slice(i);
+            arma::mat a_temporal = arma::cumsum(wt, 1); // nS x (nT + 1)
+
             model_i.coef_self_b.intercept = coef_self_intercept_stored.at(i);
+            model_i.coef_self_b.sigma2 = coef_self_sigma2_stored.at(i);
+            arma::vec psi2_temporal = coef_self_temporal_stored.col(i);
+            arma::vec psi1_spatial = coef_self_spatial_stored.col(i);
+            model_i.coef_self_b.spatial = SpatialStructure(
+                model_i.coef_self_b.spatial.V, 
+                coef_self_car_mu_stored.at(i), 
+                coef_self_car_tau2_stored.at(i), 
+                coef_self_car_rho_stored.at(i)
+            );
+
             model_i.coef_cross_c.intercept = coef_cross_intercept_stored.at(i);
+            model_i.coef_cross_c.sigma2 = coef_cross_sigma2_stored.at(i);
+            arma::vec psi4_temporal = coef_cross_temporal_stored.col(i);
+            arma::vec psi3_spatial = coef_cross_spatial_stored.col(i);
+            model_i.coef_cross_c.spatial = SpatialStructure(
+                model_i.coef_cross_c.spatial.V, 
+                coef_cross_car_mu_stored.at(i), 
+                coef_cross_car_tau2_stored.at(i), 
+                coef_cross_car_rho_stored.at(i)
+            );
+
             model_i.rho = rho_stored.col(i);
 
-            const double coef_self = std::exp(std::min(model_i.coef_self_b.intercept, UPBND));
-            const double coef_cross = std::exp(std::min(model_i.coef_cross_c.intercept, UPBND));
+            const double baseline = model_i.intercept_a.has_intercept ? model_i.intercept_a.intercept : 0.0;
 
             arma::mat Lambda(nS, ntime + 1, arma::fill::zeros);
-            log_a.slice(i) = arma::cumsum(wt_stored.slice(i), 1); // nS x (nT + 1)
-
             arma::mat ytmp(nS, ntime, arma::fill::zeros);
             for (unsigned int t = 1; t <= ntime; t++)
             {
                 for (unsigned int s = 0; s < nS; s++)
                 {
-                    double eta = std::exp(std::min(intercept_a.intercept + log_a.at(s, t, i), UPBND));
-                    eta += coef_self * Y.at(s, t - 1);
-                    eta += coef_cross * arma::dot(
+                    double log_mu = baseline;
+                    log_mu += model_i.intercept_a.has_temporal ? a_temporal.at(s, t) : 0.0;
+
+                    double log_coef_self = model_i.coef_self_b.intercept;
+                    log_coef_self += model_i.coef_self_b.has_spatial ? psi1_spatial.at(s) : 0.0;
+                    log_coef_self += model_i.coef_self_b.has_temporal ? psi2_temporal.at(t) : 0.0;
+
+                    double log_coef_cross = model_i.coef_cross_c.intercept;
+                    log_coef_cross += model_i.coef_cross_c.has_spatial ? psi3_spatial.at(s) : 0.0;
+                    log_coef_cross += model_i.coef_cross_c.has_temporal ? psi4_temporal.at(t) : 0.0;
+
+                    double eta = std::exp(std::min(log_mu, UPBND));
+                    eta += std::exp(std::min(log_coef_self, UPBND)) * Y.at(s, t - 1);
+                    eta += std::exp(std::min(log_coef_cross, UPBND)) * arma::dot(
                         model_i.spatial.W.row(s).t(), Y.col(t-1)
                     );
 

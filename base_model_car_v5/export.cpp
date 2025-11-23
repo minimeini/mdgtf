@@ -121,17 +121,22 @@ Rcpp::List mdgtf_infer(
 Rcpp::List mdgtf_posterior_predictive(
     const Rcpp::List &output, 
     const Rcpp::List &model_opts, 
+    const Rcpp::List &mcmc_opts,
     const arma::mat &Y, // nS x (nT + 1)
-    const unsigned int &nrep = 1,
-    const Rcpp::Nullable<Rcpp::NumericMatrix> &log_a_in = R_NilValue // nS x (nT + 1)
+    const unsigned int &nsample,
+    const unsigned int &nrep = 1
 )
 {
     Model model(model_opts);
-    arma::cube Y_pred, Y_residual, log_a;
+    arma::cube Y_pred, Y_residual;
     // Y_pred: nS x (nT + 1) x (nsample * nrep)
     // Y_residual: nS x (nT + 1) x nsample
     // hPsi: nS x (nT + 1) x nsample
-    double chi_sqr = model.sample_posterior_predictive_y(Y_pred, Y_residual, log_a, output, Y, nrep);
+    double chi_sqr = model.sample_posterior_predictive_y(
+        Y_pred, Y_residual, 
+        output, mcmc_opts, 
+        Y, nsample, nrep
+    );
 
     arma::cube Y_pred_trunc = Y_pred.cols(1, Y_pred.n_cols - 1); // nS x nT x (nsample * nrep)
     arma::mat Y_trunc = Y.cols(1, Y.n_cols - 1); // nS x nT
@@ -169,48 +174,6 @@ Rcpp::List mdgtf_posterior_predictive(
         Rcpp::Named("Y_width") = Y_width, // nS x 1
         Rcpp::Named("Y_width_avg") = arma::mean(Y_width)
     );
-
-    arma::cube log_a_ci(log_a.n_rows, log_a.n_cols, prob.n_elem);
-    arma::vec log_a_width(log_a.n_rows, arma::fill::zeros);
-    for (unsigned int i = 0; i < log_a.n_rows; i++)
-    {
-        for (unsigned int j = 0; j < log_a.n_cols; j++)
-        {
-            arma::vec samples = log_a.tube(i, j);                // nsample x 1
-            log_a_ci.tube(i, j) = arma::quantile(samples, prob); // 3 x 1
-        }
-
-        arma::vec lobnd = log_a_ci.slice(0).row(i).t();
-        arma::vec upbnd = log_a_ci.slice(2).row(i).t();
-        log_a_width.at(i) = arma::mean(upbnd - lobnd);
-    }
-    stats["log_a"] = log_a_ci; // nS x (nT + 1) x 3
-    stats["log_a_width"] = log_a_width; // nS x 1
-    stats["log_a_width_avg"] = arma::mean(log_a_width);
-
-    if (log_a_in.isNotNull())
-    {
-        arma::mat log_a_true = Rcpp::as<arma::mat>(log_a_in);
-        arma::vec log_a_coverage(log_a.n_rows, arma::fill::zeros);
-        
-        for (unsigned int i = 0; i < log_a.n_rows; i++)
-        {
-            arma::vec lobnd = log_a_ci.slice(0).row(i).t();
-            arma::vec upbnd = log_a_ci.slice(2).row(i).t();
-            arma::vec true_val = log_a_true.row(i).t();
-
-            double covered = arma::accu((true_val >= lobnd) % (true_val <= upbnd));
-            log_a_coverage.at(i) = covered / static_cast<double>(true_val.n_elem);
-        }
-        arma::cube log_a_res_all = arma::abs(log_a.each_slice() - log_a_true);
-        arma::mat log_a_res = arma::mean(log_a_res_all, 2); // nS x (nT + 1)
-        arma::vec mae_log_a = arma::mean(log_a_res, 1);
-
-        stats["log_a_mae"] = mae_log_a; // nS x 1
-        stats["log_a_mae_avg"] = arma::mean(mae_log_a);
-        stats["log_a_coverage"] = log_a_coverage; // nS x 1
-        stats["log_a_coverage_avg"] = arma::mean(log_a_coverage);
-    }
 
     return stats;
 }

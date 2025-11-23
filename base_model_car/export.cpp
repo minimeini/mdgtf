@@ -1,5 +1,6 @@
 #include <chrono>
 #include "../core/GainFunc.hpp"
+#include "SpatialStructureBYM2.hpp"
 #include "Model.hpp"
 #include "MCMC.hpp"
 
@@ -27,6 +28,45 @@ arma::mat sample_car(
     SpatialStructure spatial(V, car_params[0], car_params[1], car_params[2]);
     return spatial.prior_sample_spatial_effects(k);
 }
+
+
+//' @export
+// [[Rcpp::export]]
+arma::mat sample_bym2(
+    const unsigned int &k,
+    const arma::mat &V,
+    const double &mu,
+    const double &tau_b,
+    const double &phi
+)
+{
+    SpatialStructureBYM2 spatial(V);
+    spatial.mu = mu;
+    spatial.tau_b = tau_b;
+    spatial.phi = phi;
+    return spatial.sample_bym2_prior(k);
+}
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List infer_bym2_parameters(
+    arma::vec b_observed,
+    arma::mat V_adj,
+    int n_iter = 5000,
+    int burn_in = 1000,
+    int thin = 1
+) {
+    // Set up spatial structure
+    SpatialStructureBYM2 spatial(V_adj);
+    
+    // Create MCMC sampler
+    BYM2_MCMC_ObservedEffects mcmc(b_observed, spatial);
+    
+    // Run MCMC
+    return mcmc.run_mcmc(n_iter, burn_in, thin);
+}
+
 
 //' @export
 // [[Rcpp::export]]
