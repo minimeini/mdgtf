@@ -327,20 +327,22 @@ public:
         }
     }
 
-
-    void adapt_phi_proposal(int iter, int burn_in)
+    void adapt_phi_proposal_robbins_monro(int iter, int burn_in, double target_rate = 0.6)
     {
-        if (iter < burn_in && iter > 0 && iter % 200 == 0)
+        if (iter < burn_in && iter > 0 && iter % 50 == 0)
         {
-            double rate = phi_accept_count / 200.0;
+            double accept_rate = phi_accept_count / 50.0;
             phi_accept_count = 0.0;
-            if (rate < 0.2)
-                mh_sd_phi *= 0.9;
-            else if (rate > 0.5)
-                mh_sd_phi *= 1.1;
-            mh_sd_phi = std::max(std::min(mh_sd_phi, 1.0), 0.05);
+
+            // Robbins-Monro update
+            double gamma = 1.0 / std::pow(iter / 50.0, 0.6); // Decay rate
+            mh_sd_phi *= std::exp(gamma * (accept_rate - target_rate));
+
+            // Keep in reasonable range
+            mh_sd_phi = std::max(0.01, std::min(2.0, mh_sd_phi));
         }
     }
+
 
     // Main MCMC function
     Rcpp::List run_mcmc(
@@ -361,7 +363,7 @@ public:
             update_mu_tau_jointly();
 
             // Adapt proposal during burn-in
-            adapt_phi_proposal(iter, burn_in);
+            adapt_phi_proposal_robbins_monro(iter, burn_in);
             
             // Save samples after burn-in
             if (iter >= burn_in && (iter - burn_in) % thin == 0) {
