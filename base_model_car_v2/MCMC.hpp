@@ -553,8 +553,7 @@ public:
         const unsigned int &nburnin
     )
     {
-        double acc = spatial.update_phi_logit(
-            spatial_effects, prior);
+        double acc = spatial.update_phi_logit_marginal(spatial_effects, prior);
         prior.accept_count += acc;
         spatial.update_mu_tau_jointly(
             spatial_effects,

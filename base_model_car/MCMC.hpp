@@ -1244,7 +1244,7 @@ public:
 
             if (bym2_prior.infer)
             {
-                double acc = model.spatial.update_phi_logit(model.log_alpha, bym2_prior);
+                double acc = model.spatial.update_phi_logit_marginal(model.log_alpha, bym2_prior);
                 bym2_prior.accept_count += acc;
                 model.spatial.update_mu_tau_jointly(
                     model.log_alpha, 

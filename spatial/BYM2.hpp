@@ -210,6 +210,12 @@ public:
     } // end of compute_Q_scaled_ginv()
 
 
+    arma::mat compute_variance() const
+    {
+        return ((1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv) / tau_b;
+    }
+
+
     arma::mat compute_Rphi(const double &phi) const
     {
         arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;

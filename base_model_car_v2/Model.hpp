@@ -388,7 +388,7 @@ public:
                 log_beta_stored.set_size(nS, nsample);
                 for (unsigned int i = 0; i < nsample; i++)
                 {
-                    BYM2 bym2_i(spatial_alpha.V);
+                    BYM2 bym2_i(spatial_beta.V);
                     bym2_i.mu = mu.at(i);
                     bym2_i.tau_b = tau_b.at(i);
                     bym2_i.phi = phi.at(i);
