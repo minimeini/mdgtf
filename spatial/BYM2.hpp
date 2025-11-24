@@ -8,6 +8,7 @@
 // [[Rcpp::depends(RcppArmadillo)]]
 
 
+
 struct BYM2Prior
 {
     bool infer = false;
@@ -728,7 +729,109 @@ public:
             Rcpp::Named("final_mh_sd") = prior.mh_sd
         );
     }
-}; // end of class SpatialStructure
+}; // end of class BYM2
+
+
+struct Param
+{
+    double intercept = 0.0;
+    double sigma2 = 0.01;
+    BYM2 spatial;
+
+    bool has_intercept = true;
+    bool has_temporal = false;
+    bool has_spatial = false;
+
+    Param()
+    {
+        has_intercept = true;
+        intercept = 0.0;
+
+        has_temporal = false;
+        has_spatial = false;
+
+        spatial = BYM2();
+        return;
+    }
+
+    Param(const Rcpp::List &settings, const arma::mat &V)
+    {
+        if (settings.containsElementNamed("intercept"))
+        {
+            has_intercept = true;
+            intercept = Rcpp::as<double>(settings["intercept"]);
+        }
+        else
+        {
+            has_intercept = false;
+            intercept = 0.0;
+        }
+
+        if (settings.containsElementNamed("sigma2"))
+        {
+            has_temporal = true;
+            sigma2 = Rcpp::as<double>(settings["sigma2"]);
+        }
+        else
+        {
+            has_temporal = false;
+            sigma2 = 0.01;
+        }
+
+        arma::vec car_param = {0.0, 0.01, 0.5}; // default values
+        if (settings.containsElementNamed("car_param"))
+        {
+            has_spatial = true;
+            car_param = Rcpp::as<arma::vec>(settings["car_param"]);
+            if (car_param.n_elem != 3)
+            {
+                throw std::invalid_argument("Param::Param - 'car_param' should have three elements: (mu, tau_b, phi).");
+            }
+        }
+
+        spatial = BYM2(V);
+        spatial.mu = car_param[0];
+        spatial.tau_b = car_param[1];
+        spatial.phi = car_param[2];
+    }
+
+    Param(const Rcpp::List &settings)
+    {
+        if (settings.containsElementNamed("intercept"))
+        {
+            has_intercept = true;
+            intercept = Rcpp::as<double>(settings["intercept"]);
+        }
+        else
+        {
+            has_intercept = false;
+            intercept = 0.0;
+        }
+
+        if (settings.containsElementNamed("sigma2"))
+        {
+            has_temporal = true;
+            sigma2 = Rcpp::as<double>(settings["sigma2"]);
+        }
+        else
+        {
+            has_temporal = false;
+            sigma2 = 0.01;
+        }
+
+        if (
+            settings.containsElementNamed("car_param") || 
+            settings.containsElementNamed("neighborhood_matrix")
+        )
+        {
+            has_spatial = true;
+            spatial = BYM2(settings);
+        }
+
+        
+    }
+}; // end of struct spatial temporal effects
+
 
 
 #endif
