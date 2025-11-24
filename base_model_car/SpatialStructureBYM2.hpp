@@ -256,10 +256,7 @@ public:
     double log_post_phi(
         const double &phi_val, // phi on original scale (0, 1)
         const arma::vec &b_observed,
-        const double &mu_phi = 0.0, // prior mean of logit(phi)
-        const double &sigma_phi = 1.0, // prior sd of logit(phi)
-        const double &shape_tau = 1.0, // prior shape for marginal precision tau_b
-        const double &rate_tau = 1.0 // prior rate for marginal precision tau_b
+        const BYM2Prior &prior = BYM2Prior()
     )
     {
         if (phi_val <= 0.0 || phi_val >= 1.0)
@@ -277,26 +274,23 @@ public:
         double one_Rphi_b = arma::dot(b_observed, Rphi_ones);
 
         double quadratic_form = b_Rphi_b - (one_Rphi_b * one_Rphi_b) / one_Rphi_one;
-        double shape_post = shape_tau + 0.5 * static_cast<double>(nS) - 0.5;
-        double rate_post = rate_tau + 0.5 * quadratic_form;
+        double shape_post = prior.shape_tau + 0.5 * static_cast<double>(nS) - 0.5;
+        double rate_post = prior.rate_tau + 0.5 * quadratic_form;
 
         // Log marginal (integrating out tau_b and mu)
-        return 0.5 * logdet - shape_post * std::log(rate_post) - 0.5 * std::log(one_Rphi_one) + log_prior_logit_phi(phi_val, mu_phi, sigma_phi);
+        return 0.5 * logdet - shape_post * std::log(rate_post) - 0.5 * std::log(one_Rphi_one) + log_prior_logit_phi(phi_val, prior.mu_phi, prior.sigma_phi);
     }
 
 
     void update_phi_logit(
         const arma::vec &b_observed,
-        const double &mu_phi = 0.0,
-        const double &sigma_phi = 1.0,
-        const double &shape_tau = 1.0,
-        const double &rate_tau = 1.0
+        const BYM2Prior &prior = BYM2Prior()
     )
     {
         double logit_phi = logit(phi);
         double prop = logit_phi + R::rnorm(0.0, mh_sd_phi);
         double phi_prop = 1.0 / (1.0 + std::exp(-prop));
-        double log_acc = log_post_phi(phi_prop, b_observed, mu_phi, sigma_phi, shape_tau, rate_tau) - log_post_phi(phi, b_observed, mu_phi, sigma_phi, shape_tau, rate_tau);
+        double log_acc = log_post_phi(phi_prop, b_observed, prior) - log_post_phi(phi, b_observed, prior);
         if (std::log(R::runif(0, 1)) < log_acc)
         {
             // accept
