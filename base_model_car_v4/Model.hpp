@@ -16,7 +16,7 @@
 #include "../core/LinkFunc.hpp"
 #include "../core/Regression.hpp"
 #include "../utils/utils.h"
-#include "SpatialStructure.hpp"
+#include "../spatial/bym2.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
@@ -29,8 +29,8 @@ public:
     arma::vec log_beta, rho;
     double log_alpha = 0.0;
 
-    SpatialStructure spatial_beta;
-    SpatialStructure spatial_wt;
+    BYM2 spatial_beta;
+    BYM2 spatial_wt;
 
     std::string fsys = "shift";
     std::string ftrans = "sliding";
@@ -60,8 +60,8 @@ public:
         dlag.init("lognorm", LN_MU, LN_SD2, true);
         nP = LagDist::get_nlag(dlag);
 
-        spatial_beta = SpatialStructure(nS);
-        spatial_wt = SpatialStructure(nS);
+        spatial_beta = BYM2(nS);
+        spatial_wt = BYM2(nS);
 
         seas.init_default();
 
@@ -72,7 +72,6 @@ public:
     {
         Rcpp::List model_settings = settings["model"];
         Rcpp::List param_settings = settings["param"];
-        Rcpp::List spatial_settings = settings["spatial"];
 
         if (model_settings.containsElementNamed("obs_dist"))
         {
@@ -146,68 +145,26 @@ public:
         seas.init_default();
 
 
-        if (spatial_settings.containsElementNamed("nlocation"))
-        {
-            nS = Rcpp::as<unsigned int>(spatial_settings["nlocation"]);
-        }
-        else
-        {
-            throw std::invalid_argument("Model::Model - number of locations 'nlocation' is missing.");
-        }
+        Rcpp::List wt_settings = settings["wt"];
+        spatial_wt = BYM2(wt_settings);
+        nS = spatial_wt.nS;
 
-        if (spatial_settings.containsElementNamed("neighborhood_matrix"))
-        {
-            arma::mat V_r = Rcpp::as<arma::mat>(spatial_settings["neighborhood_matrix"]);
-            arma::mat V = arma::symmatu(V_r); // ensure symmetry
-            V.diag().zeros(); // zero diagonal
 
-            if (V.n_rows != nS || V.n_cols != nS)
+        Rcpp::List log_beta_settings = settings["log_beta"];
+        spatial_beta = BYM2(log_beta_settings);
+        if (log_beta_settings.containsElementNamed("spatial_effect"))
+        {
+            log_beta = Rcpp::as<arma::vec>(log_beta_settings["spatial_effect"]);
+            if (log_beta.n_elem != nS)
             {
-                throw std::invalid_argument("Model::Model - dimension of neighborhood matrix is not consistent with 'nlocation'.");
+                throw std::invalid_argument("Model::Model - dimension of 'spatial_effect' is not consistent with 'nlocation'.");
             }
-            spatial_beta = SpatialStructure(V);
-            spatial_wt = SpatialStructure(V);
         }
         else
         {
-            throw std::invalid_argument("Model::Model - neighborhood matrix 'neighborhood_matrix' is missing.");
-        }
+            log_beta = spatial_beta.sample_spatial_effects_vec();
+        } // end of loading log_beta
 
-        if (spatial_settings.containsElementNamed("car_beta"))
-        {
-            arma::vec car_param = Rcpp::as<arma::vec>(spatial_settings["car_beta"]);
-            if (car_param.n_elem != 3)
-            {
-                throw std::invalid_argument("Model::Model - CAR parameters 'car' should be a vector of length 3.");
-            }
-            double car_mu = car_param[0];
-            double car_tau2 = car_param[1];
-            double car_rho = car_param[2];
-
-            spatial_beta.update_params(car_mu, car_tau2, car_rho);
-        }
-        else
-        {
-            spatial_beta.init_params();
-        }
-
-        if (spatial_settings.containsElementNamed("car_wt"))
-        {
-            arma::vec car_param = Rcpp::as<arma::vec>(spatial_settings["car_wt"]);
-            if (car_param.n_elem != 3)
-            {
-                throw std::invalid_argument("Model::Model - CAR parameters 'car' should be a vector of length 3.");
-            }
-            double car_mu = 0.0;
-            double car_tau2 = car_param[1];
-            double car_rho = car_param[2];
-
-            spatial_wt.update_params(car_mu, car_tau2, car_rho);
-        }
-        else
-        {
-            spatial_wt.init_params();
-        }
 
         if (param_settings.containsElementNamed("obs"))
         {
@@ -245,20 +202,6 @@ public:
         dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
         nP = LagDist::get_nlag(dlag);
         dlag.Fphi = LagDist::get_Fphi(dlag);
-
-        if (param_settings.containsElementNamed("spatial_effect_beta"))
-        {
-            arma::vec log_beta_in = Rcpp::as<arma::vec>(param_settings["spatial_effect_beta"]);
-            if (log_beta_in.n_elem != nS)
-            {
-                throw std::invalid_argument("Model::Model - dimension of 'spatial_effect_beta' is not consistent with 'nlocation'.");
-            }
-            log_beta = log_beta_in;
-        }
-        else
-        {
-            log_beta = spatial_beta.prior_sample_spatial_effects_vec();
-        }
     } // end of Model(const Rcpp::List &settings)
 
     void simulate(
@@ -276,12 +219,8 @@ public:
         Y.zeros();
         Lambda.set_size(nS, ntime + 1);
 
-        arma::mat rchol_wt = arma::chol(arma::symmatu(spatial_wt.Q));
-        wt.set_size(nS, ntime + 1);
-        wt.randn();
-        wt = arma::solve(arma::trimatu(rchol_wt), wt);
-        wt /= std::sqrt(std::max(spatial_wt.car_tau2, EPS));
-
+        wt = spatial_wt.sample_spatial_effects(ntime + 1); // nS x (ntime + 1)
+        wt.col(0).zeros(); // set the first column to zero
         Psi = arma::cumsum(wt, 1);
 
         for (unsigned int t = 1; t <= ntime; t++)
@@ -361,32 +300,37 @@ public:
             log_alpha_stored.fill(log_alpha);
         } // end of loading log_alpha
 
-        arma::mat log_beta_stored;
+        arma::mat log_beta_stored(Y.n_rows, nsample, arma::fill::zeros); // nS x nsample
         if (output.containsElementNamed("log_beta"))
         {
-            log_beta_stored = Rcpp::as<arma::mat>(output["log_beta"]);
-        }
-        else if (
-            output.containsElementNamed("car_beta_mu") && 
-            output.containsElementNamed("car_beta_tau2") && 
-            output.containsElementNamed("car_beta_rho")
-        )
-        {
-            arma::vec car_mu = Rcpp::as<arma::vec>(output["car_beta_mu"]);
-            arma::vec car_tau2 = Rcpp::as<arma::vec>(output["car_beta_tau2"]);
-            arma::vec car_rho = Rcpp::as<arma::vec>(output["car_beta_rho"]);
-
-            log_beta_stored.set_size(nS, nsample);
-            for (unsigned int i = 0; i < nsample; i++)
+            Rcpp::List log_beta_output = Rcpp::as<Rcpp::List>(output["log_beta"]);
+            if (log_beta_output.containsElementNamed("spatial_effect"))
             {
-                SpatialStructure spatial_i(spatial_beta.V);
-                spatial_i.update_params(car_mu.at(i), car_tau2.at(i), car_rho.at(i));
-                log_beta_stored.col(i) = spatial_i.prior_sample_spatial_effects_vec();
+                log_beta_stored = Rcpp::as<arma::mat>(log_beta_output["spatial_effect"]);
+            }
+            else if (
+                log_beta_output.containsElementNamed("mu") && 
+                log_beta_output.containsElementNamed("tau_b") && 
+                log_beta_output.containsElementNamed("phi")
+            )
+            {
+                arma::vec mu = Rcpp::as<arma::vec>(log_beta_output["mu"]);
+                arma::vec tau_b = Rcpp::as<arma::vec>(log_beta_output["tau_b"]);
+                arma::vec phi = Rcpp::as<arma::vec>(log_beta_output["phi"]);
+
+                log_beta_stored.set_size(nS, nsample);
+                for (unsigned int i = 0; i < nsample; i++)
+                {
+                    BYM2 bym2_i(spatial_beta.V);
+                    bym2_i.mu = mu.at(i);
+                    bym2_i.tau_b = tau_b.at(i);
+                    bym2_i.phi = phi.at(i);
+                    log_beta_stored.col(i) = bym2_i.sample_spatial_effects_vec();
+                }
             }
         }
         else
         {
-            log_beta_stored.set_size(nS, nsample);
             log_beta_stored.each_col() = log_beta;
         } // end of loading log_beta
 
@@ -664,8 +608,7 @@ public:
         }
 
         // Gradient of the CAR prior w.r.t. log(beta)
-        grad -= spatial_beta.car_tau2 * spatial_beta.Q * (log_beta - spatial_beta.car_mu);
-
+        grad += spatial_beta.dloglik_dspatial(log_beta);
         return grad;
     } // end of dloglik_dlogbeta()
 
