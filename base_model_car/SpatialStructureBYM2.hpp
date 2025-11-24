@@ -48,7 +48,7 @@ struct BYM2Prior
     void adapt_phi_proposal_robbins_monro(
         const int &iter, 
         const int &burn_in, 
-        const double &target_rate = 0.6
+        const double &target_rate = 0.4
     )
     {
         if (iter < burn_in && iter > 0 && iter % 50 == 0)
@@ -88,10 +88,6 @@ public:
     double tau_b = 1.0; // overall precision parameter for BYM2
     double phi = 0.5; // mixing parameter for BYM2, between 0 and 1
     double mu = 0.0; // overall mean
-
-    // MCMC settings
-    double mh_sd_phi = 0.1;
-    double phi_accept_count = 0.0;
 
     SpatialStructure(const unsigned int &nlocation = 1)
     {
@@ -256,7 +252,7 @@ public:
     double log_post_phi(
         const double &phi_val, // phi on original scale (0, 1)
         const arma::vec &b_observed,
-        const BYM2Prior &prior = BYM2Prior()
+        const BYM2Prior &prior
     )
     {
         if (phi_val <= 0.0 || phi_val >= 1.0)
@@ -282,40 +278,25 @@ public:
     }
 
 
-    void update_phi_logit(
+    double update_phi_logit(
         const arma::vec &b_observed,
-        const BYM2Prior &prior = BYM2Prior()
+        const BYM2Prior &prior
     )
     {
         double logit_phi = logit(phi);
-        double prop = logit_phi + R::rnorm(0.0, mh_sd_phi);
+        double prop = logit_phi + R::rnorm(0.0, prior.mh_sd);
         double phi_prop = 1.0 / (1.0 + std::exp(-prop));
         double log_acc = log_post_phi(phi_prop, b_observed, prior) - log_post_phi(phi, b_observed, prior);
         if (std::log(R::runif(0, 1)) < log_acc)
         {
             // accept
             phi = phi_prop;
-            phi_accept_count += 1.0;
+            return 1.0;
         }
-    }
-
-    void adapt_phi_proposal_robbins_monro(
-        const int &iter, 
-        const int &burn_in, 
-        const double &target_rate = 0.6
-    )
-    {
-        if (iter < burn_in && iter > 0 && iter % 50 == 0)
+        else
         {
-            double accept_rate = phi_accept_count / 50.0;
-            phi_accept_count = 0.0;
-
-            // Robbins-Monro update
-            double gamma = 1.0 / std::pow(iter / 50.0, 0.6); // Decay rate
-            mh_sd_phi *= std::exp(gamma * (accept_rate - target_rate));
-
-            // Keep in reasonable range
-            mh_sd_phi = std::max(0.01, std::min(2.0, mh_sd_phi));
+            // reject
+            return 0.0;
         }
     }
 
@@ -328,6 +309,7 @@ public:
         int thin = 1,
         bool verbose = true
     ) {
+        BYM2Prior prior;
         int n_save = (n_iter - burn_in) / thin;
         arma::vec mu_samples(n_save, arma::fill::zeros);
         arma::vec tau_b_samples(n_save, arma::fill::zeros);
@@ -336,11 +318,12 @@ public:
         int save_idx = 0;
         for (int iter = 0; iter < n_iter; ++iter) {
             // Update parameters
-            update_phi_logit(b_observed);
-            update_mu_tau_jointly(b_observed);
+            double acc = update_phi_logit(b_observed, prior);
+            prior.accept_count += acc;
+            update_mu_tau_jointly(b_observed, prior.shape_tau, prior.rate_tau);
 
             // Adapt proposal during burn-in
-            adapt_phi_proposal_robbins_monro(iter, burn_in);
+            prior.adapt_phi_proposal_robbins_monro(iter, burn_in);
             
             // Save samples after burn-in
             if (iter >= burn_in && (iter - burn_in) % thin == 0) {
@@ -363,10 +346,10 @@ public:
             Rcpp::Named("mu") = mu_samples,
             Rcpp::Named("tau_b") = tau_b_samples,
             Rcpp::Named("phi") = phi_samples,
-            Rcpp::Named("final_mh_sd") = mh_sd_phi
+            Rcpp::Named("final_mh_sd") = prior.mh_sd
         );
     }
-}; // end of class SpatialStructureBYM2
+}; // end of class SpatialStructure
 
 
 #endif
