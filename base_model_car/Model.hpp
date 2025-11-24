@@ -16,7 +16,7 @@
 #include "../core/LinkFunc.hpp"
 #include "../core/Regression.hpp"
 #include "../utils/utils.h"
-#include "SpatialStructure.hpp"
+#include "SpatialStructureBYM2.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo, RcppProgress)]]
@@ -146,7 +146,6 @@ public:
 
         seas.init_default();
 
-
         if (spatial_settings.containsElementNamed("nlocation"))
         {
             nS = Rcpp::as<unsigned int>(spatial_settings["nlocation"]);
@@ -180,16 +179,11 @@ public:
             {
                 throw std::invalid_argument("Model::Model - CAR parameters 'car' should be a vector of length 3.");
             }
-            double car_mu = car_param[0];
-            double car_tau2 = car_param[1];
-            double car_rho = car_param[2];
+            spatial.mu = car_param[0];
+            spatial.tau_b = car_param[1];
+            spatial.phi = car_param[2];
+        }
 
-            spatial.update_params(car_mu, car_tau2, car_rho);
-        }
-        else
-        {
-            spatial.init_params();
-        }
 
         if (param_settings.containsElementNamed("obs"))
         {
@@ -254,7 +248,7 @@ public:
         }
         else
         {
-            log_alpha = spatial.prior_sample_spatial_effects_vec();
+            log_alpha = spatial.sample_spatial_effects_vec();
         }
     } // end of Model(const Rcpp::List &settings)
 
@@ -347,21 +341,23 @@ public:
             log_alpha_stored = Rcpp::as<arma::mat>(output["log_alpha"]);
         }
         else if (
-            output.containsElementNamed("car_mu") && 
-            output.containsElementNamed("car_tau2") && 
-            output.containsElementNamed("car_rho")
+            output.containsElementNamed("mu") && 
+            output.containsElementNamed("tau_b") && 
+            output.containsElementNamed("phi")
         )
         {
-            arma::vec car_mu = Rcpp::as<arma::vec>(output["car_mu"]);
-            arma::vec car_tau2 = Rcpp::as<arma::vec>(output["car_tau2"]);
-            arma::vec car_rho = Rcpp::as<arma::vec>(output["car_rho"]);
+            arma::vec mu = Rcpp::as<arma::vec>(output["mu"]);
+            arma::vec tau_b = Rcpp::as<arma::vec>(output["tau_b"]);
+            arma::vec phi = Rcpp::as<arma::vec>(output["phi"]);
 
             log_alpha_stored.set_size(nS, nsample);
             for (unsigned int i = 0; i < nsample; i++)
             {
                 SpatialStructure spatial_i(spatial.V);
-                spatial_i.update_params(car_mu.at(i), car_tau2.at(i), car_rho.at(i));
-                log_alpha_stored.col(i) = spatial_i.prior_sample_spatial_effects_vec();
+                spatial_i.mu = mu.at(i);
+                spatial_i.tau_b = tau_b.at(i);
+                spatial_i.phi = phi.at(i);
+                log_alpha_stored.col(i) = spatial_i.sample_spatial_effects_vec();
             }
         }
         else
@@ -676,8 +672,7 @@ public:
         }
 
         // Gradient of the CAR prior w.r.t. log_alpha
-        grad -= spatial.car_tau2 * spatial.Q * (log_alpha - spatial.car_mu);
-
+        grad += spatial.dloglik_dspatial(log_alpha);
         return grad;
     } // end of dloglik_dlogalpha()
 

@@ -22,25 +22,12 @@ double gelman_rubin_cpp(const arma::mat &samples)
 arma::mat sample_car(
     const unsigned int &k,
     const arma::mat &V,
-    const arma::vec &car_params
-)
-{
-    SpatialStructure spatial(V, car_params[0], car_params[1], car_params[2]);
-    return spatial.prior_sample_spatial_effects(k);
-}
-
-
-//' @export
-// [[Rcpp::export]]
-arma::mat sample_bym2(
-    const unsigned int &k,
-    const arma::mat &V,
     const double &mu,
     const double &tau_b,
     const double &phi
 )
 {
-    SpatialStructureBYM2 spatial(V);
+    SpatialStructure spatial(V);
     spatial.mu = mu;
     spatial.tau_b = tau_b;
     spatial.phi = phi;
@@ -58,7 +45,7 @@ Rcpp::List infer_bym2_parameters(
     int thin = 1
 ) {
     // Set up spatial structure
-    SpatialStructureBYM2 spatial(V_adj);
+    SpatialStructure spatial(V_adj);
 
     // Run MCMC
     return spatial.run_mcmc(b_observed, n_iter, burn_in, thin);

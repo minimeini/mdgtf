@@ -103,8 +103,7 @@ public:
     } // end of constructor
 
 
-    SpatialStructure(
-        const arma::mat &neighborhood_matrix)
+    SpatialStructure(const arma::mat &neighborhood_matrix)
     {
         // V: binary neighborhood matrix
         V = arma::symmatu(neighborhood_matrix); // ensure symmetry
@@ -138,8 +137,13 @@ public:
     } // end of compute_precision()
 
 
-    void compute_scale_factor() {
-        
+    void compute_scale_factor() 
+    {
+        if (pos_eig_idx.n_elem == 0) {
+            scale_factor = 1.0;
+            return;
+        }
+
         arma::vec pos_eigval = eigval_Q(pos_eig_idx);
         
         // Geometric mean for scaling
@@ -150,6 +154,11 @@ public:
 
     void compute_Q_scaled_ginv()
     {
+        if (pos_eig_idx.n_elem == 0) {
+            Q_scaled_ginv.zeros(nS, nS);
+            return;
+        }
+
         arma::mat V_pos = eigvec_Q.cols(pos_eig_idx);
         arma::vec lambda_pos = eigval_Q(pos_eig_idx);
         double scale2 = scale_factor * scale_factor;
@@ -161,6 +170,10 @@ public:
 
     arma::vec sample_icar_component()
     {
+        if (pos_eig_idx.n_elem == 0) {
+            return arma::vec(nS, arma::fill::zeros);
+        }
+
         // Sample independent normals for non-constant eigenvectors
         arma::vec z_prec = arma::sqrt(eigval_Q(pos_eig_idx));
         arma::vec z(pos_eig_idx.n_elem, arma::fill::randn);
@@ -176,31 +189,67 @@ public:
     } // end of sample_icar_component()
 
 
-    arma::mat sample_spatial_effects(const unsigned int k = 1) {
+    arma::mat sample_spatial_effects(const unsigned int k = 1) 
+    {
         arma::mat samples(nS, k);
         
         for (unsigned int j = 0; j < k; ++j) {
-            // 1. Sample unstructured component v ~ N(0, I)
-            arma::vec v(nS, arma::fill::randn);
-            
-            // 2. Sample structured ICAR component u
-            arma::vec u = sample_icar_component();
-            
-            // 3. Scale the ICAR component to get u*
-            arma::vec u_star = u / scale_factor;
-            
-            // 4. Combine according to BYM2 formula
-            arma::vec b = (1.0 / std::sqrt(tau_b)) * 
-                         (std::sqrt(1.0 - phi) * v + 
-                          std::sqrt(phi) * u_star);
-            
-            // 5. Add overall mean
-            b += mu;
-            samples.col(j) = b;
+            samples.col(j) = sample_spatial_effects_vec();
         }
         
         return samples;
-    } // end of sample_bym2_prior()
+    } // end of sample_spatial_effects()
+
+
+    arma::vec sample_spatial_effects_vec() 
+    {
+        arma::vec v(nS, arma::fill::randn);
+
+        // 2. Sample structured ICAR component u
+        arma::vec u = sample_icar_component();
+
+        // 3. Scale the ICAR component to get u*
+        arma::vec u_star = u / scale_factor;
+
+        // 4. Combine according to BYM2 formula
+        arma::vec b = (1.0 / std::sqrt(tau_b)) *
+                      (std::sqrt(1.0 - phi) * v +
+                       std::sqrt(phi) * u_star);
+
+        // 5. Add overall mean
+        b += mu;
+
+        return b;
+    } // end of sample_spatial_effects_vec()
+
+
+    arma::vec dloglik_dspatial(const arma::vec &b_observed)
+    {
+        // Gradient of the log-likelihood w.r.t. spatial effects
+        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
+        arma::mat Rphi = inverse(Rphi_inv);
+        return - tau_b * Rphi * (b_observed - mu);
+    } // end of dloglik_dspatial()
+
+
+    double log_likelihood(const arma::vec &b_observed, const bool &include_constant = false) const
+    {
+        // Log-likelihood of the spatial effects under the BYM2 prior
+        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
+        arma::mat Rphi = inverse(Rphi_inv);
+        double quad_form = arma::dot(b_observed - mu, Rphi * (b_observed - mu));
+        double deriv = -0.5 * tau_b * quad_form;
+
+        if (include_constant)
+        {
+            double nS = static_cast<double>(b_observed.n_elem);
+            double logdet = arma::log_det_sympd(arma::symmatu(Rphi));
+            double cnst = nS * std::log(tau_b);
+            deriv += - 0.5 * nS * std::log(2.0 * M_PI) + 0.5 * nS * std::log(tau_b) + 0.5 * logdet;
+        }
+        
+        return deriv;
+    } // end of log_likelihood()
 
 
     void update_mu_tau_jointly(
@@ -235,7 +284,11 @@ public:
 
 
     // Normal prior on logit(phi)
-    double log_prior_logit_phi(const double phi_val, const double mu = 0.0, const double sigma = 1.0)
+    double log_prior_logit_phi(
+        const double phi_val, 
+        const double mu = 0.0, 
+        const double sigma = 1.0
+    )
     {
         double logit_phi = logit(phi_val);
         // No need for jacobian if the model is parameterized at the logit scale from the start
