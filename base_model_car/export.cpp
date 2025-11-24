@@ -1,6 +1,6 @@
 #include <chrono>
 #include "../core/GainFunc.hpp"
-#include "../spatial/BYM2.hpp"
+#include "../spatial/bym2.hpp"
 #include "Model.hpp"
 #include "MCMC.hpp"
 
