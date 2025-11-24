@@ -16,7 +16,7 @@
 #include "../core/LinkFunc.hpp"
 #include "../core/Regression.hpp"
 #include "../utils/utils.h"
-#include "SpatialStructureBYM2.hpp"
+#include "../spatial/BYM2.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo, RcppProgress)]]

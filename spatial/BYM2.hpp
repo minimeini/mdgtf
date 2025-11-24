@@ -1,6 +1,6 @@
 #pragma once
-#ifndef SPATIALSTRUCTUREBYM2_H
-#define SPATIALSTRUCTUREBYM2_H
+#ifndef BYM2_H
+#define BYM2_H
 
 #include <RcppArmadillo.h>
 #include "../utils/utils.h"
