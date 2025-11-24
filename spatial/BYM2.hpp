@@ -210,6 +210,13 @@ public:
     } // end of compute_Q_scaled_ginv()
 
 
+    arma::mat compute_Rphi(const double &phi) const
+    {
+        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
+        return inverse(Rphi_inv);
+    } // end of compute_Rphi()
+
+
     arma::vec sample_icar_component()
     {
         if (pos_eig_idx.n_elem == 0) {
@@ -268,8 +275,7 @@ public:
     arma::vec dloglik_dspatial(const arma::vec &b_observed)
     {
         // Gradient of the log-likelihood w.r.t. spatial effects
-        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
-        arma::mat Rphi = inverse(Rphi_inv);
+        arma::mat Rphi = compute_Rphi(phi);
         return - tau_b * Rphi * (b_observed - mu);
     } // end of dloglik_dspatial()
 
@@ -277,8 +283,7 @@ public:
     double log_likelihood(const arma::vec &b_observed, const bool &include_constant = false) const
     {
         // Log-likelihood of the spatial effects under the BYM2 prior
-        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
-        arma::mat Rphi = inverse(Rphi_inv);
+        arma::mat Rphi = compute_Rphi(phi);
         double quad_form = arma::dot(b_observed - mu, Rphi * (b_observed - mu));
         double deriv = -0.5 * tau_b * quad_form;
 
@@ -301,8 +306,7 @@ public:
     )
     {
         // Given phi, (mu, tau_b) have a Normal-Gamma posterior
-        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
-        arma::mat Rphi_current = inverse(Rphi_inv);
+        arma::mat Rphi_current = compute_Rphi(phi);
 
         arma::vec ones = arma::ones(nS);
         arma::vec Rphi_b = Rphi_current * b_observed;
@@ -335,8 +339,7 @@ public:
         double nrep = static_cast<double>(b_observed.n_cols);
 
         // Given phi, (mu, tau_b) have a Normal-Gamma posterior
-        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
-        arma::mat Rphi_current = inverse(Rphi_inv);
+        arma::mat Rphi_current = compute_Rphi(phi);
 
         arma::vec ones = arma::ones(nS);
         double b_Rphi_b = 0.0;
@@ -368,15 +371,13 @@ public:
      * @brief Update the precision parameter tau_b conditional on mu and phi, with a Gamma prior. No replicate observations
      * 
      */
-    void update_tau(
+    void update_tau_conditional(
         const arma::vec &b_observed, 
         const double &shape_tau = 1.0, 
         const double &rate_tau = 1.0
     )
     {
-        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
-        arma::mat Rphi_current = inverse(Rphi_inv);
-
+        arma::mat Rphi_current = compute_Rphi(phi);
         arma::vec b_res = b_observed - mu;
         double b_Rphi_b = arma::dot(b_res, Rphi_current * b_res);
 
@@ -400,14 +401,12 @@ public:
         double nloc = static_cast<double>(b_observed.n_rows);
         double nrep = static_cast<double>(b_observed.n_cols);
 
-        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
-        arma::mat Rphi_current = inverse(Rphi_inv);
-
-        arma::mat b_res = b_observed.each_col() - mu;
+        arma::mat Rphi_current = compute_Rphi(phi);
         double b_Rphi_b = 0.0;
         for (unsigned int j = 0; j < b_observed.n_cols; ++j)
         {
-            b_Rphi_b += arma::dot(b_res.col(j), Rphi_current * b_res.col(j));
+            arma::vec b_res = b_observed.col(j) - mu;
+            b_Rphi_b += arma::dot(b_res, Rphi_current * b_res);
         }
 
         // Sample tau_b
@@ -453,8 +452,7 @@ public:
         if (phi_val <= 0.0 || phi_val >= 1.0)
             return -INFINITY;
         // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
-        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
-        arma::mat Rphi = inverse(Rphi_inv);
+        arma::mat Rphi = compute_Rphi(phi);
         double logdet = arma::log_det_sympd(arma::symmatu(Rphi));
 
         arma::vec ones(nS, arma::fill::ones);
@@ -517,8 +515,7 @@ public:
         double nrep = static_cast<double>(b_observed.n_cols);
 
         // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
-        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
-        arma::mat Rphi = inverse(Rphi_inv);
+        arma::mat Rphi = compute_Rphi(phi);
         double logdet = nrep * arma::log_det_sympd(arma::symmatu(Rphi));
 
         arma::vec ones(nS, arma::fill::ones);
@@ -581,8 +578,7 @@ public:
         if (phi_val <= 0.0 || phi_val >= 1.0)
             return -INFINITY;
         // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
-        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
-        arma::mat Rphi = inverse(Rphi_inv);
+        arma::mat Rphi = compute_Rphi(phi);
         double logdet = arma::log_det_sympd(arma::symmatu(Rphi));
 
         double b_Rphi_b = arma::dot(b_observed, Rphi * b_observed);
@@ -638,8 +634,7 @@ public:
         double nrep = static_cast<double>(b_observed.n_cols);
 
         // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
-        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
-        arma::mat Rphi = inverse(Rphi_inv);
+        arma::mat Rphi = compute_Rphi(phi);
         double logdet = nrep * arma::log_det_sympd(arma::symmatu(Rphi));
 
         double b_Rphi_b = 0.0;
