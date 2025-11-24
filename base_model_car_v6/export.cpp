@@ -24,8 +24,11 @@ arma::mat sample_car(
     const arma::vec &car_params
 )
 {
-    SpatialStructure spatial(V, car_params[0], car_params[1], car_params[2]);
-    return spatial.prior_sample_spatial_effects(k);
+    BYM2 spatial(V);
+    spatial.mu = car_params[0];
+    spatial.tau_b = car_params[1];
+    spatial.phi = car_params[2];
+    return spatial.sample_spatial_effects(k);
 }
 
 //' @export

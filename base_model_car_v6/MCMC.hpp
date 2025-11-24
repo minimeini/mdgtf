@@ -17,6 +17,7 @@
 
 #include "../core/ApproxDisturbance.hpp"
 #include "Model.hpp"
+#include "../inference/hmc.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
@@ -52,317 +53,6 @@ struct TemporalPrior
 };
 
 
-struct HMCOpts_1d
-{
-    std::vector<std::string> params_selected;
-    bool dual_averaging = false;
-    bool diagnostics = true;
-    bool verbose = false;
-    unsigned int nleapfrog = 20;
-    double leapfrog_step_size = 0.1;
-    double T_target = 2.0; // integration time T = n_leapfrog * epsilon ~= 1-2 (rough heuristic). Larger T gives better exploration but higher cost.
-
-    HMCOpts_1d() = default;
-    HMCOpts_1d(const Rcpp::List &opts)
-    {
-        nleapfrog = 10;
-        if (opts.containsElementNamed("nleapfrog"))
-        {
-            nleapfrog = Rcpp::as<unsigned int>(opts["nleapfrog"]);
-        }
-
-        leapfrog_step_size = 0.01;
-        if (opts.containsElementNamed("leapfrog_step_size"))
-        {
-            leapfrog_step_size = Rcpp::as<double>(opts["leapfrog_step_size"]);
-        }
-
-        dual_averaging = false;
-        if (opts.containsElementNamed("dual_averaging"))
-        {
-            dual_averaging = Rcpp::as<bool>(opts["dual_averaging"]);
-        }
-
-        diagnostics = true;
-        if (opts.containsElementNamed("diagnostics"))
-        {
-            diagnostics = Rcpp::as<bool>(opts["diagnostics"]);
-        }
-
-        verbose = false;
-        if (opts.containsElementNamed("verbose"))
-        {
-            verbose = Rcpp::as<bool>(opts["verbose"]);
-        }
-
-        T_target = 1.0;
-        if (opts.containsElementNamed("T_target"))
-        {
-            T_target = Rcpp::as<double>(opts["T_target"]);
-        }
-    }
-};
-
-
-struct HMCOpts_2d
-{
-    std::vector<std::string> params_selected;
-    bool dual_averaging = false;
-    bool diagnostics = true;
-    bool verbose = false;
-    double T_target = 2.0; // integration time T = n_leapfrog * epsilon ~= 1-2 (rough heuristic). Larger T gives better exploration but higher cost.
-
-    unsigned int nleapfrog_init = 20;
-    arma::uvec nleapfrog;
-    double leapfrog_step_size_init = 0.1;
-    arma::vec leapfrog_step_size;
-
-    HMCOpts_2d() = default;
-    HMCOpts_2d(const Rcpp::List &opts)
-    {
-        nleapfrog_init = 10;
-        if (opts.containsElementNamed("nleapfrog"))
-        {
-            nleapfrog_init = Rcpp::as<unsigned int>(opts["nleapfrog"]);
-        }
-
-        leapfrog_step_size_init = 0.01;
-        if (opts.containsElementNamed("leapfrog_step_size"))
-        {
-            leapfrog_step_size_init = Rcpp::as<double>(opts["leapfrog_step_size"]);
-        }
-
-        dual_averaging = false;
-        if (opts.containsElementNamed("dual_averaging"))
-        {
-            dual_averaging = Rcpp::as<bool>(opts["dual_averaging"]);
-        }
-
-        diagnostics = true;
-        if (opts.containsElementNamed("diagnostics"))
-        {
-            diagnostics = Rcpp::as<bool>(opts["diagnostics"]);
-        }
-
-        verbose = false;
-        if (opts.containsElementNamed("verbose"))
-        {
-            verbose = Rcpp::as<bool>(opts["verbose"]);
-        }
-
-        T_target = 1.0;
-        if (opts.containsElementNamed("T_target"))
-        {
-            T_target = Rcpp::as<double>(opts["T_target"]);
-        }
-    }
-};
-
-
-struct DualAveraging_1d
-{
-    double target_accept = 0.75;
-    double mu_da;
-    double log_eps_bar;
-    double log_eps;
-    double h_bar = 0.0;
-    double gamma_da = 0.05;
-    double t0_da = 10.0;
-    double kappa_da = 0.75;
-    unsigned int adapt_count = 0;
-    unsigned int min_leaps = 3;
-    unsigned int max_leaps = 128;
-
-    DualAveraging_1d() = default;
-    DualAveraging_1d(const HMCOpts_1d &hmc_opts, const double &target_accept_rate = 0.75)
-    {
-        target_accept = target_accept_rate;
-
-        mu_da = std::log(10 * hmc_opts.leapfrog_step_size);
-        log_eps = std::log(hmc_opts.leapfrog_step_size);
-        log_eps_bar = log_eps;
-        
-        h_bar = 0.0;
-        gamma_da = 0.1;
-        t0_da = 10.0;
-        kappa_da = 0.75;
-
-        adapt_count = 0;
-
-        min_leaps = 3;
-        max_leaps = 128;
-        return;
-    }
-
-    double update_step_size(const double &accept_prob)
-    {
-        adapt_count++;
-        double t = (double)adapt_count;
-        h_bar = (1.0 - 1.0 / (t + t0_da)) * h_bar + (1.0 / (t + t0_da)) * (target_accept - accept_prob);
-        log_eps = mu_da - (std::sqrt(t) / gamma_da) * h_bar;
-
-        auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
-        double leapfrog_step_size = clamp_eps(std::exp(log_eps));
-        double w = std::pow(t, -kappa_da);
-        log_eps_bar = w * std::log(leapfrog_step_size) + (1.0 - w) * log_eps_bar;
-        return leapfrog_step_size;
-    }
-
-    void finalize_leapfrog_step(double &step_size, unsigned int &nleapfrog, const double &T_target)
-    {
-        auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
-        step_size = clamp_eps(std::exp(log_eps_bar));
-        unsigned nlf = (unsigned)std::lround(T_target / step_size);
-        nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
-        return;
-    }
-};
-
-
-struct DualAveraging_2d
-{
-    double target_accept = 0.75;
-    arma::vec mu_da;
-    arma::vec log_eps_bar;
-    arma::vec log_eps;
-    arma::vec h_bar;
-    arma::vec gamma_da;
-    arma::vec t0_da;
-    arma::vec kappa_da;
-    arma::uvec adapt_count;
-    unsigned int min_leaps = 3;
-    unsigned int max_leaps = 128;
-
-    DualAveraging_2d()
-    {
-        mu_da = std::log(10 * 0.01) * arma::ones(1);
-        log_eps = std::log(0.01) * arma::ones(1);
-        log_eps_bar = log_eps;
-        h_bar = arma::zeros(1);
-        gamma_da = 0.05 * arma::ones(1);
-        t0_da = 10.0 * arma::ones(1);
-        kappa_da = 0.75 * arma::ones(1);
-        adapt_count = arma::zeros<arma::uvec>(1);
-        min_leaps = 3;
-        max_leaps = 128;
-        return;
-    }
-
-    DualAveraging_2d(
-        const HMCOpts_2d &hmc_opts, 
-        const double &target_accept_rate = 0.75
-    )
-    {
-        target_accept = target_accept_rate;
-
-        mu_da = std::log(10 * hmc_opts.leapfrog_step_size_init) * arma::ones(hmc_opts.params_selected.size());
-        log_eps = std::log(hmc_opts.leapfrog_step_size_init) * arma::ones(hmc_opts.params_selected.size());
-        log_eps_bar = log_eps;
-
-        h_bar = arma::zeros(hmc_opts.params_selected.size());
-        gamma_da = 0.05 * arma::ones(hmc_opts.params_selected.size());
-        t0_da = 10.0 * arma::ones(hmc_opts.params_selected.size());
-        kappa_da = 0.75 * arma::ones(hmc_opts.params_selected.size());
-
-        adapt_count = arma::zeros<arma::uvec>(hmc_opts.params_selected.size());
-
-        min_leaps = 3;
-        max_leaps = 128;
-        return;
-    }
-
-    double update_step_size(const unsigned int &s, const double &accept_prob)
-    {
-        adapt_count++;
-        double t = (double)adapt_count.at(s);
-        h_bar.at(s) = (1.0 - 1.0 / (t + t0_da.at(s))) * h_bar.at(s) + (1.0 / (t + t0_da.at(s))) * (target_accept - accept_prob);
-        log_eps.at(s) = mu_da.at(s) - (std::sqrt(t) / gamma_da.at(s)) * h_bar.at(s);
-
-        auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
-        double leapfrog_step_size = clamp_eps(std::exp(log_eps.at(s)));
-        double w = std::pow(t, -kappa_da.at(s));
-        log_eps_bar.at(s) = w * std::log(leapfrog_step_size) + (1.0 - w) * log_eps_bar.at(s);
-        return leapfrog_step_size;
-    }
-
-    void finalize_leapfrog_step(
-        double &step_size, 
-        unsigned int &nleapfrog, 
-        const unsigned int &s, 
-        const double &T_target
-    )
-    {
-        auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
-        step_size = clamp_eps(std::exp(log_eps_bar.at(s)));
-        unsigned nlf = (unsigned)std::lround(T_target / step_size);
-        nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
-        return;
-    }
-};
-
-
-
-struct HMCDiagnostics_1d
-{
-    double accept_count = 0.0;
-    arma::vec energy_diff;
-    arma::vec grad_norm;
-    arma::vec leapfrog_step_size_stored;
-    arma::vec nleapfrog_stored;
-    HMCDiagnostics_1d() = default;
-    HMCDiagnostics_1d(
-        const unsigned int &niter,
-        const unsigned int &nburnin = 1,
-        const bool &dual_averaging = false
-    )
-    {
-        energy_diff = arma::vec(niter, arma::fill::zeros);
-        grad_norm = arma::vec(niter, arma::fill::zeros);
-
-        if (dual_averaging)
-        {
-            leapfrog_step_size_stored = arma::vec(nburnin + 1, arma::fill::zeros);
-            nleapfrog_stored = arma::vec(nburnin + 1, arma::fill::zeros);
-        }
-        return;
-    }
-};
-
-
-struct HMCDiagnostics_2d
-{
-    arma::vec accept_count;
-    arma::mat energy_diff;
-    arma::mat grad_norm;
-    arma::mat leapfrog_step_size_stored;
-    arma::mat nleapfrog_stored;
-
-    HMCDiagnostics_2d() = default;
-    HMCDiagnostics_2d(
-        const unsigned int &nS,
-        const unsigned int &niter,
-        const unsigned int &nburnin = 1,
-        const bool &dual_averaging = false
-    )
-    {
-        accept_count = arma::vec(nS, arma::fill::zeros);
-        energy_diff = arma::mat(nS, niter, arma::fill::zeros);
-        grad_norm = arma::mat(nS, niter, arma::fill::zeros);
-
-        if (dual_averaging)
-        {
-            leapfrog_step_size_stored = arma::mat(nS, nburnin + 1, arma::fill::zeros);
-            nleapfrog_stored = arma::mat(nS, nburnin + 1, arma::fill::zeros);
-        }
-        return;
-    }
-};
-
-
 class MCMC
 {
 private:
@@ -371,14 +61,15 @@ private:
     unsigned int nthin = 1;
     
     // psi1_spatial
-    bool infer_coef_self_spatial_car = false;
+    BYM2Prior coef_self_bym2_prior;
+    arma::vec coef_self_b_car_mu_stored; // nsample x 1
+    arma::vec coef_self_b_car_tau_stored; // nsample x 1
+    arma::vec coef_self_b_car_phi_stored; // nsample x 1
+    bool infer_psi1_spatial = false;
     HMCOpts_1d spatial_coef_self_hmc;
     HMCDiagnostics_1d spatial_coef_self_hmc_diagnostics;
     arma::vec psi1_spatial_init; // nS x 1
     arma::mat psi1_spatial_stored; // nS x nsample
-    arma::vec coef_self_b_car_mu_stored; // nsample x 1
-    arma::vec coef_self_b_car_tau2_stored; // nsample x 1
-    arma::vec coef_self_b_car_rho_stored; // nsample x 1
 
     // Prior for temporal disturbances wt
     TemporalPrior<arma::vec> coef_self_temporal_prior;
@@ -535,18 +226,24 @@ public:
             if (coef_self_opts.containsElementNamed("spatial"))
             {
                 Rcpp::List coef_self_spatial_opts = Rcpp::as<Rcpp::List>(coef_self_opts["spatial"]);
-                infer_coef_self_spatial_car = false;
                 if (coef_self_spatial_opts.containsElementNamed("infer"))
                 {
-                    infer_coef_self_spatial_car = Rcpp::as<bool>(coef_self_spatial_opts["infer"]);
+                    infer_psi1_spatial = Rcpp::as<bool>(coef_self_spatial_opts["infer"]);
                 }
-
+                if (coef_self_spatial_opts.containsElementNamed("bym2"))
+                {
+                    Rcpp::List coef_self_bym2_opts = Rcpp::as<Rcpp::List>(coef_self_spatial_opts["bym2"]);
+                    coef_self_bym2_prior = BYM2Prior(coef_self_bym2_opts);
+                } // BYM2 prior settings
                 if (coef_self_spatial_opts.containsElementNamed("init"))
                 {
                     psi1_spatial_init = Rcpp::as<arma::vec>(coef_self_spatial_opts["init"]);
-                }
-
-                spatial_coef_self_hmc = HMCOpts_1d(coef_self_spatial_opts);
+                } // Initial spatial effects
+                if (coef_self_spatial_opts.containsElementNamed("hmc"))
+                {
+                    Rcpp::List coef_self_hmc_opts = Rcpp::as<Rcpp::List>(coef_self_spatial_opts["hmc"]);
+                    spatial_coef_self_hmc = HMCOpts_1d(coef_self_hmc_opts);
+                } // HMC settings
             } // end of coef_self_spatial_car options
         } // end of coef_self options
 
@@ -602,12 +299,19 @@ public:
             Rcpp::List coef_self_spatial_car_opts = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("init") = arma::vec({0.5}), // initial value of spatial random effects
-                Rcpp::Named("nleapfrog") = 20,
-                Rcpp::Named("leapfrog_step_size") = 0.1,
-                Rcpp::Named("dual_averaging") = false,
-                Rcpp::Named("diagnostics") = true,
-                Rcpp::Named("verbose") = false,
-                Rcpp::Named("T_target") = 2.0
+                Rcpp::Named("hmc") = Rcpp::List::create(
+                    Rcpp::Named("nleapfrog") = 20,
+                    Rcpp::Named("leapfrog_step_size") = 0.1,
+                    Rcpp::Named("dual_averaging") = false,
+                    Rcpp::Named("diagnostics") = true,
+                    Rcpp::Named("verbose") = false,
+                    Rcpp::Named("T_target") = 2.0),
+                Rcpp::Named("bym2") = Rcpp::List::create(
+                    Rcpp::Named("infer") = false,
+                    Rcpp::Named("mh_sd") = 0.1,
+                    Rcpp::Named("tau_b") = Rcpp::NumericVector::create(1.0, 1.0),
+                    Rcpp::Named("logit_phi") = Rcpp::NumericVector::create(0.0, 1.0)
+                )
             );
 
             coef_self_opts = Rcpp::List::create(
@@ -652,81 +356,29 @@ public:
         return mcmc_opts;
     } // end of get_default_settings()
 
-    void update_car(
-        SpatialStructure &spatial, 
-        double &rho_accept_count,
-        const arma::vec &spatial_effects,
-        const double &mh_sd = 0.1,
-        const double &jeffrey_prior_order = 1.0
+    /**
+     * @brief Block MH sampler for the BYM2 parameters (tau_b, phi) with no replicate.
+     * 
+     * @param prior 
+     * @param spatial 
+     * @param wt 
+     * @param iter 
+     * @param nburnin 
+     */
+    void update_car_conditional(
+        BYM2Prior &prior,
+        BYM2 &spatial, 
+        const arma::vec &wt, // nS x 1
+        const unsigned int &iter, 
+        const unsigned int &nburnin
     )
     {
-        double rho_min = spatial.min_car_rho;
-        double rho_max = spatial.max_car_rho;
-
-        double rho_current = spatial.car_rho;
-        double log_post_rho_old = spatial.log_posterior_rho(spatial_effects, jeffrey_prior_order);
-
-        double eta = logit(standardize(rho_current, rho_min, rho_max, true));
-        double eta_new = eta + R::rnorm(0.0, mh_sd);
-        double rho_new = rho_min + logistic(eta_new) * (rho_max - rho_min);
-        // double rho_new = rho_current + R::rnorm(0.0, mh_sd);
-
-        /*
-        When rho is updated, we also need to update:
-        - precision matrix Q
-        - one_Q_one: updated in `update_car() -> compute_precision()`
-        - post_mu_mean: updated in `log_posterior_rho()`
-        - post_mu_prec: updated in `log_posterior_rho()`
-        - post_tau2_rate: updated in `log_posterior_rho()`
-        */
-        // if (rho_new > spatial.min_car_rho && rho_new < spatial.max_car_rho)
-        // {
-        spatial.update_params(
-            spatial.car_mu,
-            spatial.car_tau2,
-            rho_new);
-        double log_post_rho_new = spatial.log_posterior_rho(spatial_effects, jeffrey_prior_order);
-
-        double u_old = standardize(rho_current, rho_min, rho_max, true);
-        double u_new = standardize(rho_new, rho_min, rho_max, true);
-        double log_jac = (std::log(u_new) + std::log1p(-u_new)) - (std::log(u_old) + std::log1p(-u_old));
-
-        double log_accept_ratio = log_post_rho_new - log_post_rho_old + log_jac;
-        if (std::log(R::runif(0.0, 1.0)) < log_accept_ratio)
-        {
-            rho_accept_count += 1.0;
-        }
-        else
-        {
-            // revert
-            spatial.update_params(
-                spatial.car_mu,
-                spatial.car_tau2,
-                rho_current);
-            double log_post_rho = spatial.log_posterior_rho(spatial_effects, jeffrey_prior_order);
-        }
-        // }
-
-        /*
-        When tau2 is updated, we also need to update:
-        - post_mu_prec: update manually here
-        */
-        double tau2_new = R::rgamma(spatial.post_tau2_shape, 1.0 / spatial.post_tau2_rate);
-        spatial.update_params(
-            spatial.car_mu,
-            tau2_new,
-            spatial.car_rho
-        );
-
-        double mu_new = R::rnorm(spatial.post_mu_mean, std::sqrt(1.0 / spatial.post_mu_prec));
-        spatial.update_params(
-            mu_new,
-            spatial.car_tau2,
-            spatial.car_rho
-        );
-
+        double acc = spatial.update_phi_logit_conditional(wt, prior);
+        prior.accept_count += acc;
+        spatial.update_tau_conditional(wt, prior.shape_tau, prior.rate_tau);
+        prior.adapt_phi_proposal_robbins_monro(iter, nburnin);
         return;        
-    } // end of update_car()
+    } // end of update_car_conditional()
 
 
     void update_wt(
@@ -837,10 +489,12 @@ public:
         const arma::vec psi2_temporal = arma::cumsum(wt2_temporal); // (nT + 1) x 1
 
         // Diagonal preconditioner: M^{-1} ≈ (tau2 * diag(Q))^{-1}
-        const arma::vec inv_m = 1.0 / arma::clamp(
-            model.coef_self_b.spatial.car_tau2 * model.coef_self_b.spatial.Q.diag(),
-            1e-8, arma::datum::inf
-        );
+        // Compute the mass matrix (diagonal)
+        arma::mat Rphi = model.coef_self_b.spatial.compute_Rphi(model.coef_self_b.spatial.phi);
+        const double mass_floor = 1e-6;
+        arma::vec inv_mass = arma::clamp(model.coef_self_b.spatial.tau_b * Rphi.diag(), mass_floor, arma::datum::inf);
+        arma::vec mass_diag = 1.0 / inv_mass;
+        arma::vec sqrt_mass = arma::sqrt(mass_diag);
 
         arma::mat dll_deta = model.dloglik_deta(Y, psi1_spatial, psi2_temporal); // nS x (nT + 1)
 
@@ -849,8 +503,7 @@ public:
             lam_current, 1,
             Y, psi1_spatial, psi2_temporal
         ); // nS x (nT + 1)
-        arma::vec spatial_res = psi1_spatial - model.coef_self_b.spatial.car_mu;
-        double logp_current = - 0.5 * model.coef_self_b.spatial.car_tau2 * arma::dot(spatial_res, model.coef_self_b.spatial.Q * spatial_res);
+        double logp_current = model.coef_self_b.spatial.log_likelihood(psi1_spatial, false);
         for (unsigned int s = 0; s < model.nS; s++)
         {
             for (unsigned int t = 1; t <= Y.n_cols - 1; t++)
@@ -867,9 +520,8 @@ public:
         arma::vec q = spatial_current;
 
         // sample an initial momentum
-        arma::vec m_sqrt = arma::sqrt(1.0 / inv_m);
-        arma::vec p = m_sqrt % arma::randn(q.n_elem);
-        double kinetic_current = 0.5 * arma::dot(p % inv_m, p);
+        arma::vec p = arma::randn(q.n_elem) % sqrt_mass;
+        double kinetic_current = 0.5 * arma::dot(p % inv_mass, p);
 
         arma::vec grad = model.dloglik_dspatial_coef_self(Y, dll_deta, psi1_spatial, psi2_temporal);
         grad *= -1.0; // Convert to gradient of potential energy
@@ -880,7 +532,7 @@ public:
         for (unsigned int i = 0; i < spatial_coef_self_hmc.nleapfrog; i++)
         {
             // Make a full step for the position
-            q += spatial_coef_self_hmc.leapfrog_step_size * (inv_m % p);
+            q += spatial_coef_self_hmc.leapfrog_step_size * (inv_mass % p);
             psi1_spatial = q;
 
             // Compute the new gradient
@@ -902,8 +554,7 @@ public:
             lam_current, 1,
             Y, psi1_spatial, psi2_temporal
         );
-        spatial_res = psi1_spatial - model.coef_self_b.spatial.car_mu;
-        double logp_proposed = -0.5 * model.coef_self_b.spatial.car_tau2 * arma::dot(spatial_res, model.coef_self_b.spatial.Q * spatial_res);
+        double logp_proposed = model.coef_self_b.spatial.log_likelihood(psi1_spatial, false);
         for (unsigned int s = 0; s < model.nS; s++)
         {
             for (unsigned int t = 1; t <= Y.n_cols - 1; t++)
@@ -915,7 +566,7 @@ public:
         }
 
         double energy_proposed = -logp_proposed;
-        double kinetic_proposed = 0.5 * arma::dot(p % inv_m, p);
+        double kinetic_proposed = 0.5 * arma::dot(p % inv_mass, p);
 
         double H_proposed = energy_proposed + kinetic_proposed;
         double H_current = energy_current + kinetic_current;
@@ -1346,6 +997,7 @@ public:
             lag_par2_stored = arma::vec(nsample, arma::fill::zeros);
         }
 
+
         if (!model.coef_self_b.has_temporal)
         {
             coef_self_temporal_prior.infer = false;
@@ -1364,8 +1016,8 @@ public:
         {
             coef_self_sigma2_stored = arma::vec(nsample, arma::fill::zeros);
         }
-
         arma::vec wt2_temporal(nT + 1, arma::fill::zeros);
+        psi2_temporal_accept = arma::vec(nT + 1, arma::fill::zeros);
         if (!coef_self_temporal_prior.init.is_empty())
         {
             wt2_temporal = coef_self_temporal_prior.init;
@@ -1374,16 +1026,15 @@ public:
         if (coef_self_temporal_prior.infer)
         {
             psi2_temporal_stored = arma::mat(nT + 1, nsample, arma::fill::zeros);
-            psi2_temporal_accept = arma::vec(nT + 1, arma::fill::zeros);
         }
 
 
         DualAveraging_1d spatial_coef_self_hmc_da(spatial_coef_self_hmc, target_accept);
         if (!model.coef_self_b.has_spatial)
         {
-            infer_coef_self_spatial_car = false;
+            infer_psi1_spatial = false;
         }
-        if (infer_coef_self_spatial_car)
+        if (infer_psi1_spatial)
         {
             if (spatial_coef_self_hmc.diagnostics)
             {
@@ -1391,15 +1042,18 @@ public:
                     niter, nburnin, spatial_coef_self_hmc.dual_averaging
                 );
             }
-            coef_self_b_car_mu_stored = arma::zeros<arma::vec>(nsample);
-            coef_self_b_car_tau2_stored = arma::zeros<arma::vec>(nsample);
-            coef_self_b_car_rho_stored = arma::zeros<arma::vec>(nsample);
             psi1_spatial_stored = arma::mat(model.nS, nsample, arma::fill::zeros);
         }
         arma::vec psi1_spatial(model.nS, arma::fill::zeros);
         if (!psi1_spatial_init.is_empty() && psi1_spatial_init.n_elem == model.nS)
         {
             psi1_spatial = psi1_spatial_init;
+        }
+        if (coef_self_bym2_prior.infer)
+        {
+            coef_self_b_car_mu_stored = arma::zeros<arma::vec>(nsample);
+            coef_self_b_car_tau_stored = arma::zeros<arma::vec>(nsample);
+            coef_self_b_car_phi_stored = arma::zeros<arma::vec>(nsample);
         }
 
         DualAveraging_2d local_hmc_da(local_hmc, target_accept);
@@ -1426,6 +1080,53 @@ public:
                     model, Y, psi1_spatial, 
                     coef_self_temporal_prior.mh_sd
                 );
+            }
+            if (coef_self_bym2_prior.infer)
+            {
+                update_car_conditional(
+                    coef_self_bym2_prior,
+                    model.coef_self_b.spatial,
+                    psi1_spatial, iter, nburnin
+                );
+            }
+            if (infer_psi1_spatial)
+            {
+                double energy_diff, grad_norm;
+                double acc_prob = update_coef_self_spatial(
+                    psi1_spatial, energy_diff, grad_norm, 
+                    model, Y, wt2_temporal
+                );
+                spatial_coef_self_hmc_diagnostics.accept_count += acc_prob;
+
+                if (spatial_coef_self_hmc.diagnostics)
+                {
+                    spatial_coef_self_hmc_diagnostics.energy_diff.at(iter) = energy_diff;
+                    spatial_coef_self_hmc_diagnostics.grad_norm.at(iter) = grad_norm;
+                }
+
+                if (spatial_coef_self_hmc.dual_averaging)
+                {
+                    if (iter < nburnin)
+                    {
+                        spatial_coef_self_hmc.leapfrog_step_size = spatial_coef_self_hmc_da.update_step_size(
+                            acc_prob
+                        );
+                    }
+                    else if (iter == nburnin)
+                    {
+                        spatial_coef_self_hmc_da.finalize_leapfrog_step(
+                            spatial_coef_self_hmc.leapfrog_step_size,
+                            spatial_coef_self_hmc.nleapfrog,
+                            spatial_coef_self_hmc.T_target
+                        );
+                    }
+
+                    if (spatial_coef_self_hmc.diagnostics && iter <= nburnin)
+                    {
+                        spatial_coef_self_hmc_diagnostics.nleapfrog_stored.at(iter) = spatial_coef_self_hmc.nleapfrog;
+                        spatial_coef_self_hmc_diagnostics.leapfrog_step_size_stored.at(iter) = spatial_coef_self_hmc.leapfrog_step_size;
+                    }
+                } // end of spatial coef self dual averaging
             }
 
             if (!global_hmc.params_selected.empty())
@@ -1537,51 +1238,6 @@ public:
                 } // end of s loop
             } // end of local params update
 
-            if (infer_coef_self_spatial_car)
-            {
-                double acc_cnt = 0.0;
-                update_car(
-                    model.coef_self_b.spatial, acc_cnt,psi1_spatial
-                );
-                spatial_coef_self_hmc_diagnostics.accept_count += acc_cnt;
-
-                double energy_diff, grad_norm;
-                double acc_prob = update_coef_self_spatial(
-                    psi1_spatial, energy_diff, grad_norm, 
-                    model, Y, wt2_temporal
-                );
-
-                if (spatial_coef_self_hmc.diagnostics)
-                {
-                    spatial_coef_self_hmc_diagnostics.energy_diff.at(iter) = energy_diff;
-                    spatial_coef_self_hmc_diagnostics.grad_norm.at(iter) = grad_norm;
-                }
-
-                if (spatial_coef_self_hmc.dual_averaging)
-                {
-                    if (iter < nburnin)
-                    {
-                        spatial_coef_self_hmc.leapfrog_step_size = spatial_coef_self_hmc_da.update_step_size(
-                            acc_prob
-                        );
-                    }
-                    else if (iter == nburnin)
-                    {
-                        spatial_coef_self_hmc_da.finalize_leapfrog_step(
-                            spatial_coef_self_hmc.leapfrog_step_size,
-                            spatial_coef_self_hmc.nleapfrog,
-                            spatial_coef_self_hmc.T_target
-                        );
-                    }
-
-                    if (spatial_coef_self_hmc.diagnostics && iter <= nburnin)
-                    {
-                        spatial_coef_self_hmc_diagnostics.nleapfrog_stored.at(iter) = spatial_coef_self_hmc.nleapfrog;
-                        spatial_coef_self_hmc_diagnostics.leapfrog_step_size_stored.at(iter) = spatial_coef_self_hmc.leapfrog_step_size;
-                    }
-                } // end of spatial coef self dual averaging
-            }
-
 
             // Store samples after burn-in and thinning
             if (iter >= nburnin && ((iter - nburnin) % nthin == 0))
@@ -1602,13 +1258,17 @@ public:
                     psi2_temporal_stored.col(sample_idx) = arma::cumsum(wt2_temporal);
                 }
 
-                if (infer_coef_self_spatial_car)
+                if (coef_self_bym2_prior.infer)
                 {
-                    coef_self_b_car_mu_stored.at(sample_idx) = model.coef_self_b.spatial.car_mu;
-                    coef_self_b_car_tau2_stored.at(sample_idx) = model.coef_self_b.spatial.car_tau2;
-                    coef_self_b_car_rho_stored.at(sample_idx) = model.coef_self_b.spatial.car_rho;
+                    coef_self_b_car_mu_stored.at(sample_idx) = model.coef_self_b.spatial.mu;
+                    coef_self_b_car_tau_stored.at(sample_idx) = model.coef_self_b.spatial.tau_b;
+                    coef_self_b_car_phi_stored.at(sample_idx) = model.coef_self_b.spatial.phi;
+                }
+                if (infer_psi1_spatial)
+                {
                     psi1_spatial_stored.col(sample_idx) = psi1_spatial;
                 }
+
 
                 if (rho_prior.infer)
                 {
@@ -1662,7 +1322,12 @@ public:
             output["intercept_a"] = intercept_a;
         } // end of intercept_a output
 
-        if (coef_self_sigma2_prior.infer || coef_self_temporal_prior.infer || infer_coef_self_spatial_car)
+        if (
+            coef_self_sigma2_prior.infer || 
+            coef_self_temporal_prior.infer || 
+            coef_self_bym2_prior.infer || 
+            infer_psi1_spatial
+        )
         {
             Rcpp::List coef_self_b;
             if (coef_self_sigma2_prior.infer)
@@ -1674,18 +1339,24 @@ public:
                 coef_self_b["psi2_temporal"] = Rcpp::wrap(psi2_temporal_stored);
                 coef_self_b["psi2_temporal_accept_rate"] = psi2_temporal_accept / (nburnin + nsample * nthin);
             } // end of coef_self_b temporal output
-            if (infer_coef_self_spatial_car)
-            {
-                coef_self_b["spatial"] = Rcpp::List::create(
-                    Rcpp::Named("mu") = Rcpp::wrap(coef_self_b_car_mu_stored),
-                    Rcpp::Named("tau2") = Rcpp::wrap(coef_self_b_car_tau2_stored),
-                    Rcpp::Named("rho") = Rcpp::wrap(coef_self_b_car_rho_stored),
-                    Rcpp::Named("psi1_spatial") = Rcpp::wrap(psi1_spatial_stored),
-                    Rcpp::Named("psi1_spatial_accept_rate") = spatial_coef_self_hmc_diagnostics.accept_count / (nburnin + nsample * nthin),
-                    Rcpp::Named("psi1_spatial_step_size") = spatial_coef_self_hmc.leapfrog_step_size,
-                    Rcpp::Named("psi1_spatial_nleapfrog") = spatial_coef_self_hmc.nleapfrog
-                );
 
+            Rcpp::List spatial_coef_self_out;
+            if (coef_self_bym2_prior.infer)
+            {
+                spatial_coef_self_out["mu"] = Rcpp::wrap(coef_self_b_car_mu_stored);
+                spatial_coef_self_out["tau"] = Rcpp::wrap(coef_self_b_car_tau_stored);
+                spatial_coef_self_out["phi"] = Rcpp::wrap(coef_self_b_car_phi_stored);
+                spatial_coef_self_out["phi_accept_rate"] = coef_self_bym2_prior.accept_count / (nburnin + nsample * nthin);
+                spatial_coef_self_out["final_phi_mh_sd"] = coef_self_bym2_prior.mh_sd;
+            }
+            if (infer_psi1_spatial)
+            {
+                spatial_coef_self_out["psi1_spatial"] = Rcpp::wrap(psi1_spatial_stored);
+                spatial_coef_self_out["hmc_settings"] = Rcpp::List::create(
+                    Rcpp::Named("accept_rate") = spatial_coef_self_hmc_diagnostics.accept_count / (nburnin + nsample * nthin),
+                    Rcpp::Named("leapfrog_step_size") = spatial_coef_self_hmc.leapfrog_step_size,
+                    Rcpp::Named("nleapfrog") = spatial_coef_self_hmc.nleapfrog
+                );
                 if (spatial_coef_self_hmc.diagnostics)
                 {
                     Rcpp::List hmc_diagnostics = Rcpp::List::create(
@@ -1699,9 +1370,14 @@ public:
                         hmc_diagnostics["step_size"] = spatial_coef_self_hmc_diagnostics.leapfrog_step_size_stored;
                     }
 
-                    coef_self_b["spatial_diagnostics"] = hmc_diagnostics;
+                    spatial_coef_self_out["hmc_diagnostics"] = hmc_diagnostics;
                 }
             } // end of coef_self_b spatial car output
+
+            if (coef_self_bym2_prior.infer || infer_psi1_spatial)
+            {
+                coef_self_b["spatial"] = spatial_coef_self_out;
+            }
             output["coef_self_b"] = coef_self_b;
         } // end of coef_self_b output
 

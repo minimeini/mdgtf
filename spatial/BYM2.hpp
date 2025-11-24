@@ -122,6 +122,34 @@ public:
     } // end of constructor
 
 
+    BYM2(
+        const arma::mat &neighborhood_matrix, 
+        const double &mu_, 
+        const double &tau_b_, 
+        const double &phi_
+    )
+    {
+        // V: binary neighborhood matrix
+        V = arma::symmatu(neighborhood_matrix); // ensure symmetry
+        nS = V.n_rows;
+        V.diag().zeros(); // zero diagonal
+        neighbors = arma::sum(V, 1); // row sums
+
+        // W: row-standardized weight matrix
+        W = V;
+        W.each_col() /= neighbors; // row-standardized weight matrix
+
+        mu = mu_;
+        tau_b = tau_b_;
+        phi = phi_;
+
+        compute_precision();
+        compute_scale_factor();
+        compute_Q_scaled_ginv();
+        return;
+    } // end of constructor
+
+
     BYM2(const Rcpp::List &opts)
     {
         if (opts.containsElementNamed("neighborhood_matrix"))
