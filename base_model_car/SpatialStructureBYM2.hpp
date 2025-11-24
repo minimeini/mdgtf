@@ -7,7 +7,68 @@
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
-class SpatialStructureBYM2
+
+struct BYM2Prior
+{
+    bool infer = false;
+    double mu_phi = 0.0;
+    double sigma_phi = 1.0;
+    double shape_tau = 1.0;
+    double rate_tau = 1.0;
+
+    // MCMC settings
+    double mh_sd = 0.1;
+    double accept_count = 0.0;
+
+    BYM2Prior() = default;
+    BYM2Prior(const Rcpp::List &opts)
+    {
+        if (opts.containsElementNamed("infer"))
+        {
+            infer = Rcpp::as<bool>(opts["infer"]);
+        }
+        if (opts.containsElementNamed("logit_phi"))
+        {
+            Rcpp::NumericVector logit_phi_opts = opts["logit_phi"];
+            mu_phi = logit_phi_opts[0];
+            sigma_phi = logit_phi_opts[1];
+        }
+        if (opts.containsElementNamed("tau_b"))
+        {
+            Rcpp::NumericVector tau_b_opts = opts["tau_b"];
+            shape_tau = tau_b_opts[0];
+            rate_tau = tau_b_opts[1];
+        }
+        if (opts.containsElementNamed("mh_sd"))
+        {
+            mh_sd = opts["mh_sd"];
+        }
+    }
+
+    void adapt_phi_proposal_robbins_monro(
+        const int &iter, 
+        const int &burn_in, 
+        const double &target_rate = 0.6
+    )
+    {
+        if (iter < burn_in && iter > 0 && iter % 50 == 0)
+        {
+            double accept_rate = accept_count / 50.0;
+            accept_count = 0.0;
+
+            // Robbins-Monro update
+            double gamma = 1.0 / std::pow(iter / 50.0, 0.6); // Decay rate
+            mh_sd *= std::exp(gamma * (accept_rate - target_rate));
+
+            // Keep in reasonable range
+            mh_sd = std::max(0.01, std::min(2.0, mh_sd));
+        }
+    }
+};
+
+
+
+class SpatialStructure
 {
 public:
     unsigned int nS; // number of locations for spatio-temporal model
@@ -32,7 +93,7 @@ public:
     double mh_sd_phi = 0.1;
     double phi_accept_count = 0.0;
 
-    SpatialStructureBYM2(const unsigned int &nlocation = 1)
+    SpatialStructure(const unsigned int &nlocation = 1)
     {
         nS = nlocation;
         V = arma::mat(nS, nS, arma::fill::zeros);
@@ -46,7 +107,7 @@ public:
     } // end of constructor
 
 
-    SpatialStructureBYM2(
+    SpatialStructure(
         const arma::mat &neighborhood_matrix)
     {
         // V: binary neighborhood matrix
