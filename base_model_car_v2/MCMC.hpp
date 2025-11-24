@@ -547,7 +547,7 @@ public:
 
     void update_car(
         BYM2Prior &prior, 
-        SpatialStructure &spatial,
+        BYM2 &spatial,
         const arma::vec &spatial_effects,
         const unsigned int &iter, 
         const unsigned int &nburnin

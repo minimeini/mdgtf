@@ -27,7 +27,7 @@ arma::mat sample_car(
     const double &phi
 )
 {
-    SpatialStructure spatial(V);
+    BYM2 spatial(V);
     spatial.mu = mu;
     spatial.tau_b = tau_b;
     spatial.phi = phi;
@@ -45,7 +45,7 @@ Rcpp::List infer_bym2_parameters(
     int thin = 1
 ) {
     // Set up spatial structure
-    SpatialStructure spatial(V_adj);
+    BYM2 spatial(V_adj);
 
     // Run MCMC
     return spatial.run_mcmc(b_observed, n_iter, burn_in, thin);

@@ -68,7 +68,7 @@ struct BYM2Prior
 
 
 
-class SpatialStructure
+class BYM2
 {
 public:
     unsigned int nS; // number of locations for spatio-temporal model
@@ -88,7 +88,7 @@ public:
     double phi = 0.5; // mixing parameter for BYM2, between 0 and 1
     double mu = 0.0; // overall mean
 
-    SpatialStructure(const unsigned int &nlocation = 1)
+    BYM2(const unsigned int &nlocation = 1)
     {
         nS = nlocation;
         V = arma::mat(nS, nS, arma::fill::zeros);
@@ -102,7 +102,7 @@ public:
     } // end of constructor
 
 
-    SpatialStructure(const arma::mat &neighborhood_matrix)
+    BYM2(const arma::mat &neighborhood_matrix)
     {
         // V: binary neighborhood matrix
         V = arma::symmatu(neighborhood_matrix); // ensure symmetry
@@ -121,7 +121,7 @@ public:
     } // end of constructor
 
 
-    SpatialStructure(const Rcpp::List &opts)
+    BYM2(const Rcpp::List &opts)
     {
         if (opts.containsElementNamed("neighborhood_matrix"))
         {

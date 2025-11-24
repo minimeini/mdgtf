@@ -29,7 +29,7 @@ public:
     arma::vec log_alpha, rho, W;
     double beta;
 
-    SpatialStructure spatial;
+    BYM2 spatial;
 
     std::string fsys = "shift";
     std::string ftrans = "sliding";
@@ -60,7 +60,7 @@ public:
         dlag.init("lognorm", LN_MU, LN_SD2, true);
         nP = LagDist::get_nlag(dlag);
 
-        spatial = SpatialStructure(nS);
+        spatial = BYM2(nS);
 
         beta = 1.0;
 
@@ -165,7 +165,7 @@ public:
             {
                 throw std::invalid_argument("Model::Model - dimension of neighborhood matrix is not consistent with 'nlocation'.");
             }
-            spatial = SpatialStructure(V);
+            spatial = BYM2(V);
         }
         else
         {
@@ -353,7 +353,7 @@ public:
             log_alpha_stored.set_size(nS, nsample);
             for (unsigned int i = 0; i < nsample; i++)
             {
-                SpatialStructure spatial_i(spatial.V);
+                BYM2 spatial_i(spatial.V);
                 spatial_i.mu = mu.at(i);
                 spatial_i.tau_b = tau_b.at(i);
                 spatial_i.phi = phi.at(i);

@@ -28,8 +28,8 @@ public:
     unsigned int nS; // number of locations for spatio-temporal model
     arma::vec log_alpha, log_beta, rho, W;
 
-    SpatialStructure spatial_alpha;
-    SpatialStructure spatial_beta;
+    BYM2 spatial_alpha;
+    BYM2 spatial_beta;
 
     std::string fsys = "shift";
     std::string ftrans = "sliding";
@@ -61,8 +61,8 @@ public:
         dlag.init("lognorm", LN_MU, LN_SD2, true);
         nP = LagDist::get_nlag(dlag);
 
-        spatial_alpha = SpatialStructure(nS);
-        spatial_beta = SpatialStructure(nS);
+        spatial_alpha = BYM2(nS);
+        spatial_beta = BYM2(nS);
 
         seas.init_default();
 
@@ -146,7 +146,7 @@ public:
         seas.init_default();
 
         Rcpp::List log_alpha_settings = settings["log_alpha"];
-        spatial_alpha = SpatialStructure(log_alpha_settings);
+        spatial_alpha = BYM2(log_alpha_settings);
         nS = spatial_alpha.nS;
         if (log_alpha_settings.containsElementNamed("spatial_effect"))
         {
@@ -163,7 +163,7 @@ public:
         } // end of loading log_alpha
 
         Rcpp::List log_beta_settings = settings["log_beta"];
-        spatial_beta = SpatialStructure(log_beta_settings);
+        spatial_beta = BYM2(log_beta_settings);
         if (log_beta_settings.containsElementNamed("spatial_effect"))
         {
             arma::vec spatial_effect_beta_in = Rcpp::as<arma::vec>(log_beta_settings["spatial_effect"]);
@@ -353,7 +353,7 @@ public:
                 log_alpha_stored.set_size(nS, nsample);
                 for (unsigned int i = 0; i < nsample; i++)
                 {
-                    SpatialStructure bym2_i(spatial_alpha.V);
+                    BYM2 bym2_i(spatial_alpha.V);
                     bym2_i.mu = mu.at(i);
                     bym2_i.tau_b = tau_b.at(i);
                     bym2_i.phi = phi.at(i);
@@ -388,7 +388,7 @@ public:
                 log_beta_stored.set_size(nS, nsample);
                 for (unsigned int i = 0; i < nsample; i++)
                 {
-                    SpatialStructure bym2_i(spatial_alpha.V);
+                    BYM2 bym2_i(spatial_alpha.V);
                     bym2_i.mu = mu.at(i);
                     bym2_i.tau_b = tau_b.at(i);
                     bym2_i.phi = phi.at(i);

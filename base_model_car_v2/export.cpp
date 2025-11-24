@@ -15,7 +15,7 @@ arma::mat sample_car(
     const arma::vec &car_params
 )
 {
-    SpatialStructure spatial(V);
+    BYM2 spatial(V);
     spatial.mu = car_params.at(0);
     spatial.tau_b = car_params.at(1);
     spatial.phi = car_params.at(2);
