@@ -325,6 +325,98 @@ public:
     }
 
 
+    void update_mu_tau_jointly(
+        const arma::mat &b_observed, // nS x nRep
+        const double &shape_tau = 1.0, 
+        const double &rate_tau = 1.0
+    )
+    {
+        double nloc = static_cast<double>(b_observed.n_rows);
+        double nrep = static_cast<double>(b_observed.n_cols);
+
+        // Given phi, (mu, tau_b) have a Normal-Gamma posterior
+        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
+        arma::mat Rphi_current = inverse(Rphi_inv);
+
+        arma::vec ones = arma::ones(nS);
+        double b_Rphi_b = 0.0;
+        double one_Rphi_b = 0.0;
+        for (unsigned int j = 0; j < b_observed.n_cols; j++)
+        {
+            arma::vec Rphi_b = Rphi_current * b_observed.col(j);
+            b_Rphi_b += arma::dot(b_observed.col(j), Rphi_b);
+            one_Rphi_b += arma::dot(ones, Rphi_b);
+
+        }
+        double one_Rphi_one = nrep * arma::dot(ones, Rphi_current * ones);
+
+
+        // Sample tau_b first
+        double quadratic_form = b_Rphi_b - (one_Rphi_b * one_Rphi_b) / one_Rphi_one;
+        double shape_post = shape_tau + 0.5 * nloc * nrep - 0.5;
+        double rate_post = rate_tau + 0.5 * quadratic_form;
+        tau_b = R::rgamma(shape_post, 1.0 / rate_post);
+
+        // Then sample mu | tau_b
+        double post_mean = one_Rphi_b / one_Rphi_one;
+        double post_var = 1.0 / (tau_b * one_Rphi_one);
+        mu = R::rnorm(post_mean, std::sqrt(post_var));
+    }
+
+
+    /**
+     * @brief Update the precision parameter tau_b conditional on mu and phi, with a Gamma prior. No replicate observations
+     * 
+     */
+    void update_tau(
+        const arma::vec &b_observed, 
+        const double &shape_tau = 1.0, 
+        const double &rate_tau = 1.0
+    )
+    {
+        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
+        arma::mat Rphi_current = inverse(Rphi_inv);
+
+        arma::vec b_res = b_observed - mu;
+        double b_Rphi_b = arma::dot(b_res, Rphi_current * b_res);
+
+        // Sample tau_b
+        double shape_post = shape_tau + 0.5 * static_cast<double>(nS);
+        double rate_post = rate_tau + 0.5 * b_Rphi_b;
+        tau_b = R::rgamma(shape_post, 1.0 / rate_post);
+    }
+
+
+    /**
+     * @brief Update the precision parameter tau_b conditional on mu and phi, with a Gamma prior. With replicates.
+     * 
+     */
+    void update_tau_conditional(
+        const arma::mat &b_observed, // nS x nRep
+        const double &shape_tau = 1.0, 
+        const double &rate_tau = 1.0
+    )
+    {
+        double nloc = static_cast<double>(b_observed.n_rows);
+        double nrep = static_cast<double>(b_observed.n_cols);
+
+        arma::mat Rphi_inv = (1.0 - phi) * arma::eye(nS, nS) + phi * Q_scaled_ginv;
+        arma::mat Rphi_current = inverse(Rphi_inv);
+
+        arma::mat b_res = b_observed.each_col() - mu;
+        double b_Rphi_b = 0.0;
+        for (unsigned int j = 0; j < b_observed.n_cols; ++j)
+        {
+            b_Rphi_b += arma::dot(b_res.col(j), Rphi_current * b_res.col(j));
+        }
+
+        // Sample tau_b
+        double shape_post = shape_tau + 0.5 * nloc * nrep;
+        double rate_post = rate_tau + 0.5 * b_Rphi_b;
+        tau_b = R::rgamma(shape_post, 1.0 / rate_post);
+    }
+
+
     // Normal prior on logit(phi)
     double log_prior_logit_phi(
         const double phi_val, 
@@ -344,7 +436,15 @@ public:
     // }
 
 
-    double log_post_phi(
+    /**
+     * @brief Marginal log-posterior for phi, integrating out tau_b and mu. No replicate observations.
+     * 
+     * @param phi_val 
+     * @param b_observed 
+     * @param prior 
+     * @return double 
+     */
+    double log_post_phi_marginal(
         const double &phi_val, // phi on original scale (0, 1)
         const arma::vec &b_observed,
         const BYM2Prior &prior
@@ -373,7 +473,7 @@ public:
     }
 
 
-    double update_phi_logit(
+    double update_phi_logit_marginal(
         const arma::vec &b_observed,
         const BYM2Prior &prior
     )
@@ -381,7 +481,190 @@ public:
         double logit_phi = logit(phi);
         double prop = logit_phi + R::rnorm(0.0, prior.mh_sd);
         double phi_prop = 1.0 / (1.0 + std::exp(-prop));
-        double log_acc = log_post_phi(phi_prop, b_observed, prior) - log_post_phi(phi, b_observed, prior);
+        double log_acc = log_post_phi_marginal(phi_prop, b_observed, prior) - log_post_phi_marginal(phi, b_observed, prior);
+        if (std::log(R::runif(0, 1)) < log_acc)
+        {
+            // accept
+            phi = phi_prop;
+            return 1.0;
+        }
+        else
+        {
+            // reject
+            return 0.0;
+        }
+    }
+
+
+    /**
+     * @brief Marginal log-posterior for phi, integrating out tau_b and mu. With replicates.
+     * 
+     * @param phi_val 
+     * @param b_observed 
+     * @param prior 
+     * @return double 
+     */
+    double log_post_phi_marginal(
+        const double &phi_val, // phi on original scale (0, 1)
+        const arma::mat &b_observed,
+        const BYM2Prior &prior
+    )
+    {
+        if (phi_val <= 0.0 || phi_val >= 1.0)
+            return -INFINITY;
+
+        double nloc = static_cast<double>(b_observed.n_rows);
+        double nrep = static_cast<double>(b_observed.n_cols);
+
+        // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
+        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
+        arma::mat Rphi = inverse(Rphi_inv);
+        double logdet = nrep * arma::log_det_sympd(arma::symmatu(Rphi));
+
+        arma::vec ones(nS, arma::fill::ones);
+        double b_Rphi_b = 0.0;
+        double one_Rphi_b = 0.0;
+        for (unsigned int j = 0; j < b_observed.n_cols; j++)
+        {
+            arma::vec Rphi_b = Rphi * b_observed.col(j);
+            b_Rphi_b += arma::dot(b_observed.col(j), Rphi_b);
+            one_Rphi_b += arma::dot(ones, Rphi_b);
+        }
+        double one_Rphi_one = nrep * arma::dot(ones, Rphi * ones);
+
+        double quadratic_form = b_Rphi_b - (one_Rphi_b * one_Rphi_b) / one_Rphi_one;
+        double shape_post = prior.shape_tau + 0.5 * nrep * nloc - 0.5;
+        double rate_post = prior.rate_tau + 0.5 * quadratic_form;
+
+        // Log marginal (integrating out tau_b and mu)
+        return 0.5 * logdet - shape_post * std::log(rate_post) - 0.5 * std::log(one_Rphi_one) + log_prior_logit_phi(phi_val, prior.mu_phi, prior.sigma_phi);
+    }
+
+
+    double update_phi_logit_marginal(
+        const arma::mat &b_observed,
+        const BYM2Prior &prior
+    )
+    {
+        double logit_phi = logit(phi);
+        double prop = logit_phi + R::rnorm(0.0, prior.mh_sd);
+        double phi_prop = 1.0 / (1.0 + std::exp(-prop));
+        double log_acc = log_post_phi_marginal(phi_prop, b_observed, prior) - log_post_phi_marginal(phi, b_observed, prior);
+        if (std::log(R::runif(0, 1)) < log_acc)
+        {
+            // accept
+            phi = phi_prop;
+            return 1.0;
+        }
+        else
+        {
+            // reject
+            return 0.0;
+        }
+    }
+
+
+    /**
+     * @brief log-posterior for phi, integrating out tau_b but conditional on mu. No replicate observations.
+     * 
+     * @param phi_val 
+     * @param b_observed 
+     * @param prior 
+     * @return double 
+     */
+    double log_post_phi_conditional(
+        const double &phi_val, // phi on original scale (0, 1)
+        const arma::vec &b_observed,
+        const BYM2Prior &prior
+    )
+    {
+        if (phi_val <= 0.0 || phi_val >= 1.0)
+            return -INFINITY;
+        // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
+        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
+        arma::mat Rphi = inverse(Rphi_inv);
+        double logdet = arma::log_det_sympd(arma::symmatu(Rphi));
+
+        double b_Rphi_b = arma::dot(b_observed, Rphi * b_observed);
+        double shape_post = prior.shape_tau + 0.5 * static_cast<double>(nS);
+        double rate_post = prior.rate_tau + 0.5 * b_Rphi_b;
+
+        // Log posterior (integrating out tau_b but conditional on mu)
+        return 0.5 * logdet - shape_post * std::log(rate_post) + log_prior_logit_phi(phi_val, prior.mu_phi, prior.sigma_phi);
+    }
+
+
+    double update_phi_logit_conditional(
+        const arma::vec &b_observed,
+        const BYM2Prior &prior
+    )
+    {
+        double logit_phi = logit(phi);
+        double prop = logit_phi + R::rnorm(0.0, prior.mh_sd);
+        double phi_prop = 1.0 / (1.0 + std::exp(-prop));
+        double log_acc = log_post_phi_conditional(phi_prop, b_observed, prior) - log_post_phi_conditional(phi, b_observed, prior);
+        if (std::log(R::runif(0, 1)) < log_acc)
+        {
+            // accept
+            phi = phi_prop;
+            return 1.0;
+        }
+        else
+        {
+            // reject
+            return 0.0;
+        }
+    }
+
+
+    /**
+     * @brief log-posterior for phi, integrating out tau_b but conditional on mu. With replicates.
+     * 
+     * @param phi_val 
+     * @param b_observed 
+     * @param prior 
+     * @return double 
+     */
+    double log_post_phi_conditional(
+        const double &phi_val, // phi on original scale (0, 1)
+        const arma::mat &b_observed,
+        const BYM2Prior &prior
+    )
+    {
+        if (phi_val <= 0.0 || phi_val >= 1.0)
+            return -INFINITY;
+
+        double nloc = static_cast<double>(b_observed.n_rows);
+        double nrep = static_cast<double>(b_observed.n_cols);
+
+        // Cov(b) = (1/tau_b)*[ (1-phi) I + phi * Q_scaled_ginv ]
+        arma::mat Rphi_inv = (1.0 - phi_val) * arma::eye(nS, nS) + phi_val * Q_scaled_ginv;
+        arma::mat Rphi = inverse(Rphi_inv);
+        double logdet = nrep * arma::log_det_sympd(arma::symmatu(Rphi));
+
+        double b_Rphi_b = 0.0;
+        for (unsigned int j = 0; j < b_observed.n_cols; j++)
+        {
+            b_Rphi_b += arma::dot(b_observed.col(j), Rphi * b_observed.col(j));
+        }
+
+        double shape_post = prior.shape_tau + 0.5 * nrep * nloc;
+        double rate_post = prior.rate_tau + 0.5 * b_Rphi_b;
+
+        // Log marginal (integrating out tau_b and mu)
+        return 0.5 * logdet - shape_post * std::log(rate_post) + log_prior_logit_phi(phi_val, prior.mu_phi, prior.sigma_phi);
+    }
+
+
+    double update_phi_logit_conditional(
+        const arma::mat &b_observed,
+        const BYM2Prior &prior
+    )
+    {
+        double logit_phi = logit(phi);
+        double prop = logit_phi + R::rnorm(0.0, prior.mh_sd);
+        double phi_prop = 1.0 / (1.0 + std::exp(-prop));
+        double log_acc = log_post_phi_conditional(phi_prop, b_observed, prior) - log_post_phi_conditional(phi, b_observed, prior);
         if (std::log(R::runif(0, 1)) < log_acc)
         {
             // accept
@@ -413,7 +696,7 @@ public:
         int save_idx = 0;
         for (int iter = 0; iter < n_iter; ++iter) {
             // Update parameters
-            double acc = update_phi_logit(b_observed, prior);
+            double acc = update_phi_logit_marginal(b_observed, prior);
             prior.accept_count += acc;
             update_mu_tau_jointly(b_observed, prior.shape_tau, prior.rate_tau);
 
