@@ -29,12 +29,6 @@ private:
     unsigned int nburnin = 1000;
     unsigned int nthin = 1;
 
-    bool infer_log_alpha = false;
-    bool infer_log_beta = false;
-
-    double car_alpha_accept_count = 0.0;
-    double car_beta_accept_count = 0.0;
-
     // HMC settings for global parameters
     std::vector<std::string> global_params_selected;
     bool global_dual_averaging = false;
@@ -87,7 +81,7 @@ private:
     Prior W_prior;
 
     // Priors for global parameters
-    Prior car_prior;
+    BYM2Prior log_alpha_bym2_prior, log_beta_bym2_prior;
     Prior lag_par1_prior;
     Prior lag_par2_prior;
 
@@ -95,15 +89,15 @@ private:
     arma::vec lag_par1_stored; // nsample x 1
     arma::vec lag_par2_stored;
 
-    arma::vec car_beta_mu_stored; // nsample x 1
-    arma::vec car_beta_tau2_stored;
-    arma::vec car_beta_rho_stored;
-    arma::mat car_beta_stored; // nS x nsample
+    arma::vec log_beta_mu_stored; // nsample x 1
+    arma::vec log_beta_tau_stored;
+    arma::vec log_beta_phi_stored;
+    arma::mat log_beta_stored; // nS x nsample
 
-    arma::vec car_alpha_mu_stored;
-    arma::vec car_alpha_tau2_stored;
-    arma::vec car_alpha_rho_stored;
-    arma::mat car_alpha_stored; // nS x nsample
+    arma::vec log_alpha_mu_stored;
+    arma::vec log_alpha_tau_stored;
+    arma::vec log_alpha_phi_stored;
+    arma::mat log_alpha_stored; // nS x nsample
 
     // Storage for local parameter samples
     arma::mat rho_stored; // nS x nsample
@@ -128,6 +122,7 @@ private:
     arma::mat local_leapfrog_step_size_stored; // nS x nburnin
 
     // Store log_alpha diagnostics
+    bool infer_log_alpha = false;
     double logalpha_accept_count = 0.0;
     arma::vec logalpha_energy_diff; // niter x 1
     arma::vec logalpha_grad_norm; // niter x 1
@@ -135,6 +130,7 @@ private:
     arma::vec logalpha_leapfrog_step_size_stored; // nburnin x 1
 
     // Store log_beta diagnostics
+    bool infer_log_beta = false;
     double logbeta_accept_count = 0.0;
     arma::vec logbeta_energy_diff; // niter x 1
     arma::vec logbeta_grad_norm; // niter x 1
@@ -157,11 +153,6 @@ public:
 
         wt_prior.infer = infer_wt_in;
         wt_prior.mh_sd = 1.0;
-
-        car_prior.infer = infer_car_in;
-        car_prior.name = "jeffrey";
-        car_prior.mh_sd = 1.0;
-        car_prior.par1 = 1.0; // jeffrey_prior_order
         return;
     } // end of constructor
 
@@ -187,18 +178,109 @@ public:
 
         logalpha_accept_count = 0.0;
         infer_log_alpha = false;
-        if (opts.containsElementNamed("infer_log_alpha"))
+        if (opts.containsElementNamed("log_alpha"))
         {
-            infer_log_alpha = Rcpp::as<bool>(opts["infer_log_alpha"]);
-        }
+            Rcpp::List log_alpha_opts = Rcpp::as<Rcpp::List>(opts["log_alpha"]);
+            if (log_alpha_opts.containsElementNamed("infer"))
+            {
+                infer_log_alpha = Rcpp::as<bool>(log_alpha_opts["infer"]);
+            }
 
-        logbeta_accept_count = 0.0;
+            if (log_alpha_opts.containsElementNamed("bym2"))
+            {
+                Rcpp::List log_alpha_bym2_opts = Rcpp::as<Rcpp::List>(log_alpha_opts["bym2"]);
+                log_alpha_bym2_prior = BYM2Prior(log_alpha_bym2_opts);
+            }
+
+            logalpha_nleapfrog = 10;
+            logalpha_leapfrog_step_size = 0.1;
+            logalpha_dual_averaging = false;
+            logalpha_diagnostics = true;
+            logalpha_verbose = false;
+            logalpha_T_target = 1.0;
+            if (log_alpha_opts.containsElementNamed("hmc"))
+            {
+                Rcpp::List logalpha_hmc_opts = Rcpp::as<Rcpp::List>(log_alpha_opts["hmc"]);
+                if (logalpha_hmc_opts.containsElementNamed("nleapfrog"))
+                {
+                    logalpha_nleapfrog = Rcpp::as<unsigned int>(logalpha_hmc_opts["nleapfrog"]);
+                }
+                if (logalpha_hmc_opts.containsElementNamed("leapfrog_step_size"))
+                {
+                    logalpha_leapfrog_step_size = Rcpp::as<double>(logalpha_hmc_opts["leapfrog_step_size"]);
+                }
+                if (logalpha_hmc_opts.containsElementNamed("dual_averaging"))
+                {
+                    logalpha_dual_averaging = Rcpp::as<bool>(logalpha_hmc_opts["dual_averaging"]);
+                }
+                if (logalpha_hmc_opts.containsElementNamed("diagnostics"))
+                {
+                    logalpha_diagnostics = Rcpp::as<bool>(logalpha_hmc_opts["diagnostics"]);
+                }
+                if (logalpha_hmc_opts.containsElementNamed("verbose"))
+                {
+                    logalpha_verbose = Rcpp::as<bool>(logalpha_hmc_opts["verbose"]);
+                }
+                if (logalpha_hmc_opts.containsElementNamed("T_target"))
+                {
+                    logalpha_T_target = Rcpp::as<double>(logalpha_hmc_opts["T_target"]);
+                }
+            }
+        } // end of log_alpha options
+
+
         infer_log_beta = false;
-        if (opts.containsElementNamed("infer_log_beta"))
+        logbeta_accept_count = 0.0;
+        if (opts.containsElementNamed("log_beta"))
         {
-            infer_log_beta = Rcpp::as<bool>(opts["infer_log_beta"]);
-        }
-        
+            Rcpp::List log_beta_opts = Rcpp::as<Rcpp::List>(opts["log_beta"]);
+            if (log_beta_opts.containsElementNamed("infer"))
+            {
+                infer_log_beta = Rcpp::as<bool>(log_beta_opts["infer"]);
+            }
+            if (log_beta_opts.containsElementNamed("bym2"))
+            {
+                Rcpp::List log_beta_bym2_opts = Rcpp::as<Rcpp::List>(log_beta_opts["bym2"]);
+                log_beta_bym2_prior = BYM2Prior(log_beta_bym2_opts);
+            }
+
+            logbeta_nleapfrog = 10;
+            logbeta_leapfrog_step_size = 0.1;
+            logbeta_dual_averaging = false;
+            logbeta_diagnostics = true;
+            logbeta_verbose = false;
+            logbeta_T_target = 1.0;
+            if (log_beta_opts.containsElementNamed("hmc"))
+            {
+                Rcpp::List logbeta_hmc_opts = Rcpp::as<Rcpp::List>(log_beta_opts["hmc"]);
+                if (logbeta_hmc_opts.containsElementNamed("nleapfrog"))
+                {
+                    logbeta_nleapfrog = Rcpp::as<unsigned int>(logbeta_hmc_opts["nleapfrog"]);
+                }
+                if (logbeta_hmc_opts.containsElementNamed("leapfrog_step_size"))
+                {
+                    logbeta_leapfrog_step_size = Rcpp::as<double>(logbeta_hmc_opts["leapfrog_step_size"]);
+                }
+                if (logbeta_hmc_opts.containsElementNamed("dual_averaging"))
+                {
+                    logbeta_dual_averaging = Rcpp::as<bool>(logbeta_hmc_opts["dual_averaging"]);
+                }
+                if (logbeta_hmc_opts.containsElementNamed("diagnostics"))
+                {
+                    logbeta_diagnostics = Rcpp::as<bool>(logbeta_hmc_opts["diagnostics"]);
+                }
+                if (logbeta_hmc_opts.containsElementNamed("verbose"))
+                {
+                    logbeta_verbose = Rcpp::as<bool>(logbeta_hmc_opts["verbose"]);
+                }
+                if (logbeta_hmc_opts.containsElementNamed("T_target"))
+                {
+                    logbeta_T_target = Rcpp::as<double>(logbeta_hmc_opts["T_target"]);
+                }
+            }
+        } // end of log_beta options
+
+ 
         if (opts.containsElementNamed("wt"))
         {
             Rcpp::List wt_opts = Rcpp::as<Rcpp::List>(opts["wt"]);
@@ -215,28 +297,6 @@ public:
             }
         }
 
-        if (opts.containsElementNamed("car"))
-        {
-            Rcpp::List car_opts = Rcpp::as<Rcpp::List>(opts["car"]);
-            car_prior.infer = false;
-            if (car_opts.containsElementNamed("infer"))
-            {
-                car_prior.infer = Rcpp::as<bool>(car_opts["infer"]);
-            }
-
-            car_prior.mh_sd = 0.1;
-            if (car_opts.containsElementNamed("mh_sd"))
-            {
-                car_prior.mh_sd = Rcpp::as<double>(car_opts["mh_sd"]);
-            }
-
-            car_prior.name = "jeffrey";
-            car_prior.par1 = 1.0; // jeffrey_prior_order
-            if (car_opts.containsElementNamed("par1"))
-            {
-                car_prior.par1 = Rcpp::as<double>(car_opts["par1"]);
-            }
-        }
 
         if (opts.containsElementNamed("rho"))
         {
@@ -358,89 +418,6 @@ public:
                 local_T_target = Rcpp::as<double>(local_hmc_opts["T_target"]);
             }
         }
-
-        if (opts.containsElementNamed("logalpha_hmc"))
-        {
-            Rcpp::List logalpha_hmc_opts = Rcpp::as<Rcpp::List>(opts["logalpha_hmc"]);
-
-            logalpha_nleapfrog = 10;
-            if (logalpha_hmc_opts.containsElementNamed("nleapfrog"))
-            {
-                logalpha_nleapfrog = Rcpp::as<unsigned int>(logalpha_hmc_opts["nleapfrog"]);
-            }
-
-            logalpha_leapfrog_step_size = 0.01;
-            if (logalpha_hmc_opts.containsElementNamed("leapfrog_step_size"))
-            {
-                logalpha_leapfrog_step_size = Rcpp::as<double>(logalpha_hmc_opts["leapfrog_step_size"]);
-            }
-
-            logalpha_dual_averaging = false;
-            if (logalpha_hmc_opts.containsElementNamed("dual_averaging"))
-            {
-                logalpha_dual_averaging = Rcpp::as<bool>(logalpha_hmc_opts["dual_averaging"]);
-            }
-
-            logalpha_diagnostics = true;
-            if (logalpha_hmc_opts.containsElementNamed("diagnostics"))
-            {
-                logalpha_diagnostics = Rcpp::as<bool>(logalpha_hmc_opts["diagnostics"]);
-            }
-
-            logalpha_verbose = false;
-            if (logalpha_hmc_opts.containsElementNamed("verbose"))
-            {
-                logalpha_verbose = Rcpp::as<bool>(logalpha_hmc_opts["verbose"]);
-            }
-
-            logalpha_T_target = 1.0;
-            if (logalpha_hmc_opts.containsElementNamed("T_target"))
-            {
-                logalpha_T_target = Rcpp::as<double>(logalpha_hmc_opts["T_target"]);
-            }
-        }
-
-        if (opts.containsElementNamed("logbeta_hmc"))
-        {
-            Rcpp::List logbeta_hmc_opts = Rcpp::as<Rcpp::List>(opts["logbeta_hmc"]);
-
-            logbeta_nleapfrog = 10;
-            if (logbeta_hmc_opts.containsElementNamed("nleapfrog"))
-            {
-                logbeta_nleapfrog = Rcpp::as<unsigned int>(logbeta_hmc_opts["nleapfrog"]);
-            }
-
-            logbeta_leapfrog_step_size = 0.01;
-            if (logbeta_hmc_opts.containsElementNamed("leapfrog_step_size"))
-            {
-                logbeta_leapfrog_step_size = Rcpp::as<double>(logbeta_hmc_opts["leapfrog_step_size"]);
-            }
-
-            logbeta_dual_averaging = false;
-            if (logbeta_hmc_opts.containsElementNamed("dual_averaging"))
-            {
-                logbeta_dual_averaging = Rcpp::as<bool>(logbeta_hmc_opts["dual_averaging"]);
-            }
-
-            logbeta_diagnostics = true;
-            if (logbeta_hmc_opts.containsElementNamed("diagnostics"))
-            {
-                logbeta_diagnostics = Rcpp::as<bool>(logbeta_hmc_opts["diagnostics"]);
-            }
-
-            logbeta_verbose = false;
-            if (logbeta_hmc_opts.containsElementNamed("verbose"))
-            {
-                logbeta_verbose = Rcpp::as<bool>(logbeta_hmc_opts["verbose"]);
-            }
-
-            logbeta_T_target = 1.0;
-            if (logbeta_hmc_opts.containsElementNamed("T_target"))
-            {
-                logbeta_T_target = Rcpp::as<double>(logbeta_hmc_opts["T_target"]);
-            }
-        }
-
         return;
     } // end of constructor from Rcpp::List
 
@@ -451,12 +428,56 @@ public:
             Rcpp::Named("mh_sd") = 1.0
         );
 
-        Rcpp::List car_opts = Rcpp::List::create(
+
+        Rcpp::List logalpha_bym2_opts = Rcpp::List::create(
             Rcpp::Named("infer") = false,
-            Rcpp::Named("name") = "jeffrey",
             Rcpp::Named("mh_sd") = 0.1,
-            Rcpp::Named("par1") = 1.0
+            Rcpp::Named("tau_b") = Rcpp::NumericVector::create(1.0, 1.0), // shape and rate for tau_b
+            Rcpp::Named("logit_phi") = Rcpp::NumericVector::create(0.0, 1.0) // mean and sd for logit(phi)
         );
+
+
+        Rcpp::List logalpha_hmc_opts = Rcpp::List::create(
+            Rcpp::Named("nleapfrog") = 10,
+            Rcpp::Named("leapfrog_step_size") = 0.1,
+            Rcpp::Named("dual_averaging") = false,
+            Rcpp::Named("diagnostics") = true,
+            Rcpp::Named("verbose") = false,
+            Rcpp::Named("T_target") = 1.0
+        );
+
+
+        Rcpp::List log_alpha_opts = Rcpp::List::create(
+            Rcpp::Named("infer") = false,
+            Rcpp::Named("bym2") = logalpha_bym2_opts,
+            Rcpp::Named("hmc") = logalpha_hmc_opts
+        );
+
+
+        Rcpp::List logbeta_bym2_opts = Rcpp::List::create(
+            Rcpp::Named("infer") = false,
+            Rcpp::Named("mh_sd") = 0.1,
+            Rcpp::Named("tau_b") = Rcpp::NumericVector::create(1.0, 1.0), // shape and rate for tau_b
+            Rcpp::Named("logit_phi") = Rcpp::NumericVector::create(0.0, 1.0) // mean and sd for logit(phi)
+        );
+
+
+        Rcpp::List logbeta_hmc_opts = Rcpp::List::create(
+            Rcpp::Named("nleapfrog") = 10,
+            Rcpp::Named("leapfrog_step_size") = 0.01,
+            Rcpp::Named("dual_averaging") = false,
+            Rcpp::Named("diagnostics") = true,
+            Rcpp::Named("verbose") = false,
+            Rcpp::Named("T_target") = 1.0
+        );
+
+
+        Rcpp::List log_beta_opts = Rcpp::List::create(
+            Rcpp::Named("infer") = false,
+            Rcpp::Named("bym2") = logbeta_bym2_opts,
+            Rcpp::Named("hmc") = logbeta_hmc_opts
+        );
+
 
         Rcpp::List rho_opts = Rcpp::List::create(
             Rcpp::Named("infer") = false,
@@ -504,119 +525,45 @@ public:
             Rcpp::Named("T_target") = 1.0
         );
 
-        Rcpp::List logalpha_hmc_opts = Rcpp::List::create(
-            Rcpp::Named("nleapfrog") = 10,
-            Rcpp::Named("leapfrog_step_size") = 0.01,
-            Rcpp::Named("dual_averaging") = false,
-            Rcpp::Named("diagnostics") = true,
-            Rcpp::Named("verbose") = false,
-            Rcpp::Named("T_target") = 1.0
-        );
-
-        Rcpp::List logbeta_hmc_opts = Rcpp::List::create(
-            Rcpp::Named("nleapfrog") = 10,
-            Rcpp::Named("leapfrog_step_size") = 0.01,
-            Rcpp::Named("dual_averaging") = false,
-            Rcpp::Named("diagnostics") = true,
-            Rcpp::Named("verbose") = false,
-            Rcpp::Named("T_target") = 1.0
-        );
 
         Rcpp::List mcmc_opts = Rcpp::List::create(
             Rcpp::Named("nsample") = 1000,
             Rcpp::Named("nburnin") = 1000,
             Rcpp::Named("nthin") = 1,
-            Rcpp::Named("infer_log_alpha") = false,
+            Rcpp::Named("log_alpha") = log_alpha_opts,
+            Rcpp::Named("log_beta") = log_beta_opts,
             Rcpp::Named("wt") = wt_opts,
-            Rcpp::Named("car") = car_opts,
             Rcpp::Named("rho") = rho_opts,
             Rcpp::Named("W") = W_opts,
             Rcpp::Named("lag_par1") = lag_par1_opts,
             Rcpp::Named("lag_par2") = lag_par2_opts,
             Rcpp::Named("global_hmc") = global_hmc_opts,
-            Rcpp::Named("local_hmc") = local_hmc_opts,
-            Rcpp::Named("logalpha_hmc") = logalpha_hmc_opts,
-            Rcpp::Named("logbeta_hmc") = logbeta_hmc_opts
+            Rcpp::Named("local_hmc") = local_hmc_opts
         );
 
         return mcmc_opts;
     } // end of get_default_settings()
 
+
     void update_car(
-        SpatialStructure &spatial, 
-        double &rho_accept_count,
+        BYM2Prior &prior, 
+        SpatialStructure &spatial,
         const arma::vec &spatial_effects,
-        const double &mh_sd = 0.1,
-        const double &jeffrey_prior_order = 1.0
+        const unsigned int &iter, 
+        const unsigned int &nburnin
     )
     {
-        double rho_min = spatial.min_car_rho;
-        double rho_max = spatial.max_car_rho;
+        double acc = spatial.update_phi_logit(
+            spatial_effects, prior);
+        prior.accept_count += acc;
+        spatial.update_mu_tau_jointly(
+            spatial_effects,
+            prior.shape_tau,
+            prior.rate_tau);
+        prior.adapt_phi_proposal_robbins_monro(iter, nburnin);
+        return;
+    }
 
-        double rho_current = spatial.car_rho;
-        double log_post_rho_old = spatial.log_posterior_rho(spatial_effects, jeffrey_prior_order);
-
-        double eta = logit(standardize(rho_current, rho_min, rho_max, true));
-        double eta_new = eta + R::rnorm(0.0, mh_sd);
-        double rho_new = rho_min + logistic(eta_new) * (rho_max - rho_min);
-        // double rho_new = rho_current + R::rnorm(0.0, mh_sd);
-
-        /*
-        When rho is updated, we also need to update:
-        - precision matrix Q
-        - one_Q_one: updated in `update_car() -> compute_precision()`
-        - post_mu_mean: updated in `log_posterior_rho()`
-        - post_mu_prec: updated in `log_posterior_rho()`
-        - post_tau2_rate: updated in `log_posterior_rho()`
-        */
-        // if (rho_new > spatial.min_car_rho && rho_new < spatial.max_car_rho)
-        // {
-        spatial.update_params(
-            spatial.car_mu,
-            spatial.car_tau2,
-            rho_new);
-        double log_post_rho_new = spatial.log_posterior_rho(spatial_effects, jeffrey_prior_order);
-
-        double u_old = standardize(rho_current, rho_min, rho_max, true);
-        double u_new = standardize(rho_new, rho_min, rho_max, true);
-        double log_jac = (std::log(u_new) + std::log1p(-u_new)) - (std::log(u_old) + std::log1p(-u_old));
-
-        double log_accept_ratio = log_post_rho_new - log_post_rho_old + log_jac;
-        if (std::log(R::runif(0.0, 1.0)) < log_accept_ratio)
-        {
-            rho_accept_count += 1.0;
-        }
-        else
-        {
-            // revert
-            spatial.update_params(
-                spatial.car_mu,
-                spatial.car_tau2,
-                rho_current);
-            double log_post_rho = spatial.log_posterior_rho(spatial_effects, jeffrey_prior_order);
-        }
-        // }
-
-        /*
-        When tau2 is updated, we also need to update:
-        - post_mu_prec: update manually here
-        */
-        double tau2_new = R::rgamma(spatial.post_tau2_shape, 1.0 / spatial.post_tau2_rate);
-        spatial.update_params(
-            spatial.car_mu,
-            tau2_new,
-            spatial.car_rho
-        );
-
-        double mu_new = R::rnorm(spatial.post_mu_mean, std::sqrt(1.0 / spatial.post_mu_prec));
-        spatial.update_params(
-            mu_new,
-            spatial.car_tau2,
-            spatial.car_rho
-        );
-
-        return;        
-    } // end of update_car()
 
     void update_wt(
         arma::mat &wt, // nS x (nT + 1)
@@ -728,9 +675,7 @@ public:
         }
 
         // Add CAR prior for log_alpha
-        arma::vec alpha_diff = model.log_alpha - model.spatial_alpha.car_mu;
-        logp += - 0.5 * model.spatial_alpha.car_tau2 * arma::dot(alpha_diff, model.spatial_alpha.Q * alpha_diff);
-
+        logp += model.spatial_alpha.log_likelihood(model.log_alpha, false);
         return logp;
     } // end of compute_log_joint_logalpha()
 
@@ -755,9 +700,7 @@ public:
         }
 
         // Add CAR prior for log_beta
-        arma::vec beta_diff = model.log_beta - model.spatial_beta.car_mu;
-        logp += - 0.5 * model.spatial_beta.car_tau2 * arma::dot(beta_diff, model.spatial_beta.Q * beta_diff);
-
+        logp += model.spatial_beta.log_likelihood(model.log_beta, false);
         return logp;
     } // end of compute_log_joint_logbeta()
 
@@ -1381,7 +1324,7 @@ public:
 
         if (infer_log_alpha)
         {
-            car_alpha_stored = arma::mat(model.nS, nsample, arma::fill::zeros);
+            log_alpha_stored = arma::mat(model.nS, nsample, arma::fill::zeros);
 
             if (logalpha_diagnostics)
             {
@@ -1396,7 +1339,6 @@ public:
             }
 
         }
-
         double logalpha_mu_da = std::log(10.0 * logalpha_leapfrog_step_size); // bias center
         double logalpha_log_eps = std::log(logalpha_leapfrog_step_size);
         double logalpha_log_eps_bar = logalpha_log_eps;
@@ -1405,11 +1347,17 @@ public:
         double logalpha_t0_da = 10.0;
         double logalpha_kappa_da = 0.75;
         unsigned int logalpha_adapt_count = 0;
+        if (log_alpha_bym2_prior.infer)
+        {
+            log_alpha_mu_stored = arma::vec(nsample, arma::fill::zeros);
+            log_alpha_tau_stored = arma::vec(nsample, arma::fill::zeros);
+            log_alpha_phi_stored = arma::vec(nsample, arma::fill::zeros);
+        }
 
 
         if (infer_log_beta)
         {
-            car_beta_stored = arma::mat(model.nS, nsample, arma::fill::zeros);
+            log_beta_stored = arma::mat(model.nS, nsample, arma::fill::zeros);
 
             if (logbeta_diagnostics)
             {
@@ -1424,7 +1372,6 @@ public:
             }
 
         }
-
         double logbeta_mu_da = std::log(10.0 * logbeta_leapfrog_step_size); // bias center
         double logbeta_log_eps = std::log(logbeta_leapfrog_step_size);
         double logbeta_log_eps_bar = logbeta_log_eps;
@@ -1433,19 +1380,11 @@ public:
         double logbeta_t0_da = 10.0;
         double logbeta_kappa_da = 0.75;
         unsigned int logbeta_adapt_count = 0;
-
-
-        if (car_prior.infer)
+        if (log_beta_bym2_prior.infer)
         {
-            car_alpha_accept_count = 0.0;
-            car_alpha_mu_stored = arma::vec(nsample, arma::fill::zeros);
-            car_alpha_tau2_stored = arma::vec(nsample, arma::fill::zeros);
-            car_alpha_rho_stored = arma::vec(nsample, arma::fill::zeros);
-
-            car_beta_accept_count = 0.0;
-            car_beta_mu_stored = arma::vec(nsample, arma::fill::zeros);
-            car_beta_tau2_stored = arma::vec(nsample, arma::fill::zeros);
-            car_beta_rho_stored = arma::vec(nsample, arma::fill::zeros);
+            log_beta_mu_stored = arma::vec(nsample, arma::fill::zeros);
+            log_beta_tau_stored = arma::vec(nsample, arma::fill::zeros);
+            log_beta_phi_stored = arma::vec(nsample, arma::fill::zeros);
         }
 
         if (wt_prior.infer)
@@ -1486,24 +1425,25 @@ public:
                 update_wt(wt, wt_accept, model, Y, wt_prior.mh_sd);
             } // end of wt update
 
-            if (car_prior.infer)
+            if (log_alpha_bym2_prior.infer)
             {
                 update_car(
-                    model.spatial_alpha,
-                    car_alpha_accept_count,
-                    model.log_alpha,
-                    car_prior.mh_sd,
-                    car_prior.par1
+                    log_alpha_bym2_prior, 
+                    model.spatial_alpha, 
+                    model.log_alpha, 
+                    iter, nburnin
                 );
+            }
 
+            if (log_beta_bym2_prior.infer)
+            {
                 update_car(
-                    model.spatial_beta,
-                    car_beta_accept_count,
-                    model.log_beta,
-                    car_prior.mh_sd,
-                    car_prior.par1
+                    log_beta_bym2_prior, 
+                    model.spatial_beta, 
+                    model.log_beta, 
+                    iter, nburnin
                 );
-            } // end of car update
+            }
 
             if (!global_params_selected.empty())
             {
@@ -1717,15 +1657,18 @@ public:
                     wt_stored.slice(sample_idx) = wt;
                 }
 
-                if (car_prior.infer)
+                if (log_alpha_bym2_prior.infer)
                 {
-                    car_alpha_mu_stored(sample_idx) = model.spatial_alpha.car_mu;
-                    car_alpha_tau2_stored(sample_idx) = model.spatial_alpha.car_tau2;
-                    car_alpha_rho_stored(sample_idx) = model.spatial_alpha.car_rho;
+                    log_alpha_mu_stored.at(sample_idx) = model.spatial_alpha.mu;
+                    log_alpha_tau_stored.at(sample_idx) = model.spatial_alpha.tau_b;
+                    log_alpha_phi_stored.at(sample_idx) = model.spatial_alpha.phi;
+                }
 
-                    car_beta_mu_stored(sample_idx) = model.spatial_beta.car_mu;
-                    car_beta_tau2_stored(sample_idx) = model.spatial_beta.car_tau2;
-                    car_beta_rho_stored(sample_idx) = model.spatial_beta.car_rho;
+                if (log_beta_bym2_prior.infer)
+                {
+                    log_beta_mu_stored.at(sample_idx) = model.spatial_beta.mu;
+                    log_beta_tau_stored.at(sample_idx) = model.spatial_beta.tau_b;
+                    log_beta_phi_stored.at(sample_idx) = model.spatial_beta.phi;
                 }
 
                 if (lag_par1_prior.infer)
@@ -1756,12 +1699,12 @@ public:
 
                 if (infer_log_alpha)
                 {
-                    car_alpha_stored.col(sample_idx) = model.log_alpha;
+                    log_alpha_stored.col(sample_idx) = model.log_alpha;
                 }
 
                 if (infer_log_beta)
                 {
-                    car_beta_stored.col(sample_idx) = model.log_beta;
+                    log_beta_stored.col(sample_idx) = model.log_beta;
                 }
             } // end of store samples
 
@@ -1779,18 +1722,90 @@ public:
             output["wt_accept_rate"] = wt_accept / (nburnin + nsample * nthin);
         }
 
-        if (car_prior.infer)
+        if (infer_log_alpha || log_alpha_bym2_prior.infer)
         {
-            output["car_alpha_mu"] = Rcpp::wrap(car_alpha_mu_stored);
-            output["car_alpha_tau2"] = Rcpp::wrap(car_alpha_tau2_stored);
-            output["car_alpha_rho"] = Rcpp::wrap(car_alpha_rho_stored);
-            output["rho_alpha_accept_rate"] = car_alpha_accept_count / (nburnin + nsample * nthin);
+            Rcpp::List log_alpha_output;
+            if (log_alpha_bym2_prior.infer)
+            {
+                log_alpha_output["mu"] = Rcpp::wrap(log_alpha_mu_stored);
+                log_alpha_output["tau"] = Rcpp::wrap(log_alpha_tau_stored);
+                log_alpha_output["phi"] = Rcpp::wrap(log_alpha_phi_stored);
+                log_alpha_output["phi_accept_rate"] = log_alpha_bym2_prior.accept_count / (nburnin + nsample * nthin);
+                log_alpha_output["final_phi_mh_sd"] = log_alpha_bym2_prior.mh_sd;
+            }
 
-            output["car_beta_mu"] = Rcpp::wrap(car_beta_mu_stored);
-            output["car_beta_tau2"] = Rcpp::wrap(car_beta_tau2_stored);
-            output["car_beta_rho"] = Rcpp::wrap(car_beta_rho_stored);
-            output["rho_beta_accept_rate"] = car_beta_accept_count / (nburnin + nsample * nthin);
-        } // end of car params output
+            if (infer_log_alpha)
+            {
+                log_alpha_output["log_alpha"] = Rcpp::wrap(log_alpha_stored);
+                log_alpha_output["logalpha_hmc_settings"] = Rcpp::List::create(
+                    Rcpp::Named("accept_rate") = logalpha_accept_count / (nburnin + nsample * nthin),
+                    Rcpp::Named("nleapfrog") = logalpha_nleapfrog,
+                    Rcpp::Named("leapfrog_step_size") = logalpha_leapfrog_step_size
+                );
+
+                if (logalpha_diagnostics && logalpha_dual_averaging)
+                {
+                    log_alpha_output["logalpha_diagnostics"] = Rcpp::List::create(
+                        Rcpp::Named("energy_diff") = logalpha_energy_diff,
+                        Rcpp::Named("grad_norm") = logalpha_grad_norm,
+                        Rcpp::Named("n_leapfrog") = logalpha_nleapfrog_stored,
+                        Rcpp::Named("step_size") = logalpha_leapfrog_step_size_stored
+                    );
+                }
+                else if (logalpha_diagnostics)
+                {
+                    log_alpha_output["logalpha_diagnostics"] = Rcpp::List::create(
+                        Rcpp::Named("energy_diff") = logalpha_energy_diff,
+                        Rcpp::Named("grad_norm") = logalpha_grad_norm
+                    );
+                }
+            }
+
+            output["log_alpha"] = log_alpha_output;
+        } // end of log_alpha output
+
+        if (infer_log_beta || log_beta_bym2_prior.infer)
+        {
+            Rcpp::List log_beta_output;
+            if (log_beta_bym2_prior.infer)
+            {
+                log_beta_output["mu"] = Rcpp::wrap(log_beta_mu_stored);
+                log_beta_output["tau"] = Rcpp::wrap(log_beta_tau_stored);
+                log_beta_output["phi"] = Rcpp::wrap(log_beta_phi_stored);
+                log_beta_output["phi_accept_rate"] = log_beta_bym2_prior.accept_count / (nburnin + nsample * nthin);
+                log_beta_output["final_phi_mh_sd"] = log_beta_bym2_prior.mh_sd;
+            }
+
+            if (infer_log_beta)
+            {
+                log_beta_output["log_beta"] = Rcpp::wrap(log_beta_stored);
+                log_beta_output["logbeta_hmc_settings"] = Rcpp::List::create(
+                    Rcpp::Named("accept_rate") = logbeta_accept_count / (nburnin + nsample * nthin),
+                    Rcpp::Named("nleapfrog") = logbeta_nleapfrog,
+                    Rcpp::Named("leapfrog_step_size") = logbeta_leapfrog_step_size
+                );
+
+                if (logbeta_diagnostics && logbeta_dual_averaging)
+                {
+                    log_beta_output["logbeta_diagnostics"] = Rcpp::List::create(
+                        Rcpp::Named("energy_diff") = logbeta_energy_diff,
+                        Rcpp::Named("grad_norm") = logbeta_grad_norm,
+                        Rcpp::Named("n_leapfrog") = logbeta_nleapfrog_stored,
+                        Rcpp::Named("step_size") = logbeta_leapfrog_step_size_stored
+                    );
+                }
+                else if (logbeta_diagnostics)
+                {
+                    log_beta_output["logbeta_diagnostics"] = Rcpp::List::create(
+                        Rcpp::Named("energy_diff") = logbeta_energy_diff,
+                        Rcpp::Named("grad_norm") = logbeta_grad_norm
+                    );
+                }
+            }
+
+            output["log_beta"] = log_beta_output;
+        } // end of log_beta output
+
 
         if (!global_params_selected.empty())
         {
@@ -1861,60 +1876,6 @@ public:
                 );
             }
         } // end of local params output
-
-        if (infer_log_alpha)
-        {
-            output["log_alpha"] = Rcpp::wrap(car_alpha_stored);
-            output["logalpha_accept_rate"] = logalpha_accept_count / (nburnin + nsample * nthin);
-            output["logalpha_hmc_settings"] = Rcpp::List::create(
-                Rcpp::Named("nleapfrog") = logalpha_nleapfrog,
-                Rcpp::Named("leapfrog_step_size") = logalpha_leapfrog_step_size
-            );
-
-            if (logalpha_diagnostics && logalpha_dual_averaging)
-            {
-                output["logalpha_diagnostics"] = Rcpp::List::create(
-                    Rcpp::Named("energy_diff") = logalpha_energy_diff,
-                    Rcpp::Named("grad_norm") = logalpha_grad_norm,
-                    Rcpp::Named("n_leapfrog") = logalpha_nleapfrog_stored,
-                    Rcpp::Named("step_size") = logalpha_leapfrog_step_size_stored
-                );
-            }
-            else if (logalpha_diagnostics)
-            {
-                output["logalpha_diagnostics"] = Rcpp::List::create(
-                    Rcpp::Named("energy_diff") = logalpha_energy_diff,
-                    Rcpp::Named("grad_norm") = logalpha_grad_norm
-                );
-            }
-        }
-
-        if (infer_log_beta)
-        {
-            output["log_beta"] = Rcpp::wrap(car_beta_stored);
-            output["logbeta_accept_rate"] = logbeta_accept_count / (nburnin + nsample * nthin);
-            output["logbeta_hmc_settings"] = Rcpp::List::create(
-                Rcpp::Named("nleapfrog") = logbeta_nleapfrog,
-                Rcpp::Named("leapfrog_step_size") = logbeta_leapfrog_step_size
-            );
-
-            if (logbeta_diagnostics && logbeta_dual_averaging)
-            {
-                output["logbeta_diagnostics"] = Rcpp::List::create(
-                    Rcpp::Named("energy_diff") = logbeta_energy_diff,
-                    Rcpp::Named("grad_norm") = logbeta_grad_norm,
-                    Rcpp::Named("n_leapfrog") = logbeta_nleapfrog_stored,
-                    Rcpp::Named("step_size") = logbeta_leapfrog_step_size_stored
-                );
-            }
-            else if (logbeta_diagnostics)
-            {
-                output["logbeta_diagnostics"] = Rcpp::List::create(
-                    Rcpp::Named("energy_diff") = logbeta_energy_diff,
-                    Rcpp::Named("grad_norm") = logbeta_grad_norm
-                );
-            }
-        }
 
         return output;
     } // end of get_output()

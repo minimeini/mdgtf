@@ -82,9 +82,8 @@ public:
     arma::uvec pos_eig_idx; // indices of positive eigenvalues of Q
 
     arma::mat Q_scaled_ginv; // scaled generalized inverse of Q
-    arma::mat prec; // precision matrix for BYM2
-
     double scale_factor = 0.0; // scaling factor for BYM2
+
     double tau_b = 1.0; // overall precision parameter for BYM2
     double phi = 0.5; // mixing parameter for BYM2, between 0 and 1
     double mu = 0.0; // overall mean
@@ -120,6 +119,49 @@ public:
         compute_Q_scaled_ginv();
         return;
     } // end of constructor
+
+
+    SpatialStructure(const Rcpp::List &opts)
+    {
+        if (opts.containsElementNamed("neighborhood_matrix"))
+        {
+            arma::mat V_r = Rcpp::as<arma::mat>(opts["neighborhood_matrix"]);
+            V = arma::symmatu(V_r); // ensure symmetry
+            nS = V.n_rows;
+            V.diag().zeros(); // zero diagonal
+            neighbors = arma::sum(V, 1); // row sums
+
+            // W: row-standardized weight matrix
+            W = V;
+            W.each_col() /= neighbors; // row-standardized weight matrix
+
+            compute_precision();
+            compute_scale_factor();
+            compute_Q_scaled_ginv();
+        }
+        else
+        {
+            throw std::invalid_argument("SpatialStructure - neighborhood matrix 'neighborhood_matrix' is missing.");
+        }
+
+        if (opts.containsElementNamed("car_param"))
+        {
+            Rcpp::NumericVector car_param = opts["car_param"];
+            if (car_param.size() != 3)
+            {
+                throw std::invalid_argument("SpatialStructure - CAR parameters 'car_param' should be a vector of length 3.");
+            }
+            mu = car_param[0];
+            tau_b = car_param[1];
+            phi = car_param[2];
+        }
+        else
+        {
+            mu = 0.0;
+            tau_b = 1.0;
+            phi = 0.5;
+        }
+    }
 
 
     void compute_precision(const double &tol = 1.0e-10)

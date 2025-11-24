@@ -1,6 +1,6 @@
 #pragma once
-#ifndef SPATIALSTRUCTURE_H
-#define SPATIALSTRUCTURE_H
+#ifndef CAR_H
+#define CAR_H
 
 #include <RcppArmadillo.h>
 #include "../utils/utils.h"

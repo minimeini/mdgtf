@@ -374,7 +374,7 @@ public:
 
         Rcpp::List bym2_opts = Rcpp::List::create(
             Rcpp::Named("infer") = false,
-            Rcpp::Named("mh_sd") = "0.1",
+            Rcpp::Named("mh_sd") = 0.1,
             Rcpp::Named("tau_b") = Rcpp::NumericVector::create(1.0, 1.0), // shape and rate for tau_b
             Rcpp::Named("logit_phi") = Rcpp::NumericVector::create(0.0, 1.0) // mean and sd for logit(phi)
         );
