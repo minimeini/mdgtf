@@ -801,9 +801,16 @@ public:
         arma::vec log_alpha_current = model.log_alpha;
         arma::vec q = log_alpha_current;
 
+        // Compute the mass matrix (diagonal)
+        arma::mat Rphi = model.spatial_alpha.compute_Rphi(model.spatial_alpha.phi);
+        const double mass_floor = 1e-6;
+        arma::vec inv_mass = arma::clamp(model.spatial_alpha.tau_b * Rphi.diag(), mass_floor, arma::datum::inf);
+        arma::vec mass_diag = 1.0 / inv_mass;
+        arma::vec sqrt_mass = arma::sqrt(mass_diag);
+
         // sample an initial momentum
-        arma::vec p = arma::randn(q.n_elem);
-        double kinetic_current = 0.5 * arma::dot(p, p);
+        arma::vec p = arma::randn(q.n_elem) % sqrt_mass;
+        double kinetic_current = 0.5 * arma::dot(p % inv_mass, p);
 
         arma::vec grad = model.dloglik_dlogalpha(Y, dll_deta);
         grad *= -1.0; // Convert to gradient of potential energy
@@ -814,7 +821,7 @@ public:
         for (unsigned int i = 0; i < n_leapfrog; i++)
         {
             // Make a full step for the position
-            q += leapfrog_step_size * p;
+            q += leapfrog_step_size * (inv_mass % p);
             model.log_alpha = q;
 
             // Compute the new gradient
@@ -834,7 +841,7 @@ public:
 
         double logp_proposed = compute_log_joint_logalpha(model, Y, wt);
         double energy_proposed = -logp_proposed;
-        double kinetic_proposed = 0.5 * arma::dot(p, p);
+        double kinetic_proposed = 0.5 * arma::dot(p % inv_mass, p);
 
         double H_proposed = energy_proposed + kinetic_proposed;
         double H_current = energy_current + kinetic_current;
@@ -883,9 +890,16 @@ public:
         arma::vec log_beta_current = model.log_beta;
         arma::vec q = log_beta_current;
 
+        // Compute the mass matrix (diagonal)
+        arma::mat Rphi = model.spatial_beta.compute_Rphi(model.spatial_beta.phi);
+        const double mass_floor = 1e-6;
+        arma::vec inv_mass = arma::clamp(model.spatial_beta.tau_b * Rphi.diag(), mass_floor, arma::datum::inf);
+        arma::vec mass_diag = 1.0 / inv_mass;
+        arma::vec sqrt_mass = arma::sqrt(mass_diag);
+
         // sample an initial momentum
-        arma::vec p = arma::randn(q.n_elem);
-        double kinetic_current = 0.5 * arma::dot(p, p);
+        arma::vec p = arma::randn(q.n_elem) % sqrt_mass;
+        double kinetic_current = 0.5 * arma::dot(p % inv_mass, p);
 
         arma::vec grad = model.dloglik_dlogbeta(Y, dll_deta);
         grad *= -1.0; // Convert to gradient of potential energy
@@ -896,7 +910,7 @@ public:
         for (unsigned int i = 0; i < n_leapfrog; i++)
         {
             // Make a full step for the position
-            q += leapfrog_step_size * p;
+            q += leapfrog_step_size * (inv_mass % p);
             model.log_beta = q;
 
             // Compute the new gradient
@@ -916,7 +930,7 @@ public:
 
         double logp_proposed = compute_log_joint_logbeta(model, Y, wt);
         double energy_proposed = -logp_proposed;
-        double kinetic_proposed = 0.5 * arma::dot(p, p);
+        double kinetic_proposed = 0.5 * arma::dot(p % inv_mass, p);
 
         double H_proposed = energy_proposed + kinetic_proposed;
         double H_current = energy_current + kinetic_current;

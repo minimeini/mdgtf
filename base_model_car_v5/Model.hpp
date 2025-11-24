@@ -16,7 +16,7 @@
 #include "../core/LinkFunc.hpp"
 #include "../core/Regression.hpp"
 #include "../utils/utils.h"
-#include "SpatialStructure.hpp"
+#include "../spatial/bym2.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppArmadillo, RcppProgress)]]
@@ -26,7 +26,7 @@ struct Param
 {
     double intercept = 0.0;
     double sigma2 = 0.01;
-    SpatialStructure spatial;
+    BYM2 spatial;
 
     bool has_intercept = true;
     bool has_temporal = false;
@@ -40,7 +40,7 @@ struct Param
         has_temporal = false;
         has_spatial = false;
 
-        spatial = SpatialStructure();
+        spatial = BYM2();
         return;
     }
 
@@ -75,11 +75,50 @@ struct Param
             car_param = Rcpp::as<arma::vec>(settings["car_param"]);
             if (car_param.n_elem != 3)
             {
-                throw std::invalid_argument("Param::Param - 'car_param' should have three elements: (car_mu, car_tau2, car_rho).");
+                throw std::invalid_argument("Param::Param - 'car_param' should have three elements: (mu, tau_b, phi).");
             }
         }
 
-        spatial = SpatialStructure(V, car_param.at(0), car_param.at(1), car_param.at(2));
+        spatial = BYM2(V);
+        spatial.mu = car_param[0];
+        spatial.tau_b = car_param[1];
+        spatial.phi = car_param[2];
+    }
+
+    Param(const Rcpp::List &settings)
+    {
+        if (settings.containsElementNamed("intercept"))
+        {
+            has_intercept = true;
+            intercept = Rcpp::as<double>(settings["intercept"]);
+        }
+        else
+        {
+            has_intercept = false;
+            intercept = 0.0;
+        }
+
+        if (settings.containsElementNamed("sigma2"))
+        {
+            has_temporal = true;
+            sigma2 = Rcpp::as<double>(settings["sigma2"]);
+        }
+        else
+        {
+            has_temporal = false;
+            sigma2 = 0.01;
+        }
+
+        if (
+            settings.containsElementNamed("car_param") || 
+            settings.containsElementNamed("neighborhood_matrix")
+        )
+        {
+            has_spatial = true;
+            spatial = BYM2(settings);
+        }
+
+        
     }
 };
 
@@ -92,13 +131,13 @@ public:
 
     unsigned int nS; // number of locations for spatio-temporal model
     arma::vec rho; // nS x 1
-    SpatialStructure spatial;
+    BYM2 spatial;
     Param intercept_a, coef_self_b, coef_cross_c;
 
     Model()
     {
         nS = 1;
-        spatial = SpatialStructure(nS);
+        spatial = BYM2(nS);
 
         rho.set_size(nS);
         rho.fill(30.0); // default dispersion for NegBin
@@ -117,26 +156,13 @@ public:
         if (settings.containsElementNamed("spatial"))
         {
             Rcpp::List spatial_settings = settings["spatial"];
-            if (spatial_settings.containsElementNamed("nlocation"))
-            {
-                nS = Rcpp::as<unsigned int>(spatial_settings["nlocation"]);
-            }
-            else
-            {
-                throw std::invalid_argument("Model::Model - number of locations 'nlocation' is missing.");
-            } // end of initialize number of locations nS
-
             if (spatial_settings.containsElementNamed("neighborhood_matrix"))
             {
                 arma::mat V_r = Rcpp::as<arma::mat>(spatial_settings["neighborhood_matrix"]);
                 arma::mat V = arma::symmatu(V_r); // ensure symmetry
                 V.diag().zeros();                 // zero diagonal
-
-                if (V.n_rows != nS || V.n_cols != nS)
-                {
-                    throw std::invalid_argument("Model::Model - dimension of neighborhood matrix is not consistent with 'nlocation'.");
-                }
-                spatial = SpatialStructure(V);
+                nS = V.n_rows;
+                spatial = BYM2(V);
             }
             else
             {
@@ -146,7 +172,7 @@ public:
         else
         {
             nS = 1;
-            spatial = SpatialStructure(nS);
+            spatial = BYM2(nS);
         } // end of initialize spatial settings
 
         if (settings.containsElementNamed("rho"))
@@ -213,7 +239,7 @@ public:
 
         if (coef_self_b.has_spatial)
         {
-            psi1_spatial = coef_self_b.spatial.prior_sample_spatial_effects_vec();
+            psi1_spatial = coef_self_b.spatial.sample_spatial_effects_vec();
         }
 
         if (coef_self_b.has_temporal)
@@ -226,7 +252,7 @@ public:
 
         if (coef_cross_c.has_spatial)
         {
-            psi3_spatial = coef_cross_c.spatial.prior_sample_spatial_effects_vec();
+            psi3_spatial = coef_cross_c.spatial.sample_spatial_effects_vec();
         }
 
         if (coef_cross_c.has_temporal)
@@ -237,10 +263,18 @@ public:
             psi4_temporal = arma::cumsum(psi4_temporal);
         }
 
-        wt.set_size(nS, ntime + 1);
-        wt.randn();
-        wt *= std::sqrt(intercept_a.sigma2);
-        a_temporal = arma::cumsum(wt, 1);
+        if (intercept_a.has_temporal)
+        {
+            wt.set_size(nS, ntime + 1);
+            wt.randn();
+            wt *= std::sqrt(intercept_a.sigma2);
+            a_temporal = arma::cumsum(wt, 1);
+        }
+        else
+        {
+            a_temporal.set_size(nS, ntime + 1);
+            a_temporal.zeros();
+        }
 
         const double baseline = intercept_a.has_intercept ? intercept_a.intercept : 0.0;
 
@@ -352,8 +386,8 @@ public:
         arma::mat coef_self_temporal_stored(ntime + 1, nsample, arma::fill::zeros);
         arma::mat coef_self_spatial_stored(nS, nsample, arma::fill::zeros);
         arma::vec coef_self_car_mu_stored(nsample, arma::fill::zeros);
-        arma::vec coef_self_car_tau2_stored(nsample, arma::fill::zeros);
-        arma::vec coef_self_car_rho_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_car_tau_stored(nsample, arma::fill::zeros);
+        arma::vec coef_self_car_phi_stored(nsample, arma::fill::zeros);
         if (output.containsElementNamed("coef_self"))
         {
             Rcpp::List coef_self_opts = output["coef_self"];
@@ -394,8 +428,8 @@ public:
             {
                 coef_self_spatial_stored = Rcpp::as<arma::mat>(coef_self_opts["spatial"]);
                 coef_self_car_mu_stored = Rcpp::as<arma::vec>(coef_self_opts["car_mu"]);
-                coef_self_car_tau2_stored = Rcpp::as<arma::vec>(coef_self_opts["car_tau2"]);
-                coef_self_car_rho_stored = Rcpp::as<arma::vec>(coef_self_opts["car_rho"]);
+                coef_self_car_tau_stored = Rcpp::as<arma::vec>(coef_self_opts["car_tau2"]);
+                coef_self_car_phi_stored = Rcpp::as<arma::vec>(coef_self_opts["car_rho"]);
             }
             else if (coef_self_mcmc_opts.containsElementNamed("spatial"))
             {
@@ -406,9 +440,9 @@ public:
                     coef_self_spatial_stored.each_col() = coef_self_spatial_init;
                 }
 
-                coef_self_car_mu_stored.fill(coef_self_b.spatial.car_mu);
-                coef_self_car_tau2_stored.fill(coef_self_b.spatial.car_tau2);
-                coef_self_car_rho_stored.fill(coef_self_b.spatial.car_rho);
+                coef_self_car_mu_stored.fill(coef_self_b.spatial.mu);
+                coef_self_car_tau_stored.fill(coef_self_b.spatial.tau_b);
+                coef_self_car_phi_stored.fill(coef_self_b.spatial.phi);
             }
         }
 
@@ -418,8 +452,8 @@ public:
         arma::mat coef_cross_temporal_stored(ntime + 1, nsample, arma::fill::zeros);
         arma::mat coef_cross_spatial_stored(nS, nsample, arma::fill::zeros);
         arma::vec coef_cross_car_mu_stored(nsample, arma::fill::zeros);
-        arma::vec coef_cross_car_tau2_stored(nsample, arma::fill::zeros);
-        arma::vec coef_cross_car_rho_stored(nsample, arma::fill::zeros);
+        arma::vec coef_cross_car_tau_stored(nsample, arma::fill::zeros);
+        arma::vec coef_cross_car_phi_stored(nsample, arma::fill::zeros);
         if (output.containsElementNamed("coef_cross"))
         {
             Rcpp::List coef_cross_opts = output["coef_cross"];
@@ -460,8 +494,8 @@ public:
             {
                 coef_cross_spatial_stored = Rcpp::as<arma::mat>(coef_cross_opts["spatial"]);
                 coef_cross_car_mu_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_mu"]);
-                coef_cross_car_tau2_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_tau2"]);
-                coef_cross_car_rho_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_rho"]);
+                coef_cross_car_tau_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_tau2"]);
+                coef_cross_car_phi_stored = Rcpp::as<arma::vec>(coef_cross_opts["car_rho"]);
             }
             else if (coef_cross_mcmc_opts.containsElementNamed("spatial"))
             {
@@ -472,9 +506,9 @@ public:
                     coef_cross_spatial_stored.each_col() = coef_cross_spatial_init;
                 }
 
-                coef_cross_car_mu_stored.fill(coef_cross_c.spatial.car_mu);
-                coef_cross_car_tau2_stored.fill(coef_cross_c.spatial.car_tau2);
-                coef_cross_car_rho_stored.fill(coef_cross_c.spatial.car_rho);
+                coef_cross_car_mu_stored.fill(coef_cross_c.spatial.mu);
+                coef_cross_car_tau_stored.fill(coef_cross_c.spatial.tau_b);
+                coef_cross_car_phi_stored.fill(coef_cross_c.spatial.phi);
             }
         }
 
@@ -500,23 +534,19 @@ public:
             model_i.coef_self_b.sigma2 = coef_self_sigma2_stored.at(i);
             arma::vec psi2_temporal = coef_self_temporal_stored.col(i);
             arma::vec psi1_spatial = coef_self_spatial_stored.col(i);
-            model_i.coef_self_b.spatial = SpatialStructure(
-                model_i.coef_self_b.spatial.V, 
-                coef_self_car_mu_stored.at(i), 
-                coef_self_car_tau2_stored.at(i), 
-                coef_self_car_rho_stored.at(i)
-            );
+            model_i.coef_self_b.spatial = BYM2(model_i.coef_self_b.spatial.V);
+            model_i.coef_self_b.spatial.mu = coef_self_car_mu_stored.at(i);
+            model_i.coef_self_b.spatial.tau_b = coef_self_car_tau_stored.at(i);
+            model_i.coef_self_b.spatial.phi = coef_self_car_phi_stored.at(i);
 
             model_i.coef_cross_c.intercept = coef_cross_intercept_stored.at(i);
             model_i.coef_cross_c.sigma2 = coef_cross_sigma2_stored.at(i);
             arma::vec psi4_temporal = coef_cross_temporal_stored.col(i);
             arma::vec psi3_spatial = coef_cross_spatial_stored.col(i);
-            model_i.coef_cross_c.spatial = SpatialStructure(
-                model_i.coef_cross_c.spatial.V, 
-                coef_cross_car_mu_stored.at(i), 
-                coef_cross_car_tau2_stored.at(i), 
-                coef_cross_car_rho_stored.at(i)
-            );
+            model_i.coef_cross_c.spatial = BYM2(model_i.coef_cross_c.spatial.V);
+            model_i.coef_cross_c.spatial.mu = coef_cross_car_mu_stored.at(i);
+            model_i.coef_cross_c.spatial.tau_b = coef_cross_car_tau_stored.at(i);
+            model_i.coef_cross_c.spatial.phi = coef_cross_car_phi_stored.at(i);
 
             model_i.rho = rho_stored.col(i);
 
@@ -785,7 +815,7 @@ public:
             }
         }
 
-        grad -= coef_self_b.spatial.car_tau2 * coef_self_b.spatial.Q * (psi1_spatial - coef_self_b.spatial.car_mu);
+        grad += coef_self_b.spatial.dloglik_dspatial(psi1_spatial);
         return grad;
     } // end of dloglik_dspatial_coef_self()
 
@@ -849,8 +879,7 @@ public:
             }
         }
 
-        grad -= coef_cross_c.spatial.car_tau2 * coef_cross_c.spatial.Q * (psi3_spatial - coef_cross_c.spatial.car_mu);
-
+        grad += coef_cross_c.spatial.dloglik_dspatial(psi3_spatial);
         return grad;
     } // end of dloglik_dspatial_coef_cross()
 
