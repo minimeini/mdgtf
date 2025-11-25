@@ -304,18 +304,18 @@ public:
         if (output.containsElementNamed("log_beta"))
         {
             Rcpp::List log_beta_output = Rcpp::as<Rcpp::List>(output["log_beta"]);
-            if (log_beta_output.containsElementNamed("spatial_effect"))
+            if (log_beta_output.containsElementNamed("log_beta"))
             {
-                log_beta_stored = Rcpp::as<arma::mat>(log_beta_output["spatial_effect"]);
+                log_beta_stored = Rcpp::as<arma::mat>(log_beta_output["log_beta"]);
             }
             else if (
                 log_beta_output.containsElementNamed("mu") && 
-                log_beta_output.containsElementNamed("tau_b") && 
+                log_beta_output.containsElementNamed("tau") && 
                 log_beta_output.containsElementNamed("phi")
             )
             {
                 arma::vec mu = Rcpp::as<arma::vec>(log_beta_output["mu"]);
-                arma::vec tau_b = Rcpp::as<arma::vec>(log_beta_output["tau_b"]);
+                arma::vec tau_b = Rcpp::as<arma::vec>(log_beta_output["tau"]);
                 arma::vec phi = Rcpp::as<arma::vec>(log_beta_output["phi"]);
 
                 log_beta_stored.set_size(nS, nsample);
