@@ -77,14 +77,6 @@ Rcpp::List dgtf_default_algo_settings(const std::string &method)
 
 //' @export
 // [[Rcpp::export]]
-Rcpp::List dgtf_default_model()
-{
-    return Model::default_settings();
-}
-
-
-//' @export
-// [[Rcpp::export]]
 Rcpp::List dgtf_simulate(
     const Rcpp::List &settings,
     const unsigned int &ntime,

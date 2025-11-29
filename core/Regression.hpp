@@ -4,7 +4,8 @@
 
 #include <RcppArmadillo.h>
 #include "../utils/utils.h"
-
+#include "../inference/hmc.hpp"
+#include "../core/ObsDist.hpp"
 
 /**
  * @brief Seasonality component to the conditional intensity.
@@ -139,10 +140,10 @@ class ZeroInflation
 {
 public:
     bool inflated = false;
-    arma::vec beta;   // p x 1
-    double intercept; // intercept of the logistic regression
-    double coef; // AR coef of the logistic regression
+    double intercept = 0.0; // intercept of the logistic regression
+    double coef = 0.0; // AR coef of the logistic regression
 
+    arma::vec beta;   // p x 1
     arma::mat X; // p x (ntime + 1), covariates of the logistic regression
 
     arma::vec prob; // (ntime + 1) x 1, z ~ Bernouli(prob)
@@ -202,7 +203,8 @@ public:
         }
 
         return;
-    }
+    } // init()
+
 
     void setX(const arma::mat &Xmat) // p x (ntime + 1)
     {
@@ -219,7 +221,8 @@ public:
         }
 
         return;
-    }
+    } // setX()
+
 
     void setZ(const arma::vec &zvec, const unsigned int &ntime)
     {
@@ -237,9 +240,19 @@ public:
         }
 
         return;
+    } // setZ()
+
+
+    void init_Z(const arma::vec &y)
+    {
+        z = arma::conv_to<arma::vec>::from(y > EPS); // (nT + 1) x 1
+        prob = z;
+        z.at(0) = 0.;
+        return;
     }
 
-    void simulateZ(const unsigned int &ntime)
+
+    void simulate(const unsigned int &ntime)
     {
         z.set_size(ntime + 1);
         z.ones();
@@ -270,37 +283,367 @@ public:
         }
 
         return;
-    }
+    } // simulateZ()
 
-    Rcpp::List info()
+
+    /**
+     * @brief Estimate the latent indicator z_t for zero-inflation via forward-filtering backward-sampling.
+     * 
+     * @param y 
+     * @param lambda 
+     * @param obs_dist \
+     * @param obs_par2 
+     */
+    void update_zt(
+        const arma::vec &y,  // (nT + 1) x 1
+        const arma::vec &lambda, // (nT + 1) x 1
+        const std::string &obs_dist,
+        const double &obs_par2
+    ) // (nT + 1) x 1
     {
-        Rcpp::List settings;
-        settings["inflated"] = inflated;
-        settings["intercept"] = intercept;
-        settings["coef"] = coef;
-        if (beta.is_empty())
+        arma::vec p01(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | z[t-1] = 0, gamma)
+        p01.at(0) = logistic(intercept);
+        arma::vec p11(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | z[t-1] = 1, gamma)
+        p11.at(0) = logistic(intercept + coef);
+
+        arma::vec prob_filter(y.n_elem, arma::fill::zeros); // p(z[t] = 1 | y[1:t], gamma)
+        prob_filter.at(0) = p01.at(0);
+        for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            settings["beta"] = NA_REAL;
+            double p0 = intercept;
+            double p1 = intercept + coef;
+            if (!X.is_empty())
+            {
+                double val = arma::dot(X.col(t), beta);
+                p0 += val;
+                p1 += val;
+            }
+            p01.at(t) = logistic(p0); // p(z[t] = 1 | z[t-1] = 0, gamma)
+            p11.at(t) = logistic(p1); // p(z[t] = 1 | z[t-1] = 1, gamma)
+
+            if (y.at(t) > EPS)
+            {
+                // If y[t] > 0
+                // We must have p(z[t] = 1 | y[t] > 0) = 1
+                prob_filter.at(t) = 1.;
+            }
+            else
+            {
+                double prob_yzero = ObsDist::loglike(
+                    0., obs_dist, lambda.at(t), obs_par2, false);
+
+                double pp1 = prob_filter.at(t - 1) * p11.at(t); // p(z[t-1] = 1) * p(z[t] = 1 | z[t-1] = 1)
+                double pp0 = prob_filter.at(t - 1) * std::abs(1. - p11.at(t)); // p(z[t-1] = 1) * p(z[t] = 0 | z[t-1] = 1)
+
+                pp1 += std::abs(1. - prob_filter.at(t - 1)) * p01.at(t); // p(z[t-1] = 0) * p(z[t] = 1 | z[t-1] = 0)
+                pp0 += std::abs(1. - prob_filter.at(t - 1)) * std::abs(1. - p01.at(t)); // p(z[t-1] = 0) * p(z[t] = 0 | z[t-1] = 0)
+
+                pp1 *= prob_yzero; // p(y[t] = 0 | z[t] = 1)
+                prob_filter.at(t) = pp1 / (pp1 + pp0 + EPS);
+            }
+        } // Forward filtering loop
+
+        z.at(y.n_elem - 1) = (R::runif(0., 1.) < prob_filter.at(y.n_elem - 1)) ? 1. : 0.;
+        for (unsigned int t = y.n_elem - 2; t > 0; t--)
+        {
+            if (y.at(t) > EPS)
+            {
+                z.at(t) = 1.;
+            }
+            else
+            {
+                double p1 = z.at(t + 1) > EPS ? p11.at(t + 1) : (1. - p11.at(t + 1)); // p(z[t+1] | z[t] = 1)
+                double prob_backward1 = prob_filter.at(t) * std::abs(p1);                        // p(z[t] = 1 | y[t] = 0) * p(z[t+1] | z[t] = 1)
+                double p0 = z.at(t + 1) > EPS ? p01.at(t + 1) : (1. - p01.at(t + 1)); // p(z[t+1] | z[t] = 0)
+                double prob_backward0 = std::abs(1. - prob_filter.at(t)) * std::abs(p0);         // p(z[t] = 0 | y[t] = 0) * p(z[t+1] | z[t] = 0)
+
+                prob_backward1 = prob_backward1 / (prob_backward1 + prob_backward0 + EPS);
+                z.at(t) = (R::runif(0., 1.) < prob_backward1) ? 1. : 0.;
+            }
+        }
+    } // update_zt
+
+
+    /**
+     * @brief Log-likelihood of z[t] given the parameters.
+     * 
+     * @return double 
+     */
+    double log_likelihood()
+    {
+        double loglik = 0.;
+        for (unsigned int t = 1; t < z.n_elem; t++)
+        {
+            double logit_p = intercept + (z.at(t - 1) > EPS ? coef : 0.);
+            if (!X.is_empty())
+            {
+                logit_p += arma::dot(X.col(t), beta);
+            }
+            double prob_t = logistic(logit_p);
+
+            if (z.at(t) > EPS)
+            {
+                loglik += std::log(prob_t + EPS);
+            }
+            else
+            {
+                loglik += std::log(1. - prob_t + EPS);
+            }
+        }
+
+        return loglik;
+    } // log_likelihood()
+
+
+    /**
+     * @brief Gradient of the log-likelihood with respect to the parameters.
+     * 
+     * @return arma::vec 
+     */
+    arma::vec dloglik_dparams()
+    {
+        arma::vec grad(2, arma::fill::zeros); // grad[0] = dloglik/dintercept, grad[1] = dloglik/dcoef
+
+        for (unsigned int t = 1; t < z.n_elem; t++)
+        {
+            double logit_p = intercept + (z.at(t - 1) > EPS ? coef : 0.);
+            if (!X.is_empty())
+            {
+                logit_p += arma::dot(X.col(t), beta);
+            }
+            double prob_t = logistic(logit_p);
+
+            double dloglik_dprob = z.at(t) / prob_t - (1. - z.at(t)) / (1. - prob_t);
+            double dprob_dlogit = prob_t * (1. - prob_t);
+            double common_grad = dloglik_dprob * dprob_dlogit;
+            grad.at(0) += common_grad; // dloglik/dintercept
+            if (z.at(t - 1) > EPS)
+            {
+                grad.at(1) += common_grad; // dloglik/dcoef
+            }
+        }
+
+        return grad; //, grad_coef;
+    } // dloglik_dparams()
+
+
+    double update_params(
+        double &energy_diff,
+        double &grad_norm_out,
+        const double &prior_mean,
+        const double &prior_sd,
+        const double &leapfrog_step_size,
+        const unsigned int &n_leapfrog
+    )
+    {
+        // Current parameters
+        arma::vec params(2);
+        params.at(0) = intercept;
+        params.at(1) = coef;
+
+        arma::vec params_old = params;
+
+        // Compute initial energy
+        double current_loglik = log_likelihood();
+        double current_logprior = -0.5 * (
+            std::pow((intercept - prior_mean) / prior_sd, 2.) +
+            std::pow((coef - prior_mean) / prior_sd, 2.)
+        );        
+        double current_energy = - (current_loglik + current_logprior);
+
+        arma::vec momentum = arma::randn(2);
+        double current_kinetic = 0.5 * arma::dot(momentum, momentum);
+
+        // Make a half step for momentum
+        arma::vec grad = dloglik_dparams();
+        grad.at(0) += -(intercept - prior_mean) / (prior_sd * prior_sd);
+        grad.at(1) += -(coef - prior_mean) / (prior_sd * prior_sd);
+        grad_norm_out = arma::norm(grad, 2);
+
+        momentum += 0.5 * leapfrog_step_size * grad;        
+
+        // Alternate full steps for position and momentum
+        for (unsigned int l = 0; l < n_leapfrog; l++)
+        {
+            // Full step for position
+            params += leapfrog_step_size * momentum;
+            intercept = params.at(0);
+            coef = params.at(1);
+
+            grad = dloglik_dparams();
+            grad.at(0) += -(params.at(0) - prior_mean) / (prior_sd * prior_sd);
+            grad.at(1) += -(params.at(1) - prior_mean) / (prior_sd * prior_sd);
+
+            // Full step for momentum, except at end of trajectory
+            if (l != n_leapfrog - 1)
+            {
+                momentum += leapfrog_step_size * grad;
+            }
+        }
+
+        // Make a half step for momentum
+        momentum += 0.5 * leapfrog_step_size * grad;
+
+        // Negate momentum to make proposal symmetric
+        momentum = -momentum;
+
+        // Compute proposed energy
+        intercept = params.at(0);
+        coef = params.at(1);
+        double proposed_loglik = log_likelihood();
+        double proposed_logprior = -0.5 * (
+            std::pow((intercept - prior_mean) / prior_sd, 2.) +
+            std::pow((coef - prior_mean) / prior_sd, 2.)
+        );        
+        double proposed_energy = - (proposed_loglik + proposed_logprior);
+        double proposed_kinetic = 0.5 * arma::dot(momentum, momentum);
+
+        double H_proposed = proposed_energy + proposed_kinetic;
+        double H_current = current_energy + current_kinetic;
+        energy_diff = H_proposed - H_current;
+
+        if (!std::isfinite(H_current) || !std::isfinite(H_proposed) || std::abs(energy_diff) > 100.0)
+        {
+            // Reject and revert to previous parameters
+            intercept = params_old.at(0);
+            coef = params_old.at(1);
+            return 0.0;
         }
         else
         {
-            settings["beta"] = Rcpp::wrap(beta.t());
+            if (std::log(runif()) >= -energy_diff)
+            {
+                // Reject and revert to previous parameters
+                intercept = params_old.at(0);
+                coef = params_old.at(1);
+            }
+
+            // Return acceptance probability
+            return std::min(1.0, std::exp(-energy_diff));
         }
-        
-        return settings;
-    }
+    } // update_params()
 
-    static Rcpp::List default_settings()
+
+    Rcpp::List run_mcmc(
+        const arma::vec &y,
+        const arma::vec &lambda,
+        const double &obs_par2,
+        const std::string &obs_dist = "nbinom",
+        const unsigned int &n_iter = 5000,
+        const unsigned int &n_burn = 1000,
+        const unsigned int &n_thin = 1,
+        const double &prior_mean = 0.0,
+        const double &prior_sd = 10.0,
+        const double &accept_prob = 0.65,
+        const Rcpp::List &hmc_settings = Rcpp::List::create(
+            Rcpp::Named("leapfrog_step_size") = 0.1,
+            Rcpp::Named("nleapfrog") = 20,
+            Rcpp::Named("T_target") = 2.0,
+            Rcpp::Named("dual_averaging") = true,
+            Rcpp::Named("diagnostics") = true,
+            Rcpp::Named("verbose") = false
+        )
+    )
     {
-        Rcpp::List settings;
-        settings["inflated"] = true;
-        settings["intercept"] = 0.;
-        settings["coef"] = 0.;
-        settings["beta"] = NA_REAL;
-        return settings;
+        inflated = true;
+        intercept = rnorm(0.0, 10.0);
+        coef = rnorm(0.0, 10.0);
+
+        init_Z(y);
+        const unsigned int n_samples = (n_iter - n_burn) / n_thin;
+        HMCOpts_1d hmc_opts(hmc_settings);
+        DualAveraging_1d da_adapter(hmc_opts, accept_prob);
+        HMCDiagnostics_1d hmc_diag(n_iter, n_burn, hmc_opts.dual_averaging);
+
+        arma::vec intercept_samples(n_samples, arma::fill::zeros);
+        arma::vec coef_samples(n_samples, arma::fill::zeros);
+        arma::mat zt_samples(y.n_elem, n_samples, arma::fill::zeros);
+
+        unsigned int sample_idx = 0;
+        for (unsigned int iter = 0; iter < n_iter; iter++)
+        {
+            // Update z_t
+            update_zt(y, lambda, obs_dist, obs_par2);
+
+            // Update parameters via HMC
+            {
+                double energy_diff = 0.;
+                double grad_norm = 0.;
+                double accept_prob = update_params(
+                    energy_diff,
+                    grad_norm,
+                    prior_mean,
+                    prior_sd,
+                    hmc_opts.leapfrog_step_size,
+                    hmc_opts.nleapfrog);
+
+                hmc_diag.accept_count += accept_prob;
+                if (hmc_opts.diagnostics)
+                {
+                    hmc_diag.energy_diff.at(iter) = energy_diff;
+                    hmc_diag.grad_norm.at(iter) = grad_norm;
+                }
+
+                // Adapt step size
+                if (hmc_opts.dual_averaging)
+                {
+                    if (iter < n_burn)
+                    {
+                        hmc_opts.leapfrog_step_size = da_adapter.update_step_size(accept_prob);
+                    }
+                    else if (iter == n_burn)
+                    {
+                        da_adapter.finalize_leapfrog_step(
+                            hmc_opts.leapfrog_step_size,
+                            hmc_opts.nleapfrog,
+                            hmc_opts.T_target);
+                    }
+
+                    if (hmc_opts.diagnostics)
+                    {
+                        hmc_diag.leapfrog_step_size_stored.at(iter) = hmc_opts.leapfrog_step_size;
+                        hmc_diag.nleapfrog_stored.at(iter) = hmc_opts.nleapfrog;
+                    }
+                } // if dual_averaging
+            } // end of HMC update
+
+            // Store samples
+            if (iter >= n_burn && ((iter - n_burn) % n_thin == 0))
+            {
+                intercept_samples.at(sample_idx) = intercept;
+                coef_samples.at(sample_idx) = coef;
+                zt_samples.col(sample_idx) = z;
+                sample_idx++;
+            }
+        } // end of MCMC iterations
+
+        Rcpp::List results = Rcpp::List::create(
+            Rcpp::Named("intercept") = intercept_samples,
+            Rcpp::Named("coef") = coef_samples,
+            Rcpp::Named("zt") = zt_samples,
+            Rcpp::Named("accept_rate") = (double)hmc_diag.accept_count / (double)n_iter,
+            Rcpp::Named("leapfrog_step_size") = hmc_opts.leapfrog_step_size,
+            Rcpp::Named("nleapfrog") = hmc_opts.nleapfrog
+        );
+
+        if (hmc_opts.diagnostics)
+        {
+            Rcpp::List diagnostics_results;
+            diagnostics_results["energy_diff"] = hmc_diag.energy_diff;
+            diagnostics_results["grad_norm"] = hmc_diag.grad_norm;
+
+            if (hmc_opts.dual_averaging)
+            {
+                diagnostics_results["leapfrog_step_size"] = hmc_diag.leapfrog_step_size_stored;
+                diagnostics_results["nleapfrog"] = hmc_diag.nleapfrog_stored;
+            }
+
+            results["diagnostics"] = diagnostics_results;
+        }
+
+        return results;
     }
+}; // class ZeroInflation
 
-
-};
 
 #endif

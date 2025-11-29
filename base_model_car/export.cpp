@@ -19,6 +19,24 @@ double gelman_rubin_cpp(const arma::mat &samples)
 
 //' @export
 // [[Rcpp::export]]
+Rcpp::List infer_zero_inflation_parameters(
+    const arma::vec &y,
+    const arma::vec &lambda,
+    const double &obs_par2,
+    const std::string &obs_dist = "nbinom",
+    const unsigned int &n_iter = 5000,
+    const unsigned int &n_burn = 1000,
+    const unsigned int &n_thin = 1
+) 
+{
+    ZeroInflation zimodel;
+    return zimodel.run_mcmc(y, lambda, obs_par2, obs_dist, n_iter, n_burn, n_thin);
+}
+
+
+
+//' @export
+// [[Rcpp::export]]
 arma::mat sample_car(
     const unsigned int &k,
     const arma::mat &V,
@@ -84,7 +102,7 @@ Rcpp::List mdgtf_simulate(
     arma::mat Y, Lambda, wt, Psi;
     model.simulate(Y, Lambda, wt, Psi, ntime);
 
-    return Rcpp::List::create(
+    Rcpp::List output = Rcpp::List::create(
         Rcpp::Named("Y") = Y,
         Rcpp::Named("Lambda") = Lambda,
         Rcpp::Named("wt") = wt,
@@ -92,6 +110,16 @@ Rcpp::List mdgtf_simulate(
         Rcpp::Named("Rt") = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain),
         Rcpp::Named("model") = settings
     );
+
+    if (model.zero.inflated)
+    {
+        output["zero"] = Rcpp::List::create(
+            Rcpp::Named("z") = model.zero.z,
+            Rcpp::Named("prob") = model.zero.prob
+        );
+    }
+
+    return output;
 } // end of mdgtf_simulate()
 
 

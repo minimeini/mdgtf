@@ -40,6 +40,7 @@ public:
     std::string derr = "gaussian";
     LagDist dlag;
     Season seas;
+    ZeroInflation zero;
 
     Model()
     {
@@ -145,6 +146,12 @@ public:
         }
 
         seas.init_default();
+
+        if (settings.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_settings = settings["zero"];
+            zero = ZeroInflation(zero_settings);
+        }
 
         if (spatial_settings.containsElementNamed("nlocation"))
         {
@@ -270,6 +277,11 @@ public:
         wt.each_col() %= arma::sqrt(W);
         Psi = arma::cumsum(wt, 1);
 
+        if (zero.inflated)
+        {
+            zero.simulate(ntime);
+        }
+
         for (unsigned int t = 1; t <= ntime; t++)
         {
             // State evolution
@@ -300,6 +312,10 @@ public:
 
                 Lambda.at(s, t) = LinkFunc::ft2mu(eta, flink);
                 Y.at(s, t) = ObsDist::sample(Lambda.at(s, t), rho.at(s), dobs);
+                if (zero.inflated)
+                {
+                    Y.at(s, t) *= zero.z.at(t);
+                }
 
             } // end of for s in [0, nS]
         } // end of for t in [1, ntime]

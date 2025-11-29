@@ -197,33 +197,6 @@ public:
     }
 
 
-    static Rcpp::List default_settings()
-    {
-        Rcpp::List model_settings;
-        model_settings["obs_dist"] = "nbinom";
-        model_settings["link_func"] = "identity";
-        model_settings["gain_func"] = "softplus";
-        model_settings["lag_dist"] = "lognorm";
-        model_settings["sys_eq"] = "shift";
-        model_settings["err_dist"] = "gaussian";
-
-        Rcpp::List param_settings;
-        param_settings["obs"] = Rcpp::NumericVector::create(0., 30.);
-        param_settings["zero"] = Rcpp::NumericVector::create(0., 0.);
-        param_settings["lag"] = Rcpp::NumericVector::create(1.4, 0.3);
-        param_settings["err"] = ErrDist::default_settings();
-
-        Rcpp::List settings;
-        settings["model"] = model_settings;
-        settings["param"] = param_settings;
-        settings["season"] = Season::default_settings();
-        settings["zero"] = ZeroInflation::default_settings();
-
-        return settings;
-    }
-
-
-
     static unsigned int get_nP(
         const LagDist &dlag, 
         const unsigned int &seasonal_period = 0,
@@ -453,7 +426,7 @@ public:
 
         if (model.zero.z.is_empty())
         {
-            model.zero.simulateZ(ntime);
+            model.zero.simulate(ntime);
         }
 
         psi = ErrDist::sample(model.derr, ntime, true);
