@@ -41,6 +41,7 @@ public:
     std::string derr = "gaussian";
     LagDist dlag;
     Season seas;
+    std::vector<ZeroInflation> zero;
 
     Model()
     {
@@ -65,8 +66,13 @@ public:
 
         seas.init_default();
 
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            zero.push_back(ZeroInflation());
+        }
         return;
     } // end of Model()
+
 
     Model(const Rcpp::List &settings)
     {
@@ -166,6 +172,34 @@ public:
         } // end of loading log_beta
 
 
+        arma::vec intercept(nS, arma::fill::zeros);
+        arma::vec coef(nS, arma::fill::zeros);
+        bool inflated = false;
+        if (settings.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_settings = settings["zero"];
+            
+            if (zero_settings.containsElementNamed("intercept"))
+            {
+                intercept = Rcpp::as<arma::vec>(zero_settings["intercept"]);
+            }
+            if (zero_settings.containsElementNamed("coef"))
+            {
+                coef = Rcpp::as<arma::vec>(zero_settings["coef"]);
+            }
+
+            if (zero_settings.containsElementNamed("inflated"))
+            {
+                inflated = Rcpp::as<bool>(zero_settings["inflated"]);
+            }
+        } // end of zero settings
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            ZeroInflation zs(intercept.at(s), coef.at(s), inflated);
+            zero.push_back(zs);
+        } // end of for nS for zero inflation
+
+
         if (param_settings.containsElementNamed("obs"))
         {
             arma::vec rho_in = Rcpp::as<arma::vec>(param_settings["obs"]);
@@ -202,11 +236,13 @@ public:
         dlag.init(dlag.name, lag_param[0], lag_param[1], dlag.truncated);
         nP = LagDist::get_nlag(dlag);
         dlag.Fphi = LagDist::get_Fphi(dlag);
+        return;
     } // end of Model(const Rcpp::List &settings)
 
+
     void simulate(
-        arma::mat &Y, 
-        arma::mat &Lambda, 
+        arma::mat &Y, // nS x (ntime + 1)
+        arma::mat &Lambda, // nS x (ntime + 1)
         arma::mat &wt,
         arma::mat &Psi, 
         const unsigned int &ntime)
@@ -222,6 +258,11 @@ public:
         wt = spatial_wt.sample_spatial_effects(ntime + 1); // nS x (ntime + 1)
         wt.col(0).zeros(); // set the first column to zero
         Psi = arma::cumsum(wt, 1);
+
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            zero[s].simulate(ntime);
+        }
 
         for (unsigned int t = 1; t <= ntime; t++)
         {
@@ -254,6 +295,11 @@ public:
                 Lambda.at(s, t) = LinkFunc::ft2mu(eta, flink);
                 Y.at(s, t) = ObsDist::sample(Lambda.at(s, t), rho.at(s), dobs);
 
+                if (zero[s].inflated)
+                {
+                    Y.at(s, t) *= zero[s].z.at(t);
+                }
+
             } // end of for s in [0, nS]
         } // end of for t in [1, ntime]
 
@@ -265,6 +311,7 @@ public:
         arma::cube &Y_pred,
         arma::cube &Y_residual,
         arma::cube &hPsi,
+        arma::cube &hPsi_total,
         const Rcpp::List &output, 
         const arma::mat &Y, 
         const unsigned int &nrep = 1
@@ -288,6 +335,13 @@ public:
 
         const unsigned int nsample = wt_stored.n_slices;
         const unsigned int ntime = wt_stored.n_cols - 1;
+
+        arma::mat zt_stored(Y.n_rows, Y.n_cols, arma::fill::ones);
+        if (output.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_out = Rcpp::as<Rcpp::List>(output["zero"]);
+            zt_stored = Rcpp::as<arma::mat>(zero_out["z"]);
+        }
 
         arma::vec log_alpha_stored;
         if (output.containsElementNamed("log_alpha"))
@@ -372,6 +426,7 @@ public:
         Y_residual.zeros();
         hPsi.set_size(nS, ntime + 1, nsample);
         hPsi.zeros();
+        hPsi_total = hPsi;
 
         arma::vec chi_sqr(nsample, arma::fill::zeros);
         Progress p(nsample, true);
@@ -391,6 +446,7 @@ public:
             arma::cube Theta(nP, ntime + 1, nS, arma::fill::randn);
             arma::mat Psi = arma::cumsum(wt_stored.slice(i), 1); // nS x (nT + 1)
             hPsi.slice(i) = GainFunc::psi2hpsi<arma::mat>(Psi, model_i.fgain);
+            arma::mat hPsi_total_i(nS, ntime + 1, arma::fill::zeros);
             arma::mat ft(Psi.n_rows, Psi.n_cols, arma::fill::zeros);
 
             arma::mat ytmp(nS, ntime, arma::fill::zeros);
@@ -398,16 +454,17 @@ public:
             {
                 for (unsigned int s = 0; s < nS; s++)
                 {
+                    /*------------------------------------*/
                     double eta = std::exp(model_i.log_alpha);
-
                     arma::vec hpsi = GainFunc::psi2hpsi<arma::vec>(Psi.row(s).t(), model_i.fgain);
                     ft.at(s, t) = TransFunc::func_ft(t, Y.row(s).t(), ft.row(s).t(), hpsi, model_i.dlag, model_i.ftrans);
                     eta += ft.at(s, t);
 
                     double beta = std::exp(std::min(model_i.log_beta.at(s), UPBND));
-                    eta += beta * arma::dot(
+                    double cross_regional_effect = beta * arma::dot(
                         model_i.spatial_beta.W.row(s).t(), Y.col(t-1)
                     );
+                    eta += cross_regional_effect;
 
                     Lambda.at(s, t) = LinkFunc::ft2mu(eta, model_i.flink);
                     double mean, var;
@@ -448,12 +505,20 @@ public:
                         Y_pred.at(s, t, i * nrep + r) = ObsDist::sample(
                             Lambda.at(s, t), model_i.rho.at(s), model_i.dobs
                         );
+
+                        Y_pred.at(s, t, i * nrep + r) *= zt_stored.at(s, t);
                     } // end of for r in [0, nrep]
+
+                    /*------------------------------------*/
+                    arma::vec hpsi_ones(hpsi.n_elem, arma::fill::ones);
+                    double denom = TransFunc::transfer_sliding(t, model_i.dlag.nL, Y.row(s).t(), model_i.dlag.Fphi, hpsi_ones);
+                    hPsi_total_i.at(s, t) = hpsi.at(t) + cross_regional_effect / std::max(denom, EPS8);
 
                 } // end of for s in [0, nS]
             } // end of for t in [1, ntime]
 
             chi_sqr.at(i) = arma::mean(arma::mean(ytmp));
+            hPsi_total.slice(i) = hPsi_total_i;
             p.increment();
         } // end of for i in [0, nsample]
 
@@ -577,11 +642,14 @@ public:
             const arma::vec hpsi_s = hPsi.row(s).t();
             for (unsigned int t = 1; t < ys.n_elem; t++)
             {
-                double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(0), hpsi_s);
-                double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(1), hpsi_s);
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(0), hpsi_s);
+                    double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(1), hpsi_s);
 
-                grad.at(0) += dll_deta.at(s, t) * deta_dpar1; // dloglik_d[lag_mu]
-                grad.at(1) += dll_deta.at(s, t) * deta_dpar2; // dloglik_d[log(lag_sd2)]
+                    grad.at(0) += dll_deta.at(s, t) * deta_dpar1; // dloglik_d[lag_mu]
+                    grad.at(1) += dll_deta.at(s, t) * deta_dpar2; // dloglik_d[log(lag_sd2)]
+                }
 
             } // end of for t
         } // end of for s
@@ -602,10 +670,13 @@ public:
             double spatial_effect_beta = std::exp(std::min(log_beta.at(s), UPBND));
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                double deta_dbeta = arma::dot(spatial_beta.W.row(s).t(), Y.col(t - 1));
-                grad.at(s) += dll_deta.at(s, t) * deta_dbeta * spatial_effect_beta; // dloglik_dlogbeta
-            }
-        }
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    double deta_dbeta = arma::dot(spatial_beta.W.row(s).t(), Y.col(t - 1));
+                    grad.at(s) += dll_deta.at(s, t) * deta_dbeta * spatial_effect_beta; // dloglik_dlogbeta
+                }
+            } // end of for t
+        } // end of for s
 
         // Gradient of the CAR prior w.r.t. log(beta)
         grad += spatial_beta.dloglik_dspatial(log_beta);
@@ -622,7 +693,11 @@ public:
         {
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                deriv += dll_deta.at(s, t) * dalpha_dlogalpha; // dloglik_dlogalpha
+                
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    deriv += dll_deta.at(s, t) * dalpha_dlogalpha; // dloglik_dlogalpha
+                }
             }
         }
 
@@ -635,8 +710,11 @@ public:
         double dll_dlogrho = 0.0;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
-        }
+            if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+            {
+                dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
+            }
+        } // end of for t
 
         return dll_dlogrho;
     } // end of dloglik_dlogrho()

@@ -67,7 +67,7 @@ public:
 
         seas.init_default();
 
-        for (unsigned int i = 0; i < nS; i++)
+        for (unsigned int s = 0; s < nS; s++)
         {
             zero.push_back(ZeroInflation());
         }
@@ -379,6 +379,13 @@ public:
         const unsigned int nsample = wt_stored.n_slices;
         const unsigned int ntime = wt_stored.n_cols - 1;
 
+        arma::mat zt_stored(Y.n_rows, Y.n_cols, arma::fill::ones);
+        if (output.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_out = Rcpp::as<Rcpp::List>(output["zero"]);
+            zt_stored = Rcpp::as<arma::mat>(zero_out["z"]);
+        }
+
         arma::mat log_alpha_stored;
         if (output.containsElementNamed("log_alpha"))
         {
@@ -532,6 +539,8 @@ public:
                         Y_pred.at(s, t, i * nrep + r) = ObsDist::sample(
                             Lambda.at(s, t), model_i.rho.at(s), model_i.dobs
                         );
+
+                        Y_pred.at(s, t, i * nrep + r) *= zt_stored.at(s, t);
                     } // end of for r in [0, nrep]
 
                 } // end of for s in [0, nS]
@@ -685,7 +694,6 @@ public:
                 if (!zero[s].inflated || zero[s].z.at(t) > EPS)
                 {
                     double deta_dbeta = arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
-                    // double dbeta_dlogbeta = beta;
                     dll_dlogbeta += dll_deta.at(s, t) * deta_dbeta * beta;
                 }
             } // end of for t

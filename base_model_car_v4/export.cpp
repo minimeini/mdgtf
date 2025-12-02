@@ -54,7 +54,7 @@ Rcpp::List mdgtf_simulate(
     arma::mat Y, Lambda, wt, Psi;
     model.simulate(Y, Lambda, wt, Psi, ntime);
 
-    return Rcpp::List::create(
+    Rcpp::List output = Rcpp::List::create(
         Rcpp::Named("Y") = Y,
         Rcpp::Named("Lambda") = Lambda,
         Rcpp::Named("wt") = wt,
@@ -62,6 +62,24 @@ Rcpp::List mdgtf_simulate(
         Rcpp::Named("Rt") = GainFunc::psi2hpsi<arma::mat>(Psi, model.fgain),
         Rcpp::Named("model") = settings
     );
+
+    if (model.zero[0].inflated)
+    {
+        arma::mat Z(Y.n_rows, Y.n_cols, arma::fill::ones);
+        arma::mat Z_prob(Y.n_rows, Y.n_cols, arma::fill::ones);
+        for (unsigned int s = 0; s < Y.n_rows; s++)
+        {
+            Z.row(s) = model.zero[s].z.t();
+            Z_prob.row(s) = model.zero[s].prob.t();
+        }
+
+        output["zero"] = Rcpp::List::create(
+            Rcpp::Named("z") = Z,
+            Rcpp::Named("prob") = Z_prob
+        );
+    }
+
+    return output;
 } // end of mdgtf_simulate()
 
 
@@ -113,11 +131,11 @@ Rcpp::List mdgtf_posterior_predictive(
 )
 {
     Model model(model_opts);
-    arma::cube Y_pred, Y_residual, hPsi;
+    arma::cube Y_pred, Y_residual, hPsi, hPsi_total;
     // Y_pred: nS x (nT + 1) x (nsample * nrep)
     // Y_residual: nS x (nT + 1) x nsample
     // hPsi: nS x (nT + 1) x nsample
-    double chi_sqr = model.sample_posterior_predictive_y(Y_pred, Y_residual, hPsi, output, Y, nrep);
+    double chi_sqr = model.sample_posterior_predictive_y(Y_pred, Y_residual, hPsi, hPsi_total, output, Y, nrep);
 
     arma::cube Y_pred_trunc = Y_pred.cols(1, Y_pred.n_cols - 1); // nS x nT x (nsample * nrep)
     arma::mat Y_trunc = Y.cols(1, Y.n_cols - 1); // nS x nT
@@ -147,6 +165,7 @@ Rcpp::List mdgtf_posterior_predictive(
     Rcpp::List stats = Rcpp::List::create(
         Rcpp::Named("Y_pred") = Y_pred_ci, // nS x (nT + 1) x 3
         Rcpp::Named("Y_residual") = Y_residual,
+        Rcpp::Named("hpsi_total") = hPsi_total,
         Rcpp::Named("chi_sqr_avg") = chi_sqr,
         Rcpp::Named("crps") = crps, // nS x 1
         Rcpp::Named("crps_avg") = arma::mean(crps),

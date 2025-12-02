@@ -1182,7 +1182,6 @@ public:
             z_stored = arma::mat(model.nS, nT + 1, arma::fill::zeros);
             z_intercept_stored = arma::zeros<arma::mat>(model.nS, nsample);
             z_slope_stored = arma::zeros<arma::mat>(model.nS, nsample);
-
         }
 
         // Dual averaging state (Hoffman & Gelman 2014)
@@ -1360,7 +1359,7 @@ public:
                         }
                     }
                 }
-            }
+            } // end of zero-inflation update
 
             if (wt_prior.infer)
             {
