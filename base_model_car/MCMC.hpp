@@ -166,10 +166,22 @@ public:
         }
 
         infer_zero_inflation = false;
-        if (opts.containsElementNamed("infer_zero_inflation"))
+        if (opts.containsElementNamed("zero"))
         {
-            infer_zero_inflation = Rcpp::as<bool>(opts["infer_zero_inflation"]);
-        }
+            Rcpp::List zero_opts = Rcpp::as<Rcpp::List>(opts["zero"]);
+
+            if (zero_opts.containsElementNamed("infer"))
+            {
+                infer_zero_inflation = Rcpp::as<bool>(zero_opts["infer"]);
+            }
+
+            if (zero_opts.containsElementNamed("hmc"))
+            {
+                Rcpp::List zero_hmc_opts_in = Rcpp::as<Rcpp::List>(zero_opts["hmc"]);
+                zero_hmc_opts = HMCOpts_2d(zero_hmc_opts_in);
+                zero_hmc_opts.params_selected = {"intercept", "coef"};
+            }
+        } // end of zero inflation options
 
         logalpha_accept_count = 0.0;
         infer_log_alpha = false;
@@ -375,13 +387,6 @@ public:
             }
         } // end of local HMC options
 
-        if (infer_zero_inflation && opts.containsElementNamed("zero_hmc"))
-        {
-            Rcpp::List zero_hmc_opts_in = Rcpp::as<Rcpp::List>(opts["zero_hmc"]);
-            zero_hmc_opts = HMCOpts_2d(zero_hmc_opts_in);
-            zero_hmc_opts.params_selected = {"intercept", "coef"};
-        }
-
         return;
     } // end of constructor from Rcpp::List
 
@@ -465,7 +470,10 @@ public:
             Rcpp::Named("nsample") = 1000,
             Rcpp::Named("nburnin") = 1000,
             Rcpp::Named("nthin") = 1,
-            Rcpp::Named("infer_zero_inflation") = false,
+            Rcpp::Named("zero") = Rcpp::List::create(
+                Rcpp::Named("infer") = false,
+                Rcpp::Named("hmc") = logalpha_hmc_opts
+            ),
             Rcpp::Named("log_alpha") = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("bym2") = bym2_opts,
