@@ -68,7 +68,7 @@ Rcpp::List mdgtf_simulate(
         ntime
     );
 
-    return Rcpp::List::create(
+    Rcpp::List output = Rcpp::List::create(
         Rcpp::Named("Y") = Y,
         Rcpp::Named("Lambda") = Lambda,
         Rcpp::Named("psi1_spatial") = psi1_spatial,
@@ -76,6 +76,24 @@ Rcpp::List mdgtf_simulate(
         Rcpp::Named("wt2_temporal") = wt2_temporal,
         Rcpp::Named("model") = settings
     );
+
+    if (model.zero[0].inflated)
+    {
+        arma::mat Z(Y.n_rows, Y.n_cols, arma::fill::ones);
+        arma::mat Z_prob(Y.n_rows, Y.n_cols, arma::fill::ones);
+        for (unsigned int s = 0; s < Y.n_rows; s++)
+        {
+            Z.row(s) = model.zero[s].z.t();
+            Z_prob.row(s) = model.zero[s].prob.t();
+        }
+
+        output["zero"] = Rcpp::List::create(
+            Rcpp::Named("z") = Z,
+            Rcpp::Named("prob") = Z_prob
+        );
+    }
+
+    return output;
 } // end of mdgtf_simulate()
 
 

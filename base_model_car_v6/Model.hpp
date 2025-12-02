@@ -40,6 +40,7 @@ public:
     Param intercept_a, coef_self_b;
 
     LagDist dlag;
+    std::vector<ZeroInflation> zero;
 
     Model()
     {
@@ -55,6 +56,10 @@ public:
         intercept_a.sigma2 = 0.01;
 
         coef_self_b.intercept = 0.0; // constant
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            zero.push_back(ZeroInflation());
+        }
         return;
     } // end of Model()
 
@@ -115,6 +120,33 @@ public:
         }
         nP = LagDist::get_nlag(dlag);
         dlag.Fphi = LagDist::get_Fphi(dlag);
+
+        arma::vec intercept(nS, arma::fill::zeros);
+        arma::vec coef(nS, arma::fill::zeros);
+        bool inflated = false;
+        if (settings.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_settings = settings["zero"];
+            
+            if (zero_settings.containsElementNamed("intercept"))
+            {
+                intercept = Rcpp::as<arma::vec>(zero_settings["intercept"]);
+            }
+            if (zero_settings.containsElementNamed("coef"))
+            {
+                coef = Rcpp::as<arma::vec>(zero_settings["coef"]);
+            }
+
+            if (zero_settings.containsElementNamed("inflated"))
+            {
+                inflated = Rcpp::as<bool>(zero_settings["inflated"]);
+            }
+        } // end of zero settings
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            ZeroInflation zs(intercept.at(s), coef.at(s), inflated);
+            zero.push_back(zs);
+        } // end of for nS for zero inflation
 
         if (settings.containsElementNamed("rho"))
         {
@@ -184,6 +216,11 @@ public:
 
         for (unsigned int s = 0; s < nS; s++)
         {
+            zero[s].simulate(ntime);
+        }
+
+        for (unsigned int s = 0; s < nS; s++)
+        {
             arma::vec psi_s = psi1_spatial.at(s) + psi2_temporal;
             arma::vec hpsi_s = GainFunc::psi2hpsi<arma::vec>(psi_s, fgain);
             arma::vec ys(ntime + 1, arma::fill::zeros);
@@ -194,6 +231,10 @@ public:
                 );
                 Lambda.at(s, t) = mu + ft;
                 ys.at(t) = ObsDist::sample(Lambda.at(s, t), rho.at(s), dobs);
+                if (zero[s].inflated)
+                {
+                    ys.at(t) *= zero[s].z.at(t);
+                }
             } // end of loop over time t
 
             Y.row(s) = ys.t();
@@ -215,6 +256,13 @@ public:
         std::map<std::string, AVAIL::Dist> obs_list = ObsDist::obs_list;
         const unsigned int ntime = Y.n_cols - 1;
         const unsigned int nS = Y.n_rows;
+
+        arma::mat zt_stored(Y.n_rows, Y.n_cols, arma::fill::ones);
+        if (output.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_out = Rcpp::as<Rcpp::List>(output["zero"]);
+            zt_stored = Rcpp::as<arma::mat>(zero_out["z"]);
+        }
 
         arma::mat rho_stored;
         if (output.containsElementNamed("rho"))
@@ -417,6 +465,7 @@ public:
                         Y_pred.at(s, t, i * nrep + r) = ObsDist::sample(
                             lambda, model_i.rho.at(s), model_i.dobs
                         );
+                        Y_pred.at(s, t, i * nrep + r) *= zt_stored.at(s, t);
                     } // end of for r in [0, nrep]
                 } // end of loop over time t
 
@@ -524,9 +573,12 @@ public:
         {
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                deriv += dll_deta.at(s, t) * intercept;
-            }
-        }
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    deriv += dll_deta.at(s, t) * intercept;
+                }
+            } // end of for t
+        } // end of for s
         return deriv;
     }
 
@@ -546,12 +598,14 @@ public:
             const arma::vec dhpsi_s = GainFunc::psi2dhpsi<arma::vec>(psi_s, fgain);
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                double deta_dspatial = TransFunc::transfer_sliding(
-                    t, dlag.nL, ys, dlag.Fphi, dhpsi_s
-                );
-                grad.at(s) += dll_deta.at(s, t) * deta_dspatial;
-            }
-        }
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    double deta_dspatial = TransFunc::transfer_sliding(
+                        t, dlag.nL, ys, dlag.Fphi, dhpsi_s);
+                    grad.at(s) += dll_deta.at(s, t) * deta_dspatial;
+                }
+            } // end of for t
+        } // end of for s
 
         grad += coef_self_b.spatial.dloglik_dspatial(psi1_spatial);
         return grad;
@@ -588,12 +642,14 @@ public:
             const arma::vec hpsi_s = GainFunc::psi2hpsi<arma::vec>(psi_s, fgain);
             for (unsigned int t = 1; t < ys.n_elem; t++)
             {
-                double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(0), hpsi_s);
-                double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(1), hpsi_s);
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(0), hpsi_s);
+                    double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(1), hpsi_s);
 
-                grad.at(0) += dll_deta.at(s, t) * deta_dpar1; // dloglik_d[lag_mu]
-                grad.at(1) += dll_deta.at(s, t) * deta_dpar2; // dloglik_d[log(lag_sd2)]
-
+                    grad.at(0) += dll_deta.at(s, t) * deta_dpar1; // dloglik_d[lag_mu]
+                    grad.at(1) += dll_deta.at(s, t) * deta_dpar2; // dloglik_d[log(lag_sd2)]
+                }
             } // end of for t
         } // end of for s
 
@@ -606,8 +662,11 @@ public:
         double dll_dlogrho = 0.0;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
-        }
+            if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+            {
+                dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
+            }
+        } // end of for t
 
         return dll_dlogrho;
     } // end of dloglik_dlogrho()
