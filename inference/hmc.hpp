@@ -71,6 +71,7 @@ struct HMCOpts_2d
     bool diagnostics = true;
     bool verbose = false;
     double T_target = 2.0; // integration time T = n_leapfrog * epsilon ~= 1-2 (rough heuristic). Larger T gives better exploration but higher cost.
+    arma::mat mass_diag_est; // nvar x nS, estimated mass matrix diagonal
 
     unsigned int nleapfrog_init = 20;
     arma::uvec nleapfrog;
@@ -115,6 +116,23 @@ struct HMCOpts_2d
         {
             T_target = Rcpp::as<double>(opts["T_target"]);
         }
+
+        if (opts.containsElementNamed("mass_diag_est"))
+        {
+            mass_diag_est = Rcpp::as<arma::mat>(opts["mass_diag_est"]);
+        }
+    } // end constructor
+
+
+    void set_size(const unsigned int &nS)
+    {
+        nleapfrog = arma::uvec(nS, arma::fill::value(nleapfrog_init));
+        leapfrog_step_size = arma::vec(nS, arma::fill::value(leapfrog_step_size_init));
+        if (mass_diag_est.is_empty())
+        {
+            mass_diag_est = arma::mat(params_selected.size(), nS, arma::fill::ones);
+        }
+        return;
     }
 };
 
@@ -162,7 +180,7 @@ struct DualAveraging_1d
         log_eps = mu_da - (std::sqrt(t) / gamma_da) * h_bar;
 
         auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
+        { return std::max(1e-3, std::min(1.0, x)); };
         double leapfrog_step_size = clamp_eps(std::exp(log_eps));
         double w = std::pow(t, -kappa_da);
         log_eps_bar = w * std::log(leapfrog_step_size) + (1.0 - w) * log_eps_bar;
@@ -172,7 +190,7 @@ struct DualAveraging_1d
     void finalize_leapfrog_step(double &step_size, unsigned int &nleapfrog, const double &T_target)
     {
         auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
+        { return std::max(1e-3, std::min(1.0, x)); };
         step_size = clamp_eps(std::exp(log_eps_bar));
         unsigned nlf = (unsigned)std::lround(T_target / step_size);
         nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));
@@ -211,22 +229,23 @@ struct DualAveraging_2d
     }
 
     DualAveraging_2d(
-        const HMCOpts_2d &hmc_opts, 
+        const unsigned int &nS,
+        const double &leapfrog_step_size_init, 
         const double &target_accept_rate = 0.75
     )
     {
         target_accept = target_accept_rate;
 
-        mu_da = std::log(10 * hmc_opts.leapfrog_step_size_init) * arma::ones(hmc_opts.params_selected.size());
-        log_eps = std::log(hmc_opts.leapfrog_step_size_init) * arma::ones(hmc_opts.params_selected.size());
+        mu_da = std::log(10 * leapfrog_step_size_init) * arma::ones(nS);
+        log_eps = std::log(leapfrog_step_size_init) * arma::ones(nS);
         log_eps_bar = log_eps;
 
-        h_bar = arma::zeros(hmc_opts.params_selected.size());
-        gamma_da = 0.05 * arma::ones(hmc_opts.params_selected.size());
-        t0_da = 10.0 * arma::ones(hmc_opts.params_selected.size());
-        kappa_da = 0.75 * arma::ones(hmc_opts.params_selected.size());
+        h_bar = arma::zeros(nS);
+        gamma_da = 0.05 * arma::ones(nS);
+        t0_da = 10.0 * arma::ones(nS);
+        kappa_da = 0.75 * arma::ones(nS);
 
-        adapt_count = arma::zeros<arma::uvec>(hmc_opts.params_selected.size());
+        adapt_count = arma::zeros<arma::uvec>(nS);
 
         min_leaps = 3;
         max_leaps = 128;
@@ -235,13 +254,13 @@ struct DualAveraging_2d
 
     double update_step_size(const unsigned int &s, const double &accept_prob)
     {
-        adapt_count++;
+        adapt_count.at(s)++;
         double t = (double)adapt_count.at(s);
         h_bar.at(s) = (1.0 - 1.0 / (t + t0_da.at(s))) * h_bar.at(s) + (1.0 / (t + t0_da.at(s))) * (target_accept - accept_prob);
         log_eps.at(s) = mu_da.at(s) - (std::sqrt(t) / gamma_da.at(s)) * h_bar.at(s);
 
         auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
+        { return std::max(1e-3, std::min(1.0, x)); };
         double leapfrog_step_size = clamp_eps(std::exp(log_eps.at(s)));
         double w = std::pow(t, -kappa_da.at(s));
         log_eps_bar.at(s) = w * std::log(leapfrog_step_size) + (1.0 - w) * log_eps_bar.at(s);
@@ -256,7 +275,7 @@ struct DualAveraging_2d
     )
     {
         auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
+        { return std::max(1e-3, std::min(1.0, x)); };
         step_size = clamp_eps(std::exp(log_eps_bar.at(s)));
         unsigned nlf = (unsigned)std::lround(T_target / step_size);
         nleapfrog = std::max(min_leaps, std::min(max_leaps, nlf));

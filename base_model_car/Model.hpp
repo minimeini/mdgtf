@@ -40,7 +40,7 @@ public:
     std::string derr = "gaussian";
     LagDist dlag;
     Season seas;
-    ZeroInflation zero;
+    std::vector<ZeroInflation> zero;
 
     Model()
     {
@@ -66,6 +66,11 @@ public:
         beta = 1.0;
 
         seas.init_default();
+
+        for (unsigned int i = 0; i < nS; i++)
+        {
+            zero.push_back(ZeroInflation());
+        }
 
         return;
     } // end of Model()
@@ -147,11 +152,6 @@ public:
 
         seas.init_default();
 
-        if (settings.containsElementNamed("zero"))
-        {
-            Rcpp::List zero_settings = settings["zero"];
-            zero = ZeroInflation(zero_settings);
-        }
 
         if (spatial_settings.containsElementNamed("nlocation"))
         {
@@ -177,7 +177,7 @@ public:
         else
         {
             throw std::invalid_argument("Model::Model - neighborhood matrix 'neighborhood_matrix' is missing.");
-        }
+        } // end of spatial settings
 
         if (spatial_settings.containsElementNamed("car"))
         {
@@ -190,6 +190,34 @@ public:
             spatial.tau_b = car_param[1];
             spatial.phi = car_param[2];
         }
+
+
+        arma::vec intercept(nS, arma::fill::zeros);
+        arma::vec coef(nS, arma::fill::zeros);
+        bool inflated = false;
+        if (settings.containsElementNamed("zero"))
+        {
+            Rcpp::List zero_settings = settings["zero"];
+            
+            if (zero_settings.containsElementNamed("intercept"))
+            {
+                intercept = Rcpp::as<arma::vec>(zero_settings["intercept"]);
+            }
+            if (zero_settings.containsElementNamed("coef"))
+            {
+                coef = Rcpp::as<arma::vec>(zero_settings["coef"]);
+            }
+
+            if (zero_settings.containsElementNamed("inflated"))
+            {
+                inflated = Rcpp::as<bool>(zero_settings["inflated"]);
+            }
+        } // end of zero settings
+        for (unsigned int s = 0; s < nS; s++)
+        {
+            ZeroInflation zs(intercept.at(s), coef.at(s), inflated);
+            zero.push_back(zs);
+        } // end of for nS for zero inflation
 
 
         if (param_settings.containsElementNamed("obs"))
@@ -277,9 +305,9 @@ public:
         wt.each_col() %= arma::sqrt(W);
         Psi = arma::cumsum(wt, 1);
 
-        if (zero.inflated)
+        for (unsigned int s = 0; s < nS; s++)
         {
-            zero.simulate(ntime);
+            zero[s].simulate(ntime);
         }
 
         for (unsigned int t = 1; t <= ntime; t++)
@@ -312,9 +340,9 @@ public:
 
                 Lambda.at(s, t) = LinkFunc::ft2mu(eta, flink);
                 Y.at(s, t) = ObsDist::sample(Lambda.at(s, t), rho.at(s), dobs);
-                if (zero.inflated)
+                if (zero[s].inflated)
                 {
-                    Y.at(s, t) *= zero.z.at(t);
+                    Y.at(s, t) *= zero[s].z.at(t);
                 }
 
             } // end of for s in [0, nS]
@@ -629,12 +657,14 @@ public:
             const arma::vec hpsi_s = hPsi.row(s).t();
             for (unsigned int t = 1; t < ys.n_elem; t++)
             {
-                double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(0), hpsi_s);
-                double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(1), hpsi_s);
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    double deta_dpar1 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(0), hpsi_s);
+                    double deta_dpar2 = TransFunc::transfer_sliding(t, dlag.nL, ys, dFphi_grad.col(1), hpsi_s);
 
-                grad.at(0) += dll_deta.at(s, t) * deta_dpar1; // dloglik_d[lag_mu]
-                grad.at(1) += dll_deta.at(s, t) * deta_dpar2; // dloglik_d[log(lag_sd2)]
-
+                    grad.at(0) += dll_deta.at(s, t) * deta_dpar1; // dloglik_d[lag_mu]
+                    grad.at(1) += dll_deta.at(s, t) * deta_dpar2; // dloglik_d[log(lag_sd2)]
+                }
             } // end of for t
         } // end of for s
 
@@ -652,11 +682,14 @@ public:
         {
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                double deta_dbeta = arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
-                // double dbeta_dlogbeta = beta;
-                dll_dlogbeta += dll_deta.at(s, t) * deta_dbeta * beta;
-            }
-        }
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    double deta_dbeta = arma::dot(spatial.W.row(s).t(), Y.col(t - 1));
+                    // double dbeta_dlogbeta = beta;
+                    dll_dlogbeta += dll_deta.at(s, t) * deta_dbeta * beta;
+                }
+            } // end of for t
+        } // end of for s
 
         return dll_dlogbeta;
     } // end of dloglik_dlogbeta()
@@ -667,8 +700,11 @@ public:
         double dll_dlogrho = 0.0;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
-        }
+            if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+            {
+                dll_dlogrho += nbinomm::dlogp_dpar2(y.at(t), lambda.at(t), rho.at(s), true);
+            }
+        } // end of for t
 
         return dll_dlogrho;
     } // end of dloglik_dlogrho()
@@ -683,9 +719,12 @@ public:
             double spatial_effect = std::exp(log_alpha.at(s));
             for (unsigned int t = 1; t < Y.n_cols; t++)
             {
-                grad.at(s) += dll_deta.at(s, t) * spatial_effect;
-            }
-        }
+                if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+                {
+                    grad.at(s) += dll_deta.at(s, t) * spatial_effect;
+                }
+            } // end of for t
+        } // end of for s
 
         // Gradient of the CAR prior w.r.t. log_alpha
         grad += spatial.dloglik_dspatial(log_alpha);
@@ -699,9 +738,12 @@ public:
         double res2 = 0.0;
         for (unsigned int t = 1; t < y.n_elem; t++)
         {
-            ntime += 1.0;
-            res2 += wt.at(t) * wt.at(t);
-        }
+            if (!zero[s].inflated || zero[s].z.at(t) > EPS)
+            {
+                ntime += 1.0;
+                res2 += wt.at(t) * wt.at(t);
+            }
+        } // end of for t
 
         return - 0.5 * ntime + 0.5 * res2 / std::max(W.at(s), EPS);
     } // end of dloglik_dlogW()

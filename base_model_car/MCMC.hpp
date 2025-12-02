@@ -29,6 +29,13 @@ private:
     unsigned int nburnin = 1000;
     unsigned int nthin = 1;
 
+    bool infer_zero_inflation = false;
+    arma::mat z_stored; // nS x (nT + 1)
+    arma::mat z_intercept_stored; // nS x nsample
+    arma::mat z_slope_stored; // nS x nsample
+    HMCOpts_2d zero_hmc_opts;
+    HMCDiagnostics_2d zero_hmc_diagnostics;
+
     bool infer_log_alpha = false;
 
     double car_rho_accept_count = 0.0;
@@ -156,6 +163,12 @@ public:
         if (opts.containsElementNamed("nthin"))
         {
             nthin = Rcpp::as<unsigned int>(opts["nthin"]);
+        }
+
+        infer_zero_inflation = false;
+        if (opts.containsElementNamed("infer_zero_inflation"))
+        {
+            infer_zero_inflation = Rcpp::as<bool>(opts["infer_zero_inflation"]);
         }
 
         logalpha_accept_count = 0.0;
@@ -360,6 +373,13 @@ public:
             {
                 local_T_target = Rcpp::as<double>(local_hmc_opts["T_target"]);
             }
+        } // end of local HMC options
+
+        if (infer_zero_inflation && opts.containsElementNamed("zero_hmc"))
+        {
+            Rcpp::List zero_hmc_opts_in = Rcpp::as<Rcpp::List>(opts["zero_hmc"]);
+            zero_hmc_opts = HMCOpts_2d(zero_hmc_opts_in);
+            zero_hmc_opts.params_selected = {"intercept", "coef"};
         }
 
         return;
@@ -445,6 +465,7 @@ public:
             Rcpp::Named("nsample") = 1000,
             Rcpp::Named("nburnin") = 1000,
             Rcpp::Named("nthin") = 1,
+            Rcpp::Named("infer_zero_inflation") = false,
             Rcpp::Named("log_alpha") = Rcpp::List::create(
                 Rcpp::Named("infer") = false,
                 Rcpp::Named("bym2") = bym2_opts,
@@ -640,9 +661,12 @@ public:
             for (unsigned int t = 1; t <= Y.n_cols - 1; t++)
             {
                 // Compute loglikelihood of y[s, t]
-                logp += ObsDist::loglike(
-                    Y.at(s, t), model.dobs, lam_s.at(t), model.rho.at(s), true
-                );
+                if (!model.zero[s].inflated || model.zero[s].z.at(t) > EPS)
+                {
+                    logp += ObsDist::loglike(
+                        Y.at(s, t), model.dobs, lam_s.at(t), model.rho.at(s), true
+                    );
+                }
             }
         }
 
@@ -665,9 +689,12 @@ public:
             for (unsigned int t = 1; t <= Y.n_cols - 1; t++)
             {
                 // Compute loglikelihood of y[s, t]
-                logp += ObsDist::loglike(
-                    Y.at(s, t), model.dobs, lam_s.at(t), model.rho.at(s), true
-                );
+                if (!model.zero[s].inflated || model.zero[s].z.at(t) > EPS)
+                {
+                    logp += ObsDist::loglike(
+                        Y.at(s, t), model.dobs, lam_s.at(t), model.rho.at(s), true
+                    );
+                }
             }
         }
 
@@ -702,10 +729,13 @@ public:
         for (unsigned int t = 1; t <= y.n_elem - 1; t++)
         {
             // Compute loglikelihood of y[s, t]
-            logp += ObsDist::loglike(
-                y.at(t), model.dobs, lambda.at(t), model.rho.at(s), true);
+            if (!model.zero[s].inflated || model.zero[s].z.at(t) > EPS)
+            {
+                logp += ObsDist::loglike(
+                    y.at(t), model.dobs, lambda.at(t), model.rho.at(s), true);
 
-            logp += R::dnorm4(wt.at(t), 0.0, std::sqrt(model.W.at(s)), true);
+                logp += R::dnorm4(wt.at(t), 0.0, std::sqrt(model.W.at(s)), true);
+            }
         }
 
         // Add local parameter priors
@@ -1119,6 +1149,34 @@ public:
         const unsigned int nT = Y.n_cols - 1;
         const unsigned int niter = nburnin + nsample * nthin;
 
+        if (!model.zero[0].inflated)
+        {
+            infer_zero_inflation = false;
+            for (unsigned int s = 0; s < model.nS; s++)
+            {
+                model.zero[s].z = arma::vec(nT + 1, arma::fill::ones);
+                model.zero[s].prob = arma::vec(nT + 1, arma::fill::ones);
+            }
+        }
+        else
+        {
+            for (unsigned int s = 0; s < model.nS; s++)
+            {
+                model.zero[s].init_Z(Y.row(s).t());
+            }
+        }
+
+        DualAveraging_2d zero_da_adapter(model.nS, zero_hmc_opts.leapfrog_step_size_init);
+        if (infer_zero_inflation)
+        {
+            zero_hmc_opts.set_size(model.nS);
+            zero_hmc_diagnostics = HMCDiagnostics_2d(model.nS, niter, nburnin, zero_hmc_opts.dual_averaging);
+            z_stored = arma::mat(model.nS, nT + 1, arma::fill::zeros);
+            z_intercept_stored = arma::zeros<arma::mat>(model.nS, nsample);
+            z_slope_stored = arma::zeros<arma::mat>(model.nS, nsample);
+
+        }
+
         // Dual averaging state (Hoffman & Gelman 2014)
         const double target_accept = 0.75;
         double mu_da = std::log(10.0 * global_leapfrog_step_size); // bias center
@@ -1132,7 +1190,7 @@ public:
 
         // Clamp helpers
         auto clamp_eps = [](double x)
-        { return std::max(1e-3, std::min(0.1, x)); };
+        { return std::max(1e-3, std::min(1.0, x)); };
         unsigned min_leaps = 3, max_leaps = 128;
 
         if (!global_params_selected.empty() && global_diagnostics)
@@ -1248,6 +1306,54 @@ public:
         Progress p(niter, true);
         for (unsigned int iter = 0; iter < niter; ++iter)
         {
+            if (infer_zero_inflation)
+            {
+                for (unsigned int s = 0; s < model.nS; s++)
+                {
+                    arma::vec ys = Y.row(s).t();
+                    arma::vec ws = wt.row(s).t();
+                    arma::vec lambda = model.compute_intensity_iterative(s, Y, arma::cumsum(ws));
+                    model.zero[s].update_zt(ys, lambda, model.dobs, model.rho.at(s));
+
+                    double energy_diff, grad_norm;
+                    double accept_prob = model.zero[s].update_params(
+                        energy_diff, grad_norm, 0.0, 10.0, 
+                        zero_hmc_opts.leapfrog_step_size.at(s), 
+                        zero_hmc_opts.nleapfrog.at(s),
+                        zero_hmc_opts.mass_diag_est.col(s)
+                    );
+                    zero_hmc_diagnostics.accept_count.at(s) += accept_prob;
+
+                    if (zero_hmc_opts.dual_averaging)
+                    {
+                        if (iter < nburnin)
+                        {
+                            zero_hmc_opts.leapfrog_step_size.at(s) = zero_da_adapter.update_step_size(s,  accept_prob);
+                        }
+                        else if (iter == nburnin)
+                        {
+                            zero_da_adapter.finalize_leapfrog_step(
+                                zero_hmc_opts.leapfrog_step_size.at(s),
+                                zero_hmc_opts.nleapfrog.at(s),
+                                s, zero_hmc_opts.T_target
+                            );
+                        }
+                    }
+                    
+                    if (zero_hmc_opts.diagnostics)
+                    {
+                        zero_hmc_diagnostics.energy_diff(s, iter) = energy_diff;
+                        zero_hmc_diagnostics.grad_norm(s, iter) = grad_norm;
+
+                        if (zero_hmc_opts.dual_averaging && iter <= nburnin)
+                        {
+                            zero_hmc_diagnostics.nleapfrog_stored(s, iter) = zero_hmc_opts.nleapfrog.at(s);
+                            zero_hmc_diagnostics.leapfrog_step_size_stored(s, iter) = zero_hmc_opts.leapfrog_step_size.at(s);
+                        }
+                    }
+                }
+            }
+
             if (wt_prior.infer)
             {
                 update_wt(wt, wt_accept, model, Y, wt_prior.mh_sd);
@@ -1424,6 +1530,17 @@ public:
             if (iter >= nburnin && ((iter - nburnin) % nthin == 0))
             {
                 const unsigned int sample_idx = (iter - nburnin) / nthin;
+
+                if (infer_zero_inflation)
+                {
+                    for (unsigned int s = 0; s < model.nS; s++)
+                    {
+                        z_intercept_stored(s, sample_idx) = model.zero[s].intercept;
+                        z_slope_stored(s, sample_idx) = model.zero[s].coef;
+                        z_stored.row(s) += model.zero[s].z.t();
+                    }
+                }
+
                 if (wt_prior.infer)
                 {
                     wt_stored.slice(sample_idx) = wt;
@@ -1480,6 +1597,25 @@ public:
     Rcpp::List get_output() const
     {
         Rcpp::List output;
+
+        if (infer_zero_inflation)
+        {
+            output["zero"] = Rcpp::List::create(
+                Rcpp::Named("z") = Rcpp::wrap(z_stored / (double)nsample),
+                Rcpp::Named("intercept") = Rcpp::wrap(z_intercept_stored),
+                Rcpp::Named("coef") = Rcpp::wrap(z_slope_stored),
+                Rcpp::Named("hmc_accept_rate") = zero_hmc_diagnostics.accept_count / (nburnin + nsample * nthin),
+                Rcpp::Named("hmc_settings") = Rcpp::List::create(
+                    Rcpp::Named("nleapfrog") = zero_hmc_opts.nleapfrog,
+                    Rcpp::Named("leapfrog_step_size") = zero_hmc_opts.leapfrog_step_size
+                ),
+                Rcpp::Named("hmc_diagnostics") = Rcpp::List::create(
+                    Rcpp::Named("energy_diff") = zero_hmc_diagnostics.energy_diff,
+                    Rcpp::Named("grad_norm") = zero_hmc_diagnostics.grad_norm,
+                    Rcpp::Named("n_leapfrog") = zero_hmc_diagnostics.nleapfrog_stored,
+                    Rcpp::Named("step_size") = zero_hmc_diagnostics.leapfrog_step_size_stored)
+            );
+        }
 
         if (wt_prior.infer)
         {

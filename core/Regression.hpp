@@ -161,6 +161,17 @@ public:
         return;
     }
 
+    ZeroInflation(const double &intercept_, const double &coef_, const bool &inflated_)
+    {
+        intercept = intercept_;
+        coef = coef_;
+        inflated = inflated_;
+
+        beta.reset();
+        X.reset();
+        return;
+    }
+
     void init_default()
     {
         inflated = false;
@@ -433,7 +444,8 @@ public:
         const double &prior_mean,
         const double &prior_sd,
         const double &leapfrog_step_size,
-        const unsigned int &n_leapfrog
+        const unsigned int &n_leapfrog,
+        const arma::vec &mass_diag_est = arma::ones<arma::vec>(2)
     )
     {
         // Current parameters
@@ -443,6 +455,10 @@ public:
 
         arma::vec params_old = params;
 
+        arma::vec mass_diag = arma::max(mass_diag_est, arma::vec(2, arma::fill::value(1e-4)));
+        arma::vec inv_mass = 1.0 / mass_diag;
+        arma::vec sqrt_mass = arma::sqrt(mass_diag);
+
         // Compute initial energy
         double current_loglik = log_likelihood();
         double current_logprior = -0.5 * (
@@ -451,8 +467,8 @@ public:
         );        
         double current_energy = - (current_loglik + current_logprior);
 
-        arma::vec momentum = arma::randn(2);
-        double current_kinetic = 0.5 * arma::dot(momentum, momentum);
+        arma::vec momentum = sqrt_mass % arma::randn<arma::vec>(2);
+        double current_kinetic = 0.5 * arma::dot(momentum % inv_mass, momentum);
 
         // Make a half step for momentum
         arma::vec grad = dloglik_dparams();
@@ -466,7 +482,7 @@ public:
         for (unsigned int l = 0; l < n_leapfrog; l++)
         {
             // Full step for position
-            params += leapfrog_step_size * momentum;
+            params += leapfrog_step_size * (inv_mass % momentum);
             intercept = params.at(0);
             coef = params.at(1);
 
@@ -496,7 +512,7 @@ public:
             std::pow((coef - prior_mean) / prior_sd, 2.)
         );        
         double proposed_energy = - (proposed_loglik + proposed_logprior);
-        double proposed_kinetic = 0.5 * arma::dot(momentum, momentum);
+        double proposed_kinetic = 0.5 * arma::dot(momentum % inv_mass, momentum);
 
         double H_proposed = proposed_energy + proposed_kinetic;
         double H_current = current_energy + current_kinetic;
