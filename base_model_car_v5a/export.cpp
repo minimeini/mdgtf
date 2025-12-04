@@ -5,7 +5,7 @@
 
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::depends(RcppArmadillo, RcppEigen, RcppProgress)]]
 
 
 //' @export

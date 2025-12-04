@@ -596,8 +596,9 @@ public:
                 hmc_diag.accept_count += accept_prob;
                 if (hmc_opts.diagnostics)
                 {
-                    hmc_diag.energy_diff.at(iter) = energy_diff;
-                    hmc_diag.grad_norm.at(iter) = grad_norm;
+                    const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                    hmc_diag.energy_diff(iter_idx) = energy_diff;
+                    hmc_diag.grad_norm(iter_idx) = grad_norm;
                 }
 
                 // Adapt step size
@@ -617,8 +618,9 @@ public:
 
                     if (hmc_opts.diagnostics)
                     {
-                        hmc_diag.leapfrog_step_size_stored.at(iter) = hmc_opts.leapfrog_step_size;
-                        hmc_diag.nleapfrog_stored.at(iter) = hmc_opts.nleapfrog;
+                        const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                        hmc_diag.leapfrog_step_size_stored(iter_idx) = hmc_opts.leapfrog_step_size;
+                        hmc_diag.nleapfrog_stored(iter_idx) = hmc_opts.nleapfrog;
                     }
                 } // if dual_averaging
             } // end of HMC update

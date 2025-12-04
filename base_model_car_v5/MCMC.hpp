@@ -19,7 +19,7 @@
 #include "../inference/hmc.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
+// [[Rcpp::depends(RcppArmadillo,RcppProgress,RcppEigen)]]
 
 
 template <typename T> 
@@ -1711,12 +1711,18 @@ public:
             coef_cross_c_car_phi_stored = arma::zeros<arma::vec>(nsample);
         }
 
-        DualAveraging_2d local_hmc_da(local_hmc, target_accept);
-        if (!local_hmc.params_selected.empty() && local_hmc.diagnostics)
+        DualAveraging_2d local_hmc_da(
+            model.nS,
+            local_hmc.leapfrog_step_size_init,
+            target_accept
+        );
+        if (!local_hmc.params_selected.empty())
         {
-            local_hmc_diagnostics = HMCDiagnostics_2d(model.nS, niter, nburnin, local_hmc.dual_averaging);
-            local_hmc.nleapfrog = arma::uvec(model.nS, arma::fill::value(local_hmc.nleapfrog_init));
-            local_hmc.leapfrog_step_size = arma::vec(model.nS, arma::fill::value(local_hmc.leapfrog_step_size_init));
+            local_hmc.set_size(model.nS);
+            if (local_hmc.diagnostics)
+            {
+                local_hmc_diagnostics = HMCDiagnostics_2d(model.nS, niter, nburnin, local_hmc.dual_averaging);
+            }
         }
         if (rho_prior.infer)
         {
@@ -1768,8 +1774,9 @@ public:
 
                 if (spatial_coef_self_hmc.diagnostics)
                 {
-                    spatial_coef_self_hmc_diagnostics.energy_diff.at(iter) = energy_diff;
-                    spatial_coef_self_hmc_diagnostics.grad_norm.at(iter) = grad_norm;
+                    const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                    spatial_coef_self_hmc_diagnostics.energy_diff(iter_idx) = energy_diff;
+                    spatial_coef_self_hmc_diagnostics.grad_norm(iter_idx) = grad_norm;
                 }
 
                 if (spatial_coef_self_hmc.dual_averaging)
@@ -1791,8 +1798,9 @@ public:
 
                     if (spatial_coef_self_hmc.diagnostics && iter <= nburnin)
                     {
-                        spatial_coef_self_hmc_diagnostics.nleapfrog_stored.at(iter) = spatial_coef_self_hmc.nleapfrog;
-                        spatial_coef_self_hmc_diagnostics.leapfrog_step_size_stored.at(iter) = spatial_coef_self_hmc.leapfrog_step_size;
+                        const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                        spatial_coef_self_hmc_diagnostics.nleapfrog_stored(iter_idx) = spatial_coef_self_hmc.nleapfrog;
+                        spatial_coef_self_hmc_diagnostics.leapfrog_step_size_stored(iter_idx) = spatial_coef_self_hmc.leapfrog_step_size;
                     }
                 } // end of spatial coef self dual averaging
             }
@@ -1817,8 +1825,9 @@ public:
 
                 if (spatial_coef_cross_hmc.diagnostics)
                 {
-                    spatial_coef_cross_hmc_diagnostics.energy_diff.at(iter) = energy_diff;
-                    spatial_coef_cross_hmc_diagnostics.grad_norm.at(iter) = grad_norm;
+                    const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                    spatial_coef_cross_hmc_diagnostics.energy_diff(iter_idx) = energy_diff;
+                    spatial_coef_cross_hmc_diagnostics.grad_norm(iter_idx) = grad_norm;
                 }
 
                 if (spatial_coef_cross_hmc.dual_averaging)
@@ -1840,8 +1849,9 @@ public:
 
                     if (spatial_coef_cross_hmc.diagnostics && iter <= nburnin)
                     {
-                        spatial_coef_cross_hmc_diagnostics.nleapfrog_stored.at(iter) = spatial_coef_cross_hmc.nleapfrog;
-                        spatial_coef_cross_hmc_diagnostics.leapfrog_step_size_stored.at(iter) = spatial_coef_cross_hmc.leapfrog_step_size;
+                        const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                        spatial_coef_cross_hmc_diagnostics.nleapfrog_stored(iter_idx) = spatial_coef_cross_hmc.nleapfrog;
+                        spatial_coef_cross_hmc_diagnostics.leapfrog_step_size_stored(iter_idx) = spatial_coef_cross_hmc.leapfrog_step_size;
                     }
                 } // end of spatial coef cross dual averaging
             }
@@ -1889,8 +1899,9 @@ public:
 
                 if (global_hmc.diagnostics)
                 {
-                    global_hmc_diagnostics.energy_diff.at(iter) = energy_diff;
-                    global_hmc_diagnostics.grad_norm.at(iter) = grad_norm;
+                    const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                    global_hmc_diagnostics.energy_diff(iter_idx) = energy_diff;
+                    global_hmc_diagnostics.grad_norm(iter_idx) = grad_norm;
                 }
 
                 if (global_hmc.dual_averaging)
@@ -1912,8 +1923,9 @@ public:
 
                     if (global_hmc.diagnostics && iter <= nburnin)
                     {
-                        global_hmc_diagnostics.nleapfrog_stored.at(iter) = global_hmc.nleapfrog;
-                        global_hmc_diagnostics.leapfrog_step_size_stored.at(iter) = global_hmc.leapfrog_step_size;
+                        const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                        global_hmc_diagnostics.nleapfrog_stored(iter_idx) = global_hmc.nleapfrog;
+                        global_hmc_diagnostics.leapfrog_step_size_stored(iter_idx) = global_hmc.leapfrog_step_size;
                     }
                 } // end of global dual averaging
             } // end of global params update
@@ -1938,44 +1950,49 @@ public:
                     }
 
                     double energy_diff, grad_norm;
+                    const Eigen::Index s_idx = static_cast<Eigen::Index>(s);
                     double local_hmc_accept_prob = update_local_params(
                         model, energy_diff, grad_norm, 
                         local_hmc.params_selected, s, Y, 
                         psi1_spatial, wt2_temporal, 
                         psi3_spatial, wt4_temporal, wt, 
-                        local_hmc.leapfrog_step_size.at(s), 
-                        local_hmc.nleapfrog.at(s)
+                        local_hmc.leapfrog_step_size(s_idx), 
+                        static_cast<unsigned int>(local_hmc.nleapfrog(s_idx))
                     );
-                    local_hmc_diagnostics.accept_count.at(s) += local_hmc_accept_prob;
+                    local_hmc_diagnostics.accept_count(s_idx) += local_hmc_accept_prob;
 
                     if (local_hmc.diagnostics)
                     {
-                        local_hmc_diagnostics.energy_diff.at(s, iter) = energy_diff;
-                        local_hmc_diagnostics.grad_norm.at(s, iter) = grad_norm;
+                        const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                        local_hmc_diagnostics.energy_diff(s_idx, iter_idx) = energy_diff;
+                        local_hmc_diagnostics.grad_norm(s_idx, iter_idx) = grad_norm;
                     }
 
                     if (local_hmc.dual_averaging)
                     {
                         if (iter < nburnin)
                         {
-                            local_hmc.leapfrog_step_size.at(s) = local_hmc_da.update_step_size(
+                            local_hmc.leapfrog_step_size(s_idx) = local_hmc_da.update_step_size(
                                 s, local_hmc_accept_prob
                             );
                         }
                         else if (iter == nburnin)
                         {
+                            int nlf = local_hmc.nleapfrog(s_idx);
                             local_hmc_da.finalize_leapfrog_step(
-                                local_hmc.leapfrog_step_size.at(s),
-                                local_hmc.nleapfrog.at(s),
+                                local_hmc.leapfrog_step_size(s_idx),
+                                nlf,
                                 s,
                                 local_hmc.T_target
                             );
+                            local_hmc.nleapfrog(s_idx) = nlf;
                         }
 
                         if (local_hmc.diagnostics && iter <= nburnin)
                         {
-                            local_hmc_diagnostics.nleapfrog_stored.at(s, iter) = local_hmc.nleapfrog.at(s);
-                            local_hmc_diagnostics.leapfrog_step_size_stored.at(s, iter) = local_hmc.leapfrog_step_size.at(s);
+                            const Eigen::Index iter_idx = static_cast<Eigen::Index>(iter);
+                            local_hmc_diagnostics.nleapfrog_stored(s_idx, iter_idx) = static_cast<double>(local_hmc.nleapfrog(s_idx));
+                            local_hmc_diagnostics.leapfrog_step_size_stored(s_idx, iter_idx) = local_hmc.leapfrog_step_size(s_idx);
                         }
                     } // end of local dual averaging
                 } // end of s loop

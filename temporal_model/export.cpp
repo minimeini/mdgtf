@@ -11,7 +11,7 @@
 
 using namespace Rcpp;
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo,nloptr, BH, RcppProgress)]]
+// [[Rcpp::depends(RcppArmadillo,nloptr, BH, RcppProgress, RcppEigen)]]
 
 //' @export
 // [[Rcpp::export]]

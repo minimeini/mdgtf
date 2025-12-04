@@ -19,7 +19,7 @@
 #include "Model.hpp"
 
 // [[Rcpp::plugins(cpp17)]]
-// [[Rcpp::depends(RcppArmadillo,RcppProgress)]]
+// [[Rcpp::depends(RcppArmadillo,RcppProgress,RcppEigen)]]
 
 
 class MCMC
@@ -1256,27 +1256,34 @@ public:
                     model.zero[s].update_zt(ys, lambda, model.dobs, model.rho.at(s));
 
                     double energy_diff, grad_norm;
+                    const Eigen::Index s_idx = static_cast<Eigen::Index>(s);
+                    arma::vec mass_diag(
+                        zero_hmc_opts.mass_diag_est.col(s_idx).data(),
+                        static_cast<arma::uword>(zero_hmc_opts.mass_diag_est.rows())
+                    );
                     double accept_prob = model.zero[s].update_params(
                         energy_diff, grad_norm, 0.0, 10.0, 
-                        zero_hmc_opts.leapfrog_step_size.at(s), 
-                        zero_hmc_opts.nleapfrog.at(s),
-                        zero_hmc_opts.mass_diag_est.col(s)
+                        zero_hmc_opts.leapfrog_step_size(s_idx), 
+                        static_cast<unsigned int>(zero_hmc_opts.nleapfrog(s_idx)),
+                        mass_diag
                     );
-                    zero_hmc_diagnostics.accept_count.at(s) += accept_prob;
+                    zero_hmc_diagnostics.accept_count(s_idx) += accept_prob;
 
                     if (zero_hmc_opts.dual_averaging)
                     {
                         if (iter < nburnin)
                         {
-                            zero_hmc_opts.leapfrog_step_size.at(s) = zero_da_adapter.update_step_size(s,  accept_prob);
+                            zero_hmc_opts.leapfrog_step_size(s_idx) = zero_da_adapter.update_step_size(s,  accept_prob);
                         }
                         else if (iter == nburnin)
                         {
+                            int nlf = zero_hmc_opts.nleapfrog(s_idx);
                             zero_da_adapter.finalize_leapfrog_step(
-                                zero_hmc_opts.leapfrog_step_size.at(s),
-                                zero_hmc_opts.nleapfrog.at(s),
+                                zero_hmc_opts.leapfrog_step_size(s_idx),
+                                nlf,
                                 s, zero_hmc_opts.T_target
                             );
+                            zero_hmc_opts.nleapfrog(s_idx) = nlf;
                         }
                     }
                     
@@ -1287,8 +1294,8 @@ public:
 
                         if (zero_hmc_opts.dual_averaging && iter <= nburnin)
                         {
-                            zero_hmc_diagnostics.nleapfrog_stored(s, iter) = zero_hmc_opts.nleapfrog.at(s);
-                            zero_hmc_diagnostics.leapfrog_step_size_stored(s, iter) = zero_hmc_opts.leapfrog_step_size.at(s);
+                            zero_hmc_diagnostics.nleapfrog_stored(s, iter) = static_cast<double>(zero_hmc_opts.nleapfrog(s_idx));
+                            zero_hmc_diagnostics.leapfrog_step_size_stored(s, iter) = zero_hmc_opts.leapfrog_step_size(s_idx);
                         }
                     }
                 }
