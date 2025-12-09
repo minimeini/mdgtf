@@ -16,7 +16,7 @@
 struct HMCOpts_1d
 {
     std::vector<std::string> params_selected;
-    bool dual_averaging = false;
+    bool dual_averaging = true;
     bool diagnostics = true;
     bool verbose = false;
     unsigned int nleapfrog = 20;
