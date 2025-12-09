@@ -383,6 +383,13 @@ public:
         return;
     }
 
+    Prior(
+        const Rcpp::List &opts) : Dist()
+    {
+        init(opts);
+        return;
+    }
+
     void init(const std::string &name_in, const double &par1_in, const double &par2_in)
     {
         name = name_in;
