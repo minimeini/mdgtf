@@ -13,6 +13,36 @@
 // [[Rcpp::plugins(cpp17)]]
 // [[Rcpp::depends(RcppEigen)]]
 
+
+struct MassAdapter {
+    Eigen::VectorXd mean;
+    Eigen::VectorXd M2;  // Sum of squared deviations
+    unsigned int count = 0;
+    unsigned int window_size = 100;
+    
+    void update(const Eigen::VectorXd& log_params) {
+        count++;
+        Eigen::VectorXd delta = log_params - mean;
+        mean += delta / count;
+        M2 += delta.cwiseProduct(log_params - mean);
+    }
+    
+    Eigen::VectorXd get_mass_diag() {
+        if (count < 10) return Eigen::VectorXd::Ones(mean.size());
+        Eigen::VectorXd var = M2 / (count - 1);
+
+        // setting the momentum covariance to approximate the precision of the parameters
+        return (1.0 / var.array()).cwiseMax(0.1).cwiseMin(100.0);
+    }
+    
+    void reset_window() {
+        // Optionally reset for new adaptation window
+        count = 0;
+        M2.setZero();
+    }
+};
+
+
 struct HMCOpts_1d
 {
     std::vector<std::string> params_selected;

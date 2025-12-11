@@ -1,4 +1,11 @@
 #include <chrono>
+#include <vector>
+#include <complex>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
+#include <unsupported/Eigen/FFT>
+#include "../inference/diagnostics.hpp"
 #include "Model.hpp"
 
 using namespace Rcpp;
@@ -8,10 +15,31 @@ using namespace Rcpp;
 
 //' @export
 // [[Rcpp::export]]
-Eigen::MatrixXd sample_A(
+double effective_sample_size(const Eigen::Map<Eigen::VectorXd> &draws)
+{
+    return effective_sample_size_eigen_impl(draws);
+}
+
+
+//' @export
+// [[Rcpp::export]]
+double compute_future_secondary_infections_sum(
+    const Rcpp::NumericVector &N_array, // R array of size ns x ns x (nt + 1) x (nt + 1)
+    const unsigned int &s0, // Index of source location
+    const unsigned int &t0 // Index of source time point
+)
+{
+    Rcpp::NumericVector N_array_copy(N_array); // make a copy to avoid modifying the original R array
+    Eigen::Tensor<double, 4> N = r_to_tensor4(N_array_copy);
+    return TemporalTransmission::compute_N_future_sum(N, s0, t0);
+}
+
+
+//' @export
+// [[Rcpp::export]]
+Eigen::MatrixXd calculate_alpha(
     const Eigen::Map<Eigen::MatrixXd> &dist_scaled,     // ns x ns, pairwise scaled distance matrix
     const Eigen::Map<Eigen::MatrixXd> &mobility_scaled, // ns x ns, pairwise scaled mobility matrix
-    const Eigen::Map<Eigen::VectorXd> &kappa,           // ns x 1, node-specific baseline intensities
     const double &rho_dist,
     const double &rho_mobility
 )
@@ -19,10 +47,9 @@ Eigen::MatrixXd sample_A(
     SpatialNetwork spatial(dist_scaled, mobility_scaled);
     spatial.rho_dist = rho_dist;
     spatial.rho_mobility = rho_mobility;
-    spatial.kappa = kappa;
+    spatial.compute_alpha();
 
-    spatial.sample_A();
-    return spatial.A;
+    return spatial.alpha;
 } // sample_A
 
 
@@ -35,7 +62,6 @@ Rcpp::List infer_spatial_network(
     const unsigned int &nburnin = 1000,
     const unsigned int &nsamples = 1000,
     const unsigned int &nthin = 1,
-    const unsigned int &hmc_block = 2, // 2: 2-block (kappa | rho_dist, rho_mobility) HMC; 1: joint HMC
     const double &step_size_init = 0.1,
     const unsigned int &n_leapfrog_init = 20
 )
@@ -48,7 +74,6 @@ Rcpp::List infer_spatial_network(
         nburnin,
         nsamples,
         nthin,
-        hmc_block,
         step_size_init,
         n_leapfrog_init
     );
@@ -118,7 +143,8 @@ Rcpp::List simulate_network_hawkes(
     const Eigen::MatrixXd &dist_matrix,     // ns x ns, pairwise distance matrix
     const Eigen::MatrixXd &mobility_matrix, // ns x ns, pairwise mobility matrix
     const std::string &fgain = "softplus",
-    const double &W = 0.01,
+    const double &mu = 1.0,
+    const double &W = 0.001,
     const Rcpp::Nullable<Rcpp::List> &spatial_opts = R_NilValue,
     const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue
 )
@@ -144,6 +170,7 @@ Rcpp::List simulate_network_hawkes(
         dist_matrix,
         mobility_matrix,
         fgain,
+        mu,
         W,
         spatial_opts_use,
         lagdist_opts_use
@@ -151,6 +178,13 @@ Rcpp::List simulate_network_hawkes(
 
     return model.simulate();
 } // simulate_network_hawkes
+
+
+void show_vec(const Eigen::VectorXd& v) {
+    Rcpp::NumericVector rv = Rcpp::wrap(v);
+    Rcpp::Rcout << rv << "\n";        // R-style print
+    // or Rcpp::Rcout << v.transpose() << "\n"; // plain Eigen format
+}
 
 
 //' @export
@@ -164,12 +198,8 @@ Rcpp::List infer_network_hawkes(
     const unsigned int &nburnin = 1000,
     const unsigned int &nsamples = 1000,
     const unsigned int &nthin = 1,
-    const double &mh_sd_wt = 1.0,
-    const double &prior_shape_W = 1.0,
-    const double &prior_rate_W = 1.0,
-    const unsigned int &spatial_hmc_block = 2, // 2: 2-block (kappa | rho_dist, rho_mobility) HMC; 1: joint HMC
-    const double &spatial_hmc_step_size = 0.1,
-    const unsigned int &spatial_hmc_nleapfrog = 20
+    const Rcpp::Nullable<Rcpp::List> &mcmc_opts = R_NilValue,
+    const bool &sample_augmented_N = false
 )
 {
     Rcpp::List lagdist_defaults = Rcpp::List::create(
@@ -189,21 +219,14 @@ Rcpp::List infer_network_hawkes(
         lagdist_opts_use
     );
 
+
     auto start = std::chrono::high_resolution_clock::now();
     Rcpp::List output = model.run_mcmc(
-        Y,
-        nburnin,
-        nsamples,
-        nthin,
-        mh_sd_wt,
-        prior_shape_W,
-        prior_rate_W,
-        spatial_hmc_block,
-        spatial_hmc_step_size,
-        spatial_hmc_nleapfrog
+        Y, nburnin, nsamples, nthin, mcmc_opts, sample_augmented_N
     );
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
     Rcpp::Rcout << "\nElapsed time: " << duration.count() << " milliseconds" << std::endl;
+    output["elapsed_time_ms"] = duration.count();
     return output;
 } // infer_network_hawkes
