@@ -24,7 +24,7 @@
 
 
 /**
- * @brief Stochastic spatial network component for discretizeds network Hawkes.
+ * @brief Sparse spatial network controlled by a regularized horseshoe prior.
  * 
  */
 class SpatialNetwork
@@ -160,6 +160,11 @@ public:
     Eigen::VectorXd tau; // ns x 1, horseshoe column-wise variance
     Eigen::VectorXd zeta; // ns x 1, horseshoe column-wise local shrinkage parameters
     Eigen::VectorXd wdiag; // ns x 1, self-exciting weight per location
+
+    // Slab (regularized horseshoe) hyperparameters
+    double slab_c2; // c^2 (slab variance)
+    double slab_df; // a_c (degrees of freedom parameter)
+    double slab_scale; // s (prior scale for slab std dev)
 
     SpatialNetwork()
     {
@@ -1281,10 +1286,12 @@ public:
         const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
         const double &step_size,
         const unsigned int &n_leapfrog,
-        const double &beta_prior_a = 1.0,
-        const double &beta_prior_b = 1.0
+        const double &prior_mean = 0.0,
+        const double &prior_sd = 3.0
     )
     {
+        const double prior_var = prior_sd * prior_sd;
+
         Eigen::VectorXd mass_diag(ns);
         mass_diag.setOnes();
         Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
@@ -1295,13 +1302,9 @@ public:
         Eigen::ArrayXd logit_wdiag = (wdiag_current.array() + EPS).log() - (1.0 - wdiag_current.array() + EPS).log();
         double loglike = 0.0;
         Eigen::VectorXd grad = dloglike_dwdiag(loglike, Y, R_mat, true);
-        Eigen::ArrayXd grad_prior = (beta_prior_a - 1.0) / (wdiag_current.array() + EPS) - (beta_prior_b - 1.0) / (1.0 - wdiag_current.array() + EPS); // prior contribution
-        grad_prior *= wdiag_current.array() * (1.0 - wdiag_current.array()); // Jacobian for logit transform
-        grad.array() += grad_prior;
-
+        grad.array() += - (logit_wdiag - prior_mean) / prior_var; // prior contribution
         grad_norm = grad.norm();
-        double current_logprior = (beta_prior_a - 1.0) * (wdiag_current.array() + EPS).log().sum()
-                                + (beta_prior_b - 1.0) * (1.0 - wdiag_current.array() + EPS).log().sum();
+        double current_logprior = - 0.5 * (logit_wdiag - prior_mean).square().matrix().sum() / prior_var;
         double current_energy = - (loglike + current_logprior);
 
         // Sample momentum
@@ -1323,10 +1326,7 @@ public:
 
             // Compute new gradient
             grad = dloglike_dwdiag(loglike, Y, R_mat, true);
-            grad_prior = (beta_prior_a - 1.0) / (spatial.wdiag.array() + EPS) - (beta_prior_b - 1.0) / (1.0 - spatial.wdiag.array() + EPS); // prior contribution
-            grad_prior *= spatial.wdiag.array() * (1.0 - spatial.wdiag.array()); // Jacobian for logit transform
-            grad.array() += grad_prior;
-
+            grad.array() += - (logit_wdiag - prior_mean) / prior_var; // prior contribution
 
             // Update momentum
             if (lf_step != n_leapfrog - 1)
@@ -1338,8 +1338,7 @@ public:
         momentum += 0.5 * step_size * grad;
         momentum = -momentum; // Negate momentum to make proposal symmetric
 
-        double proposed_logprior = (beta_prior_a - 1.0) * (spatial.wdiag.array() + EPS).log().sum()
-                                + (beta_prior_b - 1.0) * (1.0 - spatial.wdiag.array() + EPS).log().sum();
+        double proposed_logprior = - 0.5 * (logit_wdiag - prior_mean).square().matrix().sum() / prior_var;
         double proposed_energy = - (loglike + proposed_logprior);
         double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
 
@@ -2074,9 +2073,9 @@ public:
 
         // Infer all unknown parameters by default
         Prior wt_prior; wt_prior.infer = true; wt_prior.mh_sd = 1.0;
-        Prior static_params_prior("gaussian", 0.0, 10.0, true); // prior for static parameters
-        Prior hs_theta_prior("gaussian", 0.0, 10.0, true); // prior for horseshoe theta
-        Prior wdiag_prior("beta", 1.0, 1.0, true); // prior wdiag, self-exciting weight
+        Prior static_params_prior("gaussian", 0.0, 3.0, true); // prior for log(static parameters)
+        Prior hs_theta_prior("gaussian", 0.0, 3.0, true); // prior for horseshoe theta
+        Prior wdiag_prior("gaussian", 0.0, 3.0, true); // prior for logit(wdiag), self-exciting weight
         bool hmc_include_W = false;
 
         if (mcmc_opts.isNotNull())
