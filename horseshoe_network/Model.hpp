@@ -1,6 +1,6 @@
 #pragma once
-#ifndef MODEL_H
-#define MODEL_H
+#ifndef MODEL_HPP
+#define MODEL_HPP
 
 #include <RcppEigen.h>
 #include <Eigen/Dense>
@@ -31,6 +31,8 @@ class SpatialNetwork
 {
 private:
     Eigen::Index ns = 0; // number of spatial locations
+    double mean_dist = 0.0;
+    double mean_log_mobility = 0.0;
 
     /**
      * @brief Sample a column of the spatial network A
@@ -72,6 +74,77 @@ private:
     } // sample_A_col
 
 
+    /**
+     * @brief Compute a column of the spatial network alpha
+     * 
+     * @param k Eigen::Index, source location index
+     * @return Eigen::VectorXd 
+     */
+    void initialize_horseshoe_random()
+    {
+        theta.resize(ns, ns);
+        gamma.resize(ns, ns);
+        delta.resize(ns, ns);
+        tau.resize(ns);
+        zeta.resize(ns);
+        wdiag.resize(ns);
+
+        double zz = 1.0 / R::rgamma(0.5, 1.0);
+        double tt = 1.0 / R::rgamma(0.5, 1.0 / zz);
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        { // Loop over source locations (columns)
+            if (shared_tau)
+            {
+                tau(k) = tt;
+                zeta(k) = zz;
+            }
+            else
+            {
+                zeta(k) = 1.0 / R::rgamma(0.5, 1.0);
+                tau(k) = 1.0 / R::rgamma(0.5, 1.0 / zeta(k));
+            }
+
+            wdiag(k) = R::rbeta(1.0, 1.0); // self-exciting weight
+            for (Eigen::Index s = 0; s < ns; s++)
+            { // Loop over destination locations (rows)
+                delta(s, k) = 1.0 / R::rgamma(0.5, 1.0);
+                gamma(s, k) = 1.0 / R::rgamma(0.5, 1.0 / delta(s, k));
+                if (s == k)
+                {
+                    theta(s, k) = 0.0;
+                }
+                else
+                {
+                    theta(s, k) = R::rnorm(0.0, std::sqrt(tau(k) * gamma(s, k)));
+                }
+            } // for destination s given source k
+
+            double th_mean = theta.col(k).array().sum() / static_cast<double>(ns - 1);
+            theta.col(k) = theta.col(k).array() - th_mean; // center theta column
+            theta(k, k) = 0.0; // ensure diagonal is zero
+        } // for source k
+    } // initialize_horseshoe_random
+
+
+    void initialize_horseshoe_zero()
+    {
+        theta.resize(ns, ns);
+        gamma.resize(ns, ns);
+        delta.resize(ns, ns);
+        tau.resize(ns);
+        zeta.resize(ns);
+        wdiag.resize(ns);
+
+        theta.setZero();
+        gamma.setOnes();
+        delta.setOnes();
+        tau.setOnes();
+        zeta.setOnes();
+        wdiag.setOnes();
+    } // initialize_horseshoe_zero
+
+
 public:
     Eigen::MatrixXd dist; // ns x ns, pairwise scaled distance matrix
     Eigen::MatrixXd log_mobility; // ns x ns, pairwise scaled mobility matrix
@@ -80,10 +153,23 @@ public:
     double rho_dist = 1.0; // distance decay parameter
     double rho_mobility = 1.0; // mobility scaling parameter
 
+    bool shared_tau = true; // If all columns share the same tau
+    Eigen::MatrixXd theta; // ns x ns, horseshoe component for spatial network
+    Eigen::MatrixXd gamma; // ns x ns, horseshoe element-wise variance
+    Eigen::MatrixXd delta; // ns x ns, horseshoe local shrinkage parameters
+    Eigen::VectorXd tau; // ns x 1, horseshoe column-wise variance
+    Eigen::VectorXd zeta; // ns x 1, horseshoe column-wise local shrinkage parameters
+    Eigen::VectorXd wdiag; // ns x 1, self-exciting weight per location
+
     SpatialNetwork()
     {
         ns = 1;
+        shared_tau = true;
+
+        initialize_horseshoe_zero();
+
         alpha.resize(ns, ns);
+        // kappa.resize(ns);
         for (Eigen::Index k = 0; k < ns; k++)
         { // Loop over source locations
             alpha.col(k) = compute_alpha_col(k);
@@ -95,17 +181,32 @@ public:
     SpatialNetwork(
         const Eigen::MatrixXd &dist_scaled_in, // ns x ns, pairwise scaled distance matrix
         const Eigen::MatrixXd &mobility_scaled_in, // ns x ns, pairwise scaled mobility matrix
+        const bool &shared_tau_in = true,
         const bool &random_init = false
     )
     {
+        shared_tau = shared_tau_in;
+
         dist = dist_scaled_in;
         log_mobility = mobility_scaled_in.array().max(EPS8).log().matrix();
         ns = dist.rows();
+
+        mean_dist = dist.mean();
+        mean_log_mobility = log_mobility.mean();
+        dist = dist.array() - mean_dist;
+        log_mobility = log_mobility.array() - mean_log_mobility;
 
         if (random_init)
         {
             rho_dist = R::runif(0.0, 2.0);
             rho_mobility = R::runif(0.0, 2.0);
+            initialize_horseshoe_random();
+        }
+        else
+        {
+            rho_dist = 1.0;
+            rho_mobility = 1.0;
+            initialize_horseshoe_zero();
         }
 
         alpha.resize(ns, ns);
@@ -129,6 +230,11 @@ public:
         log_mobility = mobility_scaled_in.array().max(EPS8).log().matrix();
         ns = dist.rows();
 
+        shared_tau = true;
+        if (settings.containsElementNamed("shared_tau"))
+        {
+            shared_tau = Rcpp::as<bool>(settings["shared_tau"]);
+        } // if shared_tau
         if (settings.containsElementNamed("rho_dist"))
         {
             rho_dist = Rcpp::as<double>(settings["rho_dist"]);
@@ -137,6 +243,33 @@ public:
         {
             rho_mobility = Rcpp::as<double>(settings["rho_mobility"]);
         } // if rho_mobility
+
+
+        if (settings.containsElementNamed("theta"))
+        {
+            initialize_horseshoe_zero();
+            Eigen::MatrixXd theta_in = Rcpp::as<Eigen::MatrixXd>(settings["theta"]);
+            if (theta_in.rows() != ns || theta_in.cols() != ns)
+            {
+                Rcpp::stop("Dimension mismatch when initializing horseshoe theta.");
+            }
+            theta = theta_in;
+            for (Eigen::Index k = 0; k < ns; k++)
+            {
+                double th_mean = theta.col(k).array().sum() / static_cast<double>(ns - 1);
+                theta.col(k) = theta.col(k).array() - th_mean; // center theta column
+                theta(k, k) = 0.0; // ensure diagonal is zero
+            }
+        }
+        else
+        {
+            initialize_horseshoe_random();
+        }
+
+        mean_dist = dist.mean();
+        mean_log_mobility = log_mobility.mean();
+        dist = dist.array() - mean_dist;
+        log_mobility = log_mobility.array() - mean_log_mobility;
 
         alpha.resize(ns, ns);
         for (Eigen::Index k = 0; k < ns; k++)
@@ -149,6 +282,7 @@ public:
 
     Eigen::VectorXd compute_alpha_col(const Eigen::Index &k) const
     {
+        Eigen::VectorXd alpha(ns);
         if (ns == 1)
         {
             Eigen::VectorXd alpha(1);
@@ -157,13 +291,34 @@ public:
         }
         else
         {
-            Eigen::VectorXd u(ns); // unnormalized weights
+            Eigen::VectorXd u_k(ns); // unnormalized weights
+            u_k.setZero();
             for (Eigen::Index s = 0; s < ns; s++)
             { // Loop over destinations
-                u(s) = compute_unnormalized_weight(s, k);
+                u_k(s) = compute_unnormalized_weight(s, k);
             } // for s
 
-            return (u / u.sum()).array().max(EPS8);
+            double U_off = u_k.sum(); // u_k(k) == 0
+            if (U_off <= EPS8)
+            {
+                alpha.setZero();
+                alpha(k) = 1.0;
+                return alpha;
+            }
+
+            double w_k = std::min(std::max(wdiag(k), EPS8), 1.0 - EPS8);
+            for (Eigen::Index s = 0; s < ns; ++s)
+            {
+                if (s == k)
+                {
+                    alpha(s) = w_k;
+                }
+                else
+                {
+                    alpha(s) = (1.0 - w_k) * u_k(s) / U_off;
+                }
+            }
+            return alpha;
         }
     } // compute_alpha_col
 
@@ -178,14 +333,30 @@ public:
     }
 
 
+    /**
+     * @brief Calculate unnormalized weight for location pair (s, k) for s != k
+     * 
+     * @param s 
+     * @param k 
+     * @return double 
+     */
     double compute_unnormalized_weight(
         const Eigen::Index &s,
         const Eigen::Index &k
     ) const
     {
-        double v_sk = - rho_dist * dist(s, k) + 
-                      rho_mobility * log_mobility(s, k);
-        return std::exp(std::min(v_sk, UPBND));
+        if (s != k)
+        {
+            double v_sk = -rho_dist * dist(s, k) +
+                          rho_mobility * log_mobility(s, k) +
+                          theta(s, k);
+
+            return std::exp(std::min(v_sk, UPBND));
+        }
+        else
+        {
+            return 0.0;
+        }
     } // compute_unnormalized_weight
 
 
@@ -195,330 +366,155 @@ public:
         const Eigen::VectorXd &u_k // unnormalized weights for source k
     ) const
     {
-        double U_k = std::max(u_k.sum(), EPS8);
-        double deriv = -dist(s, k) * U_k + dist.col(k).dot(u_k);
-        deriv *= u_k(s) / (U_k * U_k);
-        return deriv;
+        if (s != k)
+        {
+            double U_k = u_k.array().sum(); // u_k(k) == 0
+            double deriv = -dist(s, k) * U_k + dist.col(k).dot(u_k);
+            deriv *= u_k(s) / (U_k * U_k);
+            deriv *= 1.0 - wdiag(k);
+            return deriv;
+        }
+        else
+        {
+            // alpha[k, k] does not depend on rho_dist
+            return 0.0;
+        }
     } // dalpha_drho_dist
 
 
     double dalpha_drho_mobility(
         const Eigen::Index &s,
-        const Eigen::Index &k
+        const Eigen::Index &k,
+        const Eigen::VectorXd &u_k // unnormalized weights for source k
     ) const
     {
-        double mean_log_mobility = (log_mobility.col(k).array() * alpha.col(k).array()).matrix().sum();
-        double deriv = log_mobility(s, k) - mean_log_mobility;
-        deriv *= alpha(s, k);
-        return deriv;
-    } // dalpha_drho_mobility
-
-
-    /**
-     * @brief Marginal log-likelihood of secondary infections integrating out adjacency matrix A.
-     * 
-     * @param N 4D tensor of size (ns of destination) x (ns of source) x (nt + 1 of destination) x  (nt + 1 of source), unobserved secondary infections.
-     * @return double 
-     */
-    double marginal_log_likelihood(
-        const Eigen::Tensor<double, 4> &N
-    )
-    {
-        double loglike = 0.0;
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            Eigen::VectorXd alpha = compute_alpha_col(k);
-
-            Eigen::Tensor<double, 0> N_k = N.chip(k, 1).sum();
-            loglike -= Eigen::numext::lgamma(1.0 + N_k(0));
-
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destination locations
-                Eigen::Tensor<double, 0> N_sk = N.chip(s, 0).chip(k, 0).sum();
-                loglike += Eigen::numext::lgamma(alpha(s) + N_sk(0)) - Eigen::numext::lgamma(alpha(s));
-            }
-        }
-
-        return loglike;
-    }
-
-
-    double dloglike_drho_dist(
-        const Eigen::Tensor<double, 4> &N,
-        const bool &add_jacobian = true
-    )
-    {
-        double deriv = 0.0;
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations, indexed by k
-            Eigen::VectorXd u_k(ns); // unnormalized weights
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destination locations, indexed by s
-                u_k(s) = compute_unnormalized_weight(s, k);
-            }
-            double U_k = std::max(u_k.sum(), EPS8);
-            Eigen::VectorXd alpha = (u_k / U_k).array().max(EPS8); // ns x 1, Dirichlet parameters
-
-            double deriv_k = 0.0;
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destination locations, indexed by s
-                Eigen::Tensor<double, 0> N_sk = N.chip(s, 0).chip(k, 0).sum();
-                
-                double dw_drho_dist = - dist(s, k) * U_k + dist.col(k).dot(u_k);
-                dw_drho_dist *= u_k(s) / (U_k * U_k);
-                double dloglike_dalpha = Eigen::numext::digamma(alpha(s) + N_sk(0)) - Eigen::numext::digamma(alpha(s));
-                deriv_k += dloglike_dalpha * dw_drho_dist;
-            } // for s
-
-            deriv += deriv_k;
-        }
-
-        if (add_jacobian)
+        if (s != k)
         {
-            deriv *= rho_dist;
-        }
-
-        return deriv;
-    } // dloglike_drho_dist
-
-
-    double dloglike_drho_mobility(
-        const Eigen::Tensor<double, 4> &N,
-        const bool &add_jacobian = true
-    )
-    {
-        double deriv = 0.0;
-
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations, indexed by k
-            Eigen::VectorXd u_k(ns);
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destination locations, indexed by s
-                u_k(s) = compute_unnormalized_weight(s, k);
-            }
-            double U_k = std::max(u_k.sum(), EPS8);
-            Eigen::VectorXd w_k = u_k / U_k; // ns x 1, normalized weights
-            Eigen::VectorXd alpha = (w_k).array().max(EPS8); // ns x 1, Dirichlet parameters
-
-            double deriv_k = 0.0;
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destination locations, indexed by s
-                Eigen::Tensor<double, 0> N_sk = N.chip(s, 0).chip(k, 0).sum();
-                
-                double mean_log_mobility = (log_mobility.col(k).array() * w_k.array()).matrix().sum();
-                double dw_drho_mobility = log_mobility(s, k) - mean_log_mobility;
-                dw_drho_mobility *= w_k(s);
-                double dloglike_dalpha = Eigen::numext::digamma(alpha(s) + N_sk(0)) - Eigen::numext::digamma(alpha(s));
-                deriv_k += dloglike_dalpha * dw_drho_mobility;
-            } // for s
-
-            deriv += deriv_k;
-        }
-
-        if (add_jacobian)
-        {
-            deriv *= rho_mobility;
-        }
-
-        return deriv;
-    } // dloglike_drho_mobility
-
-
-    /**
-     * @brief HMC sampler to update rho_dist and rho_mobility together. Operate on the unconstrained log(rho_dist) and log(rho_mobility).
-     * 
-     * @param energy_diff double, output energy difference between proposed and current state
-     * @param grad_norm double, output gradient norm at current state
-     * @param N 4D tensor of size (ns of destination) x (ns of source) x (nt + 1 of destination) x  (nt + 1 of source), unobserved secondary infections.
-     * @param step_size 
-     * @param n_leapfrog 
-     * @param prior_mean_logrho double (default 0.0), prior mean of (log(rho_dist), log(rho_mobility))
-     * @param prior_sd_logrho double (default 10.0), prior standard deviation of (log(rho_dist), log(rho_mobility))
-     * @return `double` Metropolis acceptance probability 
-     * @todo Precondition mass matrix
-     */
-    double update_rho(
-        double &energy_diff,
-        double &grad_norm,
-        const Eigen::Tensor<double, 4> &N,
-        const double &step_size,
-        const unsigned int &n_leapfrog,
-        const double &prior_mean_logrho = 0.0,
-        const double &prior_sd_logrho = 10.0
-    )
-    {
-        // HMC sampler to update rho_dist and rho_mobility.
-        const double prior_var_logrho = prior_sd_logrho * prior_sd_logrho;
-        const Eigen::Vector2d mass_diag = Eigen::Vector2d::Constant(1.0);
-        const Eigen::Vector2d inv_mass = mass_diag.cwiseInverse();
-        const Eigen::Vector2d sqrt_mass = mass_diag.array().sqrt();
-
-        // Current state
-        const Eigen::Vector2d rho_current = Eigen::Vector2d(rho_dist, rho_mobility);
-        Eigen::ArrayXd log_rho = rho_current.array().log();
-
-        // Compute current energy
-        double current_loglik = marginal_log_likelihood(N);
-        double current_logprior = - 0.5 * (log_rho - prior_mean_logrho).square().matrix().sum() / prior_var_logrho;
-        double current_energy = -(current_loglik + current_logprior);
-
-        // Sample momentum
-        Eigen::Vector2d momentum = sqrt_mass.array() * Eigen::Vector2d::NullaryExpr(2, []() { return R::rnorm(0.0, 1.0); }).array();
-        double current_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
-
-        // Leapfrog integration
-        Eigen::Vector2d grad;
-        grad(0) = dloglike_drho_dist(N, true);
-        grad(1) = dloglike_drho_mobility(N, true);
-        grad.array() += - (log_rho - prior_mean_logrho) / prior_var_logrho;
-        grad_norm = grad.norm();
-
-        momentum += 0.5 * step_size * grad;
-        for (unsigned int lf_step = 0; lf_step < n_leapfrog; lf_step++)
-        {
-            // Update rho
-            log_rho += step_size * inv_mass.array() * momentum.array();
-            rho_dist = std::exp(log_rho(0));
-            rho_mobility = std::exp(log_rho(1));
-
-            // Update gradient
-            grad(0) = dloglike_drho_dist(N, true);
-            grad(1) = dloglike_drho_mobility(N, true);
-            grad.array() += - (log_rho - prior_mean_logrho) / prior_var_logrho;
-
-            // Update momentum
-            if (lf_step != n_leapfrog - 1)
-            {
-                momentum += step_size * grad;
-            }
-        } // for lf_step
-
-        momentum += 0.5 * step_size * grad;
-        momentum = -momentum; // Negate momentum to make proposal symmetric
-
-        // Compute proposed energy
-        double proposed_loglik = marginal_log_likelihood(N);
-        double proposed_logprior = - 0.5 * (log_rho - prior_mean_logrho).square().matrix().sum() / prior_var_logrho;
-        double proposed_energy = -(proposed_loglik + proposed_logprior);
-        double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
-
-        double H_proposed = proposed_energy + proposed_kinetic;
-        double H_current = current_energy + current_kinetic;
-        energy_diff = H_proposed - H_current;
-
-        // Metropolis acceptance step
-        if (!std::isfinite(energy_diff) || std::abs(energy_diff) > 100.0)
-        {
-            rho_dist = rho_current(0);
-            rho_mobility = rho_current(1);
-            return 0.0;
+            double U_k = u_k.array().sum(); // u_k(k) == 0
+            double mean_log_mobility = (log_mobility.col(k).array() * u_k.array()).matrix().sum();
+            double deriv = log_mobility(s, k) * U_k - mean_log_mobility;
+            deriv *= u_k(s) / (U_k * U_k);
+            deriv *= 1.0 - wdiag(k);
+            return deriv;
         }
         else
         {
-            if (std::log(R::runif(0.0, 1.0)) < -energy_diff)
+            // alpha[k, k] does not depend on rho_mobility
+            return 0.0;
+        }
+    } // dalpha_drho_mobility
+
+
+    double dalpha_dtheta(
+        const Eigen::Index &a_s, // destination location index for alpha
+        const Eigen::Index &th_j, // destination location index for theta
+        const Eigen::Index &k, // source location index for both alpha and theta
+        const Eigen::VectorXd &u_k // unnormalized weights for source k
+    )
+    {
+        if (a_s == k)
+        {
+            return 0.0; // alpha[k, k] does not depend on theta
+        }
+        else
+        {
+            const double U_k = u_k.array().sum(); // u_k(k) == 0
+            double deriv = 0.0;
+            if (a_s == th_j)
             {
-                // accept proposed state
+                deriv = u_k(a_s) / U_k * (1.0 - u_k(a_s) / U_k);
             }
             else
             {
-                // reject and revert to current state
-                rho_dist = rho_current(0);
-                rho_mobility = rho_current(1);
+                deriv = - u_k(a_s) * u_k(th_j) / (U_k * U_k);
             }
-            return std::min(1.0, std::exp(-energy_diff)); // acceptance probability
-        } // end Metropolis step
-    } // update_rho
+
+            deriv *= 1.0 - wdiag(k);
+            return deriv;
+        }
+    } // dalpha_dtheta
 
 
-    Rcpp::List run_mcmc(
-        const Rcpp::NumericVector &N_array, // R array of size ns x ns x (nt + 1) x (nt + 1)
-        const unsigned int &nburnin,
-        const unsigned int &nsamples,
-        const unsigned int &nthin,
-        const double &step_size_init = 0.1,
-        const unsigned int &n_leapfrog_init = 20)
+    double dalpha_dwj(
+        const Eigen::Index &s, // destination location index
+        const Eigen::Index &j, // source location index
+        const Eigen::VectorXd &u_j // unnormalized weights for source j
+    )
     {
-        Eigen::Tensor<double, 4> N = r_to_tensor4(const_cast<Rcpp::NumericVector &>(N_array));
-        const Eigen::Index ntotal = static_cast<Eigen::Index>(nburnin + nsamples * nthin);
-
-        HMCOpts_1d hmc_opts_rho;
-        HMCDiagnostics_1d hmc_diag_rho;
-        DualAveraging_1d da_adapter_rho;
-
-        hmc_opts_rho.leapfrog_step_size = step_size_init;
-        hmc_opts_rho.nleapfrog = n_leapfrog_init;
-        hmc_diag_rho = HMCDiagnostics_1d(static_cast<unsigned int>(ntotal), nburnin, true);
-        da_adapter_rho = DualAveraging_1d(hmc_opts_rho);
-
-        Eigen::VectorXd rho_dist_samples(nsamples);
-        Eigen::VectorXd rho_mobility_samples(nsamples);
-
-        Progress p(static_cast<unsigned int>(ntotal), true);
-        for (Eigen::Index iter = 0; iter < ntotal; iter++)
+        double deriv = 0.0;
+        if (s == j)
         {
+            deriv = 1.0;
+        }
+        else
+        {
+            double U_j = u_j.array().sum(); // u_j(j) == 0
+            deriv = - u_j(s) / U_j;
+        }
 
-            double energy_diff_rho = 0.0;
-            double grad_norm_rho = 0.0;
-            double accept_prob_rho = update_rho(
-                energy_diff_rho,
-                grad_norm_rho,
-                N,
-                hmc_opts_rho.leapfrog_step_size,
-                hmc_opts_rho.nleapfrog);
+        return deriv;
+    } // dalpha_dwj
 
-            // (Optional) Update diagnostics and dual averaging for rho
-            hmc_diag_rho.accept_count += accept_prob_rho;
-            if (hmc_opts_rho.diagnostics)
+
+    void update_horseshoe_params()
+    {
+        // Update gamma, delta, tau, zeta, given theta
+        double tau_rate_shared = 0.0;
+        double zeta_rate_shared = 0.0;
+        Eigen::VectorXd tau_rate(ns);
+        Eigen::VectorXd zeta_rate(ns);
+        tau_rate.setZero();
+        zeta_rate.setZero();
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            tau_rate(k) = 0.0;
+            for (Eigen::Index s = 0; s < ns; s++)
             {
-                hmc_diag_rho.energy_diff(iter) = energy_diff_rho;
-                hmc_diag_rho.grad_norm(iter) = grad_norm_rho;
+                if (s == k)
+                {
+                    continue; // skip diagonal
+                }
+
+                const double th2 = theta(s, k) * theta(s, k);
+
+                double gm_rate = 1.0 / delta(s, k) + 0.5 * th2 / tau(k);
+                gamma(s, k) = 1.0 / R::rgamma(1.0, 1.0 / gm_rate);
+
+                double dl_rate = 1.0 + 1.0 / gamma(s, k);
+                delta(s, k) = 1.0 / R::rgamma(1.0, 1.0 / dl_rate);
+
+                tau_rate(k) += th2 / gamma(s, k);
+            } // for s
+
+            if (shared_tau)
+            {
+                tau_rate_shared += tau_rate(k);
             }
-
-            if (hmc_opts_rho.dual_averaging)
+            else
             {
-                if (iter < nburnin)
-                {
-                    hmc_opts_rho.leapfrog_step_size = da_adapter_rho.update_step_size(accept_prob_rho);
-                }
-                else if (iter == nburnin)
-                {
-                    da_adapter_rho.finalize_leapfrog_step(
-                        hmc_opts_rho.leapfrog_step_size,
-                        hmc_opts_rho.nleapfrog,
-                        hmc_opts_rho.T_target);
-                }
+                tau_rate(k) *= 0.5;
+                tau_rate(k) += 1.0 / zeta(k);
+                tau(k) = 1.0 / R::rgamma(0.5 * (ns - 1) + 0.5, 1.0 / tau_rate(k));
+                zeta(k) = 1.0 / R::rgamma(1.0, 1.0 / (1.0 + 1.0 / tau(k)));
+            }
+        } // for k
 
-                if (hmc_opts_rho.diagnostics)
-                {
-                    hmc_diag_rho.leapfrog_step_size_stored(iter) = hmc_opts_rho.leapfrog_step_size;
-                    hmc_diag_rho.nleapfrog_stored(iter) = hmc_opts_rho.nleapfrog;
-                }
-            } // if dual averaging for rho
-
-            // Store samples after burn-in and thinning
-            if (iter >= nburnin && ((iter - nburnin) % nthin == 0))
+        if (shared_tau)
+        {
+            tau_rate_shared *= 0.5;
+            tau_rate_shared += 1.0 / zeta(0);
+            double tau_shape_shared = 0.5 * ns * (ns - 1) + 0.5;
+            double tau_shared = 1.0 / R::rgamma(tau_shape_shared, 1.0 / tau_rate_shared);
+            double zeta_shared = 1.0 / R::rgamma(1.0, 1.0 / (1.0 + 1.0 / tau_shared));
+            for (Eigen::Index k = 0; k < ns; k++)
             {
-                Eigen::Index sample_idx = (iter - nburnin) / nthin;
-                rho_dist_samples(sample_idx) = rho_dist;
-                rho_mobility_samples(sample_idx) = rho_mobility;
-            } // if store samples
+                tau(k) = tau_shared;
+                zeta(k) = zeta_shared;
+            } // for k
+        } // if shared_tau
+    } // update_horseshoe_params
 
-            p.increment();
-        } // for MCMC iter
-
-        Rcpp::List output = Rcpp::List::create(
-            Rcpp::Named("rho_dist") = rho_dist_samples,        // nsamples x 1
-            Rcpp::Named("rho_mobility") = rho_mobility_samples // nsamples x 1
-        );
-
-        output["hmc"] = Rcpp::List::create(
-            Rcpp::Named("acceptance_rate") = hmc_diag_rho.accept_count / static_cast<double>(ntotal),
-            Rcpp::Named("leapfrog_step_size") = hmc_opts_rho.leapfrog_step_size,
-            Rcpp::Named("n_leapfrog") = hmc_opts_rho.nleapfrog,
-            Rcpp::Named("diagnostics") = hmc_diag_rho.to_list());
-
-        return output;
-    } // run_mcmc
 }; // class SpatialNetwork
 
 
@@ -677,246 +673,6 @@ public:
 
 
     /**
-     * @brief MH sampler to update wt.
-     * 
-     * @param N 
-     * @param Y 
-     * @param mh_sd 
-     * @return `Eigen::MatrixXd` acceptance probabilities for each wt(l, k)
-     */
-    Eigen::MatrixXd update_wt(
-        const Eigen::Tensor<double, 4> &N, // (ns of destination[s]) x (ns of source[k]) x (nt + 1 of destination[t]) x  (nt + 1 of source[l]), unobserved secondary infections
-        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
-        const double &mh_sd = 1.0
-    )
-    {
-        const double W_safe = W + EPS;
-
-        Eigen::MatrixXd accept_prob(nt + 1, ns);
-        accept_prob.setZero();
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            
-            for (Eigen::Index l = 1; l < nt + 1; l++)
-            { // Loop over source times
-                const double wt_old = wt(l, k);
-                Eigen::VectorXd wt_cumsum = cumsum_vec(wt.col(k));
-
-                double mh_prec = 1.0 / W_safe;
-                double mh_mean = 0.0;
-                double logp_old = - 0.5 * (wt_old * wt_old) / W_safe;
-
-                Eigen::VectorXd N_jk_future(nt + 1 - l);
-                for (Eigen::Index j = l; j < nt + 1; j++)
-                {
-                    // N_jk: Total secondary infections produced at location k and time j to all destination locations s in the future times t >= j
-                    N_jk_future(j - l) = compute_N_future_sum(N, k, j);
-
-                    double r_jk = wt_cumsum(j);
-                    double R_jk = GainFunc::psi2hpsi(r_jk, fgain); // R_jk = h(r_jk)
-                    double dR_jk = GainFunc::psi2dhpsi(r_jk, fgain); // dR_jk/d(r_jk)
-
-                    double lambda_jk = R_jk * Y(j, k) + EPS;
-                    double beta_jk = dR_jk * Y(j, k);
-                    mh_prec += beta_jk * beta_jk / lambda_jk;
-
-                    double h0_jk = (R_jk - dR_jk * r_jk) * Y(j, k);
-                    double d_jk = N_jk_future(j - l) - h0_jk - beta_jk * (r_jk - wt_old);
-                    mh_mean += beta_jk * d_jk / lambda_jk;
-                    
-                    logp_old += N_jk_future(j - l) * std::log(lambda_jk) - lambda_jk;
-                } // for time t >= l
-
-                mh_mean /= mh_prec;
-                double mh_step = std::sqrt(1.0 / mh_prec) * mh_sd;
-                double wt_new = R::rnorm(mh_mean, mh_step);
-                double logq_new_given_old = R::dnorm4(wt_new, mh_mean, mh_step, true);
-
-                wt(l, k) = wt_new;
-                wt_cumsum = cumsum_vec(wt.col(k));
-
-                mh_prec = 1.0 / W_safe;
-                mh_mean = 0.0;
-                double logp_new = - 0.5 * (wt_new * wt_new) / W_safe;
-                for (Eigen::Index j = l; j < nt + 1; j++)
-                {
-                    double r_jk = wt_cumsum(j);
-                    double R_jk = GainFunc::psi2hpsi(r_jk, fgain); // R_ts = h(r_ts)
-                    double dR_jk = GainFunc::psi2dhpsi(r_jk, fgain); // dR_jk/d(r_jk)
-
-                    double lambda_jk = R_jk * Y(j, k) + EPS;                    
-                    double beta_jk = dR_jk * Y(j, k);
-                    mh_prec += beta_jk * beta_jk / lambda_jk;
-
-                    double h0_jk = (R_jk - dR_jk * r_jk) * Y(j, k);
-                    double d_jk = N_jk_future(j - l) - h0_jk - beta_jk * (r_jk - wt_new);
-                    mh_mean += beta_jk * d_jk / lambda_jk;
-
-                    logp_new += N_jk_future(j - l) * std::log(lambda_jk) - lambda_jk;
-                } // for time t >= l
-
-                mh_mean /= mh_prec;
-                mh_step = std::sqrt(1.0 / mh_prec) * mh_sd;
-                double logq_old_given_new = R::dnorm4(wt_old, mh_mean, mh_step, true);
-
-                double logratio = std::min(
-                    0.0, logp_new - logp_old + logq_old_given_new - logq_new_given_old
-                );
-                if (!std::isfinite(logratio))
-                {
-                    // reject and revert
-                    wt(l, k) = wt_old;
-                    accept_prob(l, k) = 0.0;
-                }
-                else
-                {
-                    if (std::log(R::runif(0.0, 1.0)) < logratio)
-                    {
-                        // accept
-                        accept_prob(l, k) = 1.0;
-                    }
-                    else
-                    {
-                        // reject and revert
-                        wt(l, k) = wt_old;
-                        accept_prob(l, k) = 0.0;
-                    }
-
-                    // accept_prob(l, k) = std::min(1.0, std::exp(logratio));
-                }
-            } // for source time l
-        } // for source location k
-
-        return accept_prob;
-    } // update_wt
-
-
-    /**
-     * @brief MH sampler to update eta (noncentered disturbance).
-     * 
-     * @param N 
-     * @param Y 
-     * @param mh_sd 
-     * @return `Eigen::MatrixXd` acceptance probabilities for each wt(l, k)
-     * @todo Adaptive mh_sd via simple Robbins-Monro scheme
-     */
-    Eigen::MatrixXd update_wt_by_eta(
-        const Eigen::Tensor<double, 4> &N, // (ns of destination[s]) x (ns of source[k]) x (nt + 1 of destination[t]) x  (nt + 1 of source[l]), unobserved secondary infections
-        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
-        const double &mh_sd = 1.0
-    )
-    {
-        const double W_safe = W + EPS;
-        const double W_sqrt = std::sqrt(W_safe);
-        Eigen::MatrixXd eta = wt / W_sqrt;
-
-        Eigen::MatrixXd accept_prob(nt + 1, ns);
-        accept_prob.setZero();
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            
-            for (Eigen::Index l = 1; l < nt + 1; l++)
-            { // Loop over source times
-                const double eta_old = eta(l, k);
-                Eigen::VectorXd eta_cumsum = cumsum_vec(eta.col(k));
-
-                double mh_prec = 0.0;
-                double mh_mean = 0.0;
-                double logp_old = - 0.5 * eta_old * eta_old;
-
-                Eigen::VectorXd N_jk_future(nt + 1 - l);
-                for (Eigen::Index j = l; j < nt + 1; j++)
-                {
-                    // N_jk: Total secondary infections produced at location k and time j to all destination locations s in the future times t >= j
-                    N_jk_future(j - l) = compute_N_future_sum(N, k, j);
-
-                    double r_jk = W_sqrt * eta_cumsum(j);
-                    double R_jk = GainFunc::psi2hpsi(r_jk, fgain); // R_jk = h(r_jk)
-                    double dR_jk = GainFunc::psi2dhpsi(r_jk, fgain); // dR_jk/d(r_jk)
-
-                    double lambda_jk = R_jk * Y(j, k) + EPS;
-                    double beta_jk = dR_jk * Y(j, k);
-                    mh_prec += beta_jk * beta_jk / lambda_jk;
-
-                    double h0_jk = (R_jk - dR_jk * r_jk) * Y(j, k);
-                    double d_jk = N_jk_future(j - l) - h0_jk - beta_jk * (r_jk - W_sqrt * eta_old);
-                    mh_mean += beta_jk * d_jk / lambda_jk;
-                    
-                    logp_old += N_jk_future(j - l) * std::log(lambda_jk) - lambda_jk;
-                } // for time t >= l
-
-                mh_prec *= W_safe;
-                mh_prec += 1.0;
-                mh_mean /= mh_prec;
-                mh_mean *= W_sqrt;
-                double mh_step = std::sqrt(1.0 / mh_prec) * mh_sd;
-                double eta_new = R::rnorm(mh_mean, mh_step);
-                double logq_new_given_old = R::dnorm4(eta_new, mh_mean, mh_step, true);
-
-                eta(l, k) = eta_new;
-                eta_cumsum = cumsum_vec(eta.col(k));
-
-                mh_prec = 0.0;
-                mh_mean = 0.0;
-                double logp_new = - 0.5 * (eta_new * eta_new);
-                for (Eigen::Index j = l; j < nt + 1; j++)
-                {
-                    double r_jk = W_sqrt * eta_cumsum(j);
-                    double R_jk = GainFunc::psi2hpsi(r_jk, fgain); // R_ts = h(r_ts)
-                    double dR_jk = GainFunc::psi2dhpsi(r_jk, fgain); // dR_jk/d(r_jk)
-
-                    double lambda_jk = R_jk * Y(j, k) + EPS;                    
-                    double beta_jk = dR_jk * Y(j, k);
-                    mh_prec += beta_jk * beta_jk / lambda_jk;
-
-                    double h0_jk = (R_jk - dR_jk * r_jk) * Y(j, k);
-                    double d_jk = N_jk_future(j - l) - h0_jk - beta_jk * (r_jk - W_sqrt * eta_new);
-                    mh_mean += beta_jk * d_jk / lambda_jk;
-
-                    logp_new += N_jk_future(j - l) * std::log(lambda_jk) - lambda_jk;
-                } // for time t >= l
-
-                mh_prec *= W_safe;
-                mh_prec += 1.0;
-                mh_mean /= mh_prec;
-                mh_mean *= W_sqrt;
-                mh_step = std::sqrt(1.0 / mh_prec) * mh_sd;
-                double logq_old_given_new = R::dnorm4(eta_old, mh_mean, mh_step, true);
-
-                double logratio = std::min(
-                    0.0, logp_new - logp_old + logq_old_given_new - logq_new_given_old
-                );
-                if (!std::isfinite(logratio))
-                {
-                    // reject and revert
-                    eta(l, k) = eta_old;
-                    accept_prob(l, k) = 0.0;
-                }
-                else
-                {
-                    if (std::log(R::runif(0.0, 1.0)) < logratio)
-                    {
-                        // accept
-                        accept_prob(l, k) = 1.0;
-                        wt(l, k) = W_sqrt * eta(l, k);
-                    }
-                    else
-                    {
-                        // reject and revert
-                        eta(l, k) = eta_old;
-                        accept_prob(l, k) = 0.0;
-                    }
-
-                    // accept_prob(l, k) = std::min(1.0, std::exp(logratio));
-                }
-            } // for source time l
-        } // for source location k
-
-        return accept_prob;
-    } // update_wt_by_eta
-
-
-    /**
      * @brief Gibbs sampler to update W.
      * 
      * @param prior_shape 
@@ -940,54 +696,6 @@ public:
         return;
     } // update_W
 
-
-    Rcpp::List run_mcmc(
-        const Rcpp::NumericVector &N_array, // R array of size ns x ns x (nt + 1) x (nt + 1)
-        const Eigen::MatrixXd &Y, // matrix of size (nt + 1) x ns
-        const unsigned int &nburnin,
-        const unsigned int &nsamples,
-        const unsigned int &nthin,
-        const double &mh_sd = 1.0,
-        const double &prior_shape_W = 1.0,
-        const double &prior_rate_W = 1.0
-    )
-    {
-        Eigen::Tensor<double, 4> N = r_to_tensor4(const_cast<Rcpp::NumericVector&>(N_array));
-        const Eigen::Index ntotal = static_cast<Eigen::Index>(nburnin + nsamples * nthin);
-
-        Eigen::Tensor<double, 3> wt_samples(nt + 1, ns, nsamples);
-        Eigen::VectorXd W_samples(nsamples);
-        Eigen::MatrixXd wt_accept_prob(nt + 1, ns);
-        wt_accept_prob.setZero();
-
-        Progress p(static_cast<unsigned int>(ntotal), true);
-        for (Eigen::Index iter = 0; iter < ntotal; iter++)
-        {
-            // Update wt
-            Eigen::MatrixXd accept_prob = update_wt(N, Y, mh_sd);
-            wt_accept_prob += accept_prob;
-
-            // // Update W
-            // update_W(prior_shape_W, prior_rate_W);
-
-            // Store samples after burn-in and thinning
-            if (iter >= nburnin && ((iter - nburnin) % nthin == 0))
-            {
-                Eigen::Index sample_idx = (iter - nburnin) / nthin;
-                Eigen::TensorMap<Eigen::Tensor<const double, 2>> wt_map(wt.data(), wt.rows(), wt.cols());
-                wt_samples.chip(sample_idx, 2) = wt_map;
-                W_samples(sample_idx) = W;
-            } // if store samples
-
-            p.increment(); 
-        } // for MCMC iter
-
-        return Rcpp::List::create(
-            Rcpp::Named("wt") = tensor3_to_r(wt_samples), // (nt + 1) x ns x nsamples
-            Rcpp::Named("W") = W_samples, // nsamples x 1
-            Rcpp::Named("wt_accept_prob") = wt_accept_prob / static_cast<double>(ntotal)
-        );
-    } // run_mcmc
 }; // class TemporalTransmission
 
 
@@ -1026,7 +734,8 @@ public:
             Rcpp::Named("par2") = LN_SD2,
             Rcpp::Named("truncated") = true,
             Rcpp::Named("rescaled") = true
-        )
+        ),
+        const bool &shared_tau = true
     )
     {
         ns = dist_matrix.rows();
@@ -1034,7 +743,7 @@ public:
 
         dlag = LagDist(lagdist_opts);
         temporal = TemporalTransmission(ns, nt, fgain_);
-        spatial = SpatialNetwork(dist_matrix, mobility_matrix, true);
+        spatial = SpatialNetwork(dist_matrix, mobility_matrix, shared_tau);
 
         sample_N(Y);
 
@@ -1117,6 +826,547 @@ public:
     } // compute_intensity
 
 
+    Eigen::VectorXd dloglike_dtheta_col(
+        double &loglike,
+        const Eigen::Index &k, // column index (source location) of theta to compute derivative for
+        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
+        const Eigen::MatrixXd &R_mat // (nt + 1) x ns
+    )
+    {
+        Eigen::MatrixXd u_mat(ns, ns);
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            for (Eigen::Index k = 0; k < ns; k++)
+            {
+                u_mat(s, k) = spatial.compute_unnormalized_weight(s, k);
+            } // for source location k
+        } // for destination location s
+
+        double W_safe = std::max(temporal.W, EPS);
+        double W_sqrt = std::sqrt(W_safe);
+
+        Eigen::MatrixXd lambda_mat(nt + 1, ns);
+        Eigen::MatrixXd dloglike_dlambda_mat(nt + 1, ns);
+        loglike = 0.0;
+        for (Eigen::Index s = 0; s < ns; s++)
+        { // for destination location s
+            for (Eigen::Index t = 0; t < nt + 1; t++)
+            { // for destination time t
+                double lambda_st = mu;
+                for (Eigen::Index kk = 0; kk < ns; kk++)
+                {
+                    for (Eigen::Index l = 0; l < t; l++)
+                    {
+                        if (t - l <= static_cast<Eigen::Index>(dlag.Fphi.size()))
+                        {
+                            double coef = R_mat(l, kk) * dlag.Fphi(t - l - 1) * Y(l, kk);
+                            lambda_st += spatial.alpha(s, kk) * coef;
+                        }
+                    } // for source time l < t
+                } // for source location k
+
+                lambda_mat(t, s) = std::max(lambda_st, EPS);
+                dloglike_dlambda_mat(t, s) = Y(t, s) / lambda_mat(t, s) - 1.0;
+                loglike += Y(t, s) * std::log(lambda_mat(t, s)) - lambda_mat(t, s);
+            } // for time t
+        } // for destination location s
+
+        Eigen::MatrixXd dlambda_st_dalpha_sk(nt + 1, ns);
+        dlambda_st_dalpha_sk.setZero();
+        for (Eigen::Index s = 0; s < ns; s++)
+        { // for destination location s
+            for (Eigen::Index t = 0; t < nt + 1; t++)
+            { // for destination time t
+                for (Eigen::Index l = 0; l < t; l++)
+                {
+                    if (t - l <= static_cast<Eigen::Index>(dlag.Fphi.size()))
+                    {
+                        dlambda_st_dalpha_sk(t, s) += R_mat(l, k) * dlag.Fphi(t - l - 1) * Y(l, k);
+                    }
+                } // for source time l < t
+            } // for time t
+        } // for destination location s
+
+        Eigen::VectorXd grad(ns);
+        grad.setZero();
+        for (Eigen::Index j = 0; j < ns; j++)
+        { // for destination location j, calculate grad(j): derivative w.r.t. theta[j, k]
+            for (Eigen::Index s = 0; s < ns; s++)
+            { // loop over destination location s
+                double dalpha_sk_dtheta_jk = spatial.dalpha_dtheta(s, j, k, u_mat.col(k));
+                for (Eigen::Index t = 0; t < nt + 1; t++)
+                {
+                    grad(j) += dloglike_dlambda_mat(t, s) * dlambda_st_dalpha_sk(t, s) * dalpha_sk_dtheta_jk;
+                }
+            } // for destination location s
+        } // for destination location j
+
+        return grad;
+    } // dloglike_dtheta_col
+
+
+    // double update_theta_col(
+    //     double &energy_diff,
+    //     double &grad_norm,
+    //     const Eigen::Index &k, // column index (source location) of theta to update
+    //     const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
+    //     const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
+    //     const double &step_size,
+    //     const unsigned int &n_leapfrog
+    // )
+    // {
+    //     Eigen::VectorXd prior_var = spatial.tau(k) * spatial.gamma.col(k); // ns x 1
+    //     Eigen::VectorXd mass_diag(ns);
+    //     mass_diag.setOnes();
+    //     Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
+    //     Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
+
+    //     // Current state
+    //     Eigen::VectorXd theta_current = spatial.theta.col(k); // ns x 1
+    //     double loglike = 0.0;
+    //     Eigen::VectorXd grad = dloglike_dtheta_col(loglike, k, Y, R_mat);
+    //     grad += - theta_current.cwiseQuotient(prior_var); // prior contribution
+    //     grad_norm = grad.norm();
+    //     double current_logprior = - 0.5 * theta_current.cwiseProduct(theta_current.cwiseQuotient(prior_var)).sum();
+    //     double current_energy = - (loglike + current_logprior);
+
+    //     // Sample momentum
+    //     Eigen::VectorXd momentum(ns);
+    //     for (Eigen::Index i = 0; i < momentum.size(); i++)
+    //     {
+    //         momentum(i) = sqrt_mass(i) * R::rnorm(0.0, 1.0);
+    //     }
+    //     double current_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+    //     // Leapfrog integration
+    //     momentum += 0.5 * step_size * grad;
+    //     for (unsigned int lf_step = 0; lf_step < n_leapfrog; lf_step++)
+    //     {
+    //         // Update theta
+    //         spatial.theta.col(k) += step_size * momentum.cwiseProduct(inv_mass);
+    //         spatial.alpha.col(k) = spatial.compute_alpha_col(k); // update alpha after theta is updated
+
+    //         // Compute new gradient
+    //         grad = dloglike_dtheta_col(loglike, k, Y, R_mat);
+    //         grad += - spatial.theta.col(k).cwiseQuotient(prior_var); // prior contribution
+
+    //         // Update momentum
+    //         if (lf_step != n_leapfrog - 1)
+    //         {
+    //             momentum += step_size * grad;
+    //         }
+    //     } // for leapfrog steps
+
+    //     momentum += 0.5 * step_size * grad;
+    //     momentum = -momentum; // Negate momentum to make proposal symmetric
+
+    //     double proposed_logprior = - 0.5 * spatial.theta.col(k).cwiseProduct(spatial.theta.col(k).cwiseQuotient(prior_var)).sum();
+    //     double proposed_energy = - (loglike + proposed_logprior);
+    //     double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+    //     double H_proposed = proposed_energy + proposed_kinetic;
+    //     double H_current = current_energy + current_kinetic;
+    //     energy_diff = H_proposed - H_current;
+
+    //     // Metropolis-Hastings acceptance step
+    //     double accept_prob;
+    //     if (std::isfinite(energy_diff) && std::abs(energy_diff) < 100.0 && std::log(R::runif(0.0, 1.0)) < -energy_diff)
+    //     {
+    //         // accept proposed state
+    //         accept_prob = std::min(1.0, std::exp(-energy_diff));
+    //     }
+    //     else
+    //     {
+    //         accept_prob = 0.0;
+
+    //         // Revert to current state
+    //         spatial.theta.col(k) = theta_current;
+    //         spatial.alpha.col(k) = spatial.compute_alpha_col(k);
+    //     } // end Metropolis step
+
+    //     return accept_prob;
+    // } // update_theta_col
+
+    double update_theta_col(
+        double &energy_diff,
+        double &grad_norm,
+        const Eigen::Index &k,
+        const Eigen::MatrixXd &Y,
+        const Eigen::MatrixXd &R_mat,
+        const double &step_size,
+        const unsigned int &n_leapfrog)
+    {
+        const Eigen::Index S = ns; // number of locations
+        // Build list of off-diagonal indices in column k
+        std::vector<Eigen::Index> off_idx;
+        off_idx.reserve(S - 1);
+        for (Eigen::Index s = 0; s < S; ++s)
+        {
+            if (s == k)
+                continue;
+            off_idx.push_back(s);
+        }
+        // Choose reference index r among off-diagonals
+        const Eigen::Index r = off_idx[0];
+
+        // Free dimension m = (S-1) - 1 = S-2
+        const Eigen::Index m = static_cast<Eigen::Index>(off_idx.size()) - 1;
+
+        // Extract current theta column
+        Eigen::VectorXd theta_col = spatial.theta.col(k);
+        // Make sure constraint holds (re-center off-diagonals just in case)
+        double sum_off = 0.0;
+        for (Eigen::Index idx = 0; idx < off_idx.size(); ++idx)
+        {
+            sum_off += theta_col(off_idx[idx]);
+        }
+        double mean_off = sum_off / static_cast<double>(off_idx.size());
+        for (Eigen::Index idx = 0; idx < off_idx.size(); ++idx)
+        {
+            theta_col(off_idx[idx]) -= mean_off;
+        }
+        theta_col(k) = 0.0;
+
+        // Build free vector z from theta_col (drop the reference r)
+        Eigen::VectorXd z(m);
+        {
+            Eigen::Index j = 0;
+            for (Eigen::Index idx = 0; idx < off_idx.size(); ++idx)
+            {
+                Eigen::Index s = off_idx[idx];
+                if (s == r)
+                    continue;
+                z(j++) = theta_col(s);
+            }
+        }
+
+        // Helper lambdas: map z -> theta_col and compute logpost + grad_z
+        auto set_theta_from_z = [&](const Eigen::VectorXd &z_in,
+                                    Eigen::VectorXd &theta_out)
+        {
+            // Fill off-diagonals except r from z
+            double sum_except_r = 0.0;
+            Eigen::Index j = 0;
+            for (Eigen::Index idx = 0; idx < off_idx.size(); ++idx)
+            {
+                Eigen::Index s = off_idx[idx];
+                if (s == r)
+                    continue;
+                double val = z_in(j++);
+                theta_out(s) = val;
+                sum_except_r += val;
+            }
+            // Reference entry chosen to enforce sum zero
+            theta_out(r) = -sum_except_r;
+            // Diagonal fixed at zero
+            theta_out(k) = 0.0;
+        };
+
+        auto eval_logpost_and_grad_z =
+            [&](const Eigen::VectorXd &z_in,
+                double &logpost,
+                Eigen::VectorXd &grad_z)
+        {
+            // 1) Map z -> theta_col
+            set_theta_from_z(z_in, theta_col);
+            spatial.theta.col(k) = theta_col;
+            spatial.alpha.col(k) = spatial.compute_alpha_col(k); // update alpha
+
+            // 2) Likelihood gradient w.r.t. theta (existing code)
+            double loglike = 0.0;
+            Eigen::VectorXd grad_theta = dloglike_dtheta_col(loglike, k, Y, R_mat);
+
+            // 3) Add horseshoe prior gradient w.r.t. theta
+            Eigen::VectorXd prior_var = spatial.tau(k) * spatial.gamma.col(k); // ns
+            for (Eigen::Index s = 0; s < S; ++s)
+            {
+                if (s == k)
+                {
+                    // diagonal has no horseshoe prior in practice; force 0
+                    grad_theta(s) += 0.0;
+                }
+                else
+                {
+                    grad_theta(s) += -theta_col(s) / std::max(prior_var(s), EPS);
+                }
+            }
+            double logprior = 0.0;
+            for (Eigen::Index s = 0; s < S; ++s)
+            {
+                if (s == k)
+                    continue;
+                double v = theta_col(s);
+                double var = std::max(prior_var(s), EPS);
+                logprior += -0.5 * v * v / var;
+            }
+
+            // 4) Chain rule: grad_z = B^T * grad_theta
+            // grad_z_j = grad_theta(s_j) - grad_theta(r)
+            grad_z.setZero(m);
+            {
+                Eigen::Index j = 0;
+                for (Eigen::Index idx = 0; idx < off_idx.size(); ++idx)
+                {
+                    Eigen::Index s = off_idx[idx];
+                    if (s == r)
+                        continue;
+                    grad_z(j++) = grad_theta(s) - grad_theta(r);
+                }
+            }
+
+            grad_norm = grad_z.norm();
+            logpost = loglike + logprior;
+        };
+
+        // Mass matrix for z
+        Eigen::VectorXd mass_diag = Eigen::VectorXd::Ones(m);
+        Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
+        Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
+
+        // Evaluate at current z
+        double current_logpost = 0.0;
+        Eigen::VectorXd grad_z(m);
+        eval_logpost_and_grad_z(z, current_logpost, grad_z);
+
+        double current_energy = -current_logpost;
+
+        // Sample momentum
+        Eigen::VectorXd momentum(m);
+        for (Eigen::Index i = 0; i < m; ++i)
+        {
+            momentum(i) = sqrt_mass(i) * R::rnorm(0.0, 1.0);
+        }
+        double current_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+        // Make a copy of current state
+        Eigen::VectorXd z_current = z;
+        Eigen::VectorXd mom_current = momentum;
+
+        // Leapfrog: first half-step in momentum
+        momentum += 0.5 * step_size * grad_z;
+
+        // Leapfrog integration
+        for (unsigned int lf_step = 0; lf_step < n_leapfrog; ++lf_step)
+        {
+            // Position update
+            z += step_size * momentum.cwiseProduct(inv_mass);
+
+            // Gradient at new position (except after last step)
+            double logpost_new;
+            Eigen::VectorXd grad_z_new(m);
+            eval_logpost_and_grad_z(z, logpost_new, grad_z_new);
+
+            if (lf_step != n_leapfrog - 1)
+            {
+                momentum += step_size * grad_z_new;
+            }
+            else
+            {
+                // final half-step
+                momentum += 0.5 * step_size * grad_z_new;
+            }
+
+            // store for acceptance
+            if (lf_step == n_leapfrog - 1)
+            {
+                grad_z = grad_z_new;
+                current_logpost = logpost_new;
+            }
+        }
+
+        // Negate momentum for symmetry
+        momentum = -momentum;
+
+        // Compute proposed energy
+        double proposed_energy = -current_logpost;
+        double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+        double H_proposed = proposed_energy + proposed_kinetic;
+        double H_current = current_energy + current_kinetic;
+        energy_diff = H_proposed - H_current;
+
+        double accept_prob = 0.0;
+        if (std::isfinite(energy_diff) &&
+            std::abs(energy_diff) < 100.0 &&
+            std::log(R::runif(0.0, 1.0)) < -energy_diff)
+        {
+            accept_prob = std::min(1.0, std::exp(-energy_diff));
+            // accept: theta_col has already been set via last eval
+            spatial.theta.col(k) = theta_col;
+            spatial.alpha.col(k) = spatial.compute_alpha_col(k);
+        }
+        else
+        {
+            // reject: revert z and theta
+            accept_prob = 0.0;
+            z = z_current;
+            // rebuild theta from old z
+            set_theta_from_z(z, theta_col);
+            spatial.theta.col(k) = theta_col;
+            spatial.alpha.col(k) = spatial.compute_alpha_col(k);
+        }
+
+        return accept_prob;
+    } // update_theta_col
+
+
+    Eigen::VectorXd dloglike_dwdiag(
+        double &loglike,
+        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
+        const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
+        const bool &add_jacobian = true
+    )
+    {
+        Eigen::MatrixXd u_mat(ns, ns);
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            for (Eigen::Index k = 0; k < ns; k++)
+            {
+                u_mat(s, k) = spatial.compute_unnormalized_weight(s, k);
+            } // for source location k
+        } // for destination location s
+
+        Eigen::VectorXd deriv_wdiag(ns);
+        deriv_wdiag.setZero();
+        loglike = 0.0;
+        for (Eigen::Index t = 0; t < nt + 1; t++)
+        { // for destination time t
+            for (Eigen::Index s = 0; s < ns; s++)
+            { // for destination location s
+
+                double lambda_st = mu;
+                Eigen::VectorXd coef_sum(ns);
+                coef_sum.setZero();
+                for (Eigen::Index k = 0; k < ns; k++)
+                {
+                    for (Eigen::Index l = 0; l < t; l++)
+                    {
+                        if (t - l <= static_cast<Eigen::Index>(dlag.Fphi.size()))
+                        {
+                            double coef = R_mat(l, k) * dlag.Fphi(t - l - 1) * Y(l, k);
+                            coef_sum(k) += coef;
+                            lambda_st += spatial.alpha(s, k) * coef;
+                        }
+                    } // for source time l < t
+                } // for source location k
+
+                lambda_st = std::max(lambda_st, EPS);
+                double dloglike_dlambda_st = Y(t, s) / lambda_st - 1.0;
+                loglike += Y(t, s) * std::log(lambda_st) - lambda_st;
+
+                for (Eigen::Index j = 0; j < ns; j++)
+                {
+                    double dalpha_sk_dwj = spatial.dalpha_dwj(s, j, u_mat.col(j));
+                    deriv_wdiag(j) += dloglike_dlambda_st * dalpha_sk_dwj * coef_sum(j);
+                }
+            } // for destination location s
+        } // for time t
+
+        if (add_jacobian)
+        {
+            for (Eigen::Index j = 0; j < ns; j++)
+            {
+                deriv_wdiag(j) *= spatial.wdiag(j) * (1.0 - spatial.wdiag(j)); // Jacobian for logit transform
+            }
+        } // if add_jacobian
+
+        return deriv_wdiag;
+    } // dloglike_dwdiag
+
+
+    double update_wdiag(
+        double &energy_diff,
+        double &grad_norm,
+        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
+        const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
+        const double &step_size,
+        const unsigned int &n_leapfrog,
+        const double &beta_prior_a = 1.0,
+        const double &beta_prior_b = 1.0
+    )
+    {
+        Eigen::VectorXd mass_diag(ns);
+        mass_diag.setOnes();
+        Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
+        Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
+
+        // Current state
+        Eigen::VectorXd wdiag_current = spatial.wdiag; // ns x 1
+        Eigen::ArrayXd logit_wdiag = (wdiag_current.array() + EPS).log() - (1.0 - wdiag_current.array() + EPS).log();
+        double loglike = 0.0;
+        Eigen::VectorXd grad = dloglike_dwdiag(loglike, Y, R_mat, true);
+        Eigen::ArrayXd grad_prior = (beta_prior_a - 1.0) / (wdiag_current.array() + EPS) - (beta_prior_b - 1.0) / (1.0 - wdiag_current.array() + EPS); // prior contribution
+        grad_prior *= wdiag_current.array() * (1.0 - wdiag_current.array()); // Jacobian for logit transform
+        grad.array() += grad_prior;
+
+        grad_norm = grad.norm();
+        double current_logprior = (beta_prior_a - 1.0) * (wdiag_current.array() + EPS).log().sum()
+                                + (beta_prior_b - 1.0) * (1.0 - wdiag_current.array() + EPS).log().sum();
+        double current_energy = - (loglike + current_logprior);
+
+        // Sample momentum
+        Eigen::VectorXd momentum(ns);
+        for (Eigen::Index i = 0; i < momentum.size(); i++)
+        {
+            momentum(i) = sqrt_mass(i) * R::rnorm(0.0, 1.0);
+        }
+        double current_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+        // Leapfrog integration
+        momentum += 0.5 * step_size * grad;
+        for (unsigned int lf_step = 0; lf_step < n_leapfrog; lf_step++)
+        {
+            // Update logit_wdiag
+            logit_wdiag += step_size * momentum.cwiseProduct(inv_mass).array();
+            spatial.wdiag = (1.0 / (1.0 + (-logit_wdiag).exp())).matrix(); // inverse logit transform
+            spatial.compute_alpha(); // update alpha after wdiag is updated
+
+            // Compute new gradient
+            grad = dloglike_dwdiag(loglike, Y, R_mat, true);
+            grad_prior = (beta_prior_a - 1.0) / (spatial.wdiag.array() + EPS) - (beta_prior_b - 1.0) / (1.0 - spatial.wdiag.array() + EPS); // prior contribution
+            grad_prior *= spatial.wdiag.array() * (1.0 - spatial.wdiag.array()); // Jacobian for logit transform
+            grad.array() += grad_prior;
+
+
+            // Update momentum
+            if (lf_step != n_leapfrog - 1)
+            {
+                momentum += step_size * grad;
+            }
+        } // for leapfrog steps
+
+        momentum += 0.5 * step_size * grad;
+        momentum = -momentum; // Negate momentum to make proposal symmetric
+
+        double proposed_logprior = (beta_prior_a - 1.0) * (spatial.wdiag.array() + EPS).log().sum()
+                                + (beta_prior_b - 1.0) * (1.0 - spatial.wdiag.array() + EPS).log().sum();
+        double proposed_energy = - (loglike + proposed_logprior);
+        double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+        double H_proposed = proposed_energy + proposed_kinetic;
+        double H_current = current_energy + current_kinetic;
+        energy_diff = H_proposed - H_current;
+
+        // Metropolis acceptance step
+        double accept_prob;
+        if (std::isfinite(energy_diff) && std::abs(energy_diff) < 100.0 && std::log(R::runif(0.0, 1.0)) < -energy_diff)
+        {
+            // accept proposed state
+            accept_prob = std::min(1.0, std::exp(-energy_diff));
+        }
+        else
+        {
+            accept_prob = 0.0;
+
+            // Revert to current state
+            spatial.wdiag = wdiag_current;
+            spatial.compute_alpha();
+        } // end Metropolis step
+
+        return accept_prob;
+    } // update_wdiag
+
+
     Eigen::VectorXd dloglike_dparams_collapsed(
         double &loglike,
         const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
@@ -1152,7 +1402,7 @@ public:
                 double dlambda_st_drho_dist = 0.0;
                 for (Eigen::Index k = 0; k < ns; k++)
                 {
-                    double dalpha_sk_drho_mobility = spatial.dalpha_drho_mobility(s, k);
+                    double dalpha_sk_drho_mobility = spatial.dalpha_drho_mobility(s, k, u_mat.col(k));
                     double dalpha_sk_drho_dist = spatial.dalpha_drho_dist(s, k, u_mat.col(k));
                     for (Eigen::Index l = 0; l < t; l++)
                     {
@@ -1173,7 +1423,6 @@ public:
                 deriv_mu += dloglike_dlambda_st;
 
                 loglike += Y(t, s) * std::log(lambda_st) - lambda_st;
-
                 if (include_W && t > 0)
                 {
                     deriv_W += - 0.5 / W_safe + 0.5 * (temporal.wt(t, s) * temporal.wt(t, s)) / (W_safe * W_safe);
@@ -1191,8 +1440,8 @@ public:
             if (include_W)
             {
                 deriv_W *= temporal.W;
-            }
-        }
+            } // if include_W
+        } // if add_jacobian
 
         if (include_W)
         {
@@ -1202,7 +1451,7 @@ public:
         {
             return Eigen::Vector3d(deriv_rho_mobility, deriv_rho_dist, deriv_mu);
         }
-    } // dloglike_drho_dist_collapsed
+    } // dloglike_dparams_collapsed
 
 
     double update_params_collapsed(
@@ -1219,17 +1468,8 @@ public:
     {
         const double prior_var = prior_sd * prior_sd;
         Eigen::MatrixXd R_mat = temporal.compute_Rt(); // (nt + 1) x ns
-        Eigen::VectorXd inv_mass, sqrt_mass;
-        if (include_W)
-        {
-            inv_mass = mass_diag.cwiseInverse();
-            sqrt_mass = mass_diag.array().sqrt();
-        }
-        else
-        {
-            inv_mass = mass_diag.cwiseInverse();
-            sqrt_mass = mass_diag.array().sqrt();
-        }
+        Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
+        Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
 
         // Current state
         Eigen::VectorXd params_current;
@@ -1250,9 +1490,9 @@ public:
                 mu
             );
         }
-        Eigen::ArrayXd log_params = params_current.array().log();
 
         // Compute current energy and gradiant
+        Eigen::ArrayXd log_params = params_current.array().log();
         double loglike = 0.0;
         Eigen::VectorXd grad = dloglike_dparams_collapsed(
             loglike, Y, R_mat, true, include_W 
@@ -1449,13 +1689,21 @@ public:
         );
 
         return Rcpp::List::create(
-            Rcpp::Named("Y") = Y, // (nt + 1) x ns
-            Rcpp::Named("N") = tensor4_to_r(N), // ns x ns x (nt + 1) x (nt + 1)
-            Rcpp::Named("N0") = N0, // (nt + 1) x ns
+            Rcpp::Named("Y") = Y,                 // (nt + 1) x ns
+            Rcpp::Named("N") = tensor4_to_r(N),   // ns x ns x (nt + 1) x (nt + 1)
+            Rcpp::Named("N0") = N0,               // (nt + 1) x ns
             Rcpp::Named("alpha") = spatial.alpha, // ns x ns
-            Rcpp::Named("wt") = temporal.wt, // (nt + 1) x ns
-            Rcpp::Named("Rt") = Rt, // (nt + 1) x ns
-            Rcpp::Named("params") = params_list
+            Rcpp::Named("wt") = temporal.wt,      // (nt + 1) x ns
+            Rcpp::Named("Rt") = Rt,               // (nt + 1) x ns
+            Rcpp::Named("params") = params_list,
+            Rcpp::Named("horseshoe") = Rcpp::List::create(
+                Rcpp::Named("theta") = spatial.theta,
+                Rcpp::Named("gamma") = spatial.gamma,
+                Rcpp::Named("delta") = spatial.delta,
+                Rcpp::Named("tau") = spatial.tau,
+                Rcpp::Named("zeta") = spatial.zeta,
+                Rcpp::Named("wdiag") = spatial.wdiag
+            )
         );
 
     } // simulate
@@ -1826,12 +2074,10 @@ public:
 
         // Infer all unknown parameters by default
         Prior wt_prior; wt_prior.infer = true; wt_prior.mh_sd = 1.0;
-        bool infer_params = true;
+        Prior static_params_prior("gaussian", 0.0, 10.0, true); // prior for static parameters
+        Prior hs_theta_prior("gaussian", 0.0, 10.0, true); // prior for horseshoe theta
+        Prior wdiag_prior("beta", 1.0, 1.0, true); // prior wdiag, self-exciting weight
         bool hmc_include_W = false;
-        double hmc_step_size_init = 0.1;
-        unsigned int hmc_nleapfrog_init = 20;
-        double prior_mean = 0.0;
-        double prior_sd = 10.0;
 
         if (mcmc_opts.isNotNull())
         {
@@ -1850,9 +2096,10 @@ public:
             if (mcmc_opts_list.containsElementNamed("params"))
             {
                 Rcpp::List params_opts = mcmc_opts_list["params"];
-                if (params_opts.containsElementNamed("infer"))
+                static_params_prior = Prior(params_opts);
+                if (params_opts.containsElementNamed("include_W"))
                 {
-                    infer_params = Rcpp::as<bool>(params_opts["infer"]);
+                    hmc_include_W = Rcpp::as<bool>(params_opts["include_W"]);
                 }
                 if (params_opts.containsElementNamed("init"))
                 {
@@ -1875,46 +2122,92 @@ public:
                         temporal.W = Rcpp::as<double>(init_values["W"]);
                     }
                 } // if init
-
-                if (params_opts.containsElementNamed("hmc"))
+            } // if params
+            if (mcmc_opts_list.containsElementNamed("horseshoe"))
+            {
+                Rcpp::List hs_opts = mcmc_opts_list["horseshoe"];
+                hs_theta_prior = Prior(hs_opts);
+                spatial.shared_tau = true;
+                if (hs_opts.containsElementNamed("shared_tau"))
                 {
-                    Rcpp::List hmc_opts = params_opts["hmc"];
-                    if (hmc_opts.containsElementNamed("include_W"))
+                    spatial.shared_tau = Rcpp::as<bool>(hs_opts["shared_tau"]);
+                }
+                if (hs_opts.containsElementNamed("init"))
+                {
+                    Rcpp::List init_values = hs_opts["init"];
+                    if (init_values.containsElementNamed("theta"))
                     {
-                        hmc_include_W = Rcpp::as<bool>(hmc_opts["include_W"]);
-                    } // set hmc_include_W
-                    if (hmc_opts.containsElementNamed("step_size"))
+                        spatial.theta = Rcpp::as<Eigen::MatrixXd>(init_values["theta"]);
+                    }
+                    if (init_values.containsElementNamed("gamma"))
                     {
-                        hmc_step_size_init = Rcpp::as<double>(hmc_opts["step_size"]);
-                    } // set hmc_step_size
-                    if (hmc_opts.containsElementNamed("n_leapfrog"))
+                        spatial.gamma = Rcpp::as<Eigen::MatrixXd>(init_values["gamma"]);
+                    }
+                    if (init_values.containsElementNamed("delta"))
                     {
-                        hmc_nleapfrog_init = static_cast<unsigned int>(hmc_opts["n_leapfrog"]);
-                    } // set hmc_nleapfrog
-                    if (hmc_opts.containsElementNamed("prior_mean"))
+                        spatial.delta = Rcpp::as<Eigen::MatrixXd>(init_values["delta"]);
+                    }
+                    if (init_values.containsElementNamed("tau"))
                     {
-                        prior_mean = Rcpp::as<double>(hmc_opts["prior_mean"]);
-                    } // set prior_mean
-                    if (hmc_opts.containsElementNamed("prior_sd"))
+                        spatial.tau = Rcpp::as<Eigen::VectorXd>(init_values["tau"]);
+                    }
+                    if (init_values.containsElementNamed("zeta"))
                     {
-                        prior_sd = Rcpp::as<double>(hmc_opts["prior_sd"]);
-                    } // set prior_sd
-                } // if hmc
-            } // if spatial
+                        spatial.zeta = Rcpp::as<Eigen::VectorXd>(init_values["zeta"]);
+                    }
+                }
+            } // if horseshoe
+            if (mcmc_opts_list.containsElementNamed("wdiag"))
+            {
+                Rcpp::List wdiag_opts = mcmc_opts_list["wdiag"];
+                wdiag_prior = Prior(wdiag_opts);
+                if (wdiag_opts.containsElementNamed("init"))
+                {
+                    spatial.wdiag = Rcpp::as<Eigen::VectorXd>(wdiag_opts["init"]);
+                }
+            } // if wdiag
         } // if mcmc_opts
 
 
         // Set up HMC options and diagnostics for spatial parameters if to be inferred
-        HMCOpts_1d hmc_opts;
-        HMCDiagnostics_1d hmc_diag;
-        DualAveraging_1d da_adapter;
-        if (infer_params)
+        HMCOpts_1d hmc_opts, wdiag_hmc_opts;
+        HMCDiagnostics_1d hmc_diag, wdiag_hmc_diag;
+        DualAveraging_1d da_adapter, wdiag_da_adapter;
+        if (static_params_prior.infer)
         {
-            hmc_opts.leapfrog_step_size = hmc_step_size_init;
-            hmc_opts.nleapfrog = hmc_nleapfrog_init;
+            hmc_opts.leapfrog_step_size = static_params_prior.hmc_step_size_init;
+            hmc_opts.nleapfrog = static_params_prior.hmc_nleapfrog_init;
             hmc_diag = HMCDiagnostics_1d(static_cast<unsigned int>(ntotal), nburnin, true);
             da_adapter = DualAveraging_1d(hmc_opts);
-        } // infer_params
+        } // infer static params
+        if (wdiag_prior.infer)
+        {
+            wdiag_hmc_opts.leapfrog_step_size = wdiag_prior.hmc_step_size_init;
+            wdiag_hmc_opts.nleapfrog = wdiag_prior.hmc_nleapfrog_init;
+            wdiag_hmc_diag = HMCDiagnostics_1d(static_cast<unsigned int>(ntotal), nburnin, true);
+            wdiag_da_adapter = DualAveraging_1d(wdiag_hmc_opts);
+        } // infer wdiag
+
+        HMCOpts_2d hs_th_hmc_opts;
+        HMCDiagnostics_2d hs_th_hmc_diag;
+        DualAveraging_2d hs_th_da_adapter;
+        if (hs_theta_prior.infer)
+        {
+            hs_th_hmc_opts.leapfrog_step_size_init = hs_theta_prior.hmc_step_size_init;
+            hs_th_hmc_opts.nleapfrog_init = hs_theta_prior.hmc_nleapfrog_init;
+            hs_th_hmc_opts.set_size(static_cast<unsigned int>(ns));
+
+            hs_th_hmc_diag = HMCDiagnostics_2d(
+                static_cast<unsigned int>(ns), 
+                static_cast<unsigned int>(ntotal), 
+                nburnin, 
+                true
+            );
+            hs_th_da_adapter = DualAveraging_2d(
+                static_cast<unsigned int>(ns), 
+                hs_theta_prior.hmc_step_size_init
+            );
+        }
 
         Eigen::VectorXd mass_diag_est = Eigen::VectorXd::Ones(hmc_include_W ? 4 : 3);
         MassAdapter mass_adapter;
@@ -1930,12 +2223,42 @@ public:
 
         Eigen::MatrixXd accept_prob_wt(nt + 1, ns);
         accept_prob_wt.setZero();
+        Eigen::Tensor<double, 3> wt_samples;
+        if (wt_prior.infer)
+        {
+            wt_samples.resize(temporal.wt.rows(), temporal.wt.cols(), nsamples);
+        }
 
-        Eigen::VectorXd rho_dist_samples(nsamples);
-        Eigen::VectorXd rho_mobility_samples(nsamples);
-        Eigen::Tensor<double, 3> wt_samples(nt + 1, ns, nsamples);
-        Eigen::VectorXd W_samples(nsamples);
-        Eigen::VectorXd mu_samples(nsamples);
+        Eigen::VectorXd rho_dist_samples, rho_mobility_samples, mu_samples, W_samples;
+        if (static_params_prior.infer)
+        {
+            rho_mobility_samples.resize(nsamples);
+            rho_dist_samples.resize(nsamples);
+            mu_samples.resize(nsamples);
+            if (hmc_include_W)
+            {
+                W_samples.resize(nsamples);
+            }
+        }
+
+        Eigen::Tensor<double, 3> theta_samples, gamma_samples, delta_samples;
+        Eigen::MatrixXd tau_samples, zeta_samples;
+        if (hs_theta_prior.infer)
+        {
+            theta_samples.resize(spatial.theta.rows(), spatial.theta.cols(), nsamples);
+            gamma_samples.resize(spatial.gamma.rows(), spatial.gamma.cols(), nsamples);
+            delta_samples.resize(spatial.delta.rows(), spatial.delta.cols(), nsamples);
+            tau_samples.resize(spatial.tau.size(), nsamples);
+            zeta_samples.resize(spatial.zeta.size(), nsamples);
+        }
+
+        Eigen::MatrixXd wdiag_samples;
+        if (wdiag_prior.infer)
+        {
+            wdiag_samples.resize(spatial.wdiag.size(), nsamples);
+        }
+
+        Eigen::Tensor<double, 3> alpha_samples(spatial.alpha.rows(), spatial.alpha.cols(), nsamples);
 
         Eigen::Tensor<double, 3> N_samples; // (nt + 1) x ns x nsamples, total secondary infections generated by (t, s)
         Eigen::Tensor<double, 3> N0_samples; // (nt + 1) x ns x nsamples, baseline primary infections at (t, s)
@@ -1954,6 +2277,7 @@ public:
                 update_N(Y);
             }
 
+
             // Update temporal transmission components
             if (wt_prior.infer)
             {
@@ -1967,11 +2291,105 @@ public:
                     std::cerr << e.what() << '\n';
                     throw std::runtime_error("Error updating wt at iteration " + std::to_string(iter));
                 }
-                
-            }
+            } // if infer wt
 
-            // Update spatial network components
-            if (infer_params)
+            Eigen::MatrixXd R_mat = temporal.compute_Rt(); // (nt + 1) x ns
+
+
+            // Update horseshoe theta
+            if (hs_theta_prior.infer)
+            {
+                for (Eigen::Index k = 0; k < ns; k++)
+                {
+                    double energy_diff = 0.0;
+                    double grad_norm = 0.0;
+                    double accept_prob = update_theta_col(
+                        energy_diff, grad_norm, k, Y, R_mat,
+                        hs_th_hmc_opts.leapfrog_step_size(k),
+                        hs_th_hmc_opts.nleapfrog(k)
+                    );
+
+                    // (Optional) Update diagnostics and dual averaging for horseshoe theta
+                    hs_th_hmc_diag.accept_count(k) += accept_prob;
+                    if (hs_th_hmc_opts.diagnostics)
+                    {
+                        hs_th_hmc_diag.energy_diff(k, iter) = energy_diff;
+                        hs_th_hmc_diag.grad_norm(k, iter) = grad_norm;
+                    }
+                    if (hs_th_hmc_opts.dual_averaging && iter <= nburnin)
+                    {
+                        if (iter < nburnin)
+                        {
+                            hs_th_hmc_opts.leapfrog_step_size(k) = hs_th_da_adapter.update_step_size(k, accept_prob);
+                        }
+                        else if (iter == nburnin)
+                        {
+                            double step_size = hs_th_hmc_opts.leapfrog_step_size(k);
+                            hs_th_da_adapter.finalize_leapfrog_step(
+                                step_size,
+                                hs_th_hmc_opts.nleapfrog(k),
+                                k, hs_th_hmc_opts.T_target
+                            );
+                            hs_th_hmc_opts.leapfrog_step_size(k) = step_size;
+                        }
+
+                        if (hs_th_hmc_opts.diagnostics)
+                        {
+                            hs_th_hmc_diag.leapfrog_step_size_stored(k, iter) = hs_th_hmc_opts.leapfrog_step_size(k);
+                            hs_th_hmc_diag.nleapfrog_stored(k, iter) = hs_th_hmc_opts.nleapfrog(k);
+                        }
+                    } // if dual averaging
+                } // for location k
+
+                // Update horseshoe scales
+                // spatial.update_horseshoe_params();
+            } // if infer horseshoe theta
+
+
+            // Update wdiag
+            if (wdiag_prior.infer)
+            {
+                double energy_diff = 0.0;
+                double grad_norm = 0.0;
+                double accept_prob = update_wdiag(
+                    energy_diff, grad_norm, Y, R_mat,
+                    wdiag_hmc_opts.leapfrog_step_size,
+                    wdiag_hmc_opts.nleapfrog,
+                    wdiag_prior.par1, wdiag_prior.par2
+                );
+
+                // (Optional) Update diagnostics and dual averaging for wdiag
+                wdiag_hmc_diag.accept_count += accept_prob;
+                if (wdiag_hmc_opts.diagnostics)
+                {
+                    wdiag_hmc_diag.energy_diff(iter) = energy_diff;
+                    wdiag_hmc_diag.grad_norm(iter) = grad_norm;
+                }
+                if (wdiag_hmc_opts.dual_averaging && iter <= nburnin)
+                {
+                    if (iter < nburnin)
+                    {
+                        wdiag_hmc_opts.leapfrog_step_size = wdiag_da_adapter.update_step_size(accept_prob);
+                    }
+                    else if (iter == nburnin)
+                    {
+                        wdiag_da_adapter.finalize_leapfrog_step(
+                            wdiag_hmc_opts.leapfrog_step_size,
+                            wdiag_hmc_opts.nleapfrog,
+                            wdiag_hmc_opts.T_target);
+                    }
+
+                    if (wdiag_hmc_opts.diagnostics)
+                    {
+                        wdiag_hmc_diag.leapfrog_step_size_stored(iter) = wdiag_hmc_opts.leapfrog_step_size;
+                        wdiag_hmc_diag.nleapfrog_stored(iter) = wdiag_hmc_opts.nleapfrog;
+                    }
+                } // if dual averaging
+            } // if infer wdiag
+
+
+            // Update static parameters (rho_mobility, rho_dist, mu, [W])
+            if (static_params_prior.infer)
             {
                 double energy_diff = 0.0;
                 double grad_norm = 0.0;
@@ -1979,7 +2397,8 @@ public:
                     energy_diff, grad_norm, Y,
                     hmc_opts.leapfrog_step_size,
                     hmc_opts.nleapfrog, mass_diag_est,
-                    prior_mean, prior_sd, hmc_include_W
+                    static_params_prior.par1, static_params_prior.par2,
+                    hmc_include_W
                 );
 
                 // (Optional) Update diagnostics and dual averaging for rho
@@ -2035,18 +2454,58 @@ public:
                         da_adapter = DualAveraging_1d(hmc_opts);
                     }
                 }
-            } // if infer_params
+            } // if infer static params
+
 
             // Store samples after burn-in and thinning
             if (iter >= nburnin && ((iter - nburnin) % nthin == 0))
             {
                 Eigen::Index sample_idx = (iter - nburnin) / nthin;
-                rho_dist_samples(sample_idx) = spatial.rho_dist;
-                rho_mobility_samples(sample_idx) = spatial.rho_mobility;
-                Eigen::TensorMap<Eigen::Tensor<const double, 2>> wt_map(temporal.wt.data(), temporal.wt.rows(), temporal.wt.cols());
-                wt_samples.chip(sample_idx, 2) = wt_map;
-                W_samples(sample_idx) = temporal.W;
-                mu_samples(sample_idx) = mu;
+
+                if (static_params_prior.infer)
+                {
+                    rho_dist_samples(sample_idx) = spatial.rho_dist;
+                    rho_mobility_samples(sample_idx) = spatial.rho_mobility;
+                    mu_samples(sample_idx) = mu;
+                    if (hmc_include_W)
+                    {
+                        W_samples(sample_idx) = temporal.W;
+                    }
+                }
+
+                if (wt_prior.infer)
+                {
+                    // Store wt samples
+                    // wt_samples.chip(sample_idx, 2) = temporal.wt;
+                    Eigen::TensorMap<Eigen::Tensor<const double, 2>> wt_map(temporal.wt.data(), temporal.wt.rows(), temporal.wt.cols());
+                    wt_samples.chip(sample_idx, 2) = wt_map;
+                }
+
+                if (hs_theta_prior.infer)
+                {
+                    // Store horseshoe samples
+                    Eigen::TensorMap<Eigen::Tensor<const double, 2>> theta_map(spatial.theta.data(), spatial.theta.rows(), spatial.theta.cols());
+                    Eigen::TensorMap<Eigen::Tensor<const double, 2>> gamma_map(spatial.gamma.data(), spatial.gamma.rows(), spatial.gamma.cols());
+                    Eigen::TensorMap<Eigen::Tensor<const double, 2>> delta_map(spatial.delta.data(), spatial.delta.rows(), spatial.delta.cols());
+                    Eigen::Map<const Eigen::VectorXd> tau_map(spatial.tau.data(), spatial.tau.size());
+                    Eigen::Map<const Eigen::VectorXd> zeta_map(spatial.zeta.data(), spatial.zeta.size());
+
+                    theta_samples.chip(sample_idx, 2) = theta_map;
+                    gamma_samples.chip(sample_idx, 2) = gamma_map;
+                    delta_samples.chip(sample_idx, 2) = delta_map;
+                    tau_samples.col(sample_idx) = tau_map;
+                    zeta_samples.col(sample_idx) = zeta_map;
+                }
+
+                if (wdiag_prior.infer)
+                {
+                    // Store wdiag samples
+                    Eigen::Map<const Eigen::VectorXd> wdiag_map(spatial.wdiag.data(), spatial.wdiag.size());
+                    wdiag_samples.col(sample_idx) = wdiag_map;
+                }
+
+                Eigen::TensorMap<Eigen::Tensor<const double, 2>> alpha_map(spatial.alpha.data(), spatial.alpha.rows(), spatial.alpha.cols());
+                alpha_samples.chip(sample_idx, 2) = alpha_map;
 
                 if (sample_augmented_N)
                 {
@@ -2054,7 +2513,7 @@ public:
                     {
                         for (Eigen::Index s = 0; s < ns; s++)
                         {
-                            N_samples(t, s, sample_idx) = temporal.compute_N_future_sum(N, t, s);
+                            N_samples(t, s, sample_idx) = temporal.compute_N_future_sum(N, s, t);
                         }
                     }
                     // N_samples.chip(sample_idx, 4) = N;
@@ -2066,21 +2525,68 @@ public:
             p.increment();
         } // for MCMC iter
 
-        Rcpp::List hmc_stats = Rcpp::List::create(
+        
+        Rcpp::List output;
+
+        output["alpha"] = tensor3_to_r(alpha_samples); // ns x ns x nsamples
+
+        if (wt_prior.infer)
+        {
+            output["wt"] = tensor3_to_r(wt_samples); // (nt + 1) x ns x nsamples
+            output["wt_accept_prob"] = accept_prob_wt / static_cast<double>(ntotal); // (nt + 1) x ns
+        } // if infer wt
+
+        if (static_params_prior.infer)
+        {
+            Rcpp::List param_list = Rcpp::List::create(
+                Rcpp::Named("mu") = mu_samples, // nsamples x 1
+                Rcpp::Named("rho_dist") = rho_dist_samples, // nsamples x 1
+                Rcpp::Named("rho_mobility") = rho_mobility_samples // nsamples x 1
+            );
+            if (hmc_include_W)
+            {
+                param_list["W"] = W_samples; // nsamples x 1
+            }
+            param_list["hmc"] = Rcpp::List::create(
             Rcpp::Named("acceptance_rate") = hmc_diag.accept_count / static_cast<double>(ntotal),
             Rcpp::Named("leapfrog_step_size") = hmc_opts.leapfrog_step_size,
             Rcpp::Named("n_leapfrog") = hmc_opts.nleapfrog,
             Rcpp::Named("diagnostics") = hmc_diag.to_list());
 
-        Rcpp::List output = Rcpp::List::create(
-            Rcpp::Named("mu") = mu_samples, // nsamples x 1
-            Rcpp::Named("rho_dist") = rho_dist_samples, // nsamples x 1
-            Rcpp::Named("rho_mobility") = rho_mobility_samples, // nsamples x 1
-            Rcpp::Named("W") = W_samples, // nsamples x 1
-            Rcpp::Named("wt") = tensor3_to_r(wt_samples), // (nt + 1) x ns x nsamples
-            Rcpp::Named("wt_accept_prob") = accept_prob_wt / static_cast<double>(ntotal), // (nt + 1) x ns
-            Rcpp::Named("hmc_stats") = hmc_stats
-        );
+            output["params"] = param_list;
+        } // if infer static params
+
+        if (hs_theta_prior.infer)
+        {
+            Rcpp::List hs_list = Rcpp::List::create(
+                Rcpp::Named("theta") = tensor3_to_r(theta_samples), // ns x ns x nsamples
+                Rcpp::Named("gamma") = tensor3_to_r(gamma_samples), // ns x ns x nsamples
+                Rcpp::Named("delta") = tensor3_to_r(delta_samples), // ns x ns x nsamples
+                Rcpp::Named("tau") = tau_samples, // ns x nsamples
+                Rcpp::Named("zeta") = zeta_samples // ns x nsamples
+            );
+            hs_list["hmc"] = Rcpp::List::create(
+                Rcpp::Named("acceptance_rate") = hs_th_hmc_diag.accept_count / static_cast<double>(ntotal),
+                Rcpp::Named("leapfrog_step_size") = hs_th_hmc_opts.leapfrog_step_size,
+                Rcpp::Named("n_leapfrog") = hs_th_hmc_opts.nleapfrog,
+                Rcpp::Named("diagnostics") = hs_th_hmc_diag.to_list()
+            );
+
+            output["horseshoe"] = hs_list;
+        } // if infer horseshoe theta
+
+        if (wdiag_prior.infer)
+        {
+            output["wdiag"] = Rcpp::List::create(
+                Rcpp::Named("samples") = wdiag_samples, // ns x nsamples
+                Rcpp::Named("hmc") = Rcpp::List::create(
+                    Rcpp::Named("acceptance_rate") = wdiag_hmc_diag.accept_count / static_cast<double>(ntotal),
+                    Rcpp::Named("leapfrog_step_size") = wdiag_hmc_opts.leapfrog_step_size,
+                    Rcpp::Named("n_leapfrog") = wdiag_hmc_opts.nleapfrog,
+                    Rcpp::Named("diagnostics") = wdiag_hmc_diag.to_list()
+                )
+            );
+        } // if infer wdiag
 
         if (sample_augmented_N)
         {
@@ -2089,11 +2595,10 @@ public:
         }
 
         return output;
-
     } // run_mcmc
 
 }; // class Model
 
 
 
-#endif
+#endif // MODEL_HPP

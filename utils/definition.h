@@ -366,6 +366,8 @@ class Prior : public Dist
 public:
     bool infer = false;
     double mh_sd = 1.;
+    double hmc_step_size_init = 0.1;
+    unsigned int hmc_nleapfrog_init = 20;
 
     Prior() : Dist()
     {
@@ -417,6 +419,16 @@ public:
         if (param_opts.containsElementNamed("mh_sd"))
         {
             mh_sd = Rcpp::as<double>(param_opts["mh_sd"]);
+        }
+
+        if (param_opts.containsElementNamed("hmc_step_size"))
+        {
+            hmc_step_size_init = Rcpp::as<double>(param_opts["hmc_step_size"]);
+        }
+
+        if (param_opts.containsElementNamed("hmc_nleapfrog"))
+        {
+            hmc_nleapfrog_init = Rcpp::as<unsigned int>(param_opts["hmc_nleapfrog"]);
         }
 
         return;

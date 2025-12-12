@@ -180,13 +180,6 @@ Rcpp::List simulate_network_hawkes(
 } // simulate_network_hawkes
 
 
-void show_vec(const Eigen::VectorXd& v) {
-    Rcpp::NumericVector rv = Rcpp::wrap(v);
-    Rcpp::Rcout << rv << "\n";        // R-style print
-    // or Rcpp::Rcout << v.transpose() << "\n"; // plain Eigen format
-}
-
-
 //' @export
 // [[Rcpp::export]]
 Rcpp::List infer_network_hawkes(

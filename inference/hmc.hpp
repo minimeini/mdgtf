@@ -98,7 +98,7 @@ struct HMCOpts_1d
 struct HMCOpts_2d
 {
     std::vector<std::string> params_selected;
-    bool dual_averaging = false;
+    bool dual_averaging = true;
     bool diagnostics = true;
     bool verbose = false;
     double T_target = 2.0; // integration time T = n_leapfrog * epsilon ~= 1-2 (rough heuristic). Larger T gives better exploration but higher cost.
@@ -392,6 +392,23 @@ struct HMCDiagnostics_2d
             nleapfrog_stored = Eigen::MatrixXd::Zero(idx_nS, static_cast<Eigen::Index>(nburnin + 1));
         }
         return;
+    }
+
+
+    Rcpp::List to_list() const
+    {
+        Rcpp::List diagnostics_results = Rcpp::List::create(
+            Rcpp::Named("energy_diff") = energy_diff,
+            Rcpp::Named("grad_norm") = grad_norm
+        );
+
+        if (leapfrog_step_size_stored.size() > 0 && std::abs(leapfrog_step_size_stored.sum()) > EPS)
+        {
+            diagnostics_results["leapfrog_step_size"] = leapfrog_step_size_stored;
+            diagnostics_results["nleapfrog"] = nleapfrog_stored;
+        }
+
+        return diagnostics_results;
     }
 };
 
