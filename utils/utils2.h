@@ -22,6 +22,30 @@ void show_vec(const Eigen::VectorXd& v) {
 }
 
 
+inline double clamp01(double w) {
+  return std::min(std::max(w, 1.0e-8), 1.0 - 1.0e-8);
+}
+
+
+inline double inv_logit_stable(double x) {
+  if (x >= 0) { double e = std::exp(-x); return 1.0 / (1.0 + e); }
+  double e = std::exp(x);
+  return e / (1.0 + e);
+}
+
+
+inline double logit_safe(double w) {
+  w = clamp01(w);
+  return std::log(w) - std::log1p(-w);
+}
+
+
+inline double clamp_log_scale(double x) {
+  // tune bounds if needed
+  return std::min(std::max(x, -30.0), 30.0);
+}
+
+
 inline Eigen::Tensor<double, 4> r_to_tensor4(Rcpp::NumericVector &arr)
 {
     if (!arr.hasAttribute("dim"))

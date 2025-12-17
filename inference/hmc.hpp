@@ -43,6 +43,35 @@ struct MassAdapter {
 };
 
 
+struct MassAdapter_2d {
+    Eigen::MatrixXd mean;
+    Eigen::MatrixXd M2;  // Sum of squared deviations
+    Eigen::VectorXd count;
+    unsigned int window_size = 100;
+    
+    void update(const Eigen::Index &k, const Eigen::VectorXd& log_params) {
+        count(k)++;
+        Eigen::VectorXd delta = log_params - mean.col(k);
+        mean.col(k) += delta / count(k);
+        M2.col(k) += delta.cwiseProduct(log_params - mean.col(k));
+    }
+    
+    Eigen::VectorXd get_mass_diag(const unsigned int &k) {
+        if (count(k) < 10) return Eigen::VectorXd::Ones(mean.rows());
+        Eigen::VectorXd var = M2.col(k) / (count(k) - 1);
+
+        // setting the momentum covariance to approximate the precision of the parameters
+        return (1.0 / var.array()).cwiseMax(0.1).cwiseMin(100.0);
+    }
+    
+    void reset_window() {
+        // Optionally reset for new adaptation window
+        count.setZero();
+        M2.setZero();
+    }
+};
+
+
 struct HMCOpts_1d
 {
     std::vector<std::string> params_selected;
@@ -124,7 +153,7 @@ struct HMCOpts_2d
             leapfrog_step_size_init = Rcpp::as<double>(opts["leapfrog_step_size"]);
         }
 
-        dual_averaging = false;
+        dual_averaging = true;
         if (opts.containsElementNamed("dual_averaging"))
         {
             dual_averaging = Rcpp::as<bool>(opts["dual_averaging"]);
@@ -279,6 +308,27 @@ struct DualAveraging_2d
         kappa_da = Eigen::VectorXd::Constant(idx_nS, 0.75);
 
         adapt_count = Eigen::VectorXi::Zero(idx_nS);
+
+        min_leaps = 3;
+        max_leaps = 128;
+        return;
+    }
+
+    DualAveraging_2d(
+        const Eigen::VectorXd &leapfrog_step_size_init
+    )
+    {
+        Eigen::Index ns = leapfrog_step_size_init.size();
+        mu_da = (leapfrog_step_size_init.array().log() + std::log(10)).matrix();
+        log_eps = leapfrog_step_size_init.array().log().matrix();
+        log_eps_bar = log_eps;
+
+        h_bar = Eigen::VectorXd::Zero(ns);
+        gamma_da = Eigen::VectorXd::Constant(ns, 0.05);
+        t0_da = Eigen::VectorXd::Constant(ns, 10.0);
+        kappa_da = Eigen::VectorXd::Constant(ns, 0.75);
+
+        adapt_count = Eigen::VectorXi::Zero(ns);
 
         min_leaps = 3;
         max_leaps = 128;
