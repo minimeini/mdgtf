@@ -462,5 +462,4 @@ struct HMCDiagnostics_2d
     }
 };
 
-
 #endif

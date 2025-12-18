@@ -24,6 +24,69 @@
 
 
 /**
+ * @brief Structure to hold MH proposal parameters for block update of eta_k
+ */
+struct BlockMHProposal
+{
+    Eigen::VectorXd mean;           // (nt-1) x 1, proposal mean u_k
+    Eigen::MatrixXd prec;           // (nt-1) x (nt-1), precision matrix Omega_k
+    Eigen::LLT<Eigen::MatrixXd> chol; // Cholesky decomposition of precision
+    double log_det_prec;            // log|Omega_k| = 2 * sum(log(diag(L)))
+    bool valid;                     // Whether Cholesky succeeded
+
+    BlockMHProposal() : log_det_prec(0.0), valid(false) {}
+
+    /**
+     * @brief Sample from the proposal distribution N(mean, prec^{-1})
+     * 
+     * Uses: eta = mean + L^{-T} * z, where z ~ N(0, I) and prec = L * L'
+     */
+    Eigen::VectorXd sample(const double &mh_sd = 1.0) const
+    {
+        if (!valid)
+        {
+            Rcpp::stop("Cannot sample from invalid proposal (Cholesky failed)");
+        }
+
+        Eigen::Index n = mean.size();
+        Eigen::VectorXd z(n);
+        for (Eigen::Index i = 0; i < n; i++)
+        {
+            z(i) = R::rnorm(0.0, mh_sd);
+        }
+
+        // Solve L' * x = z  =>  x = L^{-T} * z
+        Eigen::VectorXd x = chol.matrixU().solve(z);
+
+        return mean + x;
+    }
+
+    /**
+     * @brief Compute log density of eta under proposal N(mean, prec^{-1})
+     * 
+     * log p(eta) = -n/2 * log(2*pi) + 1/2 * log|prec| - 1/2 * (eta - mean)' * prec * (eta - mean)
+     */
+    double log_density(const Eigen::VectorXd &eta) const
+    {
+        if (!valid)
+        {
+            return -std::numeric_limits<double>::infinity();
+        }
+
+        Eigen::Index n = mean.size();
+        Eigen::VectorXd diff = eta - mean;
+
+        // Quadratic form: diff' * prec * diff = ||L' * diff||^2
+        Eigen::VectorXd L_t_diff = chol.matrixL().transpose() * diff;
+        double quad_form = L_t_diff.squaredNorm();
+
+        static const double LOG_2PI = std::log(2.0 * M_PI);
+        return -0.5 * n * LOG_2PI + 0.5 * log_det_prec - 0.5 * quad_form;
+    }
+}; // struct BlockMHProposal
+
+
+/**
  * @brief Sparse spatial network controlled by a regularized horseshoe prior.
  * 
  */
@@ -1442,6 +1505,429 @@ public:
         return;
     } // update_N
 
+    void compute_auxiliary(
+        Eigen::MatrixXd &C_mat,      // (nt-1) x (nt-1), lower triangular
+        Eigen::MatrixXd &mu_vec,     // (nt-1) x ns
+        Eigen::MatrixXd &lambda_mat, // (nt-1) x ns
+        const Eigen::Index &k,
+        const Eigen::MatrixXd &Y,
+        const Eigen::MatrixXd &R_mat,
+        const Eigen::MatrixXd &dR_mat)
+    {
+        const Eigen::Index T_obs = nt - 1; // Number of observations t = 2, ..., nt
+        const double W_sqrt = std::sqrt(temporal.W + EPS);
+        const Eigen::Index L = static_cast<Eigen::Index>(dlag.Fphi.size());
+
+        // Resize outputs to (nt-1) dimensions
+        C_mat.resize(T_obs, T_obs);
+        C_mat.setZero();
+        mu_vec.resize(T_obs, ns);
+        lambda_mat.resize(T_obs, ns);
+
+        // Precompute a_l = h'(r_{k,l}) * y_{k,l} for l = 1, ..., nt-1
+        Eigen::VectorXd a_vec(T_obs);
+        for (Eigen::Index l = 1; l < nt; l++)
+        {
+            a_vec(l - 1) = dR_mat(l, k) * Y(l, k);
+        }
+
+        // =========================================================
+        // Step 1: Compute C_k matrix using column recurrence
+        // c_{k,j,t} = sum_{l=j}^{t-1} h'(r_{k,l}) * phi_{t-l} * y_{k,l}
+        // Recurrence: c_{k,j+1,t} = c_{k,j,t} - a_j * phi_{t-j}
+        //
+        // Matrix indexing: C_mat(row, col) where
+        //   row = t - 2  (t = 2, ..., nt  =>  row = 0, ..., nt-2)
+        //   col = j - 1  (j = 1, ..., t-1 =>  col = 0, ..., t-2)
+        // =========================================================
+        for (Eigen::Index t = 2; t <= nt; t++)
+        {
+            Eigen::Index row = t - 2;
+
+            // First column (j = 1): compute c_{k,1,t} = sum_{l=1}^{t-1} a_l * phi_{t-l}
+            double c_val = 0.0;
+            Eigen::Index l_start = std::max(Eigen::Index(1), t - L);
+            for (Eigen::Index l = l_start; l < t; l++)
+            {
+                Eigen::Index lag = t - l;
+                c_val += a_vec(l - 1) * dlag.Fphi(lag - 1);
+            }
+            C_mat(row, 0) = c_val;
+
+            // Remaining columns via recurrence
+            for (Eigen::Index j = 2; j < t; j++)
+            {
+                Eigen::Index col = j - 1;
+                Eigen::Index lag = t - (j - 1); // = t - j + 1
+
+                double subtract_term = 0.0;
+                if (lag >= 1 && lag <= L)
+                {
+                    subtract_term = a_vec(j - 2) * dlag.Fphi(lag - 1);
+                }
+                C_mat(row, col) = C_mat(row, col - 1) - subtract_term;
+            }
+        }
+
+        // =========================================================
+        // Step 2: Compute lambda_{s,t} for t = 2, ..., nt
+        // lambda_{s,t} = mu + sum_{kp} sum_{l} alpha_{s,kp} * R_{kp,l} * phi_{t-l} * y_{kp,l}
+        // =========================================================
+        lambda_mat.setConstant(mu);
+
+        for (Eigen::Index t = 2; t <= nt; t++)
+        {
+            Eigen::Index row = t - 2;
+            Eigen::Index l_start = std::max(Eigen::Index(1), t - L);
+
+            for (Eigen::Index l = l_start; l < t; l++)
+            {
+                Eigen::Index lag = t - l;
+                double phi_lag = dlag.Fphi(lag - 1);
+
+                for (Eigen::Index kp = 0; kp < ns; kp++)
+                {
+                    double contrib = R_mat(l, kp) * phi_lag * Y(l, kp);
+
+                    for (Eigen::Index s = 0; s < ns; s++)
+                    {
+                        lambda_mat(row, s) += spatial.alpha(s, kp) * contrib;
+                    }
+                }
+            }
+        }
+
+        lambda_mat = lambda_mat.cwiseMax(EPS);
+
+        // =========================================================
+        // Step 3: Precompute C_k * eta_k (reused for all destinations s)
+        // =========================================================
+        Eigen::VectorXd eta_k = temporal.wt.col(k) / W_sqrt; // (nt+1) x 1
+
+        // Extract eta_k[1:nt-1] into (nt-1) x 1 vector
+        Eigen::VectorXd eta_k_sub(T_obs);
+        for (Eigen::Index j = 1; j < nt; j++)
+        {
+            eta_k_sub(j - 1) = eta_k(j);
+        }
+
+        // C_eta = C_mat * eta_k_sub (lower triangular matrix-vector product)
+        Eigen::VectorXd C_eta = Eigen::VectorXd::Zero(T_obs);
+        for (Eigen::Index row = 0; row < T_obs; row++)
+        {
+            for (Eigen::Index col = 0; col <= row; col++)
+            {
+                C_eta(row) += C_mat(row, col) * eta_k_sub(col);
+            }
+        }
+
+        // =========================================================
+        // Step 4: Compute mu_{s,t} = lambda_{s,t} - sqrt(W) * alpha_{s,k} * (C_k * eta_k)_t
+        // =========================================================
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            double scale = W_sqrt * spatial.alpha(s, k);
+
+            for (Eigen::Index row = 0; row < T_obs; row++)
+            {
+                mu_vec(row, s) = std::max(lambda_mat(row, s) - scale * C_eta(row), EPS);
+            }
+        }
+    }
+
+    /**
+     * @brief Compute MH proposal parameters for block update of eta_k
+     *
+     * Computes precision matrix, its Cholesky decomposition, the mean, and log determinant
+     */
+    void compute_mh_proposal(
+        BlockMHProposal &proposal,
+        const Eigen::MatrixXd &C_mat,      // (nt-1) x (nt-1), lower triangular
+        const Eigen::MatrixXd &mu_vec,     // (nt-1) x ns
+        const Eigen::MatrixXd &lambda_mat, // (nt-1) x ns
+        const Eigen::MatrixXd &Y,          // (nt+1) x ns
+        const Eigen::Index &k)
+    {
+        const Eigen::Index T_obs = nt - 1;
+        const double W = temporal.W + EPS;
+        const double W_sqrt = std::sqrt(W);
+
+        // Initialize precision as identity
+        proposal.prec = Eigen::MatrixXd::Identity(T_obs, T_obs);
+        Eigen::VectorXd canonical_mean = Eigen::VectorXd::Zero(T_obs); // Omega * u
+
+        // Accumulate contributions from each destination
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            const double alpha_sk = spatial.alpha(s, k);
+            if (std::abs(alpha_sk) < EPS)
+                continue;
+
+            const double coef = W_sqrt * alpha_sk;
+            const double coef_sq = W * alpha_sk * alpha_sk;
+
+            // d_s = y_s - mu_s
+            Eigen::VectorXd d_s = Y.col(s).segment(2, T_obs) - mu_vec.col(s);
+
+            // lambda^{-1} element-wise
+            Eigen::VectorXd lambda_inv = lambda_mat.col(s).cwiseInverse();
+
+            // Canonical mean: += coef * C' * (lambda_inv .* d_s)
+            Eigen::VectorXd weighted_d = lambda_inv.cwiseProduct(d_s);
+            canonical_mean.noalias() += coef * (C_mat.transpose() * weighted_d);
+
+            // Precision: += coef^2 * C' * diag(lambda_inv) * C
+            // Use scaled C for efficient computation
+            Eigen::MatrixXd C_scaled = lambda_inv.cwiseSqrt().asDiagonal() * C_mat;
+            proposal.prec.noalias() += coef_sq * (C_scaled.transpose() * C_scaled);
+        }
+
+        // Cholesky decomposition of precision: Omega = L * L'
+        proposal.chol.compute(proposal.prec);
+        proposal.valid = (proposal.chol.info() == Eigen::Success);
+
+        if (proposal.valid)
+        {
+            // Log determinant: log|Omega| = 2 * sum(log(diag(L)))
+            Eigen::VectorXd chol_diag = proposal.chol.matrixL().toDenseMatrix().diagonal();
+            proposal.log_det_prec = 2.0 * chol_diag.array().log().sum();
+
+            // Solve for mean: Omega * u = canonical_mean  =>  u = Omega^{-1} * canonical_mean
+            proposal.mean = proposal.chol.solve(canonical_mean);
+        }
+        else
+        {
+            proposal.log_det_prec = -std::numeric_limits<double>::infinity();
+            proposal.mean = Eigen::VectorXd::Zero(T_obs);
+            Rcpp::warning("Cholesky decomposition failed in compute_mh_proposal");
+        }
+    }
+
+    /**
+     * @brief Compute log prior density for eta_k: N(0, I)
+     */
+    double log_prior_eta(const Eigen::VectorXd &eta)
+    {
+        Eigen::Index n = eta.size();
+        static const double LOG_2PI = std::log(2.0 * M_PI);
+        return -0.5 * n * LOG_2PI - 0.5 * eta.squaredNorm();
+    }
+
+    /**
+     * @brief Compute log likelihood for observations given eta_k
+     *
+     * sum_{s,t} [y_{s,t} * log(lambda_{s,t}) - lambda_{s,t}]
+     */
+    double log_likelihood_poisson(
+        const Eigen::MatrixXd &Y,         // (nt+1) x ns
+        const Eigen::MatrixXd &lambda_mat // (nt-1) x ns, for t = 2, ..., nt
+    )
+    {
+        const Eigen::Index T_obs = lambda_mat.rows();
+        double loglik = 0.0;
+
+        for (Eigen::Index s = 0; s < lambda_mat.cols(); s++)
+        {
+            for (Eigen::Index row = 0; row < T_obs; row++)
+            {
+                Eigen::Index t = row + 2; // Observation time
+                double y_st = Y(t, s);
+                double lam_st = lambda_mat(row, s);
+                loglik += y_st * std::log(lam_st) - lam_st;
+            }
+        }
+
+        return loglik;
+    }
+
+    /**
+     * @brief Recompute lambda given new eta values (for MH acceptance)
+     *
+     * lambda_{s,t} = mu_{s,t} + sqrt(W) * alpha_{s,k} * sum_j C(t,j) * eta_j
+     */
+    void recompute_lambda(
+        Eigen::MatrixXd &lambda_new,    // Output: (nt-1) x ns
+        const Eigen::MatrixXd &C_mat,   // (nt-1) x (nt-1)
+        const Eigen::MatrixXd &mu_vec,  // (nt-1) x ns
+        const Eigen::VectorXd &eta_new, // (nt-1) x 1
+        const Eigen::Index &k)
+    {
+        const Eigen::Index T_obs = C_mat.rows();
+        const double W_sqrt = std::sqrt(temporal.W + EPS);
+
+        // Compute C * eta_new (lower triangular)
+        Eigen::VectorXd C_eta = Eigen::VectorXd::Zero(T_obs);
+        for (Eigen::Index row = 0; row < T_obs; row++)
+        {
+            for (Eigen::Index col = 0; col <= row; col++)
+            {
+                C_eta(row) += C_mat(row, col) * eta_new(col);
+            }
+        }
+
+        // lambda_{s,t} = mu_{s,t} + sqrt(W) * alpha_{s,k} * (C * eta)_t
+        lambda_new.resize(T_obs, ns);
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            double scale = W_sqrt * spatial.alpha(s, k);
+            for (Eigen::Index row = 0; row < T_obs; row++)
+            {
+                lambda_new(row, s) = std::max(mu_vec(row, s) + scale * C_eta(row), EPS);
+            }
+        }
+    }
+
+    /**
+     * @brief Block MH update for eta_k (all time points for source location k)
+     *
+     * @return Acceptance probability (0 or 1)
+     */
+    double update_eta_block_mh(
+        const Eigen::MatrixXd &Y,
+        const Eigen::Index &k,
+        const double &mh_sd = 1.0)
+    {
+        const Eigen::Index T_obs = nt - 1;
+        const double W_sqrt = std::sqrt(temporal.W + EPS);
+
+        // Convert centered wt to noncentered eta
+        Eigen::MatrixXd eta = temporal.wt / W_sqrt;
+
+        // Precompute cumulative sums of eta over time for each location
+        Eigen::MatrixXd eta_cumsum(nt + 1, ns);
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            eta_cumsum.col(k) = cumsum_vec(eta.col(k));
+        }
+
+        // Precompute r, R, dR for all (l, k)
+        Eigen::MatrixXd r_mat = W_sqrt * eta_cumsum;
+        Eigen::MatrixXd R_mat(nt + 1, ns);
+        Eigen::MatrixXd dR_mat(nt + 1, ns);
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            for (Eigen::Index l = 0; l < nt + 1; l++)
+            {
+                R_mat(l, k) = GainFunc::psi2hpsi(r_mat(l, k), temporal.fgain);
+                dR_mat(l, k) = GainFunc::psi2dhpsi(r_mat(l, k), temporal.fgain);
+            }
+        }
+
+        // Current eta_k (indices 1, ..., nt-1)
+        Eigen::VectorXd eta_old = eta.col(k).segment(1, T_obs);
+
+        // =========================================================
+        // Step 1: Compute auxiliary quantities at current state
+        // =========================================================
+        Eigen::MatrixXd C_mat, mu_vec_old, lambda_mat_old;
+        compute_auxiliary(C_mat, mu_vec_old, lambda_mat_old, k, Y, R_mat, dR_mat);
+
+        // =========================================================
+        // Step 2: Compute proposal at current state and sample
+        // =========================================================
+        BlockMHProposal proposal_old;
+        compute_mh_proposal(proposal_old, C_mat, mu_vec_old, lambda_mat_old, Y, k);
+
+        if (!proposal_old.valid)
+        {
+            return 0.0; // Reject if Cholesky failed
+        }
+
+        Eigen::VectorXd eta_new = proposal_old.sample(mh_sd);
+
+        // =========================================================
+        // Step 3: Compute lambda at proposed state
+        // =========================================================
+        Eigen::MatrixXd lambda_mat_new;
+        recompute_lambda(lambda_mat_new, C_mat, mu_vec_old, eta_new, k);
+
+        // Check for numerical issues
+        if ((lambda_mat_new.array() <= 0).any() || !lambda_mat_new.allFinite())
+        {
+            return 0.0;
+        }
+
+        // =========================================================
+        // Step 4: Compute reverse proposal (linearized at new state)
+        // Need to recompute C_mat and mu_vec at new state
+        // =========================================================
+
+        // Temporarily update wt to compute R_mat and dR_mat at new state
+        Eigen::VectorXd wt_old = temporal.wt.col(k);
+        for (Eigen::Index j = 1; j < nt; j++)
+        {
+            temporal.wt(j, k) = W_sqrt * eta_new(j - 1);
+        }
+
+        Eigen::MatrixXd R_mat_new = temporal.compute_Rt();
+        Eigen::MatrixXd dR_mat_new(nt + 1, ns);
+        for (Eigen::Index kp = 0; kp < ns; kp++)
+        {
+            Eigen::VectorXd wt_cumsum = cumsum_vec(temporal.wt.col(kp));
+            for (Eigen::Index l = 0; l < nt + 1; l++)
+            {
+                dR_mat_new(l, kp) = GainFunc::psi2dhpsi(wt_cumsum(l), temporal.fgain);
+            }
+        }
+
+        Eigen::MatrixXd C_mat_new, mu_vec_new, lambda_mat_new_check;
+        compute_auxiliary(C_mat_new, mu_vec_new, lambda_mat_new_check, k, Y, R_mat_new, dR_mat_new);
+
+        BlockMHProposal proposal_new;
+        compute_mh_proposal(proposal_new, C_mat_new, mu_vec_new, lambda_mat_new_check, Y, k);
+
+        // Restore wt
+        temporal.wt.col(k) = wt_old;
+
+        if (!proposal_new.valid)
+        {
+            return 0.0;
+        }
+
+        // =========================================================
+        // Step 5: Compute MH acceptance ratio
+        // =========================================================
+        // log p(eta_new) - log p(eta_old) [prior]
+        double log_prior_ratio = log_prior_eta(eta_new) - log_prior_eta(eta_old);
+
+        // log p(y | eta_new) - log p(y | eta_old) [likelihood]
+        double log_lik_new = log_likelihood_poisson(Y, lambda_mat_new);
+        double log_lik_old = log_likelihood_poisson(Y, lambda_mat_old);
+        double log_lik_ratio = log_lik_new - log_lik_old;
+
+        // log q(eta_old | eta_new) - log q(eta_new | eta_old) [proposal]
+        double log_q_old_given_new = proposal_new.log_density(eta_old);
+        double log_q_new_given_old = proposal_old.log_density(eta_new);
+        double log_proposal_ratio = log_q_old_given_new - log_q_new_given_old;
+
+        double log_accept_ratio = log_prior_ratio + log_lik_ratio + log_proposal_ratio;
+
+        // =========================================================
+        // Step 6: Accept or reject
+        // =========================================================
+        double accept_prob = 0.0;
+        bool accept = false;
+
+        if (std::isfinite(log_accept_ratio))
+        {
+            accept_prob = std::min(1.0, std::exp(log_accept_ratio));
+            if (std::log(R::runif(0.0, 1.0)) < log_accept_ratio)
+            {
+                accept = true;
+            }
+        }
+
+        if (accept)
+        {
+            // Update wt with accepted values
+            for (Eigen::Index j = 1; j < nt; j++)
+            {
+                temporal.wt(j, k) = W_sqrt * eta_new(j - 1);
+            }
+        }
+
+        return accept ? 1.0 : 0.0;
+    }
 
     Eigen::MatrixXd update_wt_by_eta_collapsed(
         const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections,
@@ -1915,21 +2401,35 @@ public:
             }
 
 
-            // Update temporal transmission components
+            // // Update temporal transmission components
+            // if (wt_prior.infer)
+            // {
+            //     Eigen::MatrixXd accept_prob = update_wt_by_eta_collapsed(Y, wt_prior.mh_sd);
+            //     accept_prob_wt += accept_prob;
+            // } // if infer wt
             if (wt_prior.infer)
             {
-                Eigen::MatrixXd accept_prob = update_wt_by_eta_collapsed(Y, wt_prior.mh_sd);
-                accept_prob_wt += accept_prob;
-            } // if infer wt
-
-            Eigen::MatrixXd R_mat = temporal.compute_Rt(); // (nt + 1) x ns
-
+                for (Eigen::Index k = 0; k < ns; k++)
+                {
+                    // block update of wt
+                    double accept_prob_wt_k = 0.0;
+                    for (unsigned int pass = 0; pass < 2; pass++)
+                    {
+                        double accept_prob_tmp = update_eta_block_mh(Y, k, wt_prior.mh_sd);
+                        accept_prob_wt_k += accept_prob_tmp;
+                    }
+                    accept_prob_wt_k /= 2.0;
+                    accept_prob_wt(0, k) += accept_prob_wt_k;
+                }
+            }
 
             // Update horseshoe parameters
             if (hs_prior.infer)
             {
                 for (Eigen::Index k = 0; k < ns; k++)
                 {
+                    Eigen::MatrixXd R_mat = temporal.compute_Rt(); // (nt + 1) x ns
+
                     double energy_diff = 0.0;
                     double grad_norm = 0.0;
                     Eigen::VectorXd mass_diag_vec = mass_diag_hs.col(k);
@@ -2016,8 +2516,9 @@ public:
                             // Reset counters for next window
                             post_burnin_accept_sum(k) = 0.0;
                             post_burnin_accept_count(k) = 0;
-                        }
-                    }
+                        } // if check adaptation
+                    } // if iter > nburnin
+
                 } // HMC for location k
 
                 if (iter < nburnin)
