@@ -23,22 +23,41 @@ double effective_sample_size(const Eigen::Map<Eigen::VectorXd> &draws)
 
 //' @export
 // [[Rcpp::export]]
+Rcpp::NumericMatrix standardize_alpha(const Rcpp::NumericMatrix &alpha_in)
+{
+    Eigen::MatrixXd alpha(Rcpp::as<Eigen::MatrixXd>(alpha_in));
+    Eigen::MatrixXd alpha_std = alpha;
+    for (Eigen::Index k = 0; k < alpha.cols(); k++)
+    {
+        double off_diag_sum = alpha.col(k).sum() - alpha(k, k);
+        for (Eigen::Index s = 0; s < alpha.rows(); s++)
+        {
+            if (s != k)
+            {
+                alpha_std(s, k) = alpha(s, k) / off_diag_sum * (1.0 - alpha(k, k));
+            }
+        }
+    }
+
+    return Rcpp::wrap(alpha_std);
+}
+
+
+//' @export
+// [[Rcpp::export]]
 Rcpp::List simulate_network_hawkes(
     const Eigen::Index &nt,
-    const Eigen::MatrixXd &dist_matrix,     // ns x ns, pairwise distance matrix
-    const Eigen::MatrixXd &mobility_matrix, // ns x ns, pairwise mobility matrix
-    const std::string &fgain = "softplus",
+    const Eigen::Index &ns,
     const double &mu = 1.0,
     const double &W = 0.001,
-    const Rcpp::Nullable<Rcpp::List> &spatial_opts = R_NilValue,
-    const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue
+    const double &c_sq = 4.0,
+    const std::string &fgain = "softplus",
+    const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue,
+    const Rcpp::Nullable<Rcpp::List> &spatial_opts = R_NilValue
 )
 {
-    Rcpp::List spatial_defaults = Rcpp::List::create(
-        Rcpp::Named("rho_dist") = 1.0,
-        Rcpp::Named("rho_mobility") = 1.0,
-        Rcpp::Named("shared_tau") = true
-    );
     Rcpp::List lagdist_defaults = Rcpp::List::create(
         Rcpp::Named("name") = "lognorm",
         Rcpp::Named("par1") = LN_MU,
@@ -47,17 +66,20 @@ Rcpp::List simulate_network_hawkes(
         Rcpp::Named("rescaled") = true
     );
 
-    Rcpp::List spatial_opts_use = spatial_opts.isNull() ? spatial_defaults : Rcpp::as<Rcpp::List>(spatial_opts);
+    Rcpp::List spatial_defaults = Rcpp::List::create(
+        Rcpp::Named("rho_dist") = dist_matrix.isNull() ? 0.0 : 1.0,
+        Rcpp::Named("rho_mobility") = mobility_matrix.isNull() ? 0.0 : 1.0,
+        Rcpp::Named("c_sq") = 4.0
+    );
+
     Rcpp::List lagdist_opts_use = lagdist_opts.isNull() ? lagdist_defaults : Rcpp::as<Rcpp::List>(lagdist_opts);
+    Rcpp::List spatial_opts_use = spatial_opts.isNull() ? spatial_defaults : Rcpp::as<Rcpp::List>(spatial_opts);
 
     Model model(
-        nt,
-        dist_matrix,
-        mobility_matrix,
-        fgain,
-        mu,
-        W,
-        spatial_opts_use,
+        nt, ns, 
+        dist_matrix, mobility_matrix, 
+        mu, W, fgain, 
+        spatial_opts_use, 
         lagdist_opts_use
     );
 
@@ -69,15 +91,15 @@ Rcpp::List simulate_network_hawkes(
 // [[Rcpp::export]]
 Rcpp::List infer_network_hawkes(
     const Eigen::MatrixXd &Y,               // (nt + 1) x ns, observed primary infections
-    const Eigen::MatrixXd &dist_matrix,     // ns x ns, pairwise distance matrix
-    const Eigen::MatrixXd &mobility_matrix, // ns x ns, pairwise mobility matrix
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue,     // ns x ns, pairwise distance matrix
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
+    const double &c_sq = 4.0,
     const std::string &fgain = "softplus",
     const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue,
     const unsigned int &nburnin = 1000,
     const unsigned int &nsamples = 1000,
     const unsigned int &nthin = 1,
     const Rcpp::Nullable<Rcpp::List> &mcmc_opts = R_NilValue,
-    const bool &shared_tau = true,
     const bool &sample_augmented_N = false
 )
 {
@@ -90,14 +112,7 @@ Rcpp::List infer_network_hawkes(
     );
     Rcpp::List lagdist_opts_use = lagdist_opts.isNull() ? lagdist_defaults : Rcpp::as<Rcpp::List>(lagdist_opts);
 
-    Model model(
-        Y,
-        dist_matrix,
-        mobility_matrix,
-        fgain,
-        lagdist_opts_use,
-        shared_tau
-    );
+    Model model(Y, dist_matrix, mobility_matrix, c_sq, fgain, lagdist_opts_use);
 
 
     auto start = std::chrono::high_resolution_clock::now();
