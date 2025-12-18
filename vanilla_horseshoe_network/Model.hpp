@@ -444,7 +444,24 @@ public:
     {
         return tau(k) * compute_regularized_gamma(s, k);
     } // compute_regularized_variance
-    
+
+
+    Eigen::MatrixXd center_theta()
+    {
+        Eigen::MatrixXd theta_centered = theta;
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            double col_mean = (theta.col(k).sum() - theta(k, k)) / static_cast<double>(ns - 1);
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k)
+                {
+                    theta_centered(s, k) -= col_mean;
+                }
+            }
+        }
+        return theta_centered;
+    }
 
 
     /**
@@ -468,6 +485,23 @@ public:
     } // compute_regularized_variance_col
 
 
+    Eigen::VectorXd compute_unnormalized_weight_col(const Eigen::Index &k) const
+    {
+        double th_mean = (theta.col(k).sum() - theta(k, k)) / static_cast<double>(ns - 1);
+        Eigen::VectorXd u_k(ns); // unnormalized weights
+        u_k.setZero();
+        for (Eigen::Index s = 0; s < ns; s++)
+        { // Loop over destinations
+            if (s != k)
+            {
+                u_k(s) = std::exp(std::min(theta(s, k) - th_mean, UPBND));
+            }
+        } // for s
+
+        return u_k;
+    }
+
+
     Eigen::VectorXd compute_alpha_col(const Eigen::Index &k) const
     {
         Eigen::VectorXd alpha(ns);
@@ -479,13 +513,7 @@ public:
         }
         else
         {
-            Eigen::VectorXd u_k(ns); // unnormalized weights
-            u_k.setZero();
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destinations
-                u_k(s) = compute_unnormalized_weight(s, k);
-            } // for s
-
+            Eigen::VectorXd u_k = compute_unnormalized_weight_col(k);
             double U_off = u_k.sum(); // u_k(k) == 0
             if (U_off <= EPS8)
             {
@@ -519,29 +547,6 @@ public:
         }
         return;
     }
-
-
-    /**
-     * @brief Calculate unnormalized weight for location pair (s, k) for s != k
-     * 
-     * @param s 
-     * @param k 
-     * @return double 
-     */
-    double compute_unnormalized_weight(
-        const Eigen::Index &s,
-        const Eigen::Index &k
-    ) const
-    {
-        if (s != k)
-        {
-            return std::exp(std::min(theta(s, k), UPBND));
-        }
-        else
-        {
-            return 0.0;
-        }
-    } // compute_unnormalized_weight
 
 
     double dlogprob_dtau_k(
@@ -997,12 +1002,7 @@ public:
         const double w_safe = clamp01(spatial.wdiag(k));
         const double logit_wk = logit_safe(w_safe);
         const double jacobian_wk = w_safe * (1.0 - w_safe);
-
-        Eigen::VectorXd u_k(ns);
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            u_k(s) = spatial.compute_unnormalized_weight(s, k);
-        }
+        Eigen::VectorXd u_k = spatial.compute_unnormalized_weight_col(k);
 
         loglike = 0.0;
         Eigen::VectorXd grad(ndim);
