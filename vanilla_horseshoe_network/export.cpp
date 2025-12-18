@@ -23,6 +23,28 @@ double effective_sample_size(const Eigen::Map<Eigen::VectorXd> &draws)
 
 //' @export
 // [[Rcpp::export]]
+Rcpp::NumericMatrix standardize_alpha(const Rcpp::NumericMatrix &alpha_in)
+{
+    Eigen::MatrixXd alpha(Rcpp::as<Eigen::MatrixXd>(alpha_in));
+    Eigen::MatrixXd alpha_std = alpha;
+    for (Eigen::Index k = 0; k < alpha.cols(); k++)
+    {
+        double off_diag_sum = alpha.col(k).sum() - alpha(k, k);
+        for (Eigen::Index s = 0; s < alpha.rows(); s++)
+        {
+            if (s != k)
+            {
+                alpha_std(s, k) = alpha(s, k) / off_diag_sum * (1.0 - alpha(k, k));
+            }
+        }
+    }
+
+    return Rcpp::wrap(alpha_std);
+}
+
+
+//' @export
+// [[Rcpp::export]]
 Rcpp::List simulate_network_hawkes(
     const Eigen::Index &nt,
     const Eigen::Index &ns,

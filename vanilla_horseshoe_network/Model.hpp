@@ -95,62 +95,6 @@ class SpatialNetwork
 private:
     Eigen::Index ns = 0; // number of spatial locations
 
-    /**
-     * @brief Initialize horseshoe parameters randomly using regularized horseshoe
-     */
-    void initialize_horseshoe_random()
-    {
-        theta.resize(ns, ns);
-        gamma.resize(ns, ns);
-        delta.resize(ns, ns);
-        tau.resize(ns);
-        zeta.resize(ns);
-        wdiag.resize(ns);
-
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations (columns)
-            zeta(k) = 1.0 / R::rgamma(0.5, 1.0);
-            tau(k) = 1.0 / R::rgamma(0.5, zeta(k));
-
-            wdiag(k) = R::rbeta(1.0, 1.0); // self-exciting weight
-            for (Eigen::Index s = 0; s < ns; s++)
-            { // Loop over destination locations (rows)
-                delta(s, k) = 1.0 / R::rgamma(0.5, 1.0);
-                gamma(s, k) = 1.0 / R::rgamma(0.5, delta(s, k));
-                if (s == k)
-                {
-                    theta(s, k) = 0.0;
-                }
-                else
-                {
-                    // Use REGULARIZED variance for sampling
-                    double reg_var = compute_regularized_variance(s, k);
-                    theta(s, k) = R::rnorm(0.0, std::sqrt(reg_var));
-                }
-            } // for destination s given source k
-
-            theta(k, k) = 0.0; // ensure diagonal is zero
-        } // for source k
-    } // initialize_horseshoe_random
-
-
-    void initialize_horseshoe_zero()
-    {
-        theta.resize(ns, ns);
-        gamma.resize(ns, ns);
-        delta.resize(ns, ns);
-        tau.resize(ns);
-        zeta.resize(ns);
-        wdiag.resize(ns);
-
-        theta.setZero();
-        gamma.setOnes();
-        delta.setOnes();
-        tau.setOnes();
-        zeta.setOnes();
-        wdiag.setOnes();
-        wdiag *= 0.5;
-    } // initialize_horseshoe_zero
 
 public:
     Eigen::MatrixXd alpha; // ns x ns, adjacency matrix / stochastic network
@@ -193,11 +137,12 @@ public:
         ns = ns_in;
         if (random_init)
         {
-            initialize_horseshoe_random();
+            initialize_horseshoe_dominant();
         }
         else
         {
-            initialize_horseshoe_zero();
+            // initialize_horseshoe_zero();
+            initialize_horseshoe_sparse();
         }
 
         alpha.resize(ns, ns);
@@ -238,7 +183,7 @@ public:
         }
         else
         {
-            initialize_horseshoe_random();
+            initialize_horseshoe_dominant();
         }
 
         alpha.resize(ns, ns);
@@ -248,6 +193,228 @@ public:
         }
         return;
     } // SpatialNetwork constructor
+
+
+    /**
+     * @brief Initialize horseshoe parameters ensuring diagonal dominance
+     *
+     * Guarantees: alpha(k, k) > max_{s != k} alpha(s, k) for all k
+     */
+    void initialize_horseshoe_random(const double &dominance_margin = 0.1)
+    {
+        theta.resize(ns, ns);
+        gamma.resize(ns, ns);
+        delta.resize(ns, ns);
+        tau.resize(ns);
+        zeta.resize(ns);
+        wdiag.resize(ns);
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            // Sample variance parameters
+            zeta(k) = 1.0 / R::rgamma(0.5, 1.0);
+            tau(k) = 1.0 / R::rgamma(0.5, zeta(k));
+
+            // Sample theta and gamma for off-diagonal elements
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                delta(s, k) = 1.0 / R::rgamma(0.5, 1.0);
+                gamma(s, k) = 1.0 / R::rgamma(0.5, delta(s, k));
+
+                if (s == k)
+                {
+                    theta(s, k) = 0.0;
+                }
+                else
+                {
+                    double reg_var = compute_regularized_variance(s, k);
+                    theta(s, k) = R::rnorm(0.0, std::sqrt(reg_var));
+                }
+            }
+
+            // Compute unnormalized weights
+            Eigen::VectorXd u_k(ns);
+            u_k.setZero();
+            double u_max = 0.0;
+            double U_off = 0.0;
+
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k)
+                {
+                    u_k(s) = std::exp(std::min(theta(s, k), UPBND));
+                    U_off += u_k(s);
+                    u_max = std::max(u_max, u_k(s));
+                }
+            }
+
+            // Compute minimum wdiag for diagonal dominance
+            // alpha(k,k) > alpha(s,k) for all s != k
+            // wdiag > u_max / (U_off + u_max)
+            double wdiag_min = u_max / (U_off + u_max + EPS);
+
+            // Add margin and ensure wdiag is in valid range
+            wdiag_min = std::min(wdiag_min + dominance_margin, 1.0 - EPS);
+
+            // Sample wdiag from truncated Beta(a, b) on [wdiag_min, 1]
+            // Simple approach: sample Beta and rescale, or use rejection
+            double wdiag_raw = R::rbeta(5.0, 2.0);
+            wdiag(k) = wdiag_min + (1.0 - wdiag_min) * wdiag_raw;
+
+            // Ensure valid range
+            wdiag(k) = std::min(std::max(wdiag(k), wdiag_min), 1.0 - EPS);
+        }
+    } // initialize_horseshoe_random
+
+
+    /**
+     * @brief Initialize using a parameterization that guarantees diagonal dominance
+     *
+     * Key insight: Let r_k = alpha(k,k) / max_{s!=k} alpha(s,k) be the "dominance ratio"
+     * We can parameterize r_k > 1 directly using log(r_k - 1) ~ Normal
+     */
+    void initialize_horseshoe_dominant(
+        const double &log_dominance_mean = 1.0, // E[log(r - 1)] ≈ 1 means r ≈ 3.7
+        const double &log_dominance_sd = 0.5)
+    {
+        theta.resize(ns, ns);
+        gamma.resize(ns, ns);
+        delta.resize(ns, ns);
+        tau.resize(ns);
+        zeta.resize(ns);
+        wdiag.resize(ns);
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            // Sample variance parameters
+            zeta(k) = 1.0 / R::rgamma(0.5, 1.0);
+            tau(k) = 1.0 / R::rgamma(0.5, zeta(k));
+
+            // Sample theta for off-diagonal
+            double theta_max_k = -std::numeric_limits<double>::infinity();
+
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                delta(s, k) = 1.0 / R::rgamma(0.5, 1.0);
+                gamma(s, k) = 1.0 / R::rgamma(0.5, delta(s, k));
+
+                if (s == k)
+                {
+                    theta(s, k) = 0.0;
+                }
+                else
+                {
+                    double reg_var = compute_regularized_variance(s, k);
+                    theta(s, k) = R::rnorm(0.0, std::sqrt(reg_var));
+                    theta_max_k = std::max(theta_max_k, theta(s, k));
+                }
+            }
+
+            // Compute u_k values
+            Eigen::VectorXd u_k(ns);
+            u_k.setZero();
+            double u_max = 0.0;
+            double U_off = 0.0;
+
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k)
+                {
+                    u_k(s) = std::exp(std::min(theta(s, k), UPBND));
+                    U_off += u_k(s);
+                    u_max = std::max(u_max, u_k(s));
+                }
+            }
+
+            // Sample dominance ratio r > 1 via log(r - 1) ~ N(mean, sd)
+            double log_r_minus_1 = R::rnorm(log_dominance_mean, log_dominance_sd);
+            double r = 1.0 + std::exp(log_r_minus_1); // r > 1 guaranteed
+
+            // Solve for wdiag given r = alpha(k,k) / max_offdiag
+            // alpha(k,k) = wdiag
+            // max_offdiag = (1 - wdiag) * u_max / U_off
+            // r = wdiag / ((1 - wdiag) * u_max / U_off)
+            // r * (1 - wdiag) * u_max / U_off = wdiag
+            // r * u_max / U_off - r * wdiag * u_max / U_off = wdiag
+            // r * u_max / U_off = wdiag * (1 + r * u_max / U_off)
+            // wdiag = (r * u_max / U_off) / (1 + r * u_max / U_off)
+            //       = r * u_max / (U_off + r * u_max)
+
+            double ratio = r * u_max / U_off;
+            wdiag(k) = ratio / (1.0 + ratio);
+
+            // Clamp to valid range
+            wdiag(k) = std::min(std::max(wdiag(k), EPS), 1.0 - EPS);
+        }
+    }
+
+
+    void initialize_horseshoe_zero()
+    {
+        theta.resize(ns, ns);
+        gamma.resize(ns, ns);
+        delta.resize(ns, ns);
+        tau.resize(ns);
+        zeta.resize(ns);
+        wdiag.resize(ns);
+
+        theta.setZero();
+        gamma.setOnes();
+        delta.setOnes();
+        tau.setOnes();
+        zeta.setOnes();
+        wdiag.setOnes();
+        wdiag *= 0.8;
+    } // initialize_horseshoe_zero
+
+    /**
+     * @brief Initialize horseshoe variables with conservative sparse settings
+     *
+     * Philosophy: Start with assumption that most transmission is local (wdiag high)
+     * and spatial transmission is sparse (theta near 0)
+     */
+    void initialize_horseshoe_sparse(
+        const double &wdiag_init = 0.8, // High = mostly local transmission
+        const double &tau_init = 0.1,   // Small = strong global shrinkage
+        const double &gamma_init = 1.0 // Moderate local shrinkage
+    )
+    {
+        theta.resize(ns, ns);
+        gamma.resize(ns, ns);
+        delta.resize(ns, ns);
+        tau.resize(ns);
+        zeta.resize(ns);
+        wdiag.resize(ns);
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            // Self-excitation weight: start high (local transmission dominates)
+            wdiag(k) = wdiag_init;
+
+            // Global shrinkage: start small (sparse network)
+            tau(k) = tau_init;
+            zeta(k) = 1.0; // Prior mode
+
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s == k)
+                {
+                    theta(s, k) = 0.0; // Diagonal fixed at 0
+                    gamma(s, k) = 1.0;
+                    delta(s, k) = 1.0;
+                }
+                else
+                {
+                    // Start theta at 0 (no spatial transmission initially)
+                    theta(s, k) = 0.0;
+
+                    // Local shrinkage parameters at moderate values
+                    gamma(s, k) = gamma_init;
+                    delta(s, k) = 1.0;
+                }
+            }
+        }
+    } // initialize_horseshoe_sparse
 
 
     double compute_regularized_gamma(
@@ -806,8 +973,8 @@ public:
         const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
         const bool &add_jacobian = true,
         const bool &add_prior = true,
-        const double &prior_mean = 0.0,
-        const double &prior_sd = 1.0)
+        const double &beta_prior_a = 5.0,
+        const double &beta_prior_b = 2.0)
     {
         const Eigen::Index n_offdiag = ns - 1;
         const Eigen::Index ndim = 2 * n_offdiag + 2;
@@ -826,7 +993,7 @@ public:
             }
         }
 
-        const double prior_var = prior_sd * prior_sd;
+        // const double prior_var = prior_sd * prior_sd;
         const double w_safe = clamp01(spatial.wdiag(k));
         const double logit_wk = logit_safe(w_safe);
         const double jacobian_wk = w_safe * (1.0 - w_safe);
@@ -856,8 +1023,10 @@ public:
             {
                 Rcpp::stop("Must add jacobian to the likelihood when using Gaussian prior on logit(wdiag).");
             }
-            grad(idx_wdiag) += -(logit_wk - prior_mean) / prior_var;
-            loglike += -0.5 * (logit_wk - prior_mean) * (logit_wk - prior_mean) / prior_var;
+            // grad(idx_wdiag) += -(logit_wk - prior_mean) / prior_var;
+            grad(idx_wdiag) += beta_prior_a * (1.0 - w_safe) - beta_prior_b * w_safe; // Beta prior gradient w.r.t. logit(w[k])
+            // loglike += -0.5 * (logit_wk - prior_mean) * (logit_wk - prior_mean) / prior_var;
+            loglike += beta_prior_a * std::log(w_safe) + beta_prior_b * std::log(1.0 - w_safe); // Beta prior log-density w.r.t. logit(w[k])
             loglike += -0.5 * std::log(spatial.tau(k)) - 1.0 / (spatial.zeta(k) * spatial.tau(k));
         }
 
@@ -995,7 +1164,7 @@ public:
         // Compute initial gradient and log-probability
         double current_logprob = 0.0;
         Eigen::VectorXd grad = dloglike_dhorseshoe_col(
-            current_logprob, k, Y, R_mat, true, true, prior_mean, prior_sd);
+            current_logprob, k, Y, R_mat, true, true);
         grad_norm = grad.norm();
         double current_energy = -current_logprob;
 
@@ -1019,7 +1188,7 @@ public:
 
             // Compute new gradient
             grad = dloglike_dhorseshoe_col(
-                current_logprob, k, Y, R_mat, true, true, prior_mean, prior_sd);
+                current_logprob, k, Y, R_mat, true, true);
 
             // Update momentum (except last step)
             if (lf_step != n_leapfrog - 1)
@@ -1395,6 +1564,81 @@ public:
 
 
     /**
+     * @brief Initialize wt using data-driven estimate of R_t
+     *
+     * Structure: wt is (nt+1) x ns
+     *   - wt(0, k) = 0 always (zero-padded, not a parameter)
+     *   - wt(t, k) = sqrt(W) * eta_{k,t} for t = 1, ..., nt
+     *   - r_{k,l} = sum_{t=1}^{l} wt(t, k) = sqrt(W) * sum_{t=1}^{l} eta_{k,t}
+     *   - R_{k,l} = h(r_{k,l})
+     */
+    void initialize_wt_from_data(
+        const Eigen::MatrixXd &Y, // (nt+1) x ns
+        const double &R_default = 1.0,
+        const double &smoothing = 0.5 // Exponential smoothing parameter
+    )
+    {
+        const Eigen::Index L = static_cast<Eigen::Index>(dlag.Fphi.size());
+
+        temporal.wt.resize(nt + 1, ns);
+        temporal.wt.setZero(); // Row 0 stays zero
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            // Step 1: Estimate R_t from data for t = 1, ..., nt
+            Eigen::VectorXd R_est(nt + 1);
+            R_est(0) = R_default; // Not used, but initialize for smoothing
+
+            for (Eigen::Index t = 1; t <= nt; t++)
+            {
+                // Compute weighted sum of past cases
+                double denom = 0.0;
+                Eigen::Index l_start = std::max(Eigen::Index(1), t - L);
+                for (Eigen::Index l = l_start; l < t; l++)
+                {
+                    Eigen::Index lag = t - l;
+                    if (lag <= L)
+                    {
+                        denom += dlag.Fphi(lag - 1) * Y(l, k);
+                    }
+                }
+
+                // Estimate R_t = y_t / (sum_l phi_l * y_{t-l})
+                if (denom > EPS)
+                {
+                    double R_raw = std::max(Y(t, k) - mu, EPS) / denom;
+                    // Clamp to reasonable range
+                    R_raw = std::max(0.1, std::min(R_raw, 10.0));
+                    // Exponential smoothing
+                    R_est(t) = smoothing * R_raw + (1.0 - smoothing) * R_est(t - 1);
+                }
+                else
+                {
+                    R_est(t) = R_est(t - 1); // Carry forward
+                }
+            }
+
+            // Step 2: Convert R_t to r_t = h^{-1}(R_t) for t = 1, ..., nt
+            // Note: r_0 = 0 by definition (since wt(0, k) = 0)
+            Eigen::VectorXd r_est(nt + 1);
+            r_est(0) = 0.0; // r_0 = 0
+            for (Eigen::Index t = 1; t <= nt; t++)
+            {
+                r_est(t) = GainFunc::hpsi2psi(R_est(t), temporal.fgain);
+            }
+
+            // Step 3: Compute increments
+            // wt(t, k) = r_t - r_{t-1}
+            // Note: wt(0, k) = 0 is already set by setZero()
+            for (Eigen::Index t = 1; t <= nt; t++)
+            {
+                temporal.wt(t, k) = r_est(t) - r_est(t - 1);
+            }
+        }
+    } // initialize_wt_from_data
+
+
+    /**
      * @brief Giibs sampler to update unobserved secondary infections N and baseline primary infections N0 from multinomial distribution.
      * 
      * @param Y 
@@ -1504,6 +1748,7 @@ public:
 
         return;
     } // update_N
+
 
     void compute_auxiliary(
         Eigen::MatrixXd &C_mat,      // (nt-1) x (nt-1), lower triangular
@@ -1633,7 +1878,8 @@ public:
                 mu_vec(row, s) = std::max(lambda_mat(row, s) - scale * C_eta(row), EPS);
             }
         }
-    }
+    } // compute_auxiliary
+
 
     /**
      * @brief Compute MH proposal parameters for block update of eta_k
@@ -1701,7 +1947,8 @@ public:
             proposal.mean = Eigen::VectorXd::Zero(T_obs);
             Rcpp::warning("Cholesky decomposition failed in compute_mh_proposal");
         }
-    }
+    } // compute_mh_proposal
+
 
     /**
      * @brief Compute log prior density for eta_k: N(0, I)
@@ -1711,7 +1958,8 @@ public:
         Eigen::Index n = eta.size();
         static const double LOG_2PI = std::log(2.0 * M_PI);
         return -0.5 * n * LOG_2PI - 0.5 * eta.squaredNorm();
-    }
+    } // log_prior_eta
+
 
     /**
      * @brief Compute log likelihood for observations given eta_k
@@ -1738,7 +1986,8 @@ public:
         }
 
         return loglik;
-    }
+    } // log_likelihood_poisson
+
 
     /**
      * @brief Recompute lambda given new eta values (for MH acceptance)
@@ -1775,7 +2024,8 @@ public:
                 lambda_new(row, s) = std::max(mu_vec(row, s) + scale * C_eta(row), EPS);
             }
         }
-    }
+    } // recompute_lambda
+
 
     /**
      * @brief Block MH update for eta_k (all time points for source location k)
@@ -1927,7 +2177,8 @@ public:
         }
 
         return accept ? 1.0 : 0.0;
-    }
+    } // update_eta_block_mh
+
 
     Eigen::MatrixXd update_wt_by_eta_collapsed(
         const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections,
@@ -2188,6 +2439,9 @@ public:
     )
     {
         const Eigen::Index ntotal = static_cast<Eigen::Index>(nburnin + nsamples * nthin);
+        initialize_wt_from_data(Y);
+        spatial.initialize_horseshoe_sparse();
+        spatial.compute_alpha();
 
         // Infer all unknown parameters by default
         Prior wt_prior; wt_prior.infer = true; wt_prior.mh_sd = 1.0;
@@ -2204,17 +2458,6 @@ public:
         {
             // Initialize priors and initial values from mcmc_opts
             Rcpp::List mcmc_opts_list(mcmc_opts);
-            if (mcmc_opts_list.containsElementNamed("wt"))
-            {
-                Rcpp::List wt_opts = mcmc_opts_list["wt"];
-                wt_prior = Prior(wt_opts);
-                if (wt_opts.containsElementNamed("init"))
-                {
-                    Rcpp::NumericMatrix wt_mat = wt_opts["init"];
-                    temporal.wt = Rcpp::as<Eigen::MatrixXd>(wt_mat);
-                    temporal.W = temporal.wt.array().square().mean();
-                }
-            } // if wt
             if (mcmc_opts_list.containsElementNamed("params"))
             {
                 Rcpp::List params_opts = mcmc_opts_list["params"];
@@ -2244,9 +2487,23 @@ public:
                     if (init_values.containsElementNamed("W"))
                     {
                         temporal.W = Rcpp::as<double>(init_values["W"]);
+                        initialize_wt_from_data(Y);
                     }
                 } // if init
             } // if params
+
+            if (mcmc_opts_list.containsElementNamed("wt"))
+            {
+                Rcpp::List wt_opts = mcmc_opts_list["wt"];
+                wt_prior = Prior(wt_opts);
+                if (wt_opts.containsElementNamed("init"))
+                {
+                    Rcpp::NumericMatrix wt_mat = wt_opts["init"];
+                    temporal.wt = Rcpp::as<Eigen::MatrixXd>(wt_mat);
+                    temporal.W = temporal.wt.array().square().mean();
+                }
+            } // if wt
+
             if (mcmc_opts_list.containsElementNamed("horseshoe"))
             {
                 Rcpp::List hs_opts = mcmc_opts_list["horseshoe"];
@@ -2342,12 +2599,12 @@ public:
                 mass_adapter_hs.mean.col(k) = get_unconstrained(k);
             }
         } // infer horseshoe
-        
 
-        
 
-        Eigen::MatrixXd accept_prob_wt(nt + 1, ns);
-        accept_prob_wt.setZero();
+        Eigen::Index npass = hs_prior.infer ? 5 : 1;
+        Eigen::ArrayXd wt_accept_count(ns);
+        wt_accept_count.setZero();
+        Eigen::ArrayXd wt_mh_sd = Eigen::ArrayXd::Constant(ns, wt_prior.mh_sd);
         Eigen::Tensor<double, 3> wt_samples;
         if (wt_prior.infer)
         {
@@ -2401,32 +2658,10 @@ public:
             }
 
 
-            // // Update temporal transmission components
-            // if (wt_prior.infer)
-            // {
-            //     Eigen::MatrixXd accept_prob = update_wt_by_eta_collapsed(Y, wt_prior.mh_sd);
-            //     accept_prob_wt += accept_prob;
-            // } // if infer wt
-            if (wt_prior.infer)
+            for (Eigen::Index k = 0; k < ns; k++)
             {
-                for (Eigen::Index k = 0; k < ns; k++)
-                {
-                    // block update of wt
-                    double accept_prob_wt_k = 0.0;
-                    for (unsigned int pass = 0; pass < 2; pass++)
-                    {
-                        double accept_prob_tmp = update_eta_block_mh(Y, k, wt_prior.mh_sd);
-                        accept_prob_wt_k += accept_prob_tmp;
-                    }
-                    accept_prob_wt_k /= 2.0;
-                    accept_prob_wt(0, k) += accept_prob_wt_k;
-                }
-            }
-
-            // Update horseshoe parameters
-            if (hs_prior.infer)
-            {
-                for (Eigen::Index k = 0; k < ns; k++)
+                // Update horseshoe parameters
+                if (hs_prior.infer)
                 {
                     Eigen::MatrixXd R_mat = temporal.compute_Rt(); // (nt + 1) x ns
 
@@ -2470,7 +2705,7 @@ public:
                             hs_hmc_diag.leapfrog_step_size_stored(k, iter) = hs_hmc_opts.leapfrog_step_size(k);
                             hs_hmc_diag.nleapfrog_stored(k, iter) = hs_hmc_opts.nleapfrog(k);
                         }
-                    } // if dual averaging
+                    } // if dual averaging during burnin
 
                     if (iter > nburnin)
                     {
@@ -2517,10 +2752,47 @@ public:
                             post_burnin_accept_sum(k) = 0.0;
                             post_burnin_accept_count(k) = 0;
                         } // if check adaptation
-                    } // if iter > nburnin
+                    } // post-burnin step size adaptation when iter > nburnin
+                } // if infer horseshoe
 
-                } // HMC for location k
+                // Update temporal transmission components
+                if (wt_prior.infer)
+                {
+                    // block update of wt
+                    if (iter < nburnin && hs_prior.infer)
+                    {
+                        double accept_sum = 0.0;
+                        for (Eigen::Index pass = 0; pass < nthin; pass++)
+                        {
+                            double accept = update_eta_block_mh(Y, k, wt_mh_sd(k));
+                            accept_sum += accept;
+                        }
+                        wt_accept_count(k) += accept_sum / static_cast<double>(nthin);
+                    }
+                    else
+                    {
+                        double accept = update_eta_block_mh(Y, k, wt_mh_sd(k));
+                        wt_accept_count(k) += accept;
+                    }
 
+                    if (iter < nburnin && iter > 0 && iter % 50 == 0)
+                    {
+                        double accept_rate = wt_accept_count(k) / 50.0;
+                        wt_accept_count(k) = 0.0;
+
+                        // Robbins-Monro update
+                        double gamma = 1.0 / std::pow(iter / 50.0, 0.6); // Decay rate
+                        wt_mh_sd(k) *= std::exp(gamma * (accept_rate - 0.6));
+
+                        wt_mh_sd(k) = std::max(0.01, std::min(2.0, wt_mh_sd(k)));
+                    }
+
+                } // if infer wt
+            } // update horseshoe and wt for each location k
+
+            
+            if (hs_prior.infer)
+            {
                 if (iter < nburnin)
                 {
                     for (Eigen::Index k = 0; k < ns; k++)
@@ -2548,8 +2820,8 @@ public:
                         // CRITICAL: Reset dual averaging for new geometry
                         hs_da_adapter = DualAveraging_2d(hs_hmc_opts.leapfrog_step_size);
                     }
-                } // mass matrix adaptation
-            } // if infer horseshoe theta
+                } // mass matrix adaptation during burnin
+            } // mass matrix adaptation if infer horseshoe theta
 
 
             // Update static parameters ( mu, [W])
@@ -2688,7 +2960,8 @@ public:
         if (wt_prior.infer)
         {
             output["wt"] = tensor3_to_r(wt_samples); // (nt + 1) x ns x nsamples
-            output["wt_accept_prob"] = accept_prob_wt / static_cast<double>(ntotal); // (nt + 1) x ns
+            output["wt_mh_sd"] = wt_mh_sd; // ns x 1
+            output["wt_accept_prob"] = wt_accept_count / static_cast<double>(ntotal - nburnin); // (nt + 1) x ns
         } // if infer wt
 
         if (static_params_prior.infer)
