@@ -90,7 +90,7 @@ Rcpp::List simulate_network_hawkes(
 //' @export
 // [[Rcpp::export]]
 Rcpp::List infer_network_hawkes(
-    const Eigen::MatrixXd &Y,               // (nt + 1) x ns, observed primary infections
+    const Rcpp::NumericVector &Y_in,               // (nt + 1) x ns, observed primary infections or a vector of (nt + 1) length for a single series
     const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue,     // ns x ns, pairwise distance matrix
     const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
     const double &c_sq = 4.0,
@@ -112,8 +112,22 @@ Rcpp::List infer_network_hawkes(
     );
     Rcpp::List lagdist_opts_use = lagdist_opts.isNull() ? lagdist_defaults : Rcpp::as<Rcpp::List>(lagdist_opts);
 
-    Model model(Y, dist_matrix, mobility_matrix, c_sq, fgain, lagdist_opts_use);
+    Eigen::MatrixXd Y;
+    if (Y_in.hasAttribute("dim"))
+    {
+        // Already a matrix: convert directly
+        Rcpp::NumericMatrix Y_mat(Y_in);
+        Y = Rcpp::as<Eigen::MatrixXd>(Y_mat);
+    }
+    else
+    {
+        // Vector: make it a (nt + 1) x 1 matrix
+        Eigen::VectorXd y_vec = Rcpp::as<Eigen::VectorXd>(Y_in);
+        Y.resize(y_vec.size(), 1);
+        Y.col(0) = y_vec;
+    }
 
+    Model model(Y, dist_matrix, mobility_matrix, c_sq, fgain, lagdist_opts_use);
 
     auto start = std::chrono::high_resolution_clock::now();
     Rcpp::List output = model.run_mcmc(

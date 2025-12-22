@@ -1,5 +1,129 @@
 library(ggplot2)
 
+
+plot_ns_matrix <- function(
+  mat,
+  counties,
+  fips_in_order = NULL,      # named character: names = counties, values = FIPS (recommended)
+  fips_to_county = NULL,     # named character: names = FIPS, values = county label (alternative)
+  show_code = FALSE,         # if TRUE, label axes as "FIPS County"
+  digits = 2,
+  text_size = 5,
+  axis_text_size = 12,
+  tile_color = "grey80",
+  tile_linewidth = 0.3,
+  flip_color = FALSE,
+  color_scale = 1.0
+) {
+  stopifnot(is.matrix(mat) || inherits(mat, "Matrix"))
+  stopifnot(nrow(mat) == ncol(mat))
+  stopifnot(is.character(counties), length(counties) == nrow(mat))
+
+  # Build FIPS -> county mapping
+  if (!is.null(fips_in_order)) {
+    stopifnot(is.character(fips_in_order), !is.null(names(fips_in_order)))
+    stopifnot(all(counties %in% names(fips_in_order)))
+    fips_to_county <- setNames(names(fips_in_order), unname(fips_in_order))
+    county_to_fips <- fips_in_order[counties]
+  } else if (!is.null(fips_to_county)) {
+    stopifnot(is.character(fips_to_county), !is.null(names(fips_to_county)))
+    # If mat has FIPS rownames/colnames, infer order from counties via fips_to_county
+    if (!is.null(rownames(mat))) {
+      # Map counties -> fips by matching labels
+      county_to_fips <- vapply(
+        counties,
+        function(cty) {
+          hits <- names(fips_to_county)[fips_to_county == cty]
+          if (length(hits) == 0) NA_character_ else hits[1]
+        },
+        character(1)
+      )
+    } else {
+      county_to_fips <- rep(NA_character_, length(counties))
+    }
+  } else {
+    # No mapping provided: just use counties directly
+    fips_to_county <- setNames(counties, counties)
+    county_to_fips <- counties
+  }
+
+  # Convert matrix to long df
+  df <- as.data.frame(as.table(mat))
+  names(df) <- c("row", "col", "val")
+  df$row <- as.character(df$row)
+  df$col <- as.character(df$col)
+
+  # Default: if mat row/col names are missing, assume they correspond to `counties`
+  if (is.null(rownames(mat)) || is.null(colnames(mat))) {
+    # Create pseudo codes based on counties order
+    codes <- if (!is.null(fips_in_order)) unname(fips_in_order[counties]) else counties
+    rownames(mat) <- codes
+    colnames(mat) <- codes
+    df <- as.data.frame(as.table(mat))
+    names(df) <- c("row", "col", "val")
+    df$row <- as.character(df$row)
+    df$col <- as.character(df$col)
+  }
+
+  # Axis labels: map code -> county, optionally prepend code
+  row_lab <- fips_to_county[df$row]
+  col_lab <- fips_to_county[df$col]
+
+  if (show_code) {
+    row_lab <- paste0(df$row, " ", row_lab)
+    col_lab <- paste0(df$col, " ", col_lab)
+    axis_levels <- if (!is.null(fips_in_order)) {
+      paste0(unname(fips_in_order[counties]), " ", counties)
+    } else {
+      unique(col_lab)
+    }
+  } else {
+    axis_levels <- counties
+  }
+
+  df$row_lab <- factor(row_lab, levels = axis_levels)
+  df$col_lab <- factor(col_lab, levels = axis_levels)
+
+  p = ggplot(df, aes(x = col_lab, y = row_lab, fill = val)) +
+    geom_tile(color = tile_color, linewidth = tile_linewidth)
+    
+  if (flip_color) {
+    p = p +
+      geom_text(
+        aes(label = sprintf(paste0("%.", digits, "f"), val)),
+        size = text_size,
+        color = ifelse(df$val > 0.5 * color_scale, "black", "white")
+      ) +
+      scale_fill_gradient(limits = c(0, color_scale), low = "black", high = "white")
+  } else {
+     p = p +
+      geom_text(
+        aes(label = sprintf(paste0("%.", digits, "f"), val)),
+        size = text_size,
+        color = ifelse(df$val > 0.5 * color_scale, "white", "black")
+      ) +
+      scale_fill_gradient(limits = c(0, color_scale), low = "white", high = "black")
+  }
+  
+  p = p +
+    coord_equal() +
+    guides(fill = "none") +
+    scale_x_discrete(position = "top", expand = c(0, 0)) +
+    scale_y_discrete(expand = c(0, 0), limits = rev(axis_levels)) +
+    theme_void() +
+    theme(
+      axis.text.x.top = element_text(size = axis_text_size, angle = 0, hjust = +0.5),
+      axis.text.y     = element_text(size = axis_text_size, angle = 90),
+      axis.title      = element_blank(),
+      axis.ticks      = element_blank(),
+      plot.margin     = margin(0.5, 0.5, 0.5, 0.5)
+    )
+  
+  return(p)
+}
+
+
+
 plot_ts_ci_multi = function(psi_list = NULL,
                              fontsize = 20,
                              time_label = NULL,
@@ -13,8 +137,8 @@ plot_ts_ci_multi = function(psi_list = NULL,
   clist_external = c("seagreen", "orange", "burlywood4")
 
   mlist_dgtf = toupper(c(
-    "LBA", "LBE", "LBA.DF", "LBA.W",
-    "TFS", "TFS.W", "TFS.DF",
+    "LBA", "LBE", "LBA.DF", "LBA.W", "HS",
+    "TFS", "TFS.W", "TFS.DF", "HS.EFF",
     "HVB", "HVA",
     "MCMC",
     "True",
@@ -28,8 +152,8 @@ plot_ts_ci_multi = function(psi_list = NULL,
     "Softplus", "nbinom", "Distributed Lags"
   ))
   clist_dgtf = c(
-    rep("maroon", 4), # LBA, LBE, LBA.DF, LBA.W
-    rep("peru", 3), # TFS
+    rep("maroon", 5), # LBA, LBE, LBA.DF, LBA.W
+    rep("peru", 4), # TFS
     rep("purple", 2), # HVB, HVA **
     "darkturquoise", # MCMC
     "black", # True

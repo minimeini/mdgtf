@@ -182,12 +182,19 @@ public:
         include_log_mobility = false;
 
         initialize_horseshoe_zero();
-
         alpha.resize(ns, ns);
-        // kappa.resize(ns);
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            alpha.col(k) = compute_alpha_col(k);
+
+        if (ns == 1)
+        {
+            alpha(0, 0) = 1.0;
+            wdiag.setOnes();
+        }
+        else
+        {
+            for (Eigen::Index k = 0; k < ns; k++)
+            { // Loop over source locations
+                alpha.col(k) = compute_alpha_col(k);
+            }
         }
         return;
     } // SpatialNetwork default constructor
@@ -252,10 +259,17 @@ public:
         }
 
         alpha.resize(ns, ns);
-        // kappa.resize(ns);
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            alpha.col(k) = compute_alpha_col(k);
+        if (ns == 1)
+        {
+            alpha(0, 0) = 1.0;
+            wdiag.setOnes();
+        }
+        else
+        {
+            for (Eigen::Index k = 0; k < ns; k++)
+            { // Loop over source locations
+                alpha.col(k) = compute_alpha_col(k);
+            }
         }
 
         return;
@@ -351,10 +365,19 @@ public:
         }
 
         alpha.resize(ns, ns);
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            alpha.col(k) = compute_alpha_col(k);
+        if (ns == 1)
+        {
+            alpha(0, 0) = 1.0;
+            wdiag.setOnes();
         }
+        else
+        {
+            for (Eigen::Index k = 0; k < ns; k++)
+            { // Loop over source locations
+                alpha.col(k) = compute_alpha_col(k);
+            }
+        }
+
         return;
     } // SpatialNetwork constructor for simulation when model parameters are known but Y is to be simulated
 
@@ -3498,6 +3521,13 @@ public:
                     }
 
                     spatial.compute_alpha();
+                } // if init
+
+                if (ns == 1)
+                {
+                    hs_prior.infer = false; // No horseshoe if only one location
+                    spatial.wdiag.setOnes();
+                    spatial.alpha(0, 0) = 1.0;
                 }
             } // if horseshoe
         } // if mcmc_opts
