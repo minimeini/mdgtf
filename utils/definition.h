@@ -339,15 +339,24 @@ public:
         return;
     }
 
-    void init(const Rcpp::List &opts)
+    void init(
+        const Rcpp::List &opts,
+        const std::string &default_name = "gaussian",
+        const double &default_par1 = 0.0,
+        const double &default_par2 = 1.0
+    )
     {
         Rcpp::List param_opts = opts;
+
+        name = default_name;
         if (param_opts.containsElementNamed("prior_name"))
         {
             std::string prior_name = Rcpp::as<std::string>(param_opts["prior_name"]);
             name = prior_name;
         }
 
+        par1 = default_par1;
+        par2 = default_par2;
         if (param_opts.containsElementNamed("prior_param"))
         {
             Rcpp::NumericVector param = Rcpp::as<Rcpp::NumericVector>(param_opts["prior_param"]);
@@ -386,9 +395,14 @@ public:
     }
 
     Prior(
-        const Rcpp::List &opts) : Dist()
+        const Rcpp::List &opts,
+        const std::string &default_dist = "gaussian", 
+        const double &default_par1 = 0., 
+        const double &default_par2 = 1.,
+        const bool &default_infer = false
+    ) : Dist()
     {
-        init(opts);
+        init(opts, default_dist, default_par1, default_par2, default_infer);
         return;
     }
 
@@ -401,16 +415,18 @@ public:
         return;
     }
 
-    void init(const Rcpp::List &opts)
+    void init(
+        const Rcpp::List &opts,
+        const std::string &default_dist = "gaussian", 
+        const double &default_par1 = 0., 
+        const double &default_par2 = 1.,
+        const bool &default_infer = false
+    )
     {
         Rcpp::List param_opts = opts;
+        Dist::init(param_opts, default_dist, default_par1, default_par2);
 
-        name = "invgamma";
-        par1 = 0.01;
-        par2 = 0.01;
-        Dist::init(param_opts);
-
-        infer = false;
+        infer = default_infer;
         if (param_opts.containsElementNamed("infer"))
         {
             infer = Rcpp::as<bool>(param_opts["infer"]);

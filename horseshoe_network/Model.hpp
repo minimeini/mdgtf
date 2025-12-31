@@ -1081,33 +1081,340 @@ public:
 
         return Rt;
     } // compute_Rt
+}; // class TemporalTransmission
 
 
-    /**
-     * @brief Gibbs sampler to update W.
-     * 
-     * @param prior_shape 
-     * @param prior_rate 
-     */
-    void update_W(const double &prior_shape = 1.0, const double &prior_rate = 1.0)
+class ZeroInflation
+{
+private:
+    Eigen::Index ns = 0; // number of spatial locations
+    Eigen::Index nt = 0; // number of effective time points
+public:
+    bool inflated = false;
+    double beta0 = 0.0; // intercept for zero-inflation probability
+    double beta1 = 0.0; // coefficient for zero-inflation probability
+
+    Eigen::MatrixXd Z; // (nt + 1) x ns, zero-inflation indicators
+
+
+    ZeroInflation()
     {
-        // wt: (nt + 1) x ns, row 0 is fixed (not part of prior/likelihood)
-        const double n_effective = static_cast<double>(ns * nt);
+        return;
+    } // ZeroInflation default constructor
 
-        // sum of squares over t = 1..nt only
-        double ssq = wt.block(1, 0, nt, ns).array().square().sum();
-        // equivalently: double ssq = wt.bottomRows(nt).array().square().sum();
 
-        double posterior_shape = prior_shape + 0.5 * n_effective;
-        double posterior_rate = prior_rate + 0.5 * ssq;
+    ZeroInflation(
+        const Eigen::Index &ns_, 
+        const Eigen::Index &nt_,
+        const bool &inflated_in = false
+    ) : ns(ns_), nt(nt_)
+    {
+        inflated = inflated_in;
+        beta0 = 0.0;
+        beta1 = 0.0;
 
-        // Inverse-Gamma(shape, rate) via gamma on precision
-        W = 1.0 / R::rgamma(posterior_shape, 1.0 / posterior_rate);
+        Z.resize(nt + 1, ns);
+        Z.setOnes();
+        return;
+    } // ZeroInflation constructor
+
+
+    ZeroInflation(
+        const Eigen::MatrixXd &Y,
+        const bool &inflated_in = true
+    )
+    {
+        ns = Y.cols();
+        nt = Y.rows() - 1;
+
+        inflated = inflated_in;
+        beta0 = 0.0;
+        beta1 = 0.0;
+
+        Z.resize(nt + 1, ns);
+        for (Eigen::Index t = 0; t < nt + 1; t++)
+        {
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (Y(t, s) < EPS && inflated)
+                {
+                    Z(t, s) = 0.0;
+                }
+                else
+                {
+                    Z(t, s) = 1.0;
+                }
+            } // for s
+        } // for t
 
         return;
-    } // update_W
+    } // ZeroInflation constructor from data
 
-}; // class TemporalTransmission
+
+    ZeroInflation(
+        const Eigen::Index &ns_, 
+        const Eigen::Index &nt_,
+        const Rcpp::List &zi_opts
+    )
+    {
+        ns = ns_;
+        nt = nt_;
+
+        inflated = true;
+        if (zi_opts.containsElementNamed("inflated"))
+        {
+            inflated = Rcpp::as<bool>(zi_opts["inflated"]);
+        }
+
+        beta0 = 0.0;
+        if (zi_opts.containsElementNamed("beta0"))
+        {
+            beta0 = Rcpp::as<double>(zi_opts["beta0"]);
+        }
+
+        beta1 = 0.0;
+        if (zi_opts.containsElementNamed("beta1"))
+        {
+            beta1 = Rcpp::as<double>(zi_opts["beta1"]);
+        }
+
+        Z.resize(nt + 1, ns);
+        Z.setOnes();
+        return;
+    }
+
+
+    Rcpp::List to_list() const
+    {
+        Rcpp::List zinfo = Rcpp::List::create(
+            Rcpp::Named("inflated") = inflated
+        );
+
+        if (inflated)
+        {
+            zinfo["beta0"] = beta0;
+            zinfo["beta1"] = beta1;
+            zinfo["Z"] = Z;
+        }
+
+        return zinfo;
+    } // to_list
+
+
+    void simulate()
+    {
+        if (!inflated)
+        {
+            return;
+        }
+
+        Z.setOnes();
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            for (Eigen::Index t = 1; t < nt + 1; t++)
+            {
+                double logit_p = beta0 + beta1 * Z(t - 1, s);
+                double p_one = inv_logit_stable(logit_p);
+                Z(t, s) = R::runif(0.0, 1.0) < p_one ? 1.0 : 0.0;
+            } // for t
+        } // for s
+    } // simulate
+
+
+    void update_Z(
+        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
+        const Eigen::MatrixXd &lambda_mat // (nt + 1) x ns, intensity matrix
+    )
+    {
+        const double p11 = inv_logit_stable(beta0 + beta1); // P(Z(t,s)=1 | Z(t-1,s)=1)
+        const double p01 = inv_logit_stable(beta0); // P(Z(t,s)=1 | Z(t-1,s)=0)
+
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            // prob_filter: filtering probabilities p(Z(t,s)=1 | Y(1:t,s))
+            Eigen::VectorXd prob_filter = Eigen::VectorXd::Zero(nt + 1);
+
+            // Forward filtering
+            for (Eigen::Index t = 1; t < nt + 1; t++)
+            {
+                if (Y(t, s) > 0)
+                {
+                    Z(t, s) = 1.0;
+                    prob_filter(t) = 1.0;
+                    // If observed count > 0, then Z(t,s) must be 1
+                }
+                else
+                {
+                    double p_y0 = R::dpois(0.0, lambda_mat(t, s), false); // P(Y(t,s)=0 | Z(t,s)=1)
+
+                    /*
+                    P(Z(t,s)=1 | Y(1:t,s)) is proportional to:
+                        P(Z(t-1,s)=1 | Y(1:t-1,s)) * P(Z(t,s)=1 | Z(t-1,s)=1) * P(Y(t,s)=0 | Z(t,s)=1) +
+                        P(Z(t-1,s)=0 | Y(1:t-1,s)) * P(Z(t,s)=1 | Z(t-1,s)=0) * P(Y(t,s)=0 | Z(t,s)=1)
+                    */
+                    double prob_1 = prob_filter(t - 1) * p11 * p_y0 + (1.0 - prob_filter(t - 1)) * p01 * p_y0;
+
+                    /*
+                    P(Z(t,s)=0 | Y(1:t,s)) is proportional to:
+                        P(Z(t-1,s)=1 | Y(1:t-1,s)) * P(Z(t,s)=0 | Z(t-1,s)=1) +
+                        P(Z(t-1,s)=0 | Y(1:t-1,s)) * P(Z(t,s)=0 | Z(t-1,s)=0)
+                    */
+                    double prob_0 = prob_filter(t - 1) * (1.0 - p11) + (1.0 - prob_filter(t - 1)) * (1.0 - p01);
+
+                    prob_filter(t) = prob_1 / (prob_1 + prob_0 + EPS);
+                } // calculate p(Z(t,s)=1 | Y(1:t,s)) if Y(t,s) == 0
+            } // for t - forward filtering
+
+            /*
+            Backward sampling from the joint probability:
+            p(z[1:nT] | y[1:nT]) = p(z[nT] | y[1:nT]) *
+                    prod_{t=2}^{nT} p(z[t-1] | z[t], y[1:t-1])
+            */
+            Z(nt, s) = (R::runif(0.0, 1.0) < prob_filter(nt)) ? 1.0 : 0.0;
+            for (Eigen::Index t = nt - 1; t >= 1; t--)
+            {
+                /*
+                P(Z(t,s)=1 | Z(t+1,s), Y(1:t,s)) is proportional to:
+                    P(Z(t+1,s) | Z(t,s)=1) * P(Z(t,s)=1 | Y(1:t,s))
+
+                P(Z(t,s)=0 | Z(t+1,s), Y(1:t,s)) is proportional to:
+                    P(Z(t+1,s) | Z(t,s)=0) * P(Z(t,s)=0 | Y(1:t,s))
+                */
+                double p_ztp1_given_zt_1 = (Z(t + 1, s) == 1.0) ? p11 : (1.0 - p11);
+                double p_ztp1_given_zt_0 = (Z(t + 1, s) == 1.0) ? p01 : (1.0 - p01);
+
+                double prob_1 = p_ztp1_given_zt_1 * prob_filter(t);
+                double prob_0 = p_ztp1_given_zt_0 * (1.0 - prob_filter(t));
+                double prob_zt_1 = prob_1 / (prob_1 + prob_0 + EPS);
+                Z(t, s) = (R::runif(0.0, 1.0) < prob_zt_1) ? 1.0 : 0.0;
+            } // for t - backward sampling
+        } // for s
+
+    } // update_Z
+
+
+    Eigen::VectorXd dlogprob_dbeta(
+        double &logprob,
+        const double &prior_mean = 0.0,
+        const double &prior_sd = 3.0
+    )
+    {
+        Eigen::VectorXd grad(2);
+        grad.setZero();
+        logprob = 0.0;
+
+        if (!inflated)
+        {
+            return grad;
+        }
+
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            for (Eigen::Index t = 1; t < nt + 1; t++)
+            {
+                double logit_p = beta0 + beta1 * Z(t - 1, s);
+                double p_one = inv_logit_stable(logit_p);
+                logprob += Z(t, s) * std::log(p_one + EPS) + (1.0 - Z(t, s)) * std::log(1.0 - p_one + EPS);
+
+                double dloglike_dlogit_p = Z(t, s) - p_one;
+                grad(0) += dloglike_dlogit_p; // derivative w.r.t. beta0
+                grad(1) += dloglike_dlogit_p * Z(t - 1, s); // derivative w.r.t. beta1
+            } // for t
+        } // for s
+
+        // Add priors
+        logprob += R::dnorm(beta0, prior_mean, prior_sd, true);
+        logprob += R::dnorm(beta1, prior_mean, prior_sd, true);
+
+        double prior_var = prior_sd * prior_sd;
+        grad(0) += - (beta0 - prior_mean) / prior_var;
+        grad(1) += - (beta1 - prior_mean) / prior_var;
+        return grad;
+    } // dlogprob_dbeta
+
+
+    double update_beta(
+        double &energy_diff,
+        double &grad_norm,
+        const double &leapfrog_step_size,
+        const unsigned int &n_leapfrog,
+        const Eigen::VectorXd &mass_diag = Eigen::VectorXd::Ones(2),
+        const double &prior_mean = 0.0,
+        const double &prior_sd = 3.0
+    )
+    {
+        Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
+        Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
+
+        Eigen::VectorXd beta_old(2);
+        beta_old(0) = beta0;
+        beta_old(1) = beta1;
+
+        Eigen::VectorXd beta = beta_old;
+        double logprob = 0.0;
+        Eigen::VectorXd grad = dlogprob_dbeta(logprob, prior_mean, prior_sd);
+        grad_norm = grad.norm();
+        double current_energy = -logprob;
+
+        // Sample momentum
+        Eigen::Vector2d momentum;
+        for (Eigen::Index i = 0; i < momentum.size(); i++)
+        {
+            momentum(i) = sqrt_mass(i) * R::rnorm(0.0, 1.0);
+        }
+        double current_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+        // Leapfrog integration
+        momentum += 0.5 * leapfrog_step_size * grad;
+        for (unsigned int lf_step = 0; lf_step < n_leapfrog; lf_step++)
+        {
+            // Update params
+            beta += leapfrog_step_size * inv_mass.cwiseProduct(momentum);
+            beta0 = beta(0);
+            beta1 = beta(1);
+
+            // Compute new gradient
+            grad = dlogprob_dbeta(logprob, prior_mean, prior_sd);
+
+            // Update momentum
+            if (lf_step != n_leapfrog - 1)
+            {
+                momentum += leapfrog_step_size * grad;
+            }
+        } // for leapfrog steps
+
+        momentum += 0.5 * leapfrog_step_size * grad;
+        momentum = -momentum; // Negate momentum to make proposal symmetric
+
+        double proposed_energy = - logprob;
+        double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
+
+        double H_proposed = proposed_energy + proposed_kinetic;
+        double H_current = current_energy + current_kinetic;
+        energy_diff = H_proposed - H_current;
+
+        // Metropolis acceptance step
+        double accept_prob = 0.0;
+        bool accept = false;
+        if (std::isfinite(energy_diff) && std::abs(energy_diff) < 100.0)
+        {
+            accept_prob = std::min(1.0, std::exp(-energy_diff));
+            if (std::log(R::runif(0.0, 1.0)) < -energy_diff)
+            {
+                accept = true;
+            }
+        }
+
+        if (!accept)
+        {
+            // Revert to old values
+            beta0 = beta_old(0);
+            beta1 = beta_old(1);
+        }
+
+        return accept_prob;
+    } // update_beta
+}; // class ZeroInflation
 
 
 class Model
@@ -1118,6 +1425,7 @@ private:
 public:
     /* Known model properties */
     LagDist dlag;
+    ZeroInflation zinfl; // zero-inflation model
 
     /* Unknown model components */
     double mu = 1.0; // expectation of baseline primary infections
@@ -1140,6 +1448,7 @@ public:
         const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_scaled_in = R_NilValue,
         const double &c_sq = 4.0,
         const std::string &fgain_ = "softplus",
+        const bool &zero_inflated = true,
         const Rcpp::List &lagdist_opts = Rcpp::List::create(
             Rcpp::Named("name") = "lognorm",
             Rcpp::Named("par1") = LN_MU,
@@ -1155,6 +1464,7 @@ public:
         dlag = LagDist(lagdist_opts);
         temporal = TemporalTransmission(ns, nt, fgain_);
         spatial = SpatialNetwork(ns, true, c_sq, dist_scaled_in, mobility_scaled_in);
+        zinfl = ZeroInflation(Y, zero_inflated);
 
         sample_N(Y);
 
@@ -1183,6 +1493,11 @@ public:
             Rcpp::Named("par2") = LN_SD2,
             Rcpp::Named("truncated") = true,
             Rcpp::Named("rescaled") = true
+        ),
+        const Rcpp::List &zinfl_opts = Rcpp::List::create(
+            Rcpp::Named("inflated") = false,
+            Rcpp::Named("beta0") = 0.0,
+            Rcpp::Named("beta1") = 0.0
         )
     )
     {
@@ -1193,8 +1508,8 @@ public:
 
         dlag = LagDist(lagdist_opts);
         temporal = TemporalTransmission(ns, nt, fgain_, W_in);
-
         spatial = SpatialNetwork(ns, spatial_opts, dist_scaled_in, mobility_scaled_in);
+        zinfl = ZeroInflation(ns, nt, zinfl_opts);
 
         N.resize(ns, ns, nt + 1, nt + 1);
         N.setZero();
@@ -1263,6 +1578,11 @@ public:
         {
             for (Eigen::Index s = 0; s < ns; s++)
             {
+                if (zinfl.inflated && zinfl.Z(t, s) < 1)
+                {
+                    continue; // Skip if structural zero
+                }
+
                 double lambda_st = mu;
                 double dlambda_drho = 0.0;
 
@@ -1306,6 +1626,11 @@ public:
         {
             for (Eigen::Index s = 0; s < ns; s++)
             {
+                if (zinfl.inflated && zinfl.Z(t, s) < 1)
+                {
+                    continue; // Skip if structural zero
+                }
+
                 double lambda_st = mu;
                 double dlambda_drho = 0.0;
 
@@ -1479,6 +1804,12 @@ public:
             // Likelihood contribution from destination (t, s)
             for (Eigen::Index t = 0; t < nt + 1; t++)
             {
+                if (zinfl.inflated && zinfl.Z(t, s) < 1)
+                {
+                    // If zero-inflated and Z(t,s) == 0, skip likelihood contribution
+                    continue;
+                }
+
                 double lambda_st = mu;
                 double dlambda_st_dalpha_sk = 0.0;
 
@@ -1520,8 +1851,8 @@ public:
                     double dalpha_sk_dtheta_jk = spatial.dalpha_dtheta(s, j, k, u_k);
                     grad(i) += dloglike_dlambda_st * dlambda_st_dalpha_sk * dalpha_sk_dtheta_jk;
                 }
-            }
-        }
+            } // for time t
+        } // for destination locations s
 
         // Compute FULL gradients for rho parameters (sum over ALL columns)
         if (idx_rho_dist >= 0)
@@ -1906,6 +2237,13 @@ public:
             // Likelihood contribution from destination (t, s)
             for (Eigen::Index t = 0; t < nt + 1; t++)
             {
+                if (zinfl.inflated && zinfl.Z(t, s) < 1)
+                {
+                    // If zero-inflated and Z(t,s) == 0, skip likelihood contribution
+                    continue;
+                }
+
+
                 double lambda_st = mu;
                 double dlambda_st_dalpha_sk = 0.0;
 
@@ -2129,6 +2467,11 @@ public:
         { // for destination time t
             for (Eigen::Index s = 0; s < ns; s++)
             { // for destination location s
+                if (zinfl.inflated && zinfl.Z(t, s) < 1)
+                {
+                    // If zero-inflated and Z(t,s) == 0, skip likelihood contribution
+                    continue;
+                }
 
                 double lambda_st = mu;
                 double dlambda_st_drho_dist = 0.0;
@@ -2465,6 +2808,11 @@ public:
         temporal.sample_wt();
         const Eigen::MatrixXd Rt = temporal.compute_Rt();
 
+        if (zinfl.inflated)
+        {
+            zinfl.simulate();
+        }
+
         // Simulate primary infections at time t = 0
         Eigen::MatrixXd Y(nt + 1, ns);
         Y.setZero();
@@ -2479,7 +2827,7 @@ public:
             for (Eigen::Index s = 0; s < ns; s++)
             {
                 N0(t, s) = R::rpois(std::max(mu, EPS));
-                Y(t, s) = N0(t, s);
+                double y_ts = N0(t, s);
 
                 for (Eigen::Index k = 0; k < ns; k++)
                 {
@@ -2498,23 +2846,19 @@ public:
                             N(s, k, t, l) = 0.0;
                         }
 
-                        Y(t, s) += N(s, k, t, l);
-                    }
-                }
-            }
-        }
+                        y_ts += N(s, k, t, l);
+                    } // for l < t
+                } // for source location k
+
+                Y(t, s) = (zinfl.Z(t, s) > 0 || !zinfl.inflated) ? y_ts : 0.0;
+            } // for destination location s
+        } // for time t
 
         Rcpp::List params_list = Rcpp::List::create(
             Rcpp::Named("mu") = mu,
             Rcpp::Named("W") = temporal.W
         );
 
-        // Compute regularized variance matrix for output
-        Eigen::MatrixXd reg_var(ns, ns);
-        for (Eigen::Index k = 0; k < ns; k++)
-        {
-            reg_var.col(k) = spatial.compute_regularized_variance_col(k);
-        }
 
         return Rcpp::List::create(
             Rcpp::Named("Y") = Y,
@@ -2524,7 +2868,8 @@ public:
             Rcpp::Named("wt") = temporal.wt,
             Rcpp::Named("Rt") = Rt,
             Rcpp::Named("params") = params_list,
-            Rcpp::Named("horseshoe") = spatial.to_list()
+            Rcpp::Named("horseshoe") = spatial.to_list(),
+            Rcpp::Named("zero_inflation") = zinfl.to_list()
         );
     } // simulate
 
@@ -2945,6 +3290,11 @@ public:
             for (Eigen::Index row = 0; row < T_obs; row++)
             {
                 Eigen::Index t = row + 2; // Observation time
+                if (zinfl.inflated && zinfl.Z(t, s) < 1)
+                {
+                    continue;
+                }
+
                 double y_st = Y(t, s);
                 double lam_st = lambda_mat(row, s);
                 loglik += y_st * std::log(lam_st) - lam_st;
@@ -3146,229 +3496,6 @@ public:
     } // update_eta_block_mh
 
 
-    Eigen::MatrixXd update_wt_by_eta_collapsed(
-        const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections,
-        const double &mh_sd = 1.0
-    )
-    {
-        const double W_safe = temporal.W + EPS;
-        const double W_sqrt = std::sqrt(W_safe);
-
-        // Convert centered wt to noncentered eta
-        Eigen::MatrixXd eta = temporal.wt / W_sqrt;
-
-        // Precompute cumulative sums of eta over time for each location
-        Eigen::MatrixXd eta_cumsum(nt + 1, ns);
-        for (Eigen::Index k = 0; k < ns; k++)
-        {
-            eta_cumsum.col(k) = cumsum_vec(eta.col(k));
-        }
-
-        // Precompute r, R, dR for all (l, k)
-        Eigen::MatrixXd r_mat = W_sqrt * eta_cumsum;
-        Eigen::MatrixXd R_mat(nt + 1, ns);
-        Eigen::MatrixXd dR_mat(nt + 1, ns);
-        for (Eigen::Index k = 0; k < ns; k++)
-        {
-            for (Eigen::Index l = 0; l < nt + 1; l++)
-            {
-                R_mat(l, k) = GainFunc::psi2hpsi(r_mat(l, k), temporal.fgain);
-                dR_mat(l, k) = GainFunc::psi2dhpsi(r_mat(l, k), temporal.fgain);
-            }
-        }
-
-        // Precompute intensity lambda for all (s, t)
-        Eigen::MatrixXd lambda_mat(nt + 1, ns);
-        for (Eigen::Index t = 0; t < nt + 1; t++)
-        {
-            for (Eigen::Index s = 0; s < ns; s++)
-            {
-                double lambda_st = mu;
-                for (Eigen::Index k = 0; k < ns; k++)
-                {
-                    for (Eigen::Index l = 0; l < t; l++)
-                    {
-                        if (t - l <= static_cast<Eigen::Index>(dlag.Fphi.size()))
-                        {
-                            lambda_st += spatial.alpha(s, k) * R_mat(l, k) * dlag.Fphi(t - l - 1) * Y(l, k);
-                        }
-                    } // for source time l < t
-                }
-                lambda_mat(t, s) = std::max(lambda_st, EPS);
-            }
-        }
-
-        // MH updates for each (k, l)
-        Eigen::MatrixXd accept_prob(nt + 1, ns);
-        accept_prob.setZero();
-        for (Eigen::Index k = 0; k < ns; k++)
-        { // Loop over source locations
-            
-            for (Eigen::Index l = 1; l < nt + 1; l++)
-            { // Loop over source times
-                const double eta_old = eta(l, k);
-
-                // ===== Step 1: Compute proposal parameters at current state =====
-                // Compute c^{t}_{k, l} for all t > l
-                double mh_prec = 1.0; // prior precision
-                double mh_mean = 0.0;
-                double logp_old = - 0.5 * eta_old * eta_old;
-                for (Eigen::Index t = l + 1; t < nt + 1; t++)
-                {
-                    double c_klt = 0.0;
-                    for (Eigen::Index i = l; i < t; i++)
-                    {
-                        if (t - i <= static_cast<Eigen::Index>(dlag.Fphi.size()))
-                        {
-                            c_klt += dR_mat(i, k) * Y(i, k) * dlag.Fphi(t - i - 1);
-                        }
-                    } // Calculate c_klt for i >= l and i < t
-
-                    // Sum over all destination locations s
-                    for (Eigen::Index s = 0; s < ns; s++)
-                    {
-                        double coef = W_sqrt * spatial.alpha(s, k) * c_klt;
-                        mh_prec += coef * coef / lambda_mat(t, s);
-
-                        double d_st = Y(t, s) - lambda_mat(t, s) + coef * eta_old;
-                        mh_mean += coef * d_st / lambda_mat(t, s);
-
-                        // Log Poisson likelihood at current state
-                        logp_old += Y(t, s) * std::log(lambda_mat(t, s)) - lambda_mat(t, s);
-                    } // for destination location s
-                } // for time t > l
-
-                mh_mean /= mh_prec;
-                double mh_step = std::sqrt(1.0 / mh_prec) * mh_sd;
-
-                // ===== Step 2: Propose new eta =====
-                double eta_new = R::rnorm(mh_mean, mh_step);
-                double logq_new_given_old = R::dnorm4(eta_new, mh_mean, mh_step, true);
-
-                // ===== Step 3: Update state temporarily =====
-                double delta_eta = eta_new - eta_old;
-                eta(l, k) = eta_new;
-
-                // Update cumsum, r, R, dR for indices >= l
-                for (Eigen::Index j = l; j < nt + 1; j++)
-                {
-                    eta_cumsum(j, k) += delta_eta;
-                    r_mat(j, k) = W_sqrt * eta_cumsum(j, k);
-                    R_mat(j, k) = GainFunc::psi2hpsi(r_mat(j, k), temporal.fgain);
-                    dR_mat(j, k) = GainFunc::psi2dhpsi(r_mat(j, k), temporal.fgain);
-                } // for j >= l
-
-                // Update lambda_mat for t > l (only contributions from source k changed)
-                for (Eigen::Index t = l + 1; t < nt + 1; t++)
-                {
-                    for (Eigen::Index s = 0; s < ns; s++)
-                    {
-                        double delta_contrib = 0.0;
-                        for (Eigen::Index j = l; j < t; j++)
-                        {
-                            if (t - j <= static_cast<Eigen::Index>(dlag.Fphi.size()))
-                            {
-                                // R_old at position j before the update
-                                double r_old_j = r_mat(j, k) - W_sqrt * delta_eta;
-                                double R_old_j = GainFunc::psi2hpsi(r_old_j, temporal.fgain);
-                                delta_contrib += spatial.alpha(s, k) * (R_mat(j, k) - R_old_j) * dlag.Fphi(t - j - 1) * Y(j, k);
-                            }
-                        } // for j
-                        lambda_mat(t, s) = std::max(lambda_mat(t, s) + delta_contrib, EPS);
-                    } // for destination location s
-                } // for time t > l
-
-                // ===== Step 4: Compute reverse proposal and new log posterior =====
-                mh_prec = 1.0; // prior precision
-                mh_mean = 0.0;
-                double logp_new = - 0.5 * eta_new * eta_new;
-                for (Eigen::Index t = l + 1; t < nt + 1; t++)
-                {
-                    double c_klt = 0.0;
-                    for (Eigen::Index i = l; i < t; i++)
-                    {
-                        if (t - i <= static_cast<Eigen::Index>(dlag.Fphi.size()))
-                        {
-                            c_klt += dR_mat(i, k) * Y(i, k) * dlag.Fphi(t - i - 1);
-                        }
-                    } // Calculate c_klt
-
-                    // Sum over all destination locations s
-                    for (Eigen::Index s = 0; s < ns; s++)
-                    {
-                        double coef = W_sqrt * spatial.alpha(s, k) * c_klt;
-                        mh_prec += coef * coef / lambda_mat(t, s);
-
-                        double d_st = Y(t, s) - lambda_mat(t, s) + coef * eta_new;
-                        mh_mean += coef * d_st / lambda_mat(t, s);
-
-                        // Log Poisson likelihood at current state
-                        logp_new += Y(t, s) * std::log(lambda_mat(t, s)) - lambda_mat(t, s);
-                    } // for destination location s
-                } // for time t > l
-
-                mh_mean /= mh_prec;
-                mh_step = std::sqrt(1.0 / mh_prec) * mh_sd;
-                double logq_old_given_new = R::dnorm4(eta_old, mh_mean, mh_step, true);
-
-                // ===== Step 5: MH acceptance decision =====
-                double logratio = logp_new - logp_old + logq_old_given_new - logq_new_given_old;
-                bool accept = false;
-                if (std::isfinite(logratio) && std::log(R::runif(0.0, 1.0)) < logratio)
-                {
-                    accept = true;
-                }
-
-                if (accept)
-                {
-                    // Accept: update wt
-                    temporal.wt(l, k) = W_sqrt * eta_new;
-                    accept_prob(l, k) = 1.0;
-                }
-                else
-                {
-                    // Reject: revert all state changes
-                    eta(l, k) = eta_old;
-
-                    // Revert cumsum, r, R, dR
-                    for (Eigen::Index j = l; j < nt + 1; j++)
-                    {
-                        eta_cumsum(j, k) -= delta_eta;
-                        r_mat(j, k) = W_sqrt * eta_cumsum(j, k);
-                        R_mat(j, k) = GainFunc::psi2hpsi(r_mat(j, k), temporal.fgain);
-                        dR_mat(j, k) = GainFunc::psi2dhpsi(r_mat(j, k), temporal.fgain);
-                    }
-
-                    // Revert λ_{s,t}
-                    for (Eigen::Index t = l + 1; t < nt + 1; t++)
-                    {
-                        for (Eigen::Index s = 0; s < ns; s++)
-                        {
-                            double delta_contrib = 0.0;
-                            for (Eigen::Index j = l; j < t; j++)
-                            {
-                                if (t - j <= static_cast<Eigen::Index>(dlag.Fphi.size()))
-                                {
-                                    // R at the "wrong" state we need to undo
-                                    double r_wrong_j = r_mat(j, k) + W_sqrt * delta_eta;
-                                    double R_wrong_j = GainFunc::psi2hpsi(r_wrong_j, temporal.fgain);
-                                    delta_contrib += spatial.alpha(s, k) * (R_mat(j, k) - R_wrong_j) * dlag.Fphi(t - j - 1) * Y(j, k);
-                                }
-                            }
-                            lambda_mat(t, s) = std::max(lambda_mat(t, s) + delta_contrib, EPS);
-                        } // for destination location s
-                    } // for time t > l
-
-                    accept_prob(l, k) = 0.0;
-                } // if accept
-
-            } // for source time l
-        } // for source location k
-
-        return accept_prob;
-    } // sample_wt_by_eta_collapsed
-
-
     Eigen::VectorXd get_unconstrained(const Eigen::Index &k)
     {
         Eigen::Index n_offdiag = ns - 1;
@@ -3421,6 +3548,10 @@ public:
 
         Prior hs_prior("gaussian", 0.0, 3.0, true); // prior for horseshoe per column
         HMCOpts_2d hs_hmc_opts;
+
+        Prior zinfl_prior("gaussian", 0.0, 3.0, false); // prior for zero-inflation parameter
+        HMCOpts_1d zinfl_hmc_opts;
+
 
         if (mcmc_opts.isNotNull())
         {
@@ -3530,7 +3661,41 @@ public:
                     spatial.alpha(0, 0) = 1.0;
                 }
             } // if horseshoe
+
+
+            if (mcmc_opts_list.containsElementNamed("zero_inflation"))
+            {
+                Rcpp::List zinfl_opts = mcmc_opts_list["zero_inflation"];
+                zinfl_prior = Prior(zinfl_opts, "gaussian", 0.0, 3.0, true);
+                zinfl = ZeroInflation(Y, zinfl_prior.infer);
+
+                if (zinfl_opts.containsElementNamed("init"))
+                {
+                    Rcpp::List initial_values = zinfl_opts["init"];
+                    if (initial_values.containsElementNamed("beta0"))
+                    {
+                        zinfl.beta0 = Rcpp::as<double>(initial_values["beta0"]);
+                    }
+                    if (initial_values.containsElementNamed("beta1"))
+                    {
+                        zinfl.beta1 = Rcpp::as<double>(initial_values["beta1"]);
+                    }
+                    if (initial_values.containsElementNamed("Z"))
+                    {
+                        Rcpp::NumericMatrix Z_mat = initial_values["Z"];
+                        zinfl.Z = Rcpp::as<Eigen::MatrixXd>(Z_mat);
+                    }
+                } // if init
+
+                if (zinfl_opts.containsElementNamed("hmc"))
+                {
+                    Rcpp::List hmc_zinfl_opts = zinfl_opts["hmc"];
+                    zinfl_hmc_opts = HMCOpts_1d(hmc_zinfl_opts);
+                } // if hmc
+            } // if zero_inflation
         } // if mcmc_opts
+        
+        zinfl = ZeroInflation(Y, zinfl_prior.infer); // initialize zero-inflation model
 
 
         // Set up HMC options and diagnostics for static parameters if to be inferred
@@ -3600,6 +3765,25 @@ public:
         } // infer horseshoe
 
 
+        HMCDiagnostics_1d zinfl_hmc_diag;
+        DualAveraging_1d zinfl_da_adapter;
+        Eigen::VectorXd mass_diag_zinfl = Eigen::VectorXd::Ones(2);
+        MassAdapter mass_adapter_zinfl;
+        if (zinfl_prior.infer)
+        {
+            zinfl_hmc_opts.leapfrog_step_size = zinfl_prior.hmc_step_size_init;
+            zinfl_hmc_opts.nleapfrog = zinfl_prior.hmc_nleapfrog_init;
+            zinfl_hmc_diag = HMCDiagnostics_1d(static_cast<unsigned int>(ntotal), nburnin, true);
+            zinfl_da_adapter = DualAveraging_1d(zinfl_hmc_opts);
+
+            Eigen::VectorXd mass_init(2);
+            mass_init(0) = zinfl.beta0;
+            mass_init(1) = zinfl.beta1;
+            mass_adapter_zinfl.mean = mass_init;
+            mass_adapter_zinfl.M2 = Eigen::VectorXd::Zero(mass_adapter_zinfl.mean.size());
+        } // HMC objects infer zero-inflation
+
+
         Eigen::Index npass = hs_prior.infer ? 5 : 1;
         Eigen::ArrayXd wt_accept_count(ns);
         wt_accept_count.setZero();
@@ -3640,6 +3824,15 @@ public:
             wdiag_samples.resize(spatial.wdiag.size(), nsamples);
         }
 
+        Eigen::MatrixXd zinfl_Z_average;
+        Eigen::VectorXd zinfl_beta0_samples, zinfl_beta1_samples;
+        if (zinfl_prior.infer)
+        {
+            zinfl_Z_average = Eigen::MatrixXd::Zero(zinfl.Z.rows(), zinfl.Z.cols());
+            zinfl_beta0_samples.resize(nsamples);
+            zinfl_beta1_samples.resize(nsamples);
+        }
+
         Eigen::Tensor<double, 3> alpha_samples(spatial.alpha.rows(), spatial.alpha.cols(), nsamples);
         Eigen::Tensor<double, 3> N_samples; // (nt + 1) x ns x nsamples, total secondary infections generated by (t, s)
         Eigen::Tensor<double, 3> N0_samples; // (nt + 1) x ns x nsamples, baseline primary infections at (t, s)
@@ -3648,6 +3841,7 @@ public:
             N_samples.resize(nt + 1, ns, nsamples);
             N0_samples.resize(nt + 1, ns, nsamples);
         }
+
 
         Eigen::VectorXd post_burnin_accept_sum = Eigen::VectorXd::Zero(ns);
         Eigen::VectorXi post_burnin_accept_count = Eigen::VectorXi::Zero(ns);
@@ -3663,6 +3857,74 @@ public:
             {
                 update_N(Y);
             }
+
+
+            if (zinfl_prior.infer)
+            {
+                Eigen::MatrixXd R_mat = temporal.compute_Rt(); // (nt + 1) x ns
+                Eigen::MatrixXd lambda_mat = compute_intensity(Y, R_mat, spatial.alpha, dlag.Fphi, mu);
+                zinfl.update_Z(Y, lambda_mat);
+
+
+                double energy_diff = 0.0;
+                double grad_norm = 0.0;
+                double accept_prob = zinfl.update_beta(
+                    energy_diff, grad_norm,
+                    zinfl_hmc_opts.leapfrog_step_size,
+                    zinfl_hmc_opts.nleapfrog,
+                    mass_diag_zinfl,
+                    zinfl_prior.par1, zinfl_prior.par2
+                );
+
+                // (Optional) Update diagnostics and dual averaging for rho
+                zinfl_hmc_diag.accept_count += accept_prob;
+                if (zinfl_hmc_opts.diagnostics)
+                {
+                    zinfl_hmc_diag.energy_diff(iter) = energy_diff;
+                    zinfl_hmc_diag.grad_norm(iter) = grad_norm;
+                }
+
+                if (zinfl_hmc_opts.dual_averaging && iter <= nburnin)
+                {
+                    if (iter < nburnin)
+                    {
+                        zinfl_hmc_opts.leapfrog_step_size = zinfl_da_adapter.update_step_size(accept_prob);
+                    }
+                    else if (iter == nburnin)
+                    {
+                        zinfl_da_adapter.finalize_leapfrog_step(
+                            zinfl_hmc_opts.leapfrog_step_size,
+                            zinfl_hmc_opts.nleapfrog,
+                            zinfl_hmc_opts.T_target);
+                    }
+
+                    if (zinfl_hmc_opts.diagnostics)
+                    {
+                        zinfl_hmc_diag.leapfrog_step_size_stored(iter) = zinfl_hmc_opts.leapfrog_step_size;
+                        zinfl_hmc_diag.nleapfrog_stored(iter) = zinfl_hmc_opts.nleapfrog;
+                    }
+                } // if dual averaging
+
+
+                if (iter < nburnin)
+                {
+                    // Phase 1 (iter < nburnin/2): Adapt step size with unit mass
+                    // Phase 2 (nburnin/2 <= iter < nburnin): Adapt mass matrix
+                    Eigen::Vector2d current_params;
+                    current_params(0) = zinfl.beta0;
+                    current_params(1) = zinfl.beta1;
+                    mass_adapter_zinfl.update(current_params);
+
+                    // Only update mass matrix ONCE at the midpoint
+                    if (iter == nburnin / 2)
+                    {
+                        mass_diag_est = mass_adapter_zinfl.get_mass_diag();
+
+                        // CRITICAL: Reset dual averaging for new geometry
+                        zinfl_da_adapter = DualAveraging_1d(zinfl_hmc_opts);
+                    }
+                } // mass matrix adaptation
+            } // if infer zero-inflation
 
 
             for (Eigen::Index k = 0; k < ns; k++)
@@ -3918,6 +4180,13 @@ public:
             {
                 Eigen::Index sample_idx = (iter - nburnin) / nthin;
 
+                if (zinfl_prior.infer)
+                {
+                    zinfl_Z_average += zinfl.Z;
+                    zinfl_beta0_samples(sample_idx) = zinfl.beta0;
+                    zinfl_beta1_samples(sample_idx) = zinfl.beta1;
+                }
+
                 if (static_params_prior.infer)
                 {
                     mu_samples(sample_idx) = mu;
@@ -3987,6 +4256,24 @@ public:
         Rcpp::List output;
 
         output["alpha"] = tensor3_to_r(alpha_samples); // ns x ns x nsamples
+
+        if (zinfl_prior.infer)
+        {
+            Rcpp::List zinfl_list = Rcpp::List::create(
+                Rcpp::Named("Z_average") = zinfl_Z_average / static_cast<double>(nsamples), // (nt + 1) x ns
+                Rcpp::Named("beta0") = zinfl_beta0_samples, // nsamples x 1
+                Rcpp::Named("beta1") = zinfl_beta1_samples  // nsamples x 1
+            );
+
+            zinfl_list["hmc"] = Rcpp::List::create(
+                Rcpp::Named("acceptance_rate") = zinfl_hmc_diag.accept_count / static_cast<double>(ntotal),
+                Rcpp::Named("leapfrog_step_size") = zinfl_hmc_opts.leapfrog_step_size,
+                Rcpp::Named("n_leapfrog") = zinfl_hmc_opts.nleapfrog,
+                Rcpp::Named("diagnostics") = zinfl_hmc_diag.to_list()
+            );
+
+            output["zero_inflation"] = zinfl_list;
+        } // if infer zero-inflation
 
         if (wt_prior.infer)
         {

@@ -112,7 +112,7 @@ plot_ns_matrix <- function(
     scale_y_discrete(expand = c(0, 0), limits = rev(axis_levels)) +
     theme_void() +
     theme(
-      axis.text.x.top = element_text(size = axis_text_size, angle = 0, hjust = +0.5),
+      axis.text.x.top = element_text(size = axis_text_size, angle = 45, hjust = +0.5),
       axis.text.y     = element_text(size = axis_text_size, angle = 90),
       axis.title      = element_blank(),
       axis.ticks      = element_blank(),
@@ -137,10 +137,10 @@ plot_ts_ci_multi = function(psi_list = NULL,
   clist_external = c("seagreen", "orange", "burlywood4")
 
   mlist_dgtf = toupper(c(
-    "LBA", "LBE", "LBA.DF", "LBA.W", "HS",
-    "TFS", "TFS.W", "TFS.DF", "HS.EFF",
-    "HVB", "HVA",
-    "MCMC",
+    "LBA", "LBE", "LBA.DF", "LBA.W", "HS", "Apparent",
+    "TFS", "TFS.W", "TFS.DF", "HS.EFF", "Local",
+    "HVB", "HVA", "Import",
+    "MCMC", "Hawkes",
     "True",
     "VB",
     "PL",
@@ -152,10 +152,10 @@ plot_ts_ci_multi = function(psi_list = NULL,
     "Softplus", "nbinom", "Distributed Lags"
   ))
   clist_dgtf = c(
-    rep("maroon", 5), # LBA, LBE, LBA.DF, LBA.W
-    rep("peru", 4), # TFS
-    rep("purple", 2), # HVB, HVA **
-    "darkturquoise", # MCMC
+    rep("maroon", 6), # LBA, LBE, LBA.DF, LBA.W
+    rep("peru", 5), # TFS
+    rep("purple", 3), # HVB, HVA **
+    rep("darkturquoise", 2), # MCMC
     "black", # True
     "salmon", # VB
     "royalblue", # PL **

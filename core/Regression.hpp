@@ -354,6 +354,12 @@ public:
             }
         } // Forward filtering loop
 
+
+        /*
+        Backward sampling from the joint probability:
+        p(z[1:nT] | y[1:nT]) = p(z[nT] | y[1:nT]) * 
+                              prod_{t=2}^{nT} p(z[t-1] | z[t], y[1:t-1])
+        */
         z.at(y.n_elem - 1) = (R::runif(0., 1.) < prob_filter.at(y.n_elem - 1)) ? 1. : 0.;
         for (unsigned int t = y.n_elem - 2; t > 0; t--)
         {
