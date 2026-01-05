@@ -71,6 +71,20 @@ inline Rcpp::NumericVector tensor4_to_r(const Eigen::Tensor<double, 4> &t)
 }; // tensor4_to_r
 
 
+inline Eigen::Tensor<double, 3> r_to_tensor3(Rcpp::NumericVector &arr)
+{
+    if (!arr.hasAttribute("dim"))
+        Rcpp::stop("need dim");
+    Rcpp::IntegerVector dim = arr.attr("dim");
+    if (dim.size() != 3)
+        Rcpp::stop("need 3D array");
+
+    Eigen::array<Eigen::Index, 3> dims = {dim[0], dim[1], dim[2]};
+    Eigen::TensorMap<Eigen::Tensor<double, 3>> t(arr.begin(), dims);
+    return t;
+}; // r_to_tensor3
+
+
 inline Rcpp::NumericVector tensor3_to_r(const Eigen::Tensor<double, 3> &t)
 {
     Eigen::array<Eigen::Index, 3> dims = t.dimensions();

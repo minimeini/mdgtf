@@ -174,51 +174,44 @@ inline double calculate_mae(
 
 // ---- Chi-square ----
 inline double calculate_chisqr(
-    const Eigen::Ref<const Eigen::MatrixXd> &Y,
     const Eigen::Ref<const Eigen::VectorXd> &y_true,
-    const double eps = 1e-12
+    const Eigen::Ref<const Eigen::MatrixXd> &Y,
+    const double min_var = 1e-6
 )
 {
-    if (Y.rows() != y_true.size())
-        throw std::invalid_argument("calculate_chisqr: Y must be k x nsample; y_true must have length k.");
-
     const Eigen::Index k = Y.rows();
     const Eigen::Index nsample = Y.cols();
 
-    Eigen::VectorXd var_t(k);
+    double total = 0.0;
+    Eigen::Index valid_k = 0;
+
     for (Eigen::Index i = 0; i < k; ++i)
     {
         const Eigen::RowVectorXd row = Y.row(i);
         const double mean = row.mean();
-        const double var = (row.array() - mean).square().sum() / static_cast<double>(nsample);
-        var_t(i) = var;
+        const double var = (row.array() - mean).square().sum() / static_cast<double>(nsample - 1);
+
+        if (var < min_var)
+            continue;
+
+        valid_k++;
+        const double resid = y_true(i) - mean;
+        total += (resid * resid) / var;
     }
 
-    Eigen::MatrixXd diff = Y.colwise() - y_true;
-    double total = 0.0;
-    for (Eigen::Index i = 0; i < k; ++i)
-    {
-        const double denom = var_t(i) + eps;
-        for (Eigen::Index j = 0; j < nsample; ++j)
-        {
-            const double num = std::pow(std::abs(diff(i, j)) + eps, 2.0);
-            total += num / denom;
-        }
-    }
-
-    return total / (static_cast<double>(k) * static_cast<double>(nsample));
+    return (valid_k > 0) ? total / static_cast<double>(valid_k) : std::numeric_limits<double>::quiet_NaN();
 }
 
 
 inline double calculate_chisqr(
-    const Rcpp::NumericMatrix &Y,
     const Rcpp::NumericVector &y_true,
-    const double eps = 1e-12
+    const Rcpp::NumericMatrix &Y,
+    const double min_var = 1e-6
 )
 {
     Eigen::Map<const Eigen::MatrixXd> Y_eig(Y.begin(), Y.nrow(), Y.ncol());
     Eigen::Map<const Eigen::VectorXd> y_true_eig(y_true.begin(), y_true.size());
-    return calculate_chisqr(Y_eig, y_true_eig, eps);
+    return calculate_chisqr(y_true_eig, Y_eig, min_var);
 }
 
 
