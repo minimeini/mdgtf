@@ -699,7 +699,7 @@ Rcpp::List evaluate_posterior_predictive(
     const Rcpp::List &mcmc_output, 
     const Rcpp::List &true_vals, // true parameter values if not inferred in `mcmc_output`
     const Rcpp::NumericVector &Y_in, // (nt + 1) x ns
-    const Rcpp::Nullable<Rcpp::NumericMatrix> &Rt_in, // (nt + 1) x ns
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &Rt_in = R_NilValue, // (nt + 1) x ns
     const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue, // ns x ns, pairwise distance matrix
     const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
     const Eigen::Index &nsample = 1000
