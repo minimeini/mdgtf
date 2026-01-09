@@ -262,6 +262,7 @@ public:
 
             include_covariates = true;
             np = X.dimension(0);
+            nt = X.dimension(2) - 1;
 
             // Initialize logit retention weight parameters
             logit_wdiag_intercept.resize(ns);
@@ -414,6 +415,7 @@ public:
 
             include_covariates = true;
             np = X.dimension(0);
+            nt = X.dimension(2) - 1;
 
             /*
             Initialize logit retention weight parameters
@@ -517,6 +519,21 @@ public:
             Rcpp::Named("c_sq") = c_sq
         );
     } // to_list
+
+
+    void set_X(const Rcpp::NumericVector &X_in)
+    {
+        Rcpp::NumericVector X_vec(X_in);
+        X = r_to_tensor3(X_vec);
+        if (X.dimension(1) != ns)
+        {
+            Rcpp::stop("Dimension mismatch when setting covariate array X.");
+        }
+
+        include_covariates = true;
+        np = X.dimension(0);
+        nt = X.dimension(2) - 1;
+    } // set_X
 
 
     /**
@@ -1675,6 +1692,71 @@ class Model
 private:
     Eigen::Index ns = 0; // number of spatial locations
     Eigen::Index nt = 0; // number of effective time points
+
+
+    /**
+     * @brief Compute alpha element handling both historical and forecast time indices
+     */
+    double compute_alpha_for_time(
+        const Eigen::VectorXd &u_k,
+        const Eigen::Index s,
+        const Eigen::Index k,
+        const Eigen::Index t,
+        const Eigen::Index T_obs,
+        const Eigen::Tensor<double, 3> &X_forecast,
+        const bool has_forecast_covariates) const
+    {
+        const Eigen::Index ns = spatial.theta.cols();
+
+        if (ns == 1)
+        {
+            return 1.0;
+        }
+
+        double U_off = u_k.sum();
+        if (U_off <= EPS8)
+        {
+            return (s == k) ? 1.0 : 0.0;
+        }
+
+        // Compute w_{k,t} with appropriate covariates
+        double logit_w_k = spatial.logit_wdiag_intercept(k);
+
+        if (spatial.include_covariates && spatial.np > 0)
+        {
+            if (t < T_obs)
+            {
+                // Use historical covariates
+                for (Eigen::Index p = 0; p < spatial.np; p++)
+                {
+                    logit_w_k += spatial.logit_wdiag_slope(p) * spatial.X(p, k, t);
+                }
+            }
+            else if (has_forecast_covariates)
+            {
+                // Use forecast covariates
+                Eigen::Index t_forecast = t - T_obs;
+                for (Eigen::Index p = 0; p < spatial.np; p++)
+                {
+                    logit_w_k += spatial.logit_wdiag_slope(p) * X_forecast(p, k, t_forecast);
+                }
+            }
+            // If no forecast covariates provided, use intercept only (assumes covariates = 0)
+        }
+
+        double w_k = inv_logit_stable(logit_w_k);
+
+        if (s == k)
+        {
+            return w_k;
+        }
+        else
+        {
+            return (1.0 - w_k) * u_k(s) / U_off;
+        }
+    } // compute_alpha_for_time
+
+
 public:
     /* Known model properties */
     LagDist dlag;
@@ -2841,6 +2923,160 @@ public:
         );
 
     } // simulate
+
+
+    /**
+     * @brief Continue simulation from existing data for k additional time steps
+     *
+     * @param Y_history Existing simulated data, (T_obs) x ns matrix
+     * @param wt_history Existing disturbance trajectory, (T_obs) x ns matrix
+     * @param k_ahead Number of future time steps to simulate
+     * @param X_forecast Optional covariates for forecast period, np x ns x k_ahead tensor
+     * @return Rcpp::List with Y_forecast, wt_forecast, lambda_forecast, Rt_forecast
+     */
+    Rcpp::List simulate_ahead(
+        const Eigen::MatrixXd &Y_history,
+        const Eigen::MatrixXd &wt_history,
+        const Eigen::Index k_ahead,
+        const Rcpp::Nullable<Rcpp::NumericVector> &X_forecast_in = R_NilValue)
+    {
+        const Eigen::Index T_obs = Y_history.rows();
+        const Eigen::Index ns_check = Y_history.cols();
+
+        if (ns_check != spatial.theta.cols())
+        {
+            Rcpp::stop("Dimension mismatch: Y_history columns must match number of locations.");
+        }
+        if (wt_history.rows() != T_obs || wt_history.cols() != ns_check)
+        {
+            Rcpp::stop("Dimension mismatch: wt_history must match Y_history dimensions.");
+        }
+
+        const Eigen::Index ns = ns_check;
+        const double W_sqrt = std::sqrt(temporal.W);
+
+        // Parse forecast covariates if provided
+        Eigen::Tensor<double, 3> X_forecast;
+        bool has_forecast_covariates = false;
+        if (X_forecast_in.isNotNull() && spatial.include_covariates)
+        {
+            Rcpp::NumericVector X_vec(X_forecast_in);
+            X_forecast = r_to_tensor3(X_vec);
+            if (X_forecast.dimension(0) != spatial.np ||
+                X_forecast.dimension(1) != ns ||
+                X_forecast.dimension(2) != k_ahead)
+            {
+                Rcpp::stop("X_forecast must have dimensions (np x ns x k_ahead).");
+            }
+            has_forecast_covariates = true;
+        }
+
+        // Extend Y and wt matrices
+        Eigen::MatrixXd Y_extended(T_obs + k_ahead, ns);
+        Y_extended.setZero();
+        Y_extended.block(0, 0, T_obs, ns) = Y_history;
+
+        Eigen::MatrixXd wt_extended(T_obs + k_ahead, ns);
+        wt_extended.setZero();
+        wt_extended.block(0, 0, T_obs, ns) = wt_history;
+
+        // Output matrices for forecast period only
+        Eigen::MatrixXd Y_forecast(k_ahead, ns);
+        Eigen::MatrixXd wt_forecast(k_ahead, ns);
+        Eigen::MatrixXd lambda_forecast(k_ahead, ns);
+        Eigen::MatrixXd Rt_forecast(k_ahead, ns);
+
+        // Precompute unnormalized spatial weights (static part)
+        Eigen::MatrixXd u_mat(ns, ns);
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            u_mat.col(k) = spatial.compute_unnormalized_weight_col(k);
+        }
+
+        // Simulate forward
+        for (Eigen::Index t = T_obs; t < T_obs + k_ahead; t++)
+        {
+            const Eigen::Index t_forecast = t - T_obs; // Index into forecast arrays
+
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                // Sample new disturbance
+                wt_extended(t, s) = R::rnorm(0.0, W_sqrt);
+                wt_forecast(t_forecast, s) = wt_extended(t, s);
+
+                // Compute R_{s,t} from cumulative wt
+                double wt_cumsum = 0.0;
+                for (Eigen::Index tau = 0; tau <= t; tau++)
+                {
+                    wt_cumsum += wt_extended(tau, s);
+                }
+                double R_st = GainFunc::psi2hpsi(wt_cumsum, temporal.fgain);
+                Rt_forecast(t_forecast, s) = R_st;
+            }
+
+            // Now simulate Y for this time step
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                double lambda_st = mu; // Baseline
+
+                for (Eigen::Index k = 0; k < ns; k++)
+                {
+                    Eigen::VectorXd u_k = u_mat.col(k);
+
+                    // Compute cumulative wt for source location k (for R_k,l)
+                    Eigen::VectorXd wt_cumsum_k = cumsum_vec(wt_extended.col(k).head(t));
+
+                    for (Eigen::Index l = 0; l < t; l++)
+                    {
+                        Eigen::Index lag = t - l;
+                        if (lag <= static_cast<Eigen::Index>(dlag.Fphi.size()))
+                        {
+                            // Compute alpha_{s,k,l} - need to handle covariates carefully
+                            double alpha_skl = compute_alpha_for_time(
+                                u_k, s, k, l, T_obs,
+                                X_forecast, has_forecast_covariates);
+
+                            double R_kl = GainFunc::psi2hpsi(wt_cumsum_k(l), temporal.fgain);
+                            double phi_lag = dlag.Fphi(lag - 1);
+
+                            lambda_st += alpha_skl * R_kl * phi_lag * Y_extended(l, k);
+                        }
+                    }
+                }
+
+                lambda_forecast(t_forecast, s) = lambda_st;
+
+                // Sample Y from Poisson (or zero-inflated Poisson)
+                double y_st = R::rpois(std::max(lambda_st, EPS));
+
+                // Handle zero-inflation if needed
+                if (zinfl.inflated)
+                {
+                    // For forecast, we need to sample Z as well
+                    double z_prev = (t > 0) ? ((Y_extended(t - 1, s) > 0) ? 1.0 : 0.0) : 1.0;
+                    double logit_p = zinfl.beta0 + zinfl.beta1 * z_prev;
+                    double p_one = inv_logit_stable(logit_p);
+                    double z_st = (R::runif(0.0, 1.0) < p_one) ? 1.0 : 0.0;
+
+                    if (z_st < 0.5)
+                    {
+                        y_st = 0.0;
+                    }
+                }
+
+                Y_extended(t, s) = y_st;
+                Y_forecast(t_forecast, s) = y_st;
+            }
+        }
+
+        return Rcpp::List::create(
+            Rcpp::Named("Y_forecast") = Y_forecast,
+            Rcpp::Named("wt_forecast") = wt_forecast,
+            Rcpp::Named("lambda_forecast") = lambda_forecast,
+            Rcpp::Named("Rt_forecast") = Rt_forecast,
+            Rcpp::Named("Y_extended") = Y_extended,
+            Rcpp::Named("wt_extended") = wt_extended);
+    } // simulate_ahead
 
 
     /**

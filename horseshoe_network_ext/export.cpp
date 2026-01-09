@@ -4,7 +4,11 @@
 #include <numeric>
 #include <algorithm>
 #include <cmath>
+
+#include <RcppEigen.h>
 #include <unsupported/Eigen/FFT>
+#include <Eigen/Eigenvalues>
+
 #include "../inference/diagnostics.hpp"
 #include "Model.hpp"
 
@@ -43,10 +47,21 @@ Rcpp::NumericMatrix standardize_alpha(const Rcpp::NumericMatrix &alpha_in)
 } // standardize_alpha
 
 
+
+//' Compute apparent reproduction number decomposed into local and imported components
+//' 
+//' @param alpha_array Spatial weight matrix: either ns x ns x nsample (static) 
+//'        or ns x ns x nt x nsample (time-varying)
+//' @param Rt_array Reproduction numbers: nt x ns x nsample
+//' @param Y Observed case counts: nt x ns
+//' @param lagdist_opts Optional list of lag distribution parameters
+//' @param return_quantiles If TRUE, return quantile summaries instead of all samples
+//' @param quantiles Vector of quantiles to compute (default: c(0.025, 0.5, 0.975))
+//' @return List with R_apparent, R_local, R_import arrays (nt x ns x nsample or nt x ns x nquantiles)
 //' @export
 // [[Rcpp::export]]
 List compute_apparent_R(
-    const NumericVector& alpha_array,  // ns x ns x nsample
+    const NumericVector& alpha_array,  // ns x ns x nsample (static) or ns x ns x nt x nsample (time-varying)
     const NumericVector& Rt_array,     // nt x ns x nsample
     const NumericMatrix& Y,            // nt x ns
     const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue,
@@ -64,13 +79,50 @@ List compute_apparent_R(
     LagDist dlag(lagdist_opts_use);
     Rcpp::NumericVector phi = Rcpp::as<Rcpp::NumericVector>(Rcpp::wrap(dlag.Fphi));
 
-    // Get dimensions
-    IntegerVector alpha_dims = alpha_array.attr("dim");
-    int ns = alpha_dims[0];
-    int nsample = alpha_dims[2];
-    
+    // Get Rt dimensions: nt x ns x nsample
     IntegerVector Rt_dims = Rt_array.attr("dim");
+    if (Rt_dims.size() != 3)
+    {
+        Rcpp::stop("Rt_array must be a 3D array (nt x ns x nsample)");
+    }
     int nt = Rt_dims[0];
+    int ns = Rt_dims[1];
+    int nsample = Rt_dims[2];
+
+    // Parse alpha dimensions to determine if static or time-varying
+    IntegerVector alpha_dims = alpha_array.attr("dim");
+    bool alpha_time_varying;
+    int alpha_nt;
+
+    if (alpha_dims.size() == 3)
+    {
+        // Static: ns x ns x nsample
+        if (alpha_dims[0] != ns || alpha_dims[1] != ns || alpha_dims[2] != nsample)
+        {
+            Rcpp::stop("Static alpha dimensions must be ns x ns x nsample (got %d x %d x %d, expected %d x %d x %d)",
+                       alpha_dims[0], alpha_dims[1], alpha_dims[2], ns, ns, nsample);
+        }
+        alpha_time_varying = false;
+        alpha_nt = 1;
+    }
+    else if (alpha_dims.size() == 4)
+    {
+        // Time-varying: ns x ns x nt x nsample
+        if (alpha_dims[0] != ns || alpha_dims[1] != ns || alpha_dims[3] != nsample)
+        {
+            Rcpp::stop("Time-varying alpha dimensions must be ns x ns x nt x nsample");
+        }
+        alpha_time_varying = true;
+        alpha_nt = alpha_dims[2];
+        if (alpha_nt != nt)
+        {
+            Rcpp::stop("Time dimension of alpha (%d) must match Rt (%d)", alpha_nt, nt);
+        }
+    }
+    else
+    {
+        Rcpp::stop("alpha_array must be 3D (ns x ns x nsample) or 4D (ns x ns x nt x nsample)");
+    }
     
     int max_lag = phi.size();
     
@@ -83,18 +135,21 @@ List compute_apparent_R(
     R_local.attr("dim") = IntegerVector::create(nt, ns, nsample);
     R_import.attr("dim") = IntegerVector::create(nt, ns, nsample);
     
-    // Precompute convolution: conv(t, k) = sum_{l<t} R_{k,l} * phi_{t-l} * y_{k,l}
-    // and denominator: denom(t, s) = sum_{l<t} phi_{t-l} * y_{s,l}
+    // Temporary matrix for alpha at each time point
+    Eigen::MatrixXd alpha_t(ns, ns);
     
     // Loop over posterior samples
     for (int m = 0; m < nsample; m++) {
         
-        // Extract alpha for this sample: ns x ns matrix
-        // alpha_array is stored as [s, k, m] in column-major order
-        Eigen::MatrixXd alpha_m(ns, ns);
-        for (int k = 0; k < ns; k++) {
-            for (int s = 0; s < ns; s++) {
-                alpha_m(s, k) = alpha_array[s + k * ns + m * ns * ns];
+        // For static alpha, extract once per sample
+        Eigen::MatrixXd alpha_static(ns, ns);
+        if (!alpha_time_varying)
+        {
+            // alpha_array is stored as [s, k, m] in column-major order
+            for (int k = 0; k < ns; k++) {
+                for (int s = 0; s < ns; s++) {
+                    alpha_static(s, k) = alpha_array[s + k * ns + m * ns * ns];
+                }
             }
         }
         
@@ -142,33 +197,50 @@ List compute_apparent_R(
         
         // Now compute R_apparent, R_local, R_import for each (t, s)
         for (int t = 1; t < nt; t++) {
+            
+            // Get alpha for this time point
+            if (alpha_time_varying)
+            {
+                // alpha_array[s, k, t, m] -> index: s + k*ns + t*ns*ns + m*ns*ns*nt
+                for (int k = 0; k < ns; k++) {
+                    for (int s = 0; s < ns; s++) {
+                        int idx = s + k * ns + t * ns * ns + m * ns * ns * nt;
+                        alpha_t(s, k) = alpha_array[idx];
+                    }
+                }
+            }
+            else
+            {
+                alpha_t = alpha_static;
+            }
+            
             for (int s = 0; s < ns; s++) {
                 
                 double denom = conv_y(t, s);
                 
-                // Local contribution: w_s * conv_Ry(t, s)
-                double w_s = alpha_m(s, s);
+                // Local contribution: w_s(t) * conv_Ry(t, s)
+                double w_s = alpha_t(s, s);
                 double local_num = w_s * conv_Ry(t, s);
                 
-                // Import contribution: sum_{k != s} alpha_{s,k} * conv_Ry(t, k)
+                // Import contribution: sum_{k != s} alpha_{s,k}(t) * conv_Ry(t, k)
                 double import_num = 0.0;
                 for (int k = 0; k < ns; k++) {
                     if (k != s) {
-                        import_num += alpha_m(s, k) * conv_Ry(t, k);
+                        import_num += alpha_t(s, k) * conv_Ry(t, k);
                     }
                 }
                 
                 // Store results
-                int idx = t + s * nt + m * nt * ns;
+                int out_idx = t + s * nt + m * nt * ns;
                 
                 if (denom > 1e-10) {
-                    R_local[idx] = local_num / denom;
-                    R_import[idx] = import_num / denom;
-                    R_apparent[idx] = (local_num + import_num) / denom;
+                    R_local[out_idx] = local_num / denom;
+                    R_import[out_idx] = import_num / denom;
+                    R_apparent[out_idx] = (local_num + import_num) / denom;
                 } else {
-                    R_local[idx] = NA_REAL;
-                    R_import[idx] = NA_REAL;
-                    R_apparent[idx] = NA_REAL;
+                    R_local[out_idx] = NA_REAL;
+                    R_import[out_idx] = NA_REAL;
+                    R_apparent[out_idx] = NA_REAL;
                 }
             }
         }
@@ -183,21 +255,23 @@ List compute_apparent_R(
     }
 
     if (return_quantiles) {
-        Rcpp::NumericVector R_apparent_qt(nt * ns * quantiles.size());
-        Rcpp::NumericVector R_local_qt(nt * ns * quantiles.size());
-        Rcpp::NumericVector R_import_qt(nt * ns * quantiles.size());
+        int nq = quantiles.size();
+        Rcpp::NumericVector R_apparent_qt(nt * ns * nq);
+        Rcpp::NumericVector R_local_qt(nt * ns * nq);
+        Rcpp::NumericVector R_import_qt(nt * ns * nq);
 
-        R_apparent_qt.attr("dim") = IntegerVector::create(nt, ns, quantiles.size());
-        R_local_qt.attr("dim") = IntegerVector::create(nt, ns, quantiles.size());
-        R_import_qt.attr("dim") = IntegerVector::create(nt, ns, quantiles.size());
+        R_apparent_qt.attr("dim") = IntegerVector::create(nt, ns, nq);
+        R_local_qt.attr("dim") = IntegerVector::create(nt, ns, nq);
+        R_import_qt.attr("dim") = IntegerVector::create(nt, ns, nq);
 
         // Compute quantiles
+        std::vector<double> R_app_samples(nsample);
+        std::vector<double> R_loc_samples(nsample);
+        std::vector<double> R_imp_samples(nsample);
+
         for (int t = 0; t < nt; t++) {
             for (int s = 0; s < ns; s++) {
                 // Extract samples for (t, s)
-                std::vector<double> R_app_samples(nsample);
-                std::vector<double> R_loc_samples(nsample);
-                std::vector<double> R_imp_samples(nsample);
                 for (int m = 0; m < nsample; m++) {
                     int idx = t + s * nt + m * nt * ns;
                     R_app_samples[m] = R_apparent[idx];
@@ -205,35 +279,411 @@ List compute_apparent_R(
                     R_imp_samples[m] = R_import[idx];
                 }
 
-                // Compute quantiles for each requested quantile
-                for (int q = 0; q < quantiles.size(); q++) {
-                    double q_val = quantiles[q];
-                    std::nth_element(R_app_samples.begin(), R_app_samples.begin() + static_cast<int>(q_val * nsample), R_app_samples.end());
-                    std::nth_element(R_loc_samples.begin(), R_loc_samples.begin() + static_cast<int>(q_val * nsample), R_loc_samples.end());
-                    std::nth_element(R_imp_samples.begin(), R_imp_samples.begin() + static_cast<int>(q_val * nsample), R_imp_samples.end());
+                // Sort for proper quantile computation
+                std::vector<double> R_app_sorted = R_app_samples;
+                std::vector<double> R_loc_sorted = R_loc_samples;
+                std::vector<double> R_imp_sorted = R_imp_samples;
+                std::sort(R_app_sorted.begin(), R_app_sorted.end());
+                std::sort(R_loc_sorted.begin(), R_loc_sorted.end());
+                std::sort(R_imp_sorted.begin(), R_imp_sorted.end());
+
+                // Compute each quantile with linear interpolation
+                for (int q = 0; q < nq; q++) {
+                    double p = quantiles[q];
+                    double idx_real = p * (nsample - 1);
+                    int idx_low = static_cast<int>(std::floor(idx_real));
+                    int idx_high = static_cast<int>(std::ceil(idx_real));
+                    
                     int qt_idx = t + s * nt + q * nt * ns;
-                    R_apparent_qt[qt_idx] = R_app_samples[static_cast<int>(q_val * nsample)];
-                    R_local_qt[qt_idx] = R_loc_samples[static_cast<int>(q_val * nsample)];
-                    R_import_qt[qt_idx] = R_imp_samples[static_cast<int>(q_val * nsample)];
+                    
+                    if (idx_low == idx_high || idx_high >= nsample) {
+                        R_apparent_qt[qt_idx] = R_app_sorted[idx_low];
+                        R_local_qt[qt_idx] = R_loc_sorted[idx_low];
+                        R_import_qt[qt_idx] = R_imp_sorted[idx_low];
+                    } else {
+                        double frac = idx_real - idx_low;
+                        R_apparent_qt[qt_idx] = (1.0 - frac) * R_app_sorted[idx_low] + frac * R_app_sorted[idx_high];
+                        R_local_qt[qt_idx] = (1.0 - frac) * R_loc_sorted[idx_low] + frac * R_loc_sorted[idx_high];
+                        R_import_qt[qt_idx] = (1.0 - frac) * R_imp_sorted[idx_low] + frac * R_imp_sorted[idx_high];
+                    }
                 }
             }
+        }
+
+        // Add quantile names
+        Rcpp::CharacterVector q_names(nq);
+        for (int q = 0; q < nq; q++) {
+            q_names[q] = std::to_string(static_cast<int>(quantiles[q] * 100)) + "%";
         }
 
         return List::create(
             Named("R_apparent") = R_apparent_qt,
             Named("R_local") = R_local_qt,
-            Named("R_import") = R_import_qt
+            Named("R_import") = R_import_qt,
+            Named("quantiles") = quantiles,
+            Named("quantile_names") = q_names
         );
+    }
+    
+    return List::create(
+        Named("R_apparent") = R_apparent,
+        Named("R_local") = R_local,
+        Named("R_import") = R_import
+    );
+} // compute_apparent_R
+
+
+//' Compute network reproduction number (spectral radius of branching matrix)
+//' 
+//' @param alpha Spatial weight matrix: either ns x ns x nsample (static) or ns x ns x nt x nsample (time-varying)
+//' @param Rt Reproduction numbers: nt x ns x nsample
+//' @param quantiles Vector of quantiles to compute (default: c(0.025, 0.5, 0.975))
+//' @return List with:
+//'   - rho_samples: nt x nsample matrix of spectral radii
+//'   - rho_quantiles: nt x nquantiles matrix of quantile summaries
+//' @export
+// [[Rcpp::export]]
+Rcpp::List compute_network_Rt(
+    const Rcpp::NumericVector &alpha,
+    const Rcpp::NumericVector &Rt,
+    Rcpp::Nullable<Rcpp::NumericVector> quantiles_in = R_NilValue
+)
+{
+    // Set up quantiles
+    std::vector<double> quantiles;
+    if (quantiles_in.isNotNull())
+    {
+        Rcpp::NumericVector q(quantiles_in);
+        quantiles.resize(q.size());
+        for (int i = 0; i < q.size(); i++)
+        {
+            quantiles[i] = q[i];
+        }
     }
     else
     {
-        return List::create(
-            Named("R_apparent") = R_apparent,
-            Named("R_local") = R_local,
-            Named("R_import") = R_import
-        );
+        quantiles = {0.025, 0.5, 0.975};
     }
-} // compute_apparent_R
+
+    // Parse Rt dimensions: nt x ns x nsample
+    Rcpp::IntegerVector Rt_dims = Rt.attr("dim");
+    if (Rt_dims.size() != 3)
+    {
+        Rcpp::stop("Rt must be a 3D array (nt x ns x nsample)");
+    }
+    const Eigen::Index nt = Rt_dims[0];
+    const Eigen::Index ns = Rt_dims[1];
+    const Eigen::Index nsample = Rt_dims[2];
+
+    // Parse alpha dimensions
+    Rcpp::IntegerVector alpha_dims = alpha.attr("dim");
+    bool alpha_time_varying;
+    Eigen::Index alpha_nt;
+
+    if (alpha_dims.size() == 3)
+    {
+        // Static: ns x ns x nsample
+        if (alpha_dims[0] != ns || alpha_dims[1] != ns || alpha_dims[2] != nsample)
+        {
+            Rcpp::stop("Static alpha dimensions must be ns x ns x nsample");
+        }
+        alpha_time_varying = false;
+        alpha_nt = 1;
+    }
+    else if (alpha_dims.size() == 4)
+    {
+        // Time-varying: ns x ns x nt x nsample
+        if (alpha_dims[0] != ns || alpha_dims[1] != ns || alpha_dims[3] != nsample)
+        {
+            Rcpp::stop("Time-varying alpha dimensions must be ns x ns x nt x nsample");
+        }
+        alpha_time_varying = true;
+        alpha_nt = alpha_dims[2];
+        if (alpha_nt != nt)
+        {
+            Rcpp::stop("Time dimension of alpha must match Rt");
+        }
+    }
+    else
+    {
+        Rcpp::stop("alpha must be 3D (static) or 4D (time-varying)");
+    }
+
+    // Allocate output matrix for spectral radii
+    Eigen::MatrixXd rho_samples(nt, nsample);
+
+    // Temporary matrices for computation
+    Eigen::MatrixXd alpha_t(ns, ns);
+    Eigen::MatrixXd K_t(ns, ns);
+    Eigen::VectorXd Rt_vec(ns);
+
+    // Eigen solver (reuse for efficiency)
+    Eigen::EigenSolver<Eigen::MatrixXd> solver;
+
+    // Main computation loop
+    for (Eigen::Index m = 0; m < nsample; m++)
+    {
+        for (Eigen::Index t = 0; t < nt; t++)
+        {
+            // Extract alpha for this sample (and time if varying)
+            if (alpha_time_varying)
+            {
+                // alpha[s, k, t, m] -> index: s + k*ns + t*ns*ns + m*ns*ns*nt
+                for (Eigen::Index k = 0; k < ns; k++)
+                {
+                    for (Eigen::Index s = 0; s < ns; s++)
+                    {
+                        Eigen::Index idx = s + k * ns + t * ns * ns + m * ns * ns * nt;
+                        alpha_t(s, k) = alpha[idx];
+                    }
+                }
+            }
+            else
+            {
+                // alpha[s, k, m] -> index: s + k*ns + m*ns*ns
+                for (Eigen::Index k = 0; k < ns; k++)
+                {
+                    for (Eigen::Index s = 0; s < ns; s++)
+                    {
+                        Eigen::Index idx = s + k * ns + m * ns * ns;
+                        alpha_t(s, k) = alpha[idx];
+                    }
+                }
+            }
+
+            // Extract Rt for this sample and time
+            // Rt[t, k, m] -> index: t + k*nt + m*nt*ns
+            for (Eigen::Index k = 0; k < ns; k++)
+            {
+                Eigen::Index idx = t + k * nt + m * nt * ns;
+                Rt_vec(k) = Rt[idx];
+            }
+
+            // Compute branching matrix: K_t = alpha_t * diag(Rt)
+            // K_t(s, k) = alpha_t(s, k) * Rt(k)
+            for (Eigen::Index k = 0; k < ns; k++)
+            {
+                for (Eigen::Index s = 0; s < ns; s++)
+                {
+                    K_t(s, k) = alpha_t(s, k) * Rt_vec(k);
+                }
+            }
+
+            // Compute spectral radius (maximum real part of eigenvalues)
+            solver.compute(K_t, /* computeEigenvectors = */ false);
+            const auto& eigenvalues = solver.eigenvalues();
+
+            double max_real = eigenvalues(0).real();
+            for (Eigen::Index i = 1; i < ns; i++)
+            {
+                if (eigenvalues(i).real() > max_real)
+                {
+                    max_real = eigenvalues(i).real();
+                }
+            }
+
+            rho_samples(t, m) = max_real;
+        }
+    }
+
+    // Compute quantiles for each time point
+    Eigen::Index nq = quantiles.size();
+    Eigen::MatrixXd rho_quantiles(nt, nq);
+    std::vector<double> sample_vec(nsample);
+
+    for (Eigen::Index t = 0; t < nt; t++)
+    {
+        // Extract samples for this time point
+        for (Eigen::Index m = 0; m < nsample; m++)
+        {
+            sample_vec[m] = rho_samples(t, m);
+        }
+
+        // Sort for quantile computation
+        std::sort(sample_vec.begin(), sample_vec.end());
+
+        // Compute each quantile
+        for (Eigen::Index q = 0; q < nq; q++)
+        {
+            double p = quantiles[q];
+            double idx_real = p * (nsample - 1);
+            Eigen::Index idx_low = static_cast<Eigen::Index>(std::floor(idx_real));
+            Eigen::Index idx_high = static_cast<Eigen::Index>(std::ceil(idx_real));
+            
+            if (idx_low == idx_high || idx_high >= nsample)
+            {
+                rho_quantiles(t, q) = sample_vec[idx_low];
+            }
+            else
+            {
+                // Linear interpolation
+                double frac = idx_real - idx_low;
+                rho_quantiles(t, q) = (1.0 - frac) * sample_vec[idx_low] + frac * sample_vec[idx_high];
+            }
+        }
+    }
+
+    // Convert to R matrices
+    Rcpp::NumericMatrix rho_samples_out = Rcpp::wrap(rho_samples);
+    Rcpp::NumericMatrix rho_quantiles_out = Rcpp::wrap(rho_quantiles);
+
+    // Add column names to quantiles
+    Rcpp::CharacterVector q_names(nq);
+    for (Eigen::Index q = 0; q < nq; q++)
+    {
+        q_names[q] = std::to_string(static_cast<int>(quantiles[q] * 100)) + "%";
+    }
+    Rcpp::colnames(rho_quantiles_out) = q_names;
+
+    return Rcpp::List::create(
+        Rcpp::Named("rho_samples") = rho_samples_out,
+        Rcpp::Named("rho_quantiles") = rho_quantiles_out
+    );
+} // compute_network_Rt
+
+
+//' Compute sensitivity of spectral radius to Rt and retention rate
+//' 
+//' @param alpha Spatial weight matrix at a single time point: ns x ns
+//' @param Rt Reproduction numbers at a single time point: ns vector
+//' @return List with:
+//'   - rho: spectral radius
+//'   - d_rho_d_Rt: sensitivity to each Rt (ns vector)
+//'   - d_rho_d_w: sensitivity to each retention rate (ns vector)
+//'   - left_eigenvec: left eigenvector (ns vector)
+//'   - right_eigenvec: right eigenvector (ns vector)
+//' @export
+// [[Rcpp::export]]
+Rcpp::List compute_spectral_sensitivity(
+    const Eigen::MatrixXd &alpha,
+    const Eigen::VectorXd &Rt
+)
+{
+    const Eigen::Index ns = alpha.rows();
+    if (alpha.cols() != ns || Rt.size() != ns)
+    {
+        Rcpp::stop("Dimension mismatch");
+    }
+
+    // Compute branching matrix K = alpha * diag(Rt)
+    Eigen::MatrixXd K(ns, ns);
+    for (Eigen::Index k = 0; k < ns; k++)
+    {
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            K(s, k) = alpha(s, k) * Rt(k);
+        }
+    }
+
+    // Compute eigenvalues and right eigenvectors
+    Eigen::EigenSolver<Eigen::MatrixXd> solver(K);
+    const auto& eigenvalues = solver.eigenvalues();
+    const auto& eigenvectors = solver.eigenvectors();
+
+    // Find dominant eigenvalue (largest real part)
+    Eigen::Index dominant_idx = 0;
+    double max_real = eigenvalues(0).real();
+    for (Eigen::Index i = 1; i < ns; i++)
+    {
+        if (eigenvalues(i).real() > max_real)
+        {
+            max_real = eigenvalues(i).real();
+            dominant_idx = i;
+        }
+    }
+
+    double rho = max_real;
+
+    // Right eigenvector (normalize to sum to 1)
+    Eigen::VectorXd v(ns);
+    for (Eigen::Index i = 0; i < ns; i++)
+    {
+        v(i) = eigenvectors(i, dominant_idx).real();
+    }
+    double v_sum = v.sum();
+    if (std::abs(v_sum) > 1e-10)
+    {
+        v /= v_sum;
+    }
+
+    // Left eigenvector (from K^T)
+    Eigen::EigenSolver<Eigen::MatrixXd> solver_T(K.transpose());
+    const auto& eigenvalues_T = solver_T.eigenvalues();
+    const auto& eigenvectors_T = solver_T.eigenvectors();
+
+    // Find matching eigenvalue in transpose
+    Eigen::Index dominant_idx_T = 0;
+    double min_diff = std::abs(eigenvalues_T(0).real() - rho);
+    for (Eigen::Index i = 1; i < ns; i++)
+    {
+        double diff = std::abs(eigenvalues_T(i).real() - rho);
+        if (diff < min_diff)
+        {
+            min_diff = diff;
+            dominant_idx_T = i;
+        }
+    }
+
+    Eigen::VectorXd u(ns);
+    for (Eigen::Index i = 0; i < ns; i++)
+    {
+        u(i) = eigenvectors_T(i, dominant_idx_T).real();
+    }
+
+    // Normalize so that u^T v = 1
+    double uTv = u.dot(v);
+    if (std::abs(uTv) > 1e-10)
+    {
+        u /= uTv;
+    }
+
+    // Compute sensitivities
+    // d_rho/d_Rt_k = (v_k * sum_s u_s * alpha_{s,k}) / (u^T v)
+    // Since we normalized u^T v = 1, denominator is 1
+    Eigen::VectorXd d_rho_d_Rt(ns);
+    for (Eigen::Index k = 0; k < ns; k++)
+    {
+        double sum_u_alpha = 0.0;
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            sum_u_alpha += u(s) * alpha(s, k);
+        }
+        d_rho_d_Rt(k) = v(k) * sum_u_alpha;
+    }
+
+    // d_rho/d_w_k = (R_k * v_k) * [u_k - u_bar_{-k}]
+    // where u_bar_{-k} = sum_{s != k} u_s * alpha_tilde_{s,k}
+    // and alpha_tilde_{s,k} = alpha_{s,k} / (1 - w_k) for s != k
+    Eigen::VectorXd d_rho_d_w(ns);
+    for (Eigen::Index k = 0; k < ns; k++)
+    {
+        double w_k = alpha(k, k);  // Diagonal is retention rate
+        double one_minus_w = 1.0 - w_k;
+
+        double u_bar_minus_k = 0.0;
+        if (std::abs(one_minus_w) > 1e-10)
+        {
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k)
+                {
+                    double alpha_tilde_sk = alpha(s, k) / one_minus_w;
+                    u_bar_minus_k += u(s) * alpha_tilde_sk;
+                }
+            }
+        }
+
+        d_rho_d_w(k) = Rt(k) * v(k) * (u(k) - u_bar_minus_k);
+    }
+
+    return Rcpp::List::create(
+        Rcpp::Named("rho") = rho,
+        Rcpp::Named("d_rho_d_Rt") = d_rho_d_Rt,
+        Rcpp::Named("d_rho_d_w") = d_rho_d_w,
+        Rcpp::Named("left_eigenvec") = u,
+        Rcpp::Named("right_eigenvec") = v
+    );
+} // compute_spectral_sensitivity
 
 
 //' @export
@@ -291,6 +741,75 @@ Rcpp::List simulate_network_hawkes(
 
     return model.simulate();
 } // simulate_network_hawkes
+
+
+//' @export
+// [[Rcpp::export]]
+Rcpp::List continue_simulation(
+    const Rcpp::List &simulation_output,  // Output from simulate_network_hawkes
+    const Eigen::Index &k_ahead,
+    const Rcpp::Nullable<Rcpp::NumericVector> &X_history = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericVector> &X_forecast = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue,
+    const double &c_sq = 4.0,
+    const std::string &fgain = "softplus"
+)
+{
+    // Extract history from simulation output
+    Eigen::MatrixXd Y_history = Rcpp::as<Eigen::MatrixXd>(simulation_output["Y"]);
+    Eigen::MatrixXd wt_history = Rcpp::as<Eigen::MatrixXd>(simulation_output["wt"]);
+    
+    const Eigen::Index T_obs = Y_history.rows();
+    const Eigen::Index ns = Y_history.cols();
+    
+    // Reconstruct model with same parameters
+    Rcpp::List params = simulation_output["params"];
+    double mu = Rcpp::as<double>(params["mu"]);
+    double W = Rcpp::as<double>(params["W"]);
+    
+    Rcpp::List hs_list = simulation_output["horseshoe"];
+    Eigen::MatrixXd theta = Rcpp::as<Eigen::MatrixXd>(hs_list["theta"]);
+    Eigen::VectorXd logit_wdiag_intercept = Rcpp::as<Eigen::VectorXd>(hs_list["logit_wdiag_intercept"]);
+    
+    // Build model and set parameters
+    Rcpp::List lagdist_defaults = Rcpp::List::create(
+        Rcpp::Named("name") = "lognorm",
+        Rcpp::Named("par1") = LN_MU,
+        Rcpp::Named("par2") = LN_SD2,
+        Rcpp::Named("truncated") = true,
+        Rcpp::Named("rescaled") = true
+    );
+    
+    
+    Model model(
+        Y_history, dist_matrix, mobility_matrix, X_history,
+        c_sq, fgain, false, lagdist_defaults
+    );
+    
+    // Set inferred/true parameters
+    model.mu = mu;
+    model.temporal.W = W;
+    model.temporal.wt = wt_history;
+    model.spatial.theta = theta;
+    model.spatial.logit_wdiag_intercept = logit_wdiag_intercept;
+    
+    if (hs_list.containsElementNamed("logit_wdiag_slope"))
+    {
+        model.spatial.logit_wdiag_slope = Rcpp::as<Eigen::VectorXd>(hs_list["logit_wdiag_slope"]);
+    }
+    if (hs_list.containsElementNamed("rho_dist"))
+    {
+        model.spatial.rho_dist = Rcpp::as<double>(hs_list["rho_dist"]);
+    }
+    if (hs_list.containsElementNamed("rho_mobility"))
+    {
+        model.spatial.rho_mobility = Rcpp::as<double>(hs_list["rho_mobility"]);
+    }
+    
+    // Continue simulation
+    return model.simulate_ahead(Y_history, wt_history, k_ahead, X_forecast);
+} // continue_simulation
 
 
 //' @export
@@ -676,6 +1195,508 @@ void parse_mcmc_output(
 } // parse_mcmc_output
 
 
+void parse_mcmc_output_for_alpha(
+    Eigen::Tensor<double, 3> &theta_samples,
+    Eigen::MatrixXd &logit_wdiag_intercept_samples,
+    Eigen::MatrixXd &logit_wdiag_slopes_samples,
+    Eigen::VectorXd &rho_dist_samples,
+    Eigen::VectorXd &rho_mobility_samples,
+    const Rcpp::List &mcmc_output, 
+    const Rcpp::List &true_vals, 
+    const Eigen::Index &ns, 
+    const Eigen::Index &nsample,
+    const bool &use_distance,
+    const bool &use_mobility,
+    const bool &use_covariates
+)
+{
+    bool found_theta = false;
+    if (mcmc_output.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = mcmc_output["horseshoe"];
+        if (hs_list.containsElementNamed("theta"))
+        {
+            Rcpp::NumericVector theta_array = Rcpp::as<Rcpp::NumericVector>(hs_list["theta"]);
+            Rcpp::IntegerVector dim = theta_array.attr("dim");
+            if (dim[2] != nsample)
+            {
+                throw std::invalid_argument("Number of theta samples does not match number of wt samples.");
+            }
+            theta_samples = r_to_tensor3(theta_array);
+            found_theta = true;
+        }
+    }
+
+    if (!found_theta && true_vals.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = true_vals["horseshoe"];
+        if (hs_list.containsElementNamed("theta"))
+        {
+            Rcpp::NumericMatrix theta_mat = Rcpp::as<Rcpp::NumericMatrix>(hs_list["theta"]); // ns x ns
+            if (theta_mat.nrow() != theta_mat.ncol())
+            {
+                throw std::invalid_argument("True theta must be a square matrix.");
+            }
+            if (theta_mat.nrow() != ns)
+            {
+                throw std::invalid_argument("Dimension of true theta does not match number of locations in Y_obs.");
+            }
+            theta_samples.resize(ns, ns, nsample);
+            for (Eigen::Index i = 0; i < nsample; i++)
+            {
+                for (Eigen::Index s = 0; s < ns; s++)
+                {
+                    for (Eigen::Index k = 0; k < ns; k++)
+                    {
+                        theta_samples(s, k, i) = theta_mat(s, k);
+                    }
+                }
+            }
+            found_theta = true;
+        }
+    }
+
+    if (!found_theta)
+    {
+        throw std::invalid_argument("No theta samples in MCMC output or true values.");
+    }
+
+    bool found_wdiag_intercept = false;
+    if (mcmc_output.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = mcmc_output["horseshoe"];
+        if (hs_list.containsElementNamed("logit_wdiag_intercept"))
+        {
+            Rcpp::NumericMatrix intercept_mat = Rcpp::as<Rcpp::NumericMatrix>(hs_list["logit_wdiag_intercept"]); // ns x nsample
+            if (intercept_mat.ncol() != nsample)
+            {
+                throw std::invalid_argument("Number of logit_wdiag_intercept samples does not match number of wt samples.");
+            }
+            logit_wdiag_intercept_samples = Rcpp::as<Eigen::MatrixXd>(intercept_mat);
+            found_wdiag_intercept = true;
+        }
+    }
+
+    if (!found_wdiag_intercept && true_vals.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = true_vals["horseshoe"];
+        if (hs_list.containsElementNamed("logit_wdiag_intercept"))
+        {
+            Rcpp::NumericVector intercept_vec = Rcpp::as<Rcpp::NumericVector>(hs_list["logit_wdiag_intercept"]); // ns
+            if (intercept_vec.size() != ns)
+            {
+                throw std::invalid_argument("Dimension of true logit_wdiag_intercept does not match number of locations in Y_obs.");
+            }
+            logit_wdiag_intercept_samples.resize(ns, nsample);
+            for (Eigen::Index i = 0; i < nsample; i++)
+            {
+                for (Eigen::Index s = 0; s < ns; s++)
+                {
+                    logit_wdiag_intercept_samples(s, i) = intercept_vec[s];
+                }
+            }
+            found_wdiag_intercept = true;
+        }
+    }
+
+    if (!found_wdiag_intercept)
+    {
+        throw std::invalid_argument("No logit_wdiag_intercept samples in MCMC output or true values.");
+    }
+
+    bool found_slopes = false;
+    if (use_covariates)
+    {
+        if (mcmc_output.containsElementNamed("horseshoe"))
+        {
+            Rcpp::List hs_list = mcmc_output["horseshoe"];
+            if (hs_list.containsElementNamed("logit_wdiag_slope"))
+            {
+                Rcpp::NumericMatrix slopes_mat = Rcpp::as<Rcpp::NumericMatrix>(hs_list["logit_wdiag_slope"]); // ns x n_covariates x nsample
+                if (slopes_mat.ncol() != nsample)
+                {
+                    throw std::invalid_argument("Number of logit_wdiag_slope samples does not match number of wt samples.");
+                }
+                logit_wdiag_slopes_samples = Rcpp::as<Eigen::MatrixXd>(slopes_mat);
+                found_slopes = true;
+            }
+        }
+    }
+
+    if (use_covariates && !found_slopes && true_vals.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = true_vals["horseshoe"];
+        if (hs_list.containsElementNamed("logit_wdiag_slope"))
+        {
+            Rcpp::NumericVector slopes_vec = Rcpp::as<Rcpp::NumericVector>(hs_list["logit_wdiag_slope"]); // n_covariates x 1
+            Eigen::Index n_covariates = slopes_vec.size();
+            logit_wdiag_slopes_samples.resize(n_covariates, nsample);
+            for (Eigen::Index i = 0; i < nsample; i++)
+            {
+                for (Eigen::Index j = 0; j < n_covariates; j++)
+                {
+                    logit_wdiag_slopes_samples(j, i) = slopes_vec[j];
+                }
+            }
+            found_slopes = true;
+        }
+    }
+
+    if (use_covariates && !found_slopes)
+    {
+        throw std::invalid_argument("No logit_wdiag_slope samples in MCMC output or true values.");
+    }
+
+    bool found_rho_dist = false;
+    if (use_distance)
+    {
+        if (mcmc_output.containsElementNamed("params"))
+        {
+            Rcpp::List params_list = mcmc_output["params"];
+            if (params_list.containsElementNamed("rho_dist"))
+            {
+                Rcpp::NumericVector rho_dist_vec = Rcpp::as<Rcpp::NumericVector>(params_list["rho_dist"]); // nsample
+                if (rho_dist_vec.size() != nsample)
+                {
+                    throw std::invalid_argument("Number of rho_dist samples does not match number of wt samples.");
+                }
+                rho_dist_samples = Rcpp::as<Eigen::VectorXd>(rho_dist_vec);
+                found_rho_dist = true;
+            }
+        }
+    }
+
+    if (use_distance && !found_rho_dist && true_vals.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = true_vals["horseshoe"];
+        if (hs_list.containsElementNamed("rho_dist"))
+        {
+            double rho_dist_true = Rcpp::as<double>(hs_list["rho_dist"]);
+            rho_dist_samples.resize(nsample);
+            rho_dist_samples.fill(rho_dist_true);
+            found_rho_dist = true;
+        }
+    }
+
+    if (use_distance && !found_rho_dist)
+    {
+        throw std::invalid_argument("No rho_dist samples in MCMC output or true values.");
+    }
+
+    bool found_rho_mobility = false;
+    if (use_mobility)
+    {
+        if (mcmc_output.containsElementNamed("params"))
+        {
+            Rcpp::List params_list = mcmc_output["params"];
+            if (params_list.containsElementNamed("rho_mobility"))
+            {
+                Rcpp::NumericVector rho_mobility_vec = Rcpp::as<Rcpp::NumericVector>(params_list["rho_mobility"]); // nsample
+                if (rho_mobility_vec.size() != nsample)
+                {
+                    throw std::invalid_argument("Number of rho_mobility samples does not match number of wt samples.");
+                }
+                rho_mobility_samples = Rcpp::as<Eigen::VectorXd>(rho_mobility_vec);
+                found_rho_mobility = true;
+            }
+        }
+    }
+
+    if (use_mobility && !found_rho_mobility && true_vals.containsElementNamed("horseshoe"))
+    {
+        Rcpp::List hs_list = true_vals["horseshoe"];
+        if (hs_list.containsElementNamed("rho_mobility"))
+        {
+            double rho_mobility_true = Rcpp::as<double>(hs_list["rho_mobility"]);
+            rho_mobility_samples.resize(nsample);
+            rho_mobility_samples.fill(rho_mobility_true);
+            found_rho_mobility = true;
+        }
+    }
+
+    if (use_mobility && !found_rho_mobility)
+    {
+        throw std::invalid_argument("No rho_mobility samples in MCMC output or true values.");
+    }
+
+    return;
+} // parse_mcmc_output_for_alpha
+
+
+
+//' Calculate spatial weights alpha from MCMC output
+//' 
+//' @param mcmc_output List containing MCMC posterior samples
+//' @param true_vals List containing true values (used if MCMC samples not available)
+//' @param ns Number of spatial locations
+//' @param nsample Number of posterior samples
+//' @param dist_matrix Optional distance matrix (ns x ns)
+//' @param mobility_matrix Optional mobility matrix (ns x ns)
+//' @param X_in Optional covariate array (np x ns) or (np x ns x nt+1)
+//' @return NumericVector with dimensions:
+//'   - If static (no X or X with 1 time point): ns x ns x nsample
+//'   - If time-varying (X with nt+1 time points): ns x ns x (nt+1) x nsample
+//' @export
+// [[Rcpp::export]]
+Rcpp::NumericVector calculate_alpha(
+    const Rcpp::List &mcmc_output,
+    const Rcpp::List &true_vals,
+    const Eigen::Index &ns,
+    const Eigen::Index &nsample,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericVector> &X_in = R_NilValue
+)
+{
+    const bool use_covariates = X_in.isNotNull();
+    const bool use_distance = dist_matrix.isNotNull();
+    const bool use_mobility = mobility_matrix.isNotNull();
+
+    // Parse MCMC output
+    Eigen::Tensor<double, 3> theta_samples; // ns x ns x nsample
+    Eigen::MatrixXd logit_wdiag_intercept_samples; // ns x nsample
+    Eigen::MatrixXd logit_wdiag_slopes_samples; // np x nsample
+    Eigen::VectorXd rho_dist_samples; // nsample
+    Eigen::VectorXd rho_mobility_samples; // nsample
+
+    parse_mcmc_output_for_alpha(
+        theta_samples,
+        logit_wdiag_intercept_samples,
+        logit_wdiag_slopes_samples,
+        rho_dist_samples,
+        rho_mobility_samples,
+        mcmc_output,
+        true_vals,
+        ns,
+        nsample,
+        use_distance,
+        use_mobility,
+        use_covariates
+    );
+
+    // Set up distance matrix (centered per column)
+    Eigen::MatrixXd dist_centered(ns, ns);
+    dist_centered.setZero();
+    if (use_distance)
+    {
+        Rcpp::NumericMatrix dist_mat(dist_matrix);
+        Eigen::MatrixXd dist_raw = Rcpp::as<Eigen::MatrixXd>(dist_mat);
+        // Center per column (destination)
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            double col_mean = 0.0;
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k) col_mean += dist_raw(s, k);
+            }
+            col_mean /= (ns - 1);
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                dist_centered(s, k) = dist_raw(s, k) - col_mean;
+            }
+        }
+    }
+
+    // Set up log mobility matrix (centered per column)
+    Eigen::MatrixXd log_mobility_centered(ns, ns);
+    log_mobility_centered.setZero();
+    if (use_mobility)
+    {
+        Rcpp::NumericMatrix mob_mat(mobility_matrix);
+        Eigen::MatrixXd mob_raw = Rcpp::as<Eigen::MatrixXd>(mob_mat);
+        Eigen::MatrixXd log_mob = mob_raw.array().log().matrix();
+        // Center per column (destination)
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            double col_mean = 0.0;
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k) col_mean += log_mob(s, k);
+            }
+            col_mean /= (ns - 1);
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                log_mobility_centered(s, k) = log_mob(s, k) - col_mean;
+            }
+        }
+    }
+
+    // Determine time dimension from covariates
+    Eigen::Index nt_plus_1 = 1;  // Default: static (single time point)
+    Eigen::Tensor<double, 3> X;
+    Eigen::Index np = 0;
+
+    if (use_covariates)
+    {
+        Rcpp::NumericVector X_vec(X_in);
+        if (X_vec.hasAttribute("dim"))
+        {
+            Rcpp::IntegerVector dims = X_vec.attr("dim");
+            np = dims[0];
+            
+            if (dims.size() == 2)
+            {
+                // np x ns -> static
+                nt_plus_1 = 1;
+                X.resize(np, ns, 1);
+                Rcpp::NumericMatrix X_mat = Rcpp::as<Rcpp::NumericMatrix>(X_vec);
+                for (Eigen::Index p = 0; p < np; p++)
+                {
+                    for (Eigen::Index k = 0; k < ns; k++)
+                    {
+                        X(p, k, 0) = X_mat(p, k);
+                    }
+                }
+            }
+            else if (dims.size() == 3)
+            {
+                // np x ns x nt_plus_1
+                nt_plus_1 = dims[2];
+                X = r_to_tensor3(X_vec);
+            }
+            else
+            {
+                Rcpp::stop("X_in must be 2D (np x ns) or 3D (np x ns x nt+1)");
+            }
+        }
+        else
+        {
+            Rcpp::stop("X_in must have dim attribute");
+        }
+    }
+
+    // Determine output dimensions
+    bool time_varying = (nt_plus_1 > 1);
+
+    // Allocate output array
+    Rcpp::NumericVector alpha_out;
+    if (time_varying)
+    {
+        // ns x ns x (nt+1) x nsample
+        alpha_out = Rcpp::NumericVector(ns * ns * nt_plus_1 * nsample);
+        alpha_out.attr("dim") = Rcpp::IntegerVector::create(ns, ns, nt_plus_1, nsample);
+    }
+    else
+    {
+        // ns x ns x nsample
+        alpha_out = Rcpp::NumericVector(ns * ns * nsample);
+        alpha_out.attr("dim") = Rcpp::IntegerVector::create(ns, ns, nsample);
+    }
+
+    // Compute alpha for each posterior sample
+    for (Eigen::Index m = 0; m < nsample; m++)
+    {
+        // Extract parameters for this sample
+        double rho_dist_m = use_distance ? rho_dist_samples(m) : 0.0;
+        double rho_mobility_m = use_mobility ? rho_mobility_samples(m) : 0.0;
+
+        // For each destination k, compute unnormalized weights u_{s,k}
+        // v_{s,k} = rho_mobility * log_mobility_{s,k} - rho_dist * dist_{s,k} + (theta_{s,k} - theta_bar_k)
+        // u_{s,k} = exp(v_{s,k})
+
+        Eigen::MatrixXd u_mat(ns, ns);
+        Eigen::VectorXd U_k(ns);  // Sum of off-diagonal u for each column k
+
+        for (Eigen::Index k = 0; k < ns; k++)
+        {
+            // Compute theta_bar_k = mean of off-diagonal theta in column k
+            double theta_bar_k = 0.0;
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k)
+                {
+                    theta_bar_k += theta_samples(s, k, m);
+                }
+            }
+            theta_bar_k /= (ns - 1);
+
+            // Compute u_{s,k} for all s
+            double U_k_sum = 0.0;
+            for (Eigen::Index s = 0; s < ns; s++)
+            {
+                if (s != k)
+                {
+                    double theta_tilde_sk = theta_samples(s, k, m) - theta_bar_k;
+                    double v_sk = rho_mobility_m * log_mobility_centered(s, k) 
+                                - rho_dist_m * dist_centered(s, k) 
+                                + theta_tilde_sk;
+                    u_mat(s, k) = std::exp(v_sk);
+                    U_k_sum += u_mat(s, k);
+                }
+                else
+                {
+                    u_mat(s, k) = 0.0;  // Diagonal not used in off-diagonal calculation
+                }
+            }
+            U_k(k) = U_k_sum;
+        }
+
+        // Compute alpha for each time point
+        Eigen::Index n_times = time_varying ? nt_plus_1 : 1;
+
+        for (Eigen::Index t = 0; t < n_times; t++)
+        {
+            for (Eigen::Index k = 0; k < ns; k++)
+            {
+                // Compute w_k(t) = logistic(logit_wdiag_intercept_k + X' * slopes)
+                double logit_w_k = logit_wdiag_intercept_samples(k, m);
+                
+                if (use_covariates)
+                {
+                    Eigen::Index t_idx = time_varying ? t : 0;
+                    for (Eigen::Index p = 0; p < np; p++)
+                    {
+                        logit_w_k += logit_wdiag_slopes_samples(p, m) * X(p, k, t_idx);
+                    }
+                }
+                
+                double w_k = 1.0 / (1.0 + std::exp(-logit_w_k));
+
+                // Compute alpha_{s,k}(t) for all s
+                for (Eigen::Index s = 0; s < ns; s++)
+                {
+                    double alpha_sk;
+                    if (s == k)
+                    {
+                        // Diagonal: retention
+                        alpha_sk = w_k;
+                    }
+                    else
+                    {
+                        // Off-diagonal: normalized cross-regional transmission
+                        if (U_k(k) > 1e-10)
+                        {
+                            alpha_sk = (1.0 - w_k) * u_mat(s, k) / U_k(k);
+                        }
+                        else
+                        {
+                            // Fallback: uniform distribution if U_k is zero
+                            alpha_sk = (1.0 - w_k) / (ns - 1);
+                        }
+                    }
+
+                    // Store in output array
+                    if (time_varying)
+                    {
+                        // Index: s + k*ns + t*ns*ns + m*ns*ns*nt_plus_1
+                        Eigen::Index idx = s + k * ns + t * ns * ns + m * ns * ns * nt_plus_1;
+                        alpha_out[idx] = alpha_sk;
+                    }
+                    else
+                    {
+                        // Index: s + k*ns + m*ns*ns
+                        Eigen::Index idx = s + k * ns + m * ns * ns;
+                        alpha_out[idx] = alpha_sk;
+                    }
+                }
+            }
+        }
+    }
+
+    return alpha_out;
+} // calculate_alpha
+
+
 //' @export
 // [[Rcpp::export]]
 Rcpp::List evaluate_posterior_predictive(
@@ -901,7 +1922,7 @@ Rcpp::List forecast_network_hawkes(
     const Rcpp::Nullable<Rcpp::NumericVector> &Y_forecast_true_in = R_NilValue, // (k_step_ahead) x ns
     const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue, // ns x ns, pairwise distance matrix
     const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
-    const Rcpp::Nullable<Rcpp::NumericVector> &X_in = R_NilValue,
+    const Rcpp::Nullable<Rcpp::NumericVector> &X_extended_in = R_NilValue,
     const Eigen::Index &nsample = 1000,
     const bool &sample_disturbances = true
 )
@@ -954,7 +1975,7 @@ Rcpp::List forecast_network_hawkes(
     const Eigen::Index nt = Y_obs.rows() - 1;
     const Eigen::Index ns = Y_obs.cols();
 
-    const bool use_covariates = X_in.isNotNull();
+    const bool use_covariates = X_extended_in.isNotNull();
     const bool use_distance = dist_matrix.isNotNull();
     const bool use_mobility = mobility_matrix.isNotNull();
 
@@ -990,7 +2011,7 @@ Rcpp::List forecast_network_hawkes(
     for (Eigen::Index i = 0; i < nsample; i++)
     {
         Model model(
-            Y_obs, dist_matrix, mobility_matrix, X_in,
+            Y_obs, dist_matrix, mobility_matrix, X_extended_in,
             c_sq, fgain, lagdist_defaults
         );
 
