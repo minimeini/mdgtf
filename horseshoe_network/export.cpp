@@ -297,6 +297,7 @@ Rcpp::List infer_network_hawkes(
     const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue,     // ns x ns, pairwise distance matrix
     const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
     const double &c_sq = 4.0,
+    const double &tau0 = 1.0,
     const std::string &fgain = "softplus",
     const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue,
     const unsigned int &nburnin = 1000,
@@ -330,7 +331,7 @@ Rcpp::List infer_network_hawkes(
         Y.col(0) = y_vec;
     }
 
-    Model model(Y, dist_matrix, mobility_matrix, c_sq, fgain, lagdist_opts_use);
+    Model model(Y, dist_matrix, mobility_matrix, c_sq, tau0, fgain, lagdist_opts_use);
 
     auto start = std::chrono::high_resolution_clock::now();
     Rcpp::List output = model.run_mcmc(
@@ -703,7 +704,8 @@ Rcpp::List evaluate_posterior_predictive(
     const Rcpp::Nullable<Rcpp::NumericMatrix> &Rt_in = R_NilValue, // (nt + 1) x ns
     const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue, // ns x ns, pairwise distance matrix
     const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
-    const Eigen::Index &nsample = 1000
+    const Eigen::Index &nsample = 1000,
+    const double &tau0 = 1.0
 )
 {
     std::string fgain = "softplus";
@@ -777,7 +779,7 @@ Rcpp::List evaluate_posterior_predictive(
     {
         Model model(
             Y_obs, dist_matrix, mobility_matrix,
-            c_sq, fgain, lagdist_defaults
+            c_sq, tau0, fgain, lagdist_defaults
         );
 
         model.mu = mu_samples(i);
@@ -933,7 +935,8 @@ Rcpp::List forecast_network_hawkes(
     const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_matrix = R_NilValue, // ns x ns, pairwise distance matrix
     const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_matrix = R_NilValue, // ns x ns, pairwise mobility matrix
     const Eigen::Index &nsample = 1000,
-    const bool &sample_disturbances = true
+    const bool &sample_disturbances = true,
+    const double &tau0 = 1.0
 )
 {
     std::string fgain = "softplus";
@@ -1022,7 +1025,7 @@ Rcpp::List forecast_network_hawkes(
     {
         Model model(
             Y_obs, dist_matrix, mobility_matrix,
-            c_sq, fgain, lagdist_defaults
+            c_sq, tau0, fgain, lagdist_defaults
         );
 
         model.mu = mu_samples(i);

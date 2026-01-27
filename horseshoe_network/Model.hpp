@@ -164,20 +164,22 @@ public:
     double rho_dist = 0.0; // distance decay parameter
     double rho_mobility = 0.0; // mobility scaling parameter
 
-    Eigen::MatrixXd theta; // ns x ns, horseshoe component for spatial network
-    Eigen::MatrixXd gamma; // ns x ns, horseshoe element-wise variance
-    Eigen::MatrixXd delta; // ns x ns, horseshoe local shrinkage parameters
-    Eigen::VectorXd tau; // ns x 1, horseshoe column-wise variance
-    Eigen::VectorXd zeta; // ns x 1, horseshoe column-wise local shrinkage parameters
+    Eigen::MatrixXd theta; // ns x ns, horseshoe spatial transmission parameters
+    Eigen::MatrixXd epsilon; // ns x ns, noncentered parameterization theta[s,k] = tau[k] * tilde(gamma[s,k]) * epsilon[s,k]
+    Eigen::MatrixXd gamma; // ns x ns, horseshoe element-wise variance, gamma[s,k] ~ Half-Cauchy(0,1)
+    Eigen::VectorXd tau; // ns x 1, horseshoe column-wise variance, tau[k] ~ Half-Cauchy(0, tau0)
     Eigen::VectorXd wdiag; // ns x 1, self-exciting weight per location
 
     // Regularized horseshoe slab parameters
     double c_sq = 4.0; // slab variance (c²), controls maximum shrinkage
+    double tau0 = 1.0; // scale of the half-Cauchy prior for tau
 
     SpatialNetwork()
     {
         ns = 1;
         c_sq = 4.0;
+        tau0 = 1.0;
+
         include_distance = false;
         include_log_mobility = false;
 
@@ -204,11 +206,13 @@ public:
         const unsigned int &ns_in,
         const bool &random_init = false,
         const double &c_sq_in = 4.0,
+        const double &tau0_in = 1.0,
         const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_scaled_in = R_NilValue,
         const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_scaled_in = R_NilValue
     )
     {
         c_sq = c_sq_in;
+        tau0 = tau0_in;
         ns = ns_in;
 
         if (dist_scaled_in.isNotNull())
@@ -291,6 +295,12 @@ public:
         {
             c_sq = Rcpp::as<double>(settings["c_sq"]);
         } // if slab variance specified
+
+        tau0 = 1.0;
+        if (settings.containsElementNamed("tau0"))
+        {
+            tau0 = Rcpp::as<double>(settings["tau0"]);
+        }
 
         if (dist_scaled_in.isNotNull())
         {
@@ -388,15 +398,14 @@ public:
             Rcpp::Named("alpha") = alpha,
             Rcpp::Named("theta") = theta,
             Rcpp::Named("gamma") = gamma,
-            Rcpp::Named("delta") = delta,
             Rcpp::Named("tau") = tau,
-            Rcpp::Named("zeta") = zeta,
             Rcpp::Named("wdiag") = wdiag,
             Rcpp::Named("rho_dist") = rho_dist,
             Rcpp::Named("rho_mobility") = rho_mobility,
             Rcpp::Named("dist") = dist,
             Rcpp::Named("log_mobility") = log_mobility,
-            Rcpp::Named("c_sq") = c_sq
+            Rcpp::Named("c_sq") = c_sq,
+            Rcpp::Named("tau0") = tau0
         );
     } // to_list
 
@@ -408,24 +417,27 @@ public:
      */
     void initialize_horseshoe_random(const double &dominance_margin = 0.1)
     {
+        const double t0_sq = tau0 * tau0;
+
         theta.resize(ns, ns);
+        epsilon.resize(ns, ns);
         gamma.resize(ns, ns);
-        delta.resize(ns, ns);
         tau.resize(ns);
-        zeta.resize(ns);
         wdiag.resize(ns);
 
         for (Eigen::Index k = 0; k < ns; k++)
         {
             // Sample variance parameters
-            zeta(k) = 1.0 / R::rgamma(0.5, 1.0);
-            tau(k) = 1.0 / R::rgamma(0.5, zeta(k));
+            double zeta_k = 1.0 / R::rgamma(0.5, t0_sq);
+            double tau2_k = std::max(1.0 / R::rgamma(0.5, zeta_k), 1e-6);
+            tau(k) = std::sqrt(tau2_k);
 
             // Sample theta and gamma for off-diagonal elements
             for (Eigen::Index s = 0; s < ns; s++)
             {
-                delta(s, k) = 1.0 / R::rgamma(0.5, 1.0);
-                gamma(s, k) = 1.0 / R::rgamma(0.5, delta(s, k));
+                double delta_sk = 1.0 / R::rgamma(0.5, 1.0);
+                double gm2_sk = std::max(1.0 / R::rgamma(0.5, delta_sk), 1e-6);
+                gamma(s, k) = std::sqrt(gm2_sk);
 
                 if (s == k)
                 {
@@ -434,7 +446,8 @@ public:
                 else
                 {
                     double reg_var = compute_regularized_variance(s, k);
-                    theta(s, k) = R::rnorm(0.0, std::sqrt(reg_var));
+                    epsilon(s, k) = R::rnorm(0.0, 1.0);
+                    theta(s, k) = std::sqrt(reg_var) * epsilon(s, k);
                 }
             }
 
@@ -483,26 +496,28 @@ public:
         const double &log_dominance_mean = 1.0, // E[log(r - 1)] ≈ 1 means r ≈ 3.7
         const double &log_dominance_sd = 0.5)
     {
+        const double t0_sq = tau0 * tau0;
         theta.resize(ns, ns);
+        epsilon.resize(ns, ns);
         gamma.resize(ns, ns);
-        delta.resize(ns, ns);
         tau.resize(ns);
-        zeta.resize(ns);
         wdiag.resize(ns);
 
         for (Eigen::Index k = 0; k < ns; k++)
         {
             // Sample variance parameters
-            zeta(k) = 1.0 / R::rgamma(0.5, 1.0);
-            tau(k) = 1.0 / R::rgamma(0.5, zeta(k));
+            double zeta_k = 1.0 / R::rgamma(0.5, t0_sq);
+            double tau2_k = std::max(1.0 / R::rgamma(0.5, zeta_k), 1e-6);
+            tau(k) = std::sqrt(tau2_k);
 
             // Sample theta for off-diagonal
             double theta_max_k = -std::numeric_limits<double>::infinity();
 
             for (Eigen::Index s = 0; s < ns; s++)
             {
-                delta(s, k) = 1.0 / R::rgamma(0.5, 1.0);
-                gamma(s, k) = 1.0 / R::rgamma(0.5, delta(s, k));
+                double delta_sk = 1.0 / R::rgamma(0.5, 1.0);
+                double gm2_sk = std::max(1.0 / R::rgamma(0.5, delta_sk), 1e-6);
+                gamma(s, k) = std::sqrt(gm2_sk);
 
                 if (s == k)
                 {
@@ -511,7 +526,8 @@ public:
                 else
                 {
                     double reg_var = compute_regularized_variance(s, k);
-                    theta(s, k) = R::rnorm(0.0, std::sqrt(reg_var));
+                    epsilon(s, k) = R::rnorm(0.0, 1.0);
+                    theta(s, k) = std::sqrt(reg_var) * epsilon(s, k);
                     theta_max_k = std::max(theta_max_k, theta(s, k));
                 }
             }
@@ -558,20 +574,19 @@ public:
     void initialize_horseshoe_zero()
     {
         theta.resize(ns, ns);
+        epsilon.resize(ns, ns);
         gamma.resize(ns, ns);
-        delta.resize(ns, ns);
         tau.resize(ns);
-        zeta.resize(ns);
         wdiag.resize(ns);
 
         theta.setZero();
+        epsilon.setZero();
         gamma.setOnes();
-        delta.setOnes();
         tau.setOnes();
-        zeta.setOnes();
         wdiag.setOnes();
         wdiag *= 0.8;
     } // initialize_horseshoe_zero
+
 
     /**
      * @brief Initialize horseshoe variables with conservative sparse settings
@@ -586,10 +601,9 @@ public:
     )
     {
         theta.resize(ns, ns);
+        epsilon.resize(ns, ns);
         gamma.resize(ns, ns);
-        delta.resize(ns, ns);
         tau.resize(ns);
-        zeta.resize(ns);
         wdiag.resize(ns);
 
         for (Eigen::Index k = 0; k < ns; k++)
@@ -599,42 +613,27 @@ public:
 
             // Global shrinkage: start small (sparse network)
             tau(k) = tau_init;
-            zeta(k) = 1.0; // Prior mode
 
             for (Eigen::Index s = 0; s < ns; s++)
             {
                 if (s == k)
                 {
+                    epsilon(s, k) = 0.0;
                     theta(s, k) = 0.0; // Diagonal fixed at 0
                     gamma(s, k) = 1.0;
-                    delta(s, k) = 1.0;
                 }
                 else
                 {
                     // Start theta at 0 (no spatial transmission initially)
+                    epsilon(s, k) = 0.0;
                     theta(s, k) = 0.0;
 
                     // Local shrinkage parameters at moderate values
                     gamma(s, k) = gamma_init;
-                    delta(s, k) = 1.0;
                 }
             }
         }
     } // initialize_horseshoe_sparse
-
-
-    double compute_regularized_gamma(
-        const Eigen::Index &s,
-        const Eigen::Index &k
-    ) const
-    {
-        double gamma_sq = gamma(s, k);
-        
-        // Regularized variance: c² γ² / (c² + τ² γ²)
-        double numerator = c_sq * gamma_sq;
-        double denominator = c_sq + tau(k) * gamma_sq;
-        return numerator / std::max(denominator, EPS);
-    }
 
 
     /**
@@ -648,7 +647,14 @@ public:
         const Eigen::Index &k
     ) const
     {
-        return tau(k) * compute_regularized_gamma(s, k);
+        double gamma_sq = gamma(s, k) * gamma(s, k);
+        double tau_sq = tau(k) * tau(k);
+        
+        // Regularized variance: c² γ² / (c² + τ² γ²)
+        double numerator = c_sq * gamma_sq;
+        double denominator = c_sq + tau_sq * gamma_sq;
+        double gm2_tilde = numerator / std::max(denominator, EPS);
+        return tau_sq * gm2_tilde;
     } // compute_regularized_variance
 
 
@@ -714,7 +720,7 @@ public:
         } // for s
 
         return u_k;
-    }
+    } // compute_unnormalized_weight_col
 
 
     Eigen::VectorXd compute_alpha_col(const Eigen::Index &k) const
@@ -761,76 +767,7 @@ public:
             alpha.col(k) = compute_alpha_col(k);
         }
         return;
-    }
-
-
-    double dlogprob_dtau_k(
-        const unsigned int &k, 
-        const bool &add_jacobian = true, 
-        const bool &add_prior = true
-    )
-    {
-        double dloglike_dtau = 0.0;
-        for (unsigned int s = 0; s < ns; s++)
-        {
-            if (s == k)
-            {
-                continue; // skip diagonal
-            }
-
-            double reg_var = compute_regularized_variance(s, k);
-            double denom = c_sq + tau(k) * gamma(s, k);
-            double dreg_var_dtau = c_sq * c_sq * gamma(s, k) / (denom * denom);
-            double dloglike_dreg_var = - 0.5 * (1.0/reg_var - theta(s, k) * theta(s,k) / (reg_var * reg_var));
-
-            dloglike_dtau += dloglike_dreg_var * dreg_var_dtau;
-        }
-
-        double dlogprior_dtau = - 1.5 / tau(k) + 1.0 / (zeta(k) * tau(k) * tau(k));
-        double deriv = dloglike_dtau;
-        if (add_prior)
-        {
-            deriv += dlogprior_dtau;
-        }
-
-        if (add_jacobian)
-        {
-            deriv *= tau(k); // Jacobian adjustment for log-transform
-            deriv += 1.0;
-        }
-
-        return deriv;
-    }
-
-
-    double dlogprob_dgamma(
-        const unsigned int &s, 
-        const unsigned int &k, 
-        const bool &add_jacobian = true, 
-        const bool &add_prior = true
-    )
-    {
-        double theta_sq = theta(s, k) * theta(s, k);
-        double denom = c_sq + tau(k) * gamma(s, k);
-        double gamma_tilde = (c_sq * gamma(s, k)) / std::max(denom, EPS);
-        double dgamma_tilde_dgamma = (c_sq * c_sq) / (denom * denom);
-
-        double dloglike_dgamma_tilde = - 0.5 * (1.0 - theta_sq / (tau(k) * gamma_tilde)) / gamma_tilde;
-        double deriv = dloglike_dgamma_tilde * dgamma_tilde_dgamma;
-        if (add_prior)
-        {
-            double dlogprior_dgamma = - 1.5 / gamma(s, k) + 1.0 / (delta(s, k) * gamma(s, k) * gamma(s, k));
-            deriv += dlogprior_dgamma;
-        }
-    
-        if (add_jacobian)
-        {
-            deriv *= gamma(s, k); // Jacobian adjustment for log-transform
-            deriv += 1.0;
-        }
-
-        return deriv;
-    }
+    } // compute_alpha
 
 
     double dalpha_dtheta(
@@ -861,6 +798,63 @@ public:
             return deriv;
         }
     } // dalpha_dtheta
+
+
+    double dalpha_depsilon(
+        const Eigen::Index &a_s, // destination location index for alpha
+        const Eigen::Index &eps_j, // destination location index for theta
+        const Eigen::Index &k, // source location index for both alpha and theta
+        const Eigen::VectorXd &u_k // unnormalized weights for source k
+    )
+    {
+        double reg_gm2 = compute_regularized_variance(eps_j, k);
+        double dtheta_deps = std::sqrt(std::max(reg_gm2, EPS));
+        return dalpha_dtheta(a_s, eps_j, k, u_k) * dtheta_deps;
+    } // dalpha_depsilon
+
+
+    double dalpha_dgamma(
+        const Eigen::Index &a_s, // destination location index for alpha
+        const Eigen::Index &gm_j, // destination location index for theta
+        const Eigen::Index &k, // source location index for both alpha and theta
+        const Eigen::VectorXd &u_k // unnormalized weights for source k
+    )
+    {
+        double dtheta_dreg_gm = tau(k) * epsilon(gm_j, k);
+        double c3 = c_sq * std::sqrt(c_sq);
+        double denom = c_sq + tau(k) * tau(k) * gamma(gm_j, k) * gamma(gm_j, k);
+        double dreg_gm_dgm = c3 / std::pow(denom, 1.5);
+        double dalpha_dth = dalpha_dtheta(a_s, gm_j, k, u_k);
+        return dalpha_dth * dtheta_dreg_gm * dreg_gm_dgm;
+    } // dalpha_dgamma
+
+
+    double dalpha_dtau(
+        const Eigen::Index &a_s, // destination location index for alpha
+        const Eigen::Index &k, // source location index for both alpha and tau
+        const Eigen::VectorXd &u_k // unnormalized weights for source k
+    )
+    {
+        const double c3 = c_sq * std::sqrt(c_sq);
+        Eigen::VectorXd dtheta_dtau(ns);
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            if (s == k)
+            {
+                dtheta_dtau(s) = 0.0;
+            }
+            else
+            {
+                double num = c3 * gamma(s, k) * epsilon(s, k);
+                double denom = c_sq + tau(k) * tau(k) * gamma(s, k) * gamma(s, k);
+                dtheta_dtau(s) = num / (denom * std::sqrt(denom));
+            }
+        } // for s
+
+        const double U_k = u_k.array().sum(); // u_k(k) == 0
+        double dtheta_mean = u_k.dot(dtheta_dtau) / U_k;
+        return (1.0 - wdiag(k)) * (u_k(a_s) / U_k) * (dtheta_dtau(a_s) - dtheta_mean);
+    } // dalpha_dtau
 
 
     double dalpha_dwj(
@@ -1447,6 +1441,7 @@ public:
         const Rcpp::Nullable<Rcpp::NumericMatrix> &dist_scaled_in = R_NilValue,
         const Rcpp::Nullable<Rcpp::NumericMatrix> &mobility_scaled_in = R_NilValue,
         const double &c_sq = 4.0,
+        const double &tau0 = 1.0,
         const std::string &fgain_ = "softplus",
         const bool &zero_inflated = true,
         const Rcpp::List &lagdist_opts = Rcpp::List::create(
@@ -1463,7 +1458,7 @@ public:
 
         dlag = LagDist(lagdist_opts);
         temporal = TemporalTransmission(ns, nt, fgain_);
-        spatial = SpatialNetwork(ns, true, c_sq, dist_scaled_in, mobility_scaled_in);
+        spatial = SpatialNetwork(ns, true, c_sq, tau0, dist_scaled_in, mobility_scaled_in);
         zinfl = ZeroInflation(Y, zero_inflated);
 
         sample_N(Y);
@@ -1484,6 +1479,7 @@ public:
         const std::string &fgain_ = "softplus",
         const Rcpp::List &spatial_opts = Rcpp::List::create(
             Rcpp::Named("c_sq") = 4.0,
+            Rcpp::Named("tau0") = 1.0,
             Rcpp::Named("rho_dist") = 0.0,
             Rcpp::Named("rho_mobility") = 0.0
         ),
@@ -1655,64 +1651,50 @@ public:
             }
         }
         return grad;
-    }
+    } // compute_grad_rho_mobility_full
 
-    // =============================================================================
-    // EXTENDED: dloglike_dhorseshoe_col with rho parameters
-    // =============================================================================
 
-    /**
-     * @brief Compute gradient for horseshoe parameters of column k, optionally including rho
-     *
-     * Parameter layout in returned gradient vector:
-     *   [0, n_offdiag-1]           : theta_{s,k} for s != k
-     *   [n_offdiag]                : logit(wdiag_k)
-     *   [n_offdiag+1, 2*n_offdiag] : log(gamma_{s,k}) for s != k
-     *   [2*n_offdiag+1]            : log(tau_k)
-     *   [2*n_offdiag+2]            : log(rho_dist)     (if include_rho_dist)
-     *   [2*n_offdiag+3]            : log(rho_mobility) (if include_rho_mobility)
-     *
-     * @param loglike Output: log-likelihood value
-     * @param k Column index
-     * @param Y Observed infections
-     * @param R_mat Reproduction numbers
-     * @param add_jacobian Include Jacobian for transformed parameters
-     * @param add_prior Include prior contributions
-     * @param include_rho_dist Include rho_dist in the parameter vector
-     * @param include_rho_mobility Include rho_mobility in the parameter vector
-     * @param beta_prior_a Beta prior parameter for wdiag
-     * @param beta_prior_b Beta prior parameter for wdiag
-     * @param rho_prior_mean Prior mean for log(rho)
-     * @param rho_prior_var Prior variance for log(rho)
-     */
-    Eigen::VectorXd dloglike_dhorseshoe_col_with_rho(
-        double &loglike,
-        const Eigen::Index &k,
-        const Eigen::MatrixXd &Y,
-        const Eigen::MatrixXd &R_mat,
-        const bool &add_jacobian = true,
-        const bool &add_prior = true,
+    Eigen::Index get_ndim_colvec(
+        Eigen::VectorXi & idx_start, // starting index of each parameter block
+        Eigen::VectorXi & inverse_idx, // inverse mapping from spatial index to off-diagonal index
+        const Eigen::Index &k, // column index
         const bool &include_rho_dist = true,
-        const bool &include_rho_mobility = false,
-        const double &beta_prior_a = 5.0,
-        const double &beta_prior_b = 2.0,
-        const double &rho_prior_mean = 0.0,
-        const double &rho_prior_var = 9.0)
+        const bool &include_rho_mobility = true)
     {
+        /*
+        Store starting indices for:
+        0 - epsilon
+        1 - logit(wdiag)
+        2 - log(gamma)
+        3 - log(tau)
+        4 - rho_dist
+        5 - rho_mobility
+        */
+        idx_start.resize(6);
+        idx_start.setConstant(-1);
+
         const Eigen::Index n_offdiag = ns - 1;
+        idx_start(0) = 0; // theta start
+        idx_start(1) = n_offdiag; // log(wdiag)
+        idx_start(2) = n_offdiag + 1; // log(gamma) start
+        idx_start(3) = 2 * n_offdiag + 1; // log(tau)
 
-        // Count rho parameters to include
-        Eigen::Index n_rho = 0;
+        Eigen::Index ndim = 2 * n_offdiag + 2;
         if (include_rho_dist && spatial.include_distance)
-            n_rho++;
+        {
+            idx_start(4) = ndim; // log(rho_dist)
+            ndim++;
+        }
         if (include_rho_mobility && spatial.include_log_mobility)
-            n_rho++;
+        {
+            idx_start(5) = ndim; // log(rho_mobility)
+            ndim++;
+        }
 
-        const Eigen::Index ndim = 2 * n_offdiag + 2 + n_rho;
 
-        // Build index mapping for off-diagonal elements
+        inverse_idx.resize(ns);
+        inverse_idx.setConstant(-1);
         std::vector<Eigen::Index> offdiag_idx;
-        std::vector<Eigen::Index> inverse_idx(ns, -1);
         offdiag_idx.reserve(n_offdiag);
         for (Eigen::Index s = 0; s < ns; s++)
         {
@@ -1723,6 +1705,141 @@ public:
             }
         }
 
+        return ndim;
+    } // get_ndim_colvec
+
+
+    /**
+     * @brief Pack parameters into unconstrained vector, optionally including rho
+     */
+    Eigen::ArrayXd get_unconstrained_colvec(
+        const Eigen::Index &k,
+        const Eigen::Index &ndim,
+        const Eigen::VectorXi &idx_start,
+        const Eigen::VectorXi &inverse_idx
+    ) const
+    {
+        const Eigen::Index n_offdiag = ns - 1;
+
+        Eigen::ArrayXd unconstrained(ndim);
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            if (s == k)
+                continue;
+            Eigen::Index i = inverse_idx[s];
+            unconstrained(idx_start(0) + i) = spatial.epsilon(s, k); // theta: from 0 to n_offdiag - 1
+            unconstrained(idx_start(2) + i) = std::log(spatial.gamma(s, k)); // gamma: from n_offdiag to 2*n_offdiag - 1
+        }
+        unconstrained(idx_start(3)) = std::log(spatial.tau(k));
+        unconstrained(idx_start(1)) = logit_safe(spatial.wdiag(k));
+
+        if (idx_start(4) >= 0)
+        {
+            unconstrained(idx_start(5)) = std::log(std::max(spatial.rho_dist, EPS));
+        }
+
+        if (idx_start(5) >= 0)
+        {
+            unconstrained(idx_start(6)) = std::log(std::max(spatial.rho_mobility, EPS));
+        }
+
+        return unconstrained;
+    } // get_unconstrained_colvec
+
+
+    // Lambda to unpack unconstrained params back to model
+    void unpack_unconstrained_colvec(
+        const Eigen::ArrayXd &unconstrained_params,
+        const Eigen::Index &k,
+        const Eigen::VectorXi &idx_start,
+        const Eigen::VectorXi &inverse_idx
+    )
+    {
+        spatial.tau(k) = std::exp(clamp_log_scale(unconstrained_params(idx_start(3))));
+        for (Eigen::Index s = 0; s < ns; s++)
+        {
+            if (s == k)
+                continue;
+            Eigen::Index i = inverse_idx[s];
+            spatial.epsilon(s, k) = unconstrained_params(idx_start(0) + i);
+            spatial.gamma(s, k) = std::exp(clamp_log_scale(unconstrained_params(idx_start(2) + i)));
+
+            double reg_var = spatial.compute_regularized_variance(s, k);
+            spatial.theta(s, k) = spatial.epsilon(s, k) * std::sqrt(reg_var);
+        }
+        spatial.epsilon(k, k) = 0.0;
+        spatial.theta(k, k) = 0.0;
+
+        double w = inv_logit_stable(unconstrained_params(idx_start(1)));
+        spatial.wdiag(k) = clamp01(w);
+
+        // Unpack rho parameters
+        if (idx_start(4) >= 0)
+        {
+            spatial.rho_dist = std::exp(clamp_log_scale(unconstrained_params(idx_start(4))));
+        }
+        if (idx_start(5) >= 0)
+        {
+            spatial.rho_mobility = std::exp(clamp_log_scale(unconstrained_params(idx_start(5))));
+        }
+
+        // Recompute alpha (for ALL columns since rho affects all)
+        spatial.compute_alpha();
+    } // unpack_unconstrained_colvec
+
+
+    /**
+     * @brief Compute gradient for horseshoe parameters of column k, optionally including rho.
+     *
+     * Parameter layout in returned gradient vector:
+     *   [0, n_offdiag-1]           : epsilon_{s,k} for s != k
+     *   [n_offdiag]                : logit(wdiag_k)
+     *   [n_offdiag+1, 2*n_offdiag] : log(gamma_{s,k}) for s != k
+     *   [2*n_offdiag+1]            : log(tau_k)
+     *   [2*n_offdiag+2]            : log(rho_dist)     (if include_rho_dist)
+     *   [2*n_offdiag+3]            : log(rho_mobility) (if include_rho_mobility)
+     *
+     * @param loglike Output: log-likelihood value
+     * @param k Column index
+     * @param Y Observed infections
+     * @param R_mat Reproduction numbers
+     * @param include_rho_dist Include rho_dist in the parameter vector
+     * @param include_rho_mobility Include rho_mobility in the parameter vector
+     * @param beta_prior_a Beta prior parameter for wdiag
+     * @param beta_prior_b Beta prior parameter for wdiag
+     * @param rho_prior_mean Prior mean for log(rho)
+     * @param rho_prior_var Prior variance for log(rho)
+     */
+    Eigen::VectorXd dlogprob_dcolvec(
+        double &loglike,
+        const Eigen::Index &k,
+        const Eigen::MatrixXd &Y,
+        const Eigen::MatrixXd &R_mat,
+        const bool &include_rho_dist = true,
+        const bool &include_rho_mobility = false,
+        const double &beta_prior_a = 5.0,
+        const double &beta_prior_b = 2.0,
+        const double &rho_prior_mean = 0.0,
+        const double &rho_prior_var = 9.0)
+    {
+        /*
+        idx_start:
+        0 - epsilon
+        1 - logit(wdiag)
+        2 - log(gamma)
+        3 - log(tau)
+        4 - rho_dist
+        5 - rho_mobility
+        */
+        Eigen::VectorXi idx_start, inverse_idx;
+        Eigen::Index ndim = get_ndim_colvec(
+            idx_start,
+            inverse_idx,
+            k,
+            include_rho_dist,
+            include_rho_mobility
+        );
+
         const double w_safe = clamp01(spatial.wdiag(k));
         const double logit_wk = logit_safe(w_safe);
         const double jacobian_wk = w_safe * (1.0 - w_safe);
@@ -1732,73 +1849,46 @@ public:
         Eigen::VectorXd grad(ndim);
         grad.setZero();
 
-        // Gradient index positions
-        const Eigen::Index idx_wdiag = n_offdiag;
-        const Eigen::Index idx_gamma_start = n_offdiag + 1;
-        const Eigen::Index idx_tau = 2 * n_offdiag + 1;
-
-        // Rho indices (at the end)
-        Eigen::Index idx_rho_dist = -1;
-        Eigen::Index idx_rho_mobility = -1;
-        Eigen::Index rho_idx_counter = 2 * n_offdiag + 2;
-        if (include_rho_dist && spatial.include_distance)
-        {
-            idx_rho_dist = rho_idx_counter++;
-        }
-        if (include_rho_mobility && spatial.include_log_mobility)
-        {
-            idx_rho_mobility = rho_idx_counter++;
-        }
-
-        // tau gradient (includes prior)
-        grad(idx_tau) = spatial.dlogprob_dtau_k(k, add_jacobian, add_prior);
-
         // Prior on logit(wdiag)
-        if (add_prior)
-        {
-            if (!add_jacobian)
-            {
-                Rcpp::stop("Must add jacobian when using Beta prior on wdiag.");
-            }
-            grad(idx_wdiag) += beta_prior_a * (1.0 - w_safe) - beta_prior_b * w_safe;
-            loglike += beta_prior_a * std::log(w_safe) + beta_prior_b * std::log(1.0 - w_safe);
-            loglike += -0.5 * std::log(spatial.tau(k)) - 1.0 / (spatial.zeta(k) * spatial.tau(k));
-        }
+        grad(idx_start(1)) += beta_prior_a * (1.0 - w_safe) - beta_prior_b * w_safe;
+        loglike += beta_prior_a * std::log(w_safe) + beta_prior_b * std::log(1.0 - w_safe);
 
-        // Prior on log(rho_dist)
-        if (add_prior && idx_rho_dist >= 0)
+        // Prior on log(tau(k))
+        double tau_scl = std::max(spatial.tau(k) / spatial.tau0, 1.0e-8);
+        double t2_scl = tau_scl * tau_scl;
+        grad(idx_start(3)) += (1.0 - t2_scl) / (1.0 + t2_scl);
+        loglike += std::log(tau_scl) - std::log(1.0 + t2_scl);
+
+        if (idx_start(4) >= 0)
         {
+            // Prior on log(rho_dist)
             double log_rho = std::log(std::max(spatial.rho_dist, EPS));
-            grad(idx_rho_dist) += -(log_rho - rho_prior_mean) / rho_prior_var;
+            grad(idx_start(4)) += -(log_rho - rho_prior_mean) / rho_prior_var;
             loglike += -0.5 * (log_rho - rho_prior_mean) * (log_rho - rho_prior_mean) / rho_prior_var;
         }
 
-        // Prior on log(rho_mobility)
-        if (add_prior && idx_rho_mobility >= 0)
+        if (idx_start(5) >= 0)
         {
+            // Prior on log(rho_mobility)
             double log_rho = std::log(std::max(spatial.rho_mobility, EPS));
-            grad(idx_rho_mobility) += -(log_rho - rho_prior_mean) / rho_prior_var;
+            grad(idx_start(5)) += -(log_rho - rho_prior_mean) / rho_prior_var;
             loglike += -0.5 * (log_rho - rho_prior_mean) * (log_rho - rho_prior_mean) / rho_prior_var;
         }
 
         // Loop over destination locations for theta/gamma gradients
         for (Eigen::Index s = 0; s < ns; s++)
         {
-            // gamma gradient (only for off-diagonal)
             if (s != k)
             {
                 Eigen::Index i = inverse_idx[s];
-                grad(idx_gamma_start + i) = spatial.dlogprob_dgamma(s, k, add_jacobian, add_prior);
-            }
-
-            // theta prior (only for off-diagonal)
-            if (add_prior && s != k)
-            {
-                Eigen::Index i = inverse_idx[s];
-                double reg_var = std::max(spatial.compute_regularized_variance(s, k), EPS8);
-                grad(i) += -spatial.theta(s, k) / reg_var;
-                loglike += -0.5 * std::log(reg_var) - 0.5 * spatial.theta(s, k) * spatial.theta(s, k) / reg_var;
-                loglike += -0.5 * std::log(spatial.gamma(s, k)) - 1.0 / (spatial.delta(s, k) * spatial.gamma(s, k));
+                // epsilon prior (only for off-diagonal)
+                grad(i) += -spatial.epsilon(s, k);
+                loglike += - 0.5 * spatial.epsilon(s, k) * spatial.epsilon(s, k);
+                
+                // gamma prior (only for off-diagonal)
+                double gm2 = spatial.gamma(s, k) * spatial.gamma(s, k);
+                grad(idx_start(2) + i) += (1.0 - gm2) / (1.0 + gm2);
+                loglike += std::log(spatial.gamma(s, k)) - std::log(1.0 + gm2);
             }
 
             // Likelihood contribution from destination (t, s)
@@ -1831,110 +1921,51 @@ public:
 
                 lambda_st = std::max(lambda_st, EPS);
                 loglike += Y(t, s) * std::log(lambda_st) - lambda_st;
+
                 double dloglike_dlambda_st = Y(t, s) / lambda_st - 1.0;
+                const double dloglike_dalpha = dloglike_dlambda_st * dlambda_st_dalpha_sk;
 
-                // Gradient w.r.t. logit(wdiag(k))
-                double dalpha_sk_dwk = spatial.dalpha_dwj(s, k, u_k);
-                double deriv = dloglike_dlambda_st * dlambda_st_dalpha_sk * dalpha_sk_dwk;
-                if (add_jacobian)
-                {
-                    deriv *= jacobian_wk;
-                }
-                grad(idx_wdiag) += deriv;
-
-                // Gradient w.r.t. theta(j, k) for j != k
                 for (Eigen::Index j = 0; j < ns; j++)
                 {
                     if (j == k)
                         continue;
                     Eigen::Index i = inverse_idx[j];
-                    double dalpha_sk_dtheta_jk = spatial.dalpha_dtheta(s, j, k, u_k);
-                    grad(i) += dloglike_dlambda_st * dlambda_st_dalpha_sk * dalpha_sk_dtheta_jk;
+
+                    // Gradient w.r.t. epsilon for s != k
+                    double dalpha_sk_depsilon_jk = spatial.dalpha_depsilon(s, j, k, u_k);
+                    grad(i) += dloglike_dalpha * dalpha_sk_depsilon_jk;
+
+                    // Gradient w.r.t. log(gamma(s, k)) for s != k
+                    double dalpha_sk_dgamma_jk = spatial.dalpha_dgamma(s, j, k, u_k);
+                    grad(idx_start(2) + i) += dloglike_dalpha * dalpha_sk_dgamma_jk * spatial.gamma(j, k);
                 }
+
+
+                // Gradient w.r.t. logit(wdiag(k))
+                double dalpha_sk_dwk = spatial.dalpha_dwj(s, k, u_k);
+                grad(idx_start(1)) += dloglike_dalpha * dalpha_sk_dwk * jacobian_wk;
+
+                // Gradient w.r.t. log(tau(k))
+                double dalpha_sk_dtau_k = spatial.dalpha_dtau(s, k, u_k);
+                grad(idx_start(3)) += dloglike_dalpha * dalpha_sk_dtau_k * spatial.tau(k);
+
             } // for time t
         } // for destination locations s
 
         // Compute FULL gradients for rho parameters (sum over ALL columns)
-        if (idx_rho_dist >= 0)
+        if (idx_start(4) >= 0)
         {
-            double grad_rho = compute_grad_rho_dist_full(Y, R_mat);
-            if (add_jacobian)
-            {
-                grad_rho *= spatial.rho_dist; // Jacobian for log transform
-            }
-            grad(idx_rho_dist) += grad_rho;
+            grad(idx_start(4)) += compute_grad_rho_dist_full(Y, R_mat) * spatial.rho_dist;
         }
 
-        if (idx_rho_mobility >= 0)
+        if (idx_start(5) >= 0)
         {
-            double grad_rho = compute_grad_rho_mobility_full(Y, R_mat);
-            if (add_jacobian)
-            {
-                grad_rho *= spatial.rho_mobility;
-            }
-            grad(idx_rho_mobility) += grad_rho;
+            grad(idx_start(5)) += compute_grad_rho_mobility_full(Y, R_mat) * spatial.rho_mobility;
         }
 
         return grad;
-    } // dloglike_dhorseshoe_col_with_rho
+    } // dlogprob_dcolvec
 
-    // =============================================================================
-    // EXTENDED: get_unconstrained with rho parameters
-    // =============================================================================
-
-    /**
-     * @brief Pack parameters into unconstrained vector, optionally including rho
-     */
-    Eigen::VectorXd get_unconstrained_with_rho(
-        const Eigen::Index &k,
-        const bool &include_rho_dist = true,
-        const bool &include_rho_mobility = false) const
-    {
-        Eigen::Index n_offdiag = ns - 1;
-
-        Eigen::Index n_rho = 0;
-        if (include_rho_dist && spatial.include_distance)
-            n_rho++;
-        if (include_rho_mobility && spatial.include_log_mobility)
-            n_rho++;
-
-        Eigen::Index ndim = 2 * n_offdiag + 2 + n_rho;
-
-        std::vector<Eigen::Index> offdiag_idx;
-        offdiag_idx.reserve(n_offdiag);
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            if (s != k)
-                offdiag_idx.push_back(s);
-        }
-
-        Eigen::VectorXd unconstrained(ndim);
-        for (Eigen::Index i = 0; i < n_offdiag; i++)
-        {
-            Eigen::Index s = offdiag_idx[i];
-            unconstrained(i) = spatial.theta(s, k);
-            unconstrained(n_offdiag + 1 + i) = std::log(spatial.gamma(s, k));
-        }
-        unconstrained(n_offdiag) = logit_safe(spatial.wdiag(k));
-        unconstrained(2 * n_offdiag + 1) = std::log(spatial.tau(k));
-
-        // Add rho parameters at the end
-        Eigen::Index rho_idx = 2 * n_offdiag + 2;
-        if (include_rho_dist && spatial.include_distance)
-        {
-            unconstrained(rho_idx++) = std::log(std::max(spatial.rho_dist, EPS));
-        }
-        if (include_rho_mobility && spatial.include_log_mobility)
-        {
-            unconstrained(rho_idx++) = std::log(std::max(spatial.rho_mobility, EPS));
-        }
-
-        return unconstrained;
-    }
-
-    // =============================================================================
-    // EXTENDED: update_horseshoe_col with rho parameters
-    // =============================================================================
 
     /**
      * @brief HMC update for horseshoe parameters of column k, including rho parameters
@@ -1955,7 +1986,7 @@ public:
      * @param rho_prior_var Prior variance for log(rho)
      * @return Acceptance probability
      */
-    double update_horseshoe_col_with_rho(
+    double update_colvec(
         double &energy_diff,
         double &grad_norm,
         const Eigen::Index &k,
@@ -1971,96 +2002,31 @@ public:
         const double &rho_prior_mean = 0.0,
         const double &rho_prior_var = 9.0)
     {
-        const Eigen::Index n_offdiag = ns - 1;
-
-        // Count rho parameters
-        Eigen::Index n_rho = 0;
-        if (include_rho_dist && spatial.include_distance)
-            n_rho++;
-        if (include_rho_mobility && spatial.include_log_mobility)
-            n_rho++;
-
-        const Eigen::Index ndim = 2 * n_offdiag + 2 + n_rho;
-
-        // Build index mapping for off-diagonal elements
-        std::vector<Eigen::Index> offdiag_idx;
-        offdiag_idx.reserve(n_offdiag);
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            if (s != k)
-                offdiag_idx.push_back(s);
-        }
-
-        // Rho indices
-        Eigen::Index idx_rho_dist = -1;
-        Eigen::Index idx_rho_mobility = -1;
-        Eigen::Index rho_idx_counter = 2 * n_offdiag + 2;
-        if (include_rho_dist && spatial.include_distance)
-        {
-            idx_rho_dist = rho_idx_counter++;
-        }
-        if (include_rho_mobility && spatial.include_log_mobility)
-        {
-            idx_rho_mobility = rho_idx_counter++;
-        }
+        Eigen::VectorXi idx_start, inverse_idx;
+        Eigen::Index ndim = get_ndim_colvec(
+            idx_start,
+            inverse_idx,
+            k,
+            include_rho_dist,
+            include_rho_mobility
+        );
 
         Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
         Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
 
-        // Store current constrained parameters for potential revert
-        Eigen::ArrayXd constrained_params(ndim);
-        for (Eigen::Index i = 0; i < n_offdiag; i++)
-        {
-            Eigen::Index s = offdiag_idx[i];
-            constrained_params(i) = spatial.theta(s, k);
-            constrained_params(n_offdiag + 1 + i) = spatial.gamma(s, k);
-        }
-        constrained_params(n_offdiag) = spatial.wdiag(k);
-        constrained_params(2 * n_offdiag + 1) = spatial.tau(k);
-
-        // Store rho values
-        double rho_dist_saved = spatial.rho_dist;
-        double rho_mobility_saved = spatial.rho_mobility;
-
         // Get unconstrained parameters
-        Eigen::ArrayXd unconstrained_params = get_unconstrained_with_rho(
-                                                  k, include_rho_dist, include_rho_mobility)
-                                                  .array();
-
-        // Lambda to unpack unconstrained params back to model
-        auto unpack_params = [&]()
-        {
-            for (Eigen::Index i = 0; i < n_offdiag; i++)
-            {
-                Eigen::Index s = offdiag_idx[i];
-                spatial.theta(s, k) = unconstrained_params(i);
-                spatial.gamma(s, k) = std::exp(clamp_log_scale(unconstrained_params(n_offdiag + 1 + i)));
-            }
-            spatial.theta(k, k) = 0.0;
-            double w = inv_logit_stable(unconstrained_params(n_offdiag));
-            spatial.wdiag(k) = clamp01(w);
-            spatial.tau(k) = std::exp(clamp_log_scale(unconstrained_params(2 * n_offdiag + 1)));
-
-            // Unpack rho parameters
-            if (idx_rho_dist >= 0)
-            {
-                spatial.rho_dist = std::exp(clamp_log_scale(unconstrained_params(idx_rho_dist)));
-            }
-            if (idx_rho_mobility >= 0)
-            {
-                spatial.rho_mobility = std::exp(clamp_log_scale(unconstrained_params(idx_rho_mobility)));
-            }
-
-            // Recompute alpha (for ALL columns since rho affects all)
-            spatial.compute_alpha();
-        };
+        Eigen::ArrayXd unconstrained_current = get_unconstrained_colvec(k, ndim, idx_start, inverse_idx);
+        Eigen::ArrayXd unconstrained_params = unconstrained_current;
 
         // Compute initial gradient and log-probability
         double current_logprob = 0.0;
-        Eigen::VectorXd grad = dloglike_dhorseshoe_col_with_rho(
-            current_logprob, k, Y, R_mat, true, true,
-            include_rho_dist, include_rho_mobility,
-            beta_prior_a, beta_prior_b, rho_prior_mean, rho_prior_var);
+        Eigen::VectorXd grad = dlogprob_dcolvec(
+            current_logprob, k, Y, R_mat,
+            include_rho_dist, 
+            include_rho_mobility,
+            beta_prior_a, beta_prior_b, 
+            rho_prior_mean, rho_prior_var
+        );
         grad_norm = grad.norm();
         double current_energy = -current_logprob;
 
@@ -2080,13 +2046,16 @@ public:
             unconstrained_params += step_size * inv_mass.array() * momentum.array();
 
             // Unpack to model
-            unpack_params();
+            unpack_unconstrained_colvec(unconstrained_params, k, idx_start, inverse_idx);
 
             // Compute new gradient
-            grad = dloglike_dhorseshoe_col_with_rho(
-                current_logprob, k, Y, R_mat, true, true,
-                include_rho_dist, include_rho_mobility,
-                beta_prior_a, beta_prior_b, rho_prior_mean, rho_prior_var);
+            grad = dlogprob_dcolvec(
+                current_logprob, k, Y, R_mat,
+                include_rho_dist, 
+                include_rho_mobility,
+                beta_prior_a, beta_prior_b, 
+                rho_prior_mean, rho_prior_var
+            );
 
             // Update momentum (except last step)
             if (lf_step != n_leapfrog - 1)
@@ -2120,322 +2089,12 @@ public:
         if (!accept)
         {
             // Revert to previous constrained parameters
-            for (Eigen::Index i = 0; i < n_offdiag; i++)
-            {
-                Eigen::Index s = offdiag_idx[i];
-                spatial.theta(s, k) = constrained_params(i);
-                spatial.gamma(s, k) = constrained_params(n_offdiag + 1 + i);
-            }
-            spatial.theta(k, k) = 0.0;
-            spatial.wdiag(k) = constrained_params(n_offdiag);
-            spatial.tau(k) = constrained_params(2 * n_offdiag + 1);
-
-            // Revert rho
-            spatial.rho_dist = rho_dist_saved;
-            spatial.rho_mobility = rho_mobility_saved;
-
-            // Recompute alpha with reverted params
-            spatial.compute_alpha();
-        }
-
-        // Gibbs updates for delta and zeta (conjugate)
-        spatial.zeta(k) = 1.0 / R::rgamma(1.0, 1.0 / (1.0 + 1.0 / spatial.tau(k)));
-        for (Eigen::Index i = 0; i < n_offdiag; i++)
-        {
-            Eigen::Index s = offdiag_idx[i];
-            double dl_rate = 1.0 + 1.0 / spatial.gamma(s, k);
-            spatial.delta(s, k) = 1.0 / R::rgamma(1.0, 1.0 / dl_rate);
+            unpack_unconstrained_colvec(unconstrained_current, k, idx_start, inverse_idx);
         }
 
         return accept_prob;
-    } // update_horseshoe_col_with_rho
+    } // update_colvec
 
-    /*
-    =======================================================
-    */
-
-
-    Eigen::VectorXd dloglike_dhorseshoe_col(
-        double &loglike,
-        const Eigen::Index &k,        // column index (source location) of theta to compute derivative for
-        const Eigen::MatrixXd &Y,     // (nt + 1) x ns, observed primary infections
-        const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
-        const bool &add_jacobian = true,
-        const bool &add_prior = true,
-        const double &beta_prior_a = 5.0,
-        const double &beta_prior_b = 2.0)
-    {
-        const Eigen::Index n_offdiag = ns - 1;
-        const Eigen::Index ndim = 2 * n_offdiag + 2;
-
-        // Build index mapping: offdiag_idx[i] = row index s for the i-th off-diagonal element
-        // inverse_idx[s] = position i in the off-diagonal array (-1 if s == k)
-        std::vector<Eigen::Index> offdiag_idx;
-        std::vector<Eigen::Index> inverse_idx(ns, -1);
-        offdiag_idx.reserve(n_offdiag);
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            if (s != k)
-            {
-                inverse_idx[s] = static_cast<Eigen::Index>(offdiag_idx.size());
-                offdiag_idx.push_back(s);
-            }
-        }
-
-        // const double prior_var = prior_sd * prior_sd;
-        const double w_safe = clamp01(spatial.wdiag(k));
-        const double logit_wk = logit_safe(w_safe);
-        const double jacobian_wk = w_safe * (1.0 - w_safe);
-        Eigen::VectorXd u_k = spatial.compute_unnormalized_weight_col(k);
-
-        loglike = 0.0;
-        Eigen::VectorXd grad(ndim);
-        grad.setZero();
-
-        // Gradient index positions
-        const Eigen::Index idx_wdiag = n_offdiag;
-        const Eigen::Index idx_gamma_start = n_offdiag + 1;
-        const Eigen::Index idx_tau = 2 * n_offdiag + 1;
-
-        // tau gradient (includes prior)
-        grad(idx_tau) = spatial.dlogprob_dtau_k(k, add_jacobian, add_prior);
-
-        // Prior on logit(wdiag)
-        if (add_prior)
-        {
-            if (!add_jacobian)
-            {
-                Rcpp::stop("Must add jacobian to the likelihood when using Gaussian prior on logit(wdiag).");
-            }
-            // grad(idx_wdiag) += -(logit_wk - prior_mean) / prior_var;
-            grad(idx_wdiag) += beta_prior_a * (1.0 - w_safe) - beta_prior_b * w_safe; // Beta prior gradient w.r.t. logit(w[k])
-            // loglike += -0.5 * (logit_wk - prior_mean) * (logit_wk - prior_mean) / prior_var;
-            loglike += beta_prior_a * std::log(w_safe) + beta_prior_b * std::log(1.0 - w_safe); // Beta prior log-density w.r.t. logit(w[k])
-            loglike += -0.5 * std::log(spatial.tau(k)) - 1.0 / (spatial.zeta(k) * spatial.tau(k));
-        }
-
-        // Loop over destination locations
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            // gamma gradient (only for off-diagonal)
-            if (s != k)
-            {
-                Eigen::Index i = inverse_idx[s];
-                grad(idx_gamma_start + i) = spatial.dlogprob_dgamma(s, k, add_jacobian, add_prior);
-            }
-
-            // theta prior (only for off-diagonal)
-            if (add_prior && s != k)
-            {
-                Eigen::Index i = inverse_idx[s];
-                double reg_var = std::max(spatial.compute_regularized_variance(s, k), EPS8);
-                grad(i) += -spatial.theta(s, k) / reg_var;
-                loglike += -0.5 * std::log(reg_var) - 0.5 * spatial.theta(s, k) * spatial.theta(s, k) / reg_var;
-                loglike += -0.5 * std::log(spatial.gamma(s, k)) - 1.0 / (spatial.delta(s, k) * spatial.gamma(s, k));
-            }
-
-            // Likelihood contribution from destination (t, s)
-            for (Eigen::Index t = 0; t < nt + 1; t++)
-            {
-                if (zinfl.inflated && zinfl.Z(t, s) < 1)
-                {
-                    // If zero-inflated and Z(t,s) == 0, skip likelihood contribution
-                    continue;
-                }
-
-
-                double lambda_st = mu;
-                double dlambda_st_dalpha_sk = 0.0;
-
-                for (Eigen::Index kk = 0; kk < ns; kk++)
-                {
-                    for (Eigen::Index l = 0; l < t; l++)
-                    {
-                        if (t - l <= static_cast<Eigen::Index>(dlag.Fphi.size()))
-                        {
-                            double coef = R_mat(l, kk) * dlag.Fphi(t - l - 1) * Y(l, kk);
-                            if (kk == k)
-                            {
-                                dlambda_st_dalpha_sk += coef;
-                            }
-                            lambda_st += spatial.alpha(s, kk) * coef;
-                        }
-                    }
-                }
-
-                lambda_st = std::max(lambda_st, EPS);
-                loglike += Y(t, s) * std::log(lambda_st) - lambda_st;
-                double dloglike_dlambda_st = Y(t, s) / lambda_st - 1.0;
-
-                // Gradient w.r.t. logit(wdiag(k))
-                double dalpha_sk_dwk = spatial.dalpha_dwj(s, k, u_k);
-                double deriv = dloglike_dlambda_st * dlambda_st_dalpha_sk * dalpha_sk_dwk;
-                if (add_jacobian)
-                {
-                    deriv *= jacobian_wk;
-                }
-                grad(idx_wdiag) += deriv;
-
-                // Gradient w.r.t. theta(j, k) for j != k
-                for (Eigen::Index j = 0; j < ns; j++)
-                {
-                    if (j == k)
-                    {
-                        continue;
-                    }
-                    Eigen::Index i = inverse_idx[j];
-                    double dalpha_sk_dtheta_jk = spatial.dalpha_dtheta(s, j, k, u_k);
-                    grad(i) += dloglike_dlambda_st * dlambda_st_dalpha_sk * dalpha_sk_dtheta_jk;
-                }
-            }
-        }
-
-        return grad;
-    } // dloglike_dhorseshoe_col
-
-
-    double update_horseshoe_col(
-        double &energy_diff,
-        double &grad_norm,
-        const Eigen::Index &k,
-        const Eigen::MatrixXd &Y,
-        const Eigen::MatrixXd &R_mat,
-        const Eigen::VectorXd &mass_diag,
-        const double &step_size,
-        const unsigned int &n_leapfrog,
-        const double &prior_mean = 0.0,
-        const double &prior_sd = 1.0)
-    {
-        // Dimension: (ns-1) for theta_offdiag + 1 for wdiag + (ns-1) for gamma_offdiag + 1 for tau
-        const Eigen::Index n_offdiag = ns - 1;
-        const Eigen::Index ndim = 2 * n_offdiag + 2;
-
-        // Build index mapping for off-diagonal elements
-        std::vector<Eigen::Index> offdiag_idx;
-        offdiag_idx.reserve(n_offdiag);
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            if (s != k)
-                offdiag_idx.push_back(s);
-        }
-
-        Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
-        Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
-
-        // Pack constrained parameters (off-diagonal only for theta and gamma)
-        Eigen::ArrayXd constrained_params(ndim);
-        for (Eigen::Index i = 0; i < n_offdiag; i++)
-        {
-            Eigen::Index s = offdiag_idx[i];
-            constrained_params(i) = spatial.theta(s, k);                 // theta_offdiag
-            constrained_params(n_offdiag + 1 + i) = spatial.gamma(s, k); // gamma_offdiag
-        }
-        constrained_params(n_offdiag) = spatial.wdiag(k);       // wdiag
-        constrained_params(2 * n_offdiag + 1) = spatial.tau(k); // tau
-
-        // Create unconstrained parameters with transforms
-        Eigen::ArrayXd unconstrained_params = get_unconstrained(k);
-
-        // Lambda to unpack unconstrained params back to spatial object
-        auto unpack_params = [&]()
-        {
-            for (Eigen::Index i = 0; i < n_offdiag; i++)
-            {
-                Eigen::Index s = offdiag_idx[i];
-                spatial.theta(s, k) = unconstrained_params(i);
-                spatial.gamma(s,k) = std::exp(clamp_log_scale(unconstrained_params(n_offdiag + 1 + i)));
-            }
-            spatial.theta(k, k) = 0.0; // ensure diagonal is zero
-            double w = inv_logit_stable(unconstrained_params(n_offdiag));
-            spatial.wdiag(k) = clamp01(w);
-            spatial.tau(k)     = std::exp(clamp_log_scale(unconstrained_params(2*n_offdiag + 1)));
-            spatial.alpha.col(k) = spatial.compute_alpha_col(k);
-        };
-
-        // Compute initial gradient and log-probability
-        double current_logprob = 0.0;
-        Eigen::VectorXd grad = dloglike_dhorseshoe_col(
-            current_logprob, k, Y, R_mat, true, true);
-        grad_norm = grad.norm();
-        double current_energy = -current_logprob;
-
-        // Sample momentum
-        Eigen::VectorXd momentum(ndim);
-        for (Eigen::Index i = 0; i < ndim; i++)
-        {
-            momentum(i) = sqrt_mass(i) * R::rnorm(0.0, 1.0);
-        }
-        double current_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
-
-        // Leapfrog integration
-        momentum += 0.5 * step_size * grad;
-        for (unsigned int lf_step = 0; lf_step < n_leapfrog; lf_step++)
-        {
-            // Update position
-            unconstrained_params += step_size * inv_mass.array() * momentum.array();
-
-            // Unpack to spatial object
-            unpack_params();
-
-            // Compute new gradient
-            grad = dloglike_dhorseshoe_col(
-                current_logprob, k, Y, R_mat, true, true);
-
-            // Update momentum (except last step)
-            if (lf_step != n_leapfrog - 1)
-            {
-                momentum += step_size * grad;
-            }
-        }
-
-        momentum += 0.5 * step_size * grad;
-        momentum = -momentum; // Negate for reversibility
-
-        double proposed_energy = -current_logprob;
-        double proposed_kinetic = 0.5 * momentum.cwiseProduct(inv_mass).dot(momentum);
-
-        double H_proposed = proposed_energy + proposed_kinetic;
-        double H_current = current_energy + current_kinetic;
-        energy_diff = H_proposed - H_current;
-
-        // MH acceptance
-        bool accept = false;
-        double accept_prob = 0.0;
-        if (std::isfinite(energy_diff) && std::abs(energy_diff) < 1.0e4)
-        {
-            accept_prob = std::min(1.0, std::exp(-energy_diff));
-            if (std::log(R::runif(0.0, 1.0)) < -energy_diff)
-            {
-                accept = true;
-            }
-        }
-
-        if (!accept)
-        {
-            // Revert to previous constrained parameters
-            for (Eigen::Index i = 0; i < n_offdiag; i++)
-            {
-                Eigen::Index s = offdiag_idx[i];
-                spatial.theta(s, k) = constrained_params(i);
-                spatial.gamma(s, k) = constrained_params(n_offdiag + 1 + i);
-            }
-            spatial.theta(k, k) = 0.0;
-            spatial.wdiag(k) = constrained_params(n_offdiag);
-            spatial.tau(k) = constrained_params(2 * n_offdiag + 1);
-            spatial.alpha.col(k) = spatial.compute_alpha_col(k);
-        }
-
-        // Gibbs updates for delta and zeta (conjugate)
-        spatial.zeta(k) = 1.0 / R::rgamma(1.0, 1.0 / (1.0 + 1.0 / spatial.tau(k)));
-        for (Eigen::Index i = 0; i < n_offdiag; i++)
-        {
-            Eigen::Index s = offdiag_idx[i];
-            double dl_rate = 1.0 + 1.0 / spatial.gamma(s, k);
-            spatial.delta(s, k) = 1.0 / R::rgamma(1.0, 1.0 / dl_rate);
-        }
-
-        return accept_prob;
-    } // update_horseshoe_col
 
     Eigen::VectorXd dloglike_dparams_collapsed(
         double &loglike,
@@ -3496,32 +3155,6 @@ public:
     } // update_eta_block_mh
 
 
-    Eigen::VectorXd get_unconstrained(const Eigen::Index &k)
-    {
-        Eigen::Index n_offdiag = ns - 1;
-        Eigen::Index ndim = 2 * n_offdiag + 2;
-        std::vector<Eigen::Index> offdiag_idx;
-        offdiag_idx.reserve(n_offdiag);
-        for (Eigen::Index s = 0; s < ns; s++)
-        {
-            if (s != k)
-                offdiag_idx.push_back(s);
-        }
-
-        Eigen::VectorXd unconstrained(ndim);
-        for (Eigen::Index i = 0; i < n_offdiag; i++)
-        {
-            Eigen::Index s = offdiag_idx[i];
-            unconstrained(i) = spatial.theta(s, k);                 // theta_offdiag
-            unconstrained(n_offdiag + 1 + i) = std::log(spatial.gamma(s, k)); // gamma_offdiag
-        }
-        unconstrained(n_offdiag) = logit_safe(spatial.wdiag(k));       // wdiag
-        unconstrained(2 * n_offdiag + 1) = std::log(spatial.tau(k)); // tau
-
-        return unconstrained;
-    }
-
-
     Rcpp::List run_mcmc(
         const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
         const unsigned int &nburnin,
@@ -3626,30 +3259,37 @@ public:
                 if (hs_opts.containsElementNamed("init"))
                 {
                     Rcpp::List init_values = hs_opts["init"];
-                    if (init_values.containsElementNamed("theta"))
+                    if (init_values.containsElementNamed("epsilon"))
                     {
-                        spatial.theta = Rcpp::as<Eigen::MatrixXd>(init_values["theta"]);
+                        spatial.epsilon = Rcpp::as<Eigen::MatrixXd>(init_values["epsilon"]);
                     }
                     if (init_values.containsElementNamed("gamma"))
                     {
                         spatial.gamma = Rcpp::as<Eigen::MatrixXd>(init_values["gamma"]);
                     }
-                    if (init_values.containsElementNamed("delta"))
-                    {
-                        spatial.delta = Rcpp::as<Eigen::MatrixXd>(init_values["delta"]);
-                    }
                     if (init_values.containsElementNamed("tau"))
                     {
                         spatial.tau = Rcpp::as<Eigen::VectorXd>(init_values["tau"]);
-                    }
-                    if (init_values.containsElementNamed("zeta"))
-                    {
-                        spatial.zeta = Rcpp::as<Eigen::VectorXd>(init_values["zeta"]);
                     }
                     if (init_values.containsElementNamed("wdiag"))
                     {
                         spatial.wdiag = Rcpp::as<Eigen::VectorXd>(init_values["wdiag"]);
                     }
+
+                    for (Eigen::Index k = 0; k < ns; k++)
+                    {
+                        for (Eigen::Index s = 0; s < ns; s++)
+                        {
+                            if (s != k)
+                            {
+                                spatial.theta(s, k) = spatial.epsilon(s, k) * spatial.gamma(s, k) * spatial.tau(k);
+                            }
+                            else
+                            {
+                                spatial.theta(s, k) = 0.0;
+                            }
+                        } // for s
+                    } // for k
 
                     spatial.compute_alpha();
                 } // if init
@@ -3718,18 +3358,11 @@ public:
         
 
 
-        Eigen::Index n_rho = 0;
-        if (static_params_prior.infer)
-        {
-            if (spatial.include_distance)
-                n_rho++;
-            if (spatial.include_log_mobility)
-                n_rho++;
-        }
-
+        Eigen::VectorXi idx_colvec, idx_inverse;
+        Eigen::Index n_colvec = get_ndim_colvec(idx_colvec, idx_inverse, 0);
         HMCDiagnostics_2d hs_hmc_diag;
         DualAveraging_2d hs_da_adapter;
-        Eigen::MatrixXd mass_diag_hs = Eigen::MatrixXd::Ones(2 * ns + n_rho, ns);
+        Eigen::MatrixXd mass_diag_hs = Eigen::MatrixXd::Ones(n_colvec, ns);
         MassAdapter_2d mass_adapter_hs;
         if (hs_prior.infer)
         {
@@ -3747,20 +3380,14 @@ public:
                 hs_prior.hmc_step_size_init
             );
 
-            mass_adapter_hs.mean = Eigen::MatrixXd::Zero(2 * ns + n_rho, ns);
-            mass_adapter_hs.M2 = Eigen::MatrixXd::Zero(2 * ns + n_rho, ns);
+            mass_adapter_hs.mean = Eigen::MatrixXd::Zero(n_colvec, ns);
+            mass_adapter_hs.M2 = Eigen::MatrixXd::Zero(n_colvec, ns);
             mass_adapter_hs.count = Eigen::VectorXd::Zero(ns);
             for (Eigen::Index k = 0; k < ns; k++)
             {
-                if (n_rho > 0)
-                {
-                    mass_adapter_hs.mean.col(k) = get_unconstrained_with_rho(
-                        k, spatial.include_distance, spatial.include_log_mobility);
-                }
-                else
-                {
-                    mass_adapter_hs.mean.col(k) = get_unconstrained(k);
-                }
+                mass_adapter_hs.mean.col(k) = get_unconstrained_colvec(
+                    k, n_colvec, idx_colvec, idx_inverse
+                );
             }
         } // infer horseshoe
 
@@ -3812,15 +3439,13 @@ public:
             }
         }
 
-        Eigen::Tensor<double, 3> theta_samples, gamma_samples, delta_samples;
-        Eigen::MatrixXd tau_samples, zeta_samples, wdiag_samples;
+        Eigen::Tensor<double, 3> theta_samples, gamma_samples;
+        Eigen::MatrixXd tau_samples, wdiag_samples;
         if (hs_prior.infer)
         {
             theta_samples.resize(spatial.theta.rows(), spatial.theta.cols(), nsamples);
             gamma_samples.resize(spatial.gamma.rows(), spatial.gamma.cols(), nsamples);
-            delta_samples.resize(spatial.delta.rows(), spatial.delta.cols(), nsamples);
             tau_samples.resize(spatial.tau.size(), nsamples);
-            zeta_samples.resize(spatial.zeta.size(), nsamples);
             wdiag_samples.resize(spatial.wdiag.size(), nsamples);
         }
 
@@ -3937,28 +3562,14 @@ public:
                     double energy_diff = 0.0;
                     double grad_norm = 0.0;
                     Eigen::VectorXd mass_diag_vec = mass_diag_hs.col(k);
-                    double accept_prob = 0.0;
-                    if (n_rho > 0)
-                    {
-                        accept_prob = update_horseshoe_col_with_rho(
-                            energy_diff, grad_norm, k, Y,
-                            R_mat, mass_diag_vec,
-                            hs_hmc_opts.leapfrog_step_size(k),
-                            hs_hmc_opts.nleapfrog(k),
-                            spatial.include_distance,
-                            spatial.include_log_mobility
-                        );
-                    }
-                    else
-                    {
-                        accept_prob = update_horseshoe_col(
-                            energy_diff, grad_norm, k, Y,
-                            R_mat, mass_diag_vec,
-                            hs_hmc_opts.leapfrog_step_size(k),
-                            hs_hmc_opts.nleapfrog(k),
-                            hs_prior.par1, hs_prior.par2
-                        );
-                    }
+                    double accept_prob = update_colvec(
+                        energy_diff, grad_norm, k, Y,
+                        R_mat, mass_diag_vec,
+                        hs_hmc_opts.leapfrog_step_size(k),
+                        hs_hmc_opts.nleapfrog(k),
+                        spatial.include_distance,
+                        spatial.include_log_mobility
+                    );
 
                     // (Optional) Update diagnostics and dual averaging for horseshoe theta
                     hs_hmc_diag.accept_count(k) += accept_prob;
@@ -4083,7 +3694,11 @@ public:
                     {
                         // Phase 1 (iter < nburnin/2): Adapt step size with unit mass
                         // Phase 2 (nburnin/2 <= iter < nburnin): Adapt mass matrix
-                        Eigen::VectorXd current_unconstrained = get_unconstrained(k);
+                        Eigen::VectorXi indices_start, indices_inverse;
+                        Eigen::Index n_colvec = get_ndim_colvec(indices_start, indices_inverse, k);
+                        Eigen::VectorXd current_unconstrained = get_unconstrained_colvec(
+                            k, n_colvec, indices_start, indices_inverse
+                        );
                         mass_adapter_hs.update(k, current_unconstrained);
 
                         // Only update mass matrix ONCE at the midpoint
@@ -4218,16 +3833,12 @@ public:
                     Eigen::MatrixXd theta_centered = spatial.center_theta();
                     Eigen::TensorMap<Eigen::Tensor<const double, 2>> theta_map(theta_centered.data(), theta_centered.rows(), theta_centered.cols());
                     Eigen::TensorMap<Eigen::Tensor<const double, 2>> gamma_map(spatial.gamma.data(), spatial.gamma.rows(), spatial.gamma.cols());
-                    Eigen::TensorMap<Eigen::Tensor<const double, 2>> delta_map(spatial.delta.data(), spatial.delta.rows(), spatial.delta.cols());
                     Eigen::Map<const Eigen::VectorXd> tau_map(spatial.tau.data(), spatial.tau.size());
-                    Eigen::Map<const Eigen::VectorXd> zeta_map(spatial.zeta.data(), spatial.zeta.size());
                     Eigen::Map<const Eigen::VectorXd> wdiag_map(spatial.wdiag.data(), spatial.wdiag.size());
 
                     theta_samples.chip(sample_idx, 2) = theta_map;
                     gamma_samples.chip(sample_idx, 2) = gamma_map;
-                    delta_samples.chip(sample_idx, 2) = delta_map;
                     tau_samples.col(sample_idx) = tau_map;
-                    zeta_samples.col(sample_idx) = zeta_map;
                     wdiag_samples.col(sample_idx) = wdiag_map;
                 }
 
@@ -4313,9 +3924,7 @@ public:
             Rcpp::List hs_list = Rcpp::List::create(
                 Rcpp::Named("theta") = tensor3_to_r(theta_samples), // ns x ns x nsamples
                 Rcpp::Named("gamma") = tensor3_to_r(gamma_samples), // ns x ns x nsamples
-                Rcpp::Named("delta") = tensor3_to_r(delta_samples), // ns x ns x nsamples
                 Rcpp::Named("tau") = tau_samples, // ns x nsamples
-                Rcpp::Named("zeta") = zeta_samples, // ns x nsamples
                 Rcpp::Named("wdiag") = wdiag_samples  // ns x nsamples
             );
 
