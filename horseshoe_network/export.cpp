@@ -48,6 +48,7 @@ Rcpp::NumericMatrix standardize_alpha(const Rcpp::NumericMatrix &alpha_in)
 List compute_apparent_R(
     const NumericVector& alpha_array,  // ns x ns x nsample
     const NumericVector& Rt_array,     // nt x ns x nsample
+    const NumericVector& mu_array, // nsample x 1
     const NumericMatrix& Y,            // nt x ns
     const Rcpp::Nullable<Rcpp::List> &lagdist_opts = R_NilValue,
     const bool return_quantiles = false,
@@ -151,7 +152,7 @@ List compute_apparent_R(
                 double local_num = w_s * conv_Ry(t, s);
                 
                 // Import contribution: sum_{k != s} alpha_{s,k} * conv_Ry(t, k)
-                double import_num = 0.0;
+                double import_num = mu_array[m]; // Add exogenous importation first
                 for (int k = 0; k < ns; k++) {
                     if (k != s) {
                         import_num += alpha_m(s, k) * conv_Ry(t, k);
