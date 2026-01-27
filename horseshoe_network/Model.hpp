@@ -1658,8 +1658,8 @@ public:
         Eigen::VectorXi & idx_start, // starting index of each parameter block
         Eigen::VectorXi & inverse_idx, // inverse mapping from spatial index to off-diagonal index
         const Eigen::Index &k, // column index
-        const bool &include_rho_dist = true,
-        const bool &include_rho_mobility = true)
+        const bool &include_rho = false
+    )
     {
         /*
         Store starting indices for:
@@ -1680,17 +1680,19 @@ public:
         idx_start(3) = 2 * n_offdiag + 1; // log(tau)
 
         Eigen::Index ndim = 2 * n_offdiag + 2;
-        if (include_rho_dist && spatial.include_distance)
+        if (include_rho)
         {
-            idx_start(4) = ndim; // log(rho_dist)
-            ndim++;
-        }
-        if (include_rho_mobility && spatial.include_log_mobility)
-        {
-            idx_start(5) = ndim; // log(rho_mobility)
-            ndim++;
-        }
-
+            if (spatial.include_distance)
+            {
+                idx_start(4) = ndim; // log(rho_dist)
+                ndim++;
+            }
+            if (spatial.include_log_mobility)
+            {
+                idx_start(5) = ndim; // log(rho_mobility)
+                ndim++;
+            }
+        } // if include_rho
 
         inverse_idx.resize(ns);
         inverse_idx.setConstant(-1);
@@ -1815,8 +1817,7 @@ public:
         const Eigen::Index &k,
         const Eigen::MatrixXd &Y,
         const Eigen::MatrixXd &R_mat,
-        const bool &include_rho_dist = true,
-        const bool &include_rho_mobility = false,
+        const bool &include_rho = false,
         const double &beta_prior_a = 5.0,
         const double &beta_prior_b = 2.0,
         const double &rho_prior_mean = 0.0,
@@ -1836,8 +1837,7 @@ public:
             idx_start,
             inverse_idx,
             k,
-            include_rho_dist,
-            include_rho_mobility
+            include_rho
         );
 
         const double w_safe = clamp01(spatial.wdiag(k));
@@ -1978,8 +1978,7 @@ public:
      * @param mass_diag Mass matrix diagonal
      * @param step_size HMC step size
      * @param n_leapfrog Number of leapfrog steps
-     * @param include_rho_dist Include rho_dist in the update
-     * @param include_rho_mobility Include rho_mobility in the update
+     * @param include_rho Include rho_dist or rho_mobility in the update
      * @param beta_prior_a Beta prior parameter for wdiag
      * @param beta_prior_b Beta prior parameter for wdiag
      * @param rho_prior_mean Prior mean for log(rho)
@@ -1995,8 +1994,7 @@ public:
         const Eigen::VectorXd &mass_diag,
         const double &step_size,
         const unsigned int &n_leapfrog,
-        const bool &include_rho_dist = true,
-        const bool &include_rho_mobility = false,
+        const bool &include_rho = false,
         const double &beta_prior_a = 5.0,
         const double &beta_prior_b = 2.0,
         const double &rho_prior_mean = 0.0,
@@ -2007,8 +2005,7 @@ public:
             idx_start,
             inverse_idx,
             k,
-            include_rho_dist,
-            include_rho_mobility
+            include_rho
         );
 
         Eigen::VectorXd inv_mass = mass_diag.cwiseInverse();
@@ -2022,8 +2019,7 @@ public:
         double current_logprob = 0.0;
         Eigen::VectorXd grad = dlogprob_dcolvec(
             current_logprob, k, Y, R_mat,
-            include_rho_dist, 
-            include_rho_mobility,
+            include_rho, 
             beta_prior_a, beta_prior_b, 
             rho_prior_mean, rho_prior_var
         );
@@ -2051,8 +2047,7 @@ public:
             // Compute new gradient
             grad = dlogprob_dcolvec(
                 current_logprob, k, Y, R_mat,
-                include_rho_dist, 
-                include_rho_mobility,
+                include_rho, 
                 beta_prior_a, beta_prior_b, 
                 rho_prior_mean, rho_prior_var
             );
@@ -2100,21 +2095,24 @@ public:
         double &loglike,
         const Eigen::MatrixXd &Y, // (nt + 1) x ns, observed primary infections
         const Eigen::MatrixXd &R_mat, // (nt + 1) x ns
-        const bool &add_jacobian = true,
-        const bool &include_W = false
+        const bool &include_W = false,
+        const bool &include_rho = false
     )
     {
         double W_safe = std::max(temporal.W, EPS);
         double W_sqrt = std::sqrt(W_safe);
 
         Eigen::MatrixXd deriv_rho1_mat, deriv_rho2_mat;
-        if (spatial.include_distance)
+        if (include_rho)
         {
-            deriv_rho1_mat = spatial.dalpha_drho_dist();
-        }
-        if (spatial.include_log_mobility)
-        {
-            deriv_rho2_mat = spatial.dalpha_drho_mobility();
+            if (spatial.include_distance)
+            {
+                deriv_rho1_mat = spatial.dalpha_drho_dist();
+            }
+            if (spatial.include_log_mobility)
+            {
+                deriv_rho2_mat = spatial.dalpha_drho_mobility();
+            }
         }
 
         double deriv_mu = 0.0;
@@ -2148,14 +2146,18 @@ public:
                         }
                     } // for source time l < t
 
-                    if (spatial.include_distance)
+                    if (include_rho)
                     {
-                        dlambda_st_drho_dist += deriv_rho1_mat(s, k) * coef_sum;
-                    }
-                    if (spatial.include_log_mobility)
-                    {
-                        dlambda_st_drho_mobility += deriv_rho2_mat(s, k) * coef_sum;
-                    }
+                        if (spatial.include_distance)
+                        {
+                            dlambda_st_drho_dist += deriv_rho1_mat(s, k) * coef_sum;
+                        }
+                        if (spatial.include_log_mobility)
+                        {
+                            dlambda_st_drho_mobility += deriv_rho2_mat(s, k) * coef_sum;
+                        }
+                    } // if include_rho
+
                 } // for source location k
 
                 lambda_st = std::max(lambda_st, EPS);
@@ -2169,26 +2171,30 @@ public:
                     loglike += R::dnorm4(temporal.wt(t, s), 0.0, W_sqrt, true);
                 }
 
-                if (spatial.include_distance)
+                if (include_rho)
                 {
-                    deriv_rho_dist += dloglike_dlambda_st * dlambda_st_drho_dist;
-                }
-                if (spatial.include_log_mobility)
-                {
-                    deriv_rho_mobility += dloglike_dlambda_st * dlambda_st_drho_mobility;
+                    if (spatial.include_distance)
+                    {
+                        deriv_rho_dist += dloglike_dlambda_st * dlambda_st_drho_dist;
+                    }
+                    if (spatial.include_log_mobility)
+                    {
+                        deriv_rho_mobility += dloglike_dlambda_st * dlambda_st_drho_mobility;
+                    }
                 }
             } // for destination location s
         } // for time t
 
-        if (add_jacobian)
+        // add jacobian
+        deriv_mu *= mu;
+
+        if (include_W)
         {
-            deriv_mu *= mu;
+            deriv_W *= temporal.W;
+        } // if include_W
 
-            if (include_W)
-            {
-                deriv_W *= temporal.W;
-            } // if include_W
-
+        if (include_rho)
+        {
             if (spatial.include_distance)
             {
                 deriv_rho_dist *= spatial.rho_dist;
@@ -2198,16 +2204,19 @@ public:
             {
                 deriv_rho_mobility *= spatial.rho_mobility;
             }
-        } // if add_jacobian
+        } // if include_rho
 
         Eigen::Index n_params = 1;
-        if (spatial.include_distance)
+        if (include_rho)
         {
-            n_params += 1;
-        }
-        if (spatial.include_log_mobility)
-        {
-            n_params += 1;
+            if (spatial.include_distance)
+            {
+                n_params += 1;
+            }
+            if (spatial.include_log_mobility)
+            {
+                n_params += 1;
+            }
         }
         if (include_W)
         {
@@ -2218,15 +2227,18 @@ public:
         Eigen::Index idx = 0;
         derivs(idx) = deriv_mu;
         idx += 1;
-        if (spatial.include_distance)
+        if (include_rho)
         {
-            derivs(idx) = deriv_rho_dist;
-            idx += 1;
-        }
-        if (spatial.include_log_mobility)
-        {
-            derivs(idx) = deriv_rho_mobility;
-            idx += 1;
+            if (spatial.include_distance)
+            {
+                derivs(idx) = deriv_rho_dist;
+                idx += 1;
+            }
+            if (spatial.include_log_mobility)
+            {
+                derivs(idx) = deriv_rho_mobility;
+                idx += 1;
+            }
         }
         if (include_W)
         {
@@ -2237,76 +2249,97 @@ public:
     } // dloglike_dparams_collapsed
 
 
-    Eigen::Index get_ndim_static_params(const bool &include_W = false)
+    Eigen::Index get_ndim_static_params(
+        const bool &include_W = false,
+        const bool &include_rho = false
+    )
     {
         Eigen::Index n_params = 1; // mu
-        if (spatial.include_distance)
+        if (include_rho)
         {
-            n_params += 1;
-        }
-        if (spatial.include_log_mobility)
-        {
-            n_params += 1;
-        }
+            if (spatial.include_distance)
+            {
+                n_params += 1;
+            }
+            if (spatial.include_log_mobility)
+            {
+                n_params += 1;
+            }
+        } // if include_rho
         if (include_W)
         {
             n_params += 1;
-        }
+        } // if include_W
         return n_params;
     } // get_ndim_static_params
 
 
-    Eigen::VectorXd get_constrained_static_params(const bool &include_W = false)
+    Eigen::ArrayXd get_unconstrained_static_params(
+        const bool &include_W = false,
+        const bool &include_rho = false
+    )
     {
-        Eigen::Index n_params = get_ndim_static_params(include_W);
-        Eigen::VectorXd constrained_params(n_params);
+        Eigen::Index n_params = get_ndim_static_params(include_W, include_rho);
+        Eigen::VectorXd unconstrained_params(n_params);
         Eigen::Index idx = 0;
-        constrained_params(idx) = mu;
+        unconstrained_params(idx) = std::log(std::max(mu, EPS));
         idx += 1;
-        if (spatial.include_distance)
+        if (include_rho)
         {
-            constrained_params(idx) = spatial.rho_dist;
-            idx += 1;
-        }
-        if (spatial.include_log_mobility)
-        {
-            constrained_params(idx) = spatial.rho_mobility;
-            idx += 1;
-        }
+            if (spatial.include_distance)
+            {
+                unconstrained_params(idx) = std::log(std::max(spatial.rho_dist, EPS));
+                idx += 1;
+            }
+            if (spatial.include_log_mobility)
+            {
+                unconstrained_params(idx) = std::log(std::max(spatial.rho_mobility, EPS));
+                idx += 1;
+            }
+        } // if include_rho
+
         if (include_W)
         {
-            constrained_params(idx) = temporal.W;
-        }
-        return constrained_params;
-    } // get_constrained_static_params
+            unconstrained_params(idx) = std::log(std::max(temporal.W, EPS));
+        } // if include_W
+        return unconstrained_params;
+    } // get_unconstrained_static_params
 
 
-    void unpack_constrained_static_params(
-        const Eigen::ArrayXd &constrained_params,
-        const bool &include_W = false
+    void unpack_unconstrained_static_params(
+        const Eigen::ArrayXd &unconstrained_params,
+        const bool &include_W = false,
+        const bool &include_rho = false
     )
     {
         Eigen::Index idx = 0;
-        mu = constrained_params(idx);
+        mu = std::exp(clamp_log_scale(unconstrained_params(idx)));
         idx += 1;
-        if (spatial.include_distance)
+        if (include_rho)
         {
-            spatial.rho_dist = constrained_params(idx);
-            idx += 1;
-        }
-        if (spatial.include_log_mobility)
-        {
-            spatial.rho_mobility = constrained_params(idx);
-            idx += 1;
-        }
-        if (spatial.include_distance || spatial.include_log_mobility)
-        {
-            spatial.compute_alpha();
-        }
+            bool update_alpha = false;
+            if (spatial.include_distance)
+            {
+                spatial.rho_dist = std::exp(clamp_log_scale(unconstrained_params(idx)));
+                idx += 1;
+                update_alpha = true;
+            }
+            if (spatial.include_log_mobility)
+            {
+                spatial.rho_mobility = std::exp(clamp_log_scale(unconstrained_params(idx)));
+                idx += 1;
+                update_alpha = true;
+            }
+            if (update_alpha)
+            {
+                spatial.compute_alpha();
+            }
+        } // if include_rho
+
         if (include_W)
         {
-            temporal.W = constrained_params(idx);
-        }
+            temporal.W = std::exp(clamp_log_scale(unconstrained_params(idx)));
+        } // if include_W
         return;
     } // unpack_unconstrained_static_params
 
@@ -2320,7 +2353,8 @@ public:
         const Eigen::VectorXd &mass_diag, // covariance diagonal for momentum, which is proportional to the precision of parameters
         const double &prior_mean = 0.0,
         const double &prior_sd = 10.0,
-        const bool &include_W = false
+        const bool &include_W = false,
+        const bool &include_rho = false
     )
     {
         const double prior_var = prior_sd * prior_sd;
@@ -2329,13 +2363,13 @@ public:
         Eigen::VectorXd sqrt_mass = mass_diag.array().sqrt();
 
         // Current state
-        Eigen::VectorXd params_current = get_constrained_static_params(include_W);
+        Eigen::ArrayXd unconstrained_current = get_unconstrained_static_params(include_W, include_rho);
 
         // Compute current energy and gradiant
-        Eigen::ArrayXd log_params = params_current.array().log();
+        Eigen::ArrayXd log_params = unconstrained_current;
         double loglike = 0.0;
         Eigen::VectorXd grad = dloglike_dparams_collapsed(
-            loglike, Y, R_mat, true, include_W 
+            loglike, Y, R_mat, include_W , include_rho
         );
         grad.array() += - (log_params - prior_mean) / prior_var;
         grad_norm = grad.norm();
@@ -2343,7 +2377,7 @@ public:
         double current_energy = - (loglike + current_logprior);
 
         // Sample momentum
-        Eigen::VectorXd momentum(params_current.size());
+        Eigen::VectorXd momentum(log_params.size());
         for (Eigen::Index i = 0; i < momentum.size(); i++)
         {
             momentum(i) = sqrt_mass(i) * R::rnorm(0.0, 1.0);
@@ -2357,12 +2391,11 @@ public:
             // Update params
             log_params += step_size * inv_mass.array() * momentum.array();
 
-            Eigen::VectorXd constrained_params = log_params.exp();
-            unpack_constrained_static_params(constrained_params, include_W);
+            unpack_unconstrained_static_params(log_params, include_W, include_rho);
 
             // Update gradient
             grad = dloglike_dparams_collapsed(
-                loglike, Y, R_mat, true, include_W
+                loglike, Y, R_mat, include_W, include_rho
             );
             grad.array() += - (log_params - prior_mean) / prior_var;
 
@@ -2399,7 +2432,7 @@ public:
         if (!accept)
         {
             // Revert to current state
-            unpack_constrained_static_params(params_current, include_W);
+            unpack_unconstrained_static_params(unconstrained_current, include_W, include_rho);
         } // end Metropolis step
 
         return accept_prob;
@@ -3176,6 +3209,7 @@ public:
 
         Prior static_params_prior("gaussian", 0.0, 3.0, true); // prior for log(static parameters)
         bool hmc_include_W = false;
+        bool hmc_include_rho = false;
         HMCOpts_1d hmc_opts;
         mu = Y.block(1, 0, nt, ns).array().minCoeff() + EPS; // initialize mu to min observed primary infections
 
@@ -3202,6 +3236,10 @@ public:
                 {
                     hmc_include_W = Rcpp::as<bool>(params_opts["include_W"]);
                 }
+                if (params_opts.containsElementNamed("include_rho"))
+                {
+                    hmc_include_rho = Rcpp::as<bool>(params_opts["include_rho"]);
+                }
                 if (params_opts.containsElementNamed("hmc"))
                 {
                     Rcpp::List hmc_params_opts = params_opts["hmc"];
@@ -3212,23 +3250,42 @@ public:
                     Rcpp::List init_values = params_opts["init"];
                     spatial.compute_alpha();
 
+                    // baseline primary infection rate
                     if (init_values.containsElementNamed("mu"))
                     {
                         mu = Rcpp::as<double>(init_values["mu"]);
                     }
+
+                    // temporal parameters
                     if (init_values.containsElementNamed("W"))
                     {
                         temporal.W = Rcpp::as<double>(init_values["W"]);
                         initialize_wt_from_data(Y);
                     }
+
+                    // spatial parameters
+                    bool update_alpha = false;
                     if (init_values.containsElementNamed("rho_dist"))
                     {
                         spatial.rho_dist = Rcpp::as<double>(init_values["rho_dist"]);
-                        spatial.compute_alpha();
+                        update_alpha = true;
                     }
+                    else if (spatial.include_distance && !hmc_include_rho)
+                    {
+                        throw std::runtime_error("rho_dist must be initialized if distance is included and not inferred.");
+                    } // rho_dist
                     if (init_values.containsElementNamed("rho_mobility"))
                     {
                         spatial.rho_mobility = Rcpp::as<double>(init_values["rho_mobility"]);
+                        update_alpha = true;
+                    }
+                    else if (spatial.include_log_mobility && !hmc_include_rho)
+                    {
+                        throw std::runtime_error("rho_mobility must be initialized if mobility is included and not inferred.");
+                    } // rho_mobility
+
+                    if (update_alpha)
+                    {
                         spatial.compute_alpha();
                     }
                 } // if init
@@ -3282,7 +3339,8 @@ public:
                         {
                             if (s != k)
                             {
-                                spatial.theta(s, k) = spatial.epsilon(s, k) * spatial.gamma(s, k) * spatial.tau(k);
+                                double reg_var = spatial.compute_regularized_variance(s, k);
+                                spatial.theta(s, k) = spatial.epsilon(s, k) * std::sqrt(reg_var);
                             }
                             else
                             {
@@ -3339,7 +3397,7 @@ public:
 
 
         // Set up HMC options and diagnostics for static parameters if to be inferred
-        Eigen::Index n_static_params = get_ndim_static_params(hmc_include_W);
+        Eigen::Index n_static_params = get_ndim_static_params(hmc_include_W, hmc_include_rho);
         HMCDiagnostics_1d hmc_diag;
         DualAveraging_1d da_adapter;
         Eigen::VectorXd mass_diag_est = Eigen::VectorXd::Ones(n_static_params);
@@ -3351,15 +3409,16 @@ public:
             hmc_diag = HMCDiagnostics_1d(static_cast<unsigned int>(ntotal), nburnin, true);
             da_adapter = DualAveraging_1d(hmc_opts);
 
-            Eigen::VectorXd mass_init = get_constrained_static_params(hmc_include_W);
-            mass_adapter.mean = mass_init.array().log().matrix();
+            Eigen::ArrayXd mass_init = get_unconstrained_static_params(hmc_include_W, hmc_include_rho);
+            mass_adapter.mean = mass_init.matrix();
             mass_adapter.M2 = Eigen::VectorXd::Zero(mass_adapter.mean.size());
         } // infer static params
         
 
 
+        bool hs_include_rho = hmc_include_rho && static_params_prior.infer;
         Eigen::VectorXi idx_colvec, idx_inverse;
-        Eigen::Index n_colvec = get_ndim_colvec(idx_colvec, idx_inverse, 0);
+        Eigen::Index n_colvec = get_ndim_colvec(idx_colvec, idx_inverse, 0, hs_include_rho);
         HMCDiagnostics_2d hs_hmc_diag;
         DualAveraging_2d hs_da_adapter;
         Eigen::MatrixXd mass_diag_hs = Eigen::MatrixXd::Ones(n_colvec, ns);
@@ -3428,15 +3487,18 @@ public:
             if (hmc_include_W)
             {
                 W_samples.resize(nsamples);
-            }
-            if (spatial.include_distance)
+            } // if include W
+            if (hmc_include_rho)
             {
-                rho_dist_samples.resize(nsamples);
-            }
-            if (spatial.include_log_mobility)
-            {
-                rho_mobility_samples.resize(nsamples);
-            }
+                if (spatial.include_distance)
+                {
+                    rho_dist_samples.resize(nsamples);
+                }
+                if (spatial.include_log_mobility)
+                {
+                    rho_mobility_samples.resize(nsamples);
+                }
+            } // if include rho
         }
 
         Eigen::Tensor<double, 3> theta_samples, gamma_samples;
@@ -3567,8 +3629,7 @@ public:
                         R_mat, mass_diag_vec,
                         hs_hmc_opts.leapfrog_step_size(k),
                         hs_hmc_opts.nleapfrog(k),
-                        spatial.include_distance,
-                        spatial.include_log_mobility
+                        hs_include_rho
                     );
 
                     // (Optional) Update diagnostics and dual averaging for horseshoe theta
@@ -3695,7 +3756,12 @@ public:
                         // Phase 1 (iter < nburnin/2): Adapt step size with unit mass
                         // Phase 2 (nburnin/2 <= iter < nburnin): Adapt mass matrix
                         Eigen::VectorXi indices_start, indices_inverse;
-                        Eigen::Index n_colvec = get_ndim_colvec(indices_start, indices_inverse, k);
+                        Eigen::Index n_colvec = get_ndim_colvec(
+                            indices_start, 
+                            indices_inverse, 
+                            k, 
+                            hs_include_rho
+                        );
                         Eigen::VectorXd current_unconstrained = get_unconstrained_colvec(
                             k, n_colvec, indices_start, indices_inverse
                         );
@@ -3731,9 +3797,12 @@ public:
                 double accept_prob = update_params_collapsed(
                     energy_diff, grad_norm, Y,
                     hmc_opts.leapfrog_step_size,
-                    hmc_opts.nleapfrog, mass_diag_est,
-                    static_params_prior.par1, static_params_prior.par2,
-                    hmc_include_W
+                    hmc_opts.nleapfrog, 
+                    mass_diag_est,
+                    static_params_prior.par1, 
+                    static_params_prior.par2,
+                    hmc_include_W,
+                    hmc_include_rho
                 );
 
                 // (Optional) Update diagnostics and dual averaging for rho
@@ -3771,12 +3840,10 @@ public:
                     // Phase 1 (iter < nburnin/2): Adapt step size with unit mass
                     // Phase 2 (nburnin/2 <= iter < nburnin): Adapt mass matrix
 
-                    Eigen::VectorXd current_log_params(hmc_include_W ? 2 : 1);
-                    current_log_params(0) = std::log(mu);
-                    if (hmc_include_W)
-                        current_log_params(1) = std::log(temporal.W);
-
-                    mass_adapter.update(current_log_params);
+                    Eigen::ArrayXd current_log_params = get_unconstrained_static_params(
+                        hmc_include_W, hmc_include_rho
+                    );
+                    mass_adapter.update(current_log_params.matrix());
 
                     // Only update mass matrix ONCE at the midpoint
                     if (iter == nburnin / 2)
@@ -3808,15 +3875,19 @@ public:
                     if (hmc_include_W)
                     {
                         W_samples(sample_idx) = temporal.W;
-                    }
-                    if (spatial.include_distance)
+                    } // if include W
+
+                    if (hmc_include_rho)
                     {
-                        rho_dist_samples(sample_idx) = spatial.rho_dist;
-                    }
-                    if (spatial.include_log_mobility)
-                    {
-                        rho_mobility_samples(sample_idx) = spatial.rho_mobility;
-                    }
+                        if (spatial.include_distance)
+                        {
+                            rho_dist_samples(sample_idx) = spatial.rho_dist;
+                        }
+                        if (spatial.include_log_mobility)
+                        {
+                            rho_mobility_samples(sample_idx) = spatial.rho_mobility;
+                        }
+                    } // if include rho
                 }
 
                 if (wt_prior.infer)
@@ -3901,15 +3972,20 @@ public:
             if (hmc_include_W)
             {
                 param_list["W"] = W_samples; // nsamples x 1
-            }
-            if (spatial.include_distance)
+            } // if include W
+
+            if (hmc_include_rho)
             {
-                param_list["rho_dist"] = rho_dist_samples; // nsamples x 1
-            }
-            if (spatial.include_log_mobility)
-            {
-                param_list["rho_mobility"] = rho_mobility_samples; // nsamples x 1
-            }
+                if (spatial.include_distance)
+                {
+                    param_list["rho_dist"] = rho_dist_samples; // nsamples x 1
+                }
+                if (spatial.include_log_mobility)
+                {
+                    param_list["rho_mobility"] = rho_mobility_samples; // nsamples x 1
+                }
+            } // if include rho
+
             param_list["hmc"] = Rcpp::List::create(
             Rcpp::Named("acceptance_rate") = hmc_diag.accept_count / static_cast<double>(ntotal),
             Rcpp::Named("leapfrog_step_size") = hmc_opts.leapfrog_step_size,
