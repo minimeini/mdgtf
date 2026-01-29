@@ -129,7 +129,7 @@ private:
             } // for source locations k
         } // centering distance
 
-        if (include_log_mobility && log_mobility.size() > 0)
+        if (include_mobility && mobility.size() > 0)
         {
             for (Eigen::Index k = 0; k < ns; k++)
             {
@@ -137,7 +137,7 @@ private:
                 for (Eigen::Index s = 0; s < ns; s++)
                 {
                     if (s != k)
-                        col_mean += log_mobility(s, k);
+                        col_mean += mobility(s, k);
                 }
                 col_mean /= static_cast<double>(ns - 1);
 
@@ -145,20 +145,20 @@ private:
                 {
                     if (s != k)
                     {
-                        log_mobility(s, k) -= col_mean;
+                        mobility(s, k) -= col_mean;
                     }
                 }
-                log_mobility(k, k) = 0.0;
+                mobility(k, k) = 0.0;
             } // for source locations k
         } // centering log mobility
     } // center_covariates_per_column
 
 public:
     bool include_distance = false;
-    bool include_log_mobility = false;
+    bool include_mobility = false;
 
     Eigen::MatrixXd dist; // ns x ns, pairwise distances between locations
-    Eigen::MatrixXd log_mobility; // ns x ns, pairwise log mobility
+    Eigen::MatrixXd mobility; // ns x ns, pairwise mobility
 
     Eigen::MatrixXd alpha; // ns x ns, adjacency matrix / stochastic network
     double rho_dist = 0.0; // distance decay parameter
@@ -181,7 +181,7 @@ public:
         tau0 = 1.0;
 
         include_distance = false;
-        include_log_mobility = false;
+        include_mobility = false;
 
         initialize_horseshoe_zero();
         alpha.resize(ns, ns);
@@ -237,13 +237,12 @@ public:
             {
                 Rcpp::stop("Dimension mismatch when initializing mobility matrix.");
             }
-            Eigen::MatrixXd mobility_tmp = Rcpp::as<Eigen::MatrixXd>(mobility_mat);
-            log_mobility = mobility_tmp.array().log().matrix();
-            include_log_mobility = true;
+            mobility = Rcpp::as<Eigen::MatrixXd>(mobility_mat);
+            include_mobility = true;
         }
         else
         {
-            include_log_mobility = false;
+            include_mobility = false;
         } // if use mobility or not
 
         center_covariates_per_column();
@@ -251,7 +250,7 @@ public:
         if (random_init)
         {
             rho_dist = include_distance ? R::runif(0.0, 2.0) : 0.0;
-            rho_mobility = include_log_mobility ? R::runif(0.0, 2.0) : 0.0;
+            rho_mobility = include_mobility ? R::runif(0.0, 2.0) : 0.0;
             initialize_horseshoe_dominant();
         }
         else
@@ -334,9 +333,8 @@ public:
             {
                 Rcpp::stop("Dimension mismatch when initializing mobility matrix.");
             }
-            Eigen::MatrixXd mobility_tmp = Rcpp::as<Eigen::MatrixXd>(mobility_mat);
-            log_mobility = mobility_tmp.array().log().matrix();
-            include_log_mobility = true;
+            mobility = Rcpp::as<Eigen::MatrixXd>(mobility_mat);
+            include_mobility = true;
 
             if (settings.containsElementNamed("rho_mobility"))
             {
@@ -350,7 +348,7 @@ public:
         else
         {
             rho_mobility = 0.0;
-            include_log_mobility = false;
+            include_mobility = false;
         } // if use mobility or not
 
         center_covariates_per_column();
@@ -403,7 +401,7 @@ public:
             Rcpp::Named("rho_dist") = rho_dist,
             Rcpp::Named("rho_mobility") = rho_mobility,
             Rcpp::Named("dist") = dist,
-            Rcpp::Named("log_mobility") = log_mobility,
+            Rcpp::Named("mobility") = mobility,
             Rcpp::Named("c_sq") = c_sq,
             Rcpp::Named("tau0") = tau0
         );
@@ -711,9 +709,9 @@ public:
                 {
                     v_sk -= rho_dist * dist(s, k);
                 }
-                if (include_log_mobility)
+                if (include_mobility)
                 {
-                    v_sk += rho_mobility * log_mobility(s, k);
+                    v_sk += rho_mobility * mobility(s, k);
                 }
                 u_k(s) = std::exp(std::min(v_sk, UPBND));
             }
@@ -908,12 +906,12 @@ public:
         {
             Eigen::VectorXd u_k = compute_unnormalized_weight_col(k);
             double U_k = u_k.array().sum(); // u_k(k) == 0
-            double M_k = u_k.dot(log_mobility.col(k)); // sum_s u_k(s) * log_mobility(s, k), u_k(k) == 0 & log_mobility(k, k) == 0
+            double M_k = u_k.dot(mobility.col(k)); // sum_s u_k(s) * mobility(s, k), u_k(k) == 0 & mobility(k, k) == 0
             for (Eigen::Index s = 0; s < ns; s++)
             {
                 if (s != k)
                 {
-                    deriv_mat(s, k) = alpha(s, k) * (log_mobility(s, k) - M_k / U_k);
+                    deriv_mat(s, k) = alpha(s, k) * (mobility(s, k) - M_k / U_k);
                 }
             }
         }
@@ -1612,7 +1610,7 @@ public:
         const Eigen::MatrixXd &Y,
         const Eigen::MatrixXd &R_mat)
     {
-        if (!spatial.include_log_mobility)
+        if (!spatial.include_mobility)
             return 0.0;
 
         Eigen::MatrixXd dalpha_drho = spatial.dalpha_drho_mobility();
@@ -1687,7 +1685,7 @@ public:
                 idx_start(4) = ndim; // log(rho_dist)
                 ndim++;
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 idx_start(5) = ndim; // log(rho_mobility)
                 ndim++;
@@ -2109,7 +2107,7 @@ public:
             {
                 deriv_rho1_mat = spatial.dalpha_drho_dist();
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 deriv_rho2_mat = spatial.dalpha_drho_mobility();
             }
@@ -2152,7 +2150,7 @@ public:
                         {
                             dlambda_st_drho_dist += deriv_rho1_mat(s, k) * coef_sum;
                         }
-                        if (spatial.include_log_mobility)
+                        if (spatial.include_mobility)
                         {
                             dlambda_st_drho_mobility += deriv_rho2_mat(s, k) * coef_sum;
                         }
@@ -2177,7 +2175,7 @@ public:
                     {
                         deriv_rho_dist += dloglike_dlambda_st * dlambda_st_drho_dist;
                     }
-                    if (spatial.include_log_mobility)
+                    if (spatial.include_mobility)
                     {
                         deriv_rho_mobility += dloglike_dlambda_st * dlambda_st_drho_mobility;
                     }
@@ -2200,7 +2198,7 @@ public:
                 deriv_rho_dist *= spatial.rho_dist;
             }
 
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 deriv_rho_mobility *= spatial.rho_mobility;
             }
@@ -2213,7 +2211,7 @@ public:
             {
                 n_params += 1;
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 n_params += 1;
             }
@@ -2234,7 +2232,7 @@ public:
                 derivs(idx) = deriv_rho_dist;
                 idx += 1;
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 derivs(idx) = deriv_rho_mobility;
                 idx += 1;
@@ -2261,7 +2259,7 @@ public:
             {
                 n_params += 1;
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 n_params += 1;
             }
@@ -2291,7 +2289,7 @@ public:
                 unconstrained_params(idx) = std::log(std::max(spatial.rho_dist, EPS));
                 idx += 1;
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 unconstrained_params(idx) = std::log(std::max(spatial.rho_mobility, EPS));
                 idx += 1;
@@ -2324,7 +2322,7 @@ public:
                 idx += 1;
                 update_alpha = true;
             }
-            if (spatial.include_log_mobility)
+            if (spatial.include_mobility)
             {
                 spatial.rho_mobility = std::exp(clamp_log_scale(unconstrained_params(idx)));
                 idx += 1;
@@ -3279,7 +3277,7 @@ public:
                         spatial.rho_mobility = Rcpp::as<double>(init_values["rho_mobility"]);
                         update_alpha = true;
                     }
-                    else if (spatial.include_log_mobility && !hmc_include_rho)
+                    else if (spatial.include_mobility && !hmc_include_rho)
                     {
                         throw std::runtime_error("rho_mobility must be initialized if mobility is included and not inferred.");
                     } // rho_mobility
@@ -3494,7 +3492,7 @@ public:
                 {
                     rho_dist_samples.resize(nsamples);
                 }
-                if (spatial.include_log_mobility)
+                if (spatial.include_mobility)
                 {
                     rho_mobility_samples.resize(nsamples);
                 }
@@ -3883,7 +3881,7 @@ public:
                         {
                             rho_dist_samples(sample_idx) = spatial.rho_dist;
                         }
-                        if (spatial.include_log_mobility)
+                        if (spatial.include_mobility)
                         {
                             rho_mobility_samples(sample_idx) = spatial.rho_mobility;
                         }
@@ -3980,7 +3978,7 @@ public:
                 {
                     param_list["rho_dist"] = rho_dist_samples; // nsamples x 1
                 }
-                if (spatial.include_log_mobility)
+                if (spatial.include_mobility)
                 {
                     param_list["rho_mobility"] = rho_mobility_samples; // nsamples x 1
                 }
