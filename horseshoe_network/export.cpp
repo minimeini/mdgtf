@@ -443,7 +443,16 @@ void parse_mcmc_output(
 
     if (!found_theta)
     {
-        throw std::invalid_argument("No theta samples in MCMC output or true values.");
+        if (ns > 1)
+        {
+            throw std::invalid_argument("No theta samples in MCMC output or true values.");
+        }
+        else
+        {
+            // Single location: theta not needed
+            theta_samples.resize(1, 1, nsample);
+            theta_samples.setZero();
+        }
     }
 
     bool found_wdiag = false;
@@ -486,7 +495,16 @@ void parse_mcmc_output(
 
     if (!found_wdiag)
     {
-        throw std::invalid_argument("No wdiag samples in MCMC output or true values.");
+        if (ns > 1)
+        {
+            throw std::invalid_argument("No wdiag samples in MCMC output or true values.");
+        }
+        else
+        {
+            // Single location: wdiag not needed
+            wdiag_samples.resize(1, nsample);
+            wdiag_samples.setOnes();
+        }
     }
 
 
@@ -589,7 +607,8 @@ void parse_mcmc_output(
 
     if (use_distance && !found_rho_dist)
     {
-        throw std::invalid_argument("No rho_dist samples in MCMC output or true values.");
+        rho_dist_samples.resize(nsample);
+        rho_dist_samples.setOnes();
     }
 
     bool found_rho_mobility = false;
@@ -625,7 +644,8 @@ void parse_mcmc_output(
 
     if (use_mobility && !found_rho_mobility)
     {
-        throw std::invalid_argument("No rho_mobility samples in MCMC output or true values.");
+        rho_mobility_samples.resize(nsample);
+        rho_mobility_samples.setOnes();
     }
 
 
@@ -788,9 +808,16 @@ Rcpp::List evaluate_posterior_predictive(
         Eigen::MatrixXd theta_slice(Y_obs.cols(), Y_obs.cols());
         for (Eigen::Index s = 0; s < Y_obs.cols(); ++s)
         {
-            for (Eigen::Index k = 0; k < Y_obs.cols(); ++k)
+            if (ns > 1)
             {
-                theta_slice(s, k) = theta_samples(s, k, i);
+                for (Eigen::Index k = 0; k < Y_obs.cols(); ++k)
+                {
+                    theta_slice(s, k) = theta_samples(s, k, i);
+                }
+            }
+            else
+            {
+                theta_slice(0, 0) = 1.0;
             }
 
             for (Eigen::Index t = 0; t < Y_obs.rows(); ++t)
@@ -803,15 +830,18 @@ Rcpp::List evaluate_posterior_predictive(
         model.temporal.W = W_samples(i);
         Eigen::MatrixXd Rt = model.temporal.compute_Rt(); // (nt + 1) x ns
 
-        model.spatial.theta = theta_slice;
-        model.spatial.wdiag = wdiag_samples.col(i);
-        if (use_distance)
+        if (ns > 1)
         {
-            model.spatial.rho_dist = rho_dist_samples(i);
-        }
-        if (use_mobility)
-        {
-            model.spatial.rho_mobility = rho_mobility_samples(i);
+            model.spatial.theta = theta_slice;
+            model.spatial.wdiag = wdiag_samples.col(i);
+            if (use_distance)
+            {
+                model.spatial.rho_dist = rho_dist_samples(i);
+            }
+            if (use_mobility)
+            {
+                model.spatial.rho_mobility = rho_mobility_samples(i);
+            }
         }
         model.spatial.compute_alpha();
 
@@ -822,13 +852,6 @@ Rcpp::List evaluate_posterior_predictive(
             model.zinfl.beta1 = zinfl_beta1_samples(i);
         }
 
-
-        Eigen::MatrixXd u_mat(ns, ns);
-        for (Eigen::Index j = 0; j < ns; j++)
-        {
-            u_mat.col(j) = model.spatial.compute_unnormalized_weight_col(j);
-        }
-        
 
         Eigen::MatrixXd Y_rep(Y_obs.rows(), Y_obs.cols());
         for (Eigen::Index t = 1; t < nt + 1; t++)
@@ -1049,15 +1072,18 @@ Rcpp::List forecast_network_hawkes(
         model.temporal.W = W_samples(i);
         double Wsqrt = std::sqrt(W_samples(i));
 
-        model.spatial.theta = theta_slice;
-        model.spatial.wdiag = wdiag_samples.col(i);
-        if (use_distance)
+        if (ns > 1)
         {
-            model.spatial.rho_dist = rho_dist_samples(i);
-        }
-        if (use_mobility)
-        {
-            model.spatial.rho_mobility = rho_mobility_samples(i);
+            model.spatial.theta = theta_slice;
+            model.spatial.wdiag = wdiag_samples.col(i);
+            if (use_distance)
+            {
+                model.spatial.rho_dist = rho_dist_samples(i);
+            }
+            if (use_mobility)
+            {
+                model.spatial.rho_mobility = rho_mobility_samples(i);
+            }
         }
         model.spatial.compute_alpha();
 
@@ -1066,12 +1092,6 @@ Rcpp::List forecast_network_hawkes(
             model.zinfl = ZeroInflation(Y_obs, true);
             model.zinfl.beta0 = zinfl_beta0_samples(i);
             model.zinfl.beta1 = zinfl_beta1_samples(i);
-        }
-
-        Eigen::MatrixXd u_mat(ns, ns);
-        for (Eigen::Index j = 0; j < ns; j++)
-        {
-            u_mat.col(j) = model.spatial.compute_unnormalized_weight_col(j);
         }
 
         Eigen::MatrixXd Y_extended(nt + 1 + k_step_ahead, ns);
